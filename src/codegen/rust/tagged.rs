@@ -1,0 +1,110 @@
+use itertools::Itertools;
+use proc_macro2::TokenStream;
+use quote::{ToTokens, TokenStreamExt, quote};
+
+use crate::{
+    codegen::{rust::CodegenIdent, unique::UniqueNameSpace},
+    ir::IrTagged,
+};
+
+use super::{
+    context::CodegenContext, derives::ExtraDerive, doc_attrs, naming::CodegenTypeName,
+    ref_::CodegenRef,
+};
+
+#[derive(Clone, Copy, Debug)]
+pub struct CodegenTagged<'a> {
+    context: &'a CodegenContext<'a>,
+    name: CodegenTypeName<'a>,
+    ty: &'a IrTagged<'a>,
+}
+
+impl<'a> CodegenTagged<'a> {
+    pub fn new(
+        context: &'a CodegenContext,
+        name: CodegenTypeName<'a>,
+        ty: &'a IrTagged<'a>,
+    ) -> Self {
+        Self { context, name, ty }
+    }
+}
+
+impl ToTokens for CodegenTagged<'_> {
+    fn to_tokens(&self, tokens: &mut TokenStream) {
+        let mut extra_derives = vec![];
+        let is_hashable = self
+            .ty
+            .variants
+            .iter()
+            .all(|variant| self.context.hashable(&variant.ty));
+        if is_hashable {
+            extra_derives.push(ExtraDerive::Eq);
+            extra_derives.push(ExtraDerive::Hash);
+        }
+
+        let mut space = UniqueNameSpace::new();
+        let variants = self
+            .ty
+            .variants
+            .iter()
+            .map(|variant| {
+                // Look up the proper Rust type name.
+                let variant_name = CodegenIdent::Variant(&space.uniquify(variant.name));
+                let rust_type_name = CodegenRef::new(self.context, &variant.ty);
+
+                // Add `#[serde(alias = ...)]` attributes for multiple
+                // discriminator values that map to the same type.
+                let serde_attr = {
+                    let mut iter = variant.aliases.iter();
+                    match iter.next() {
+                        Some(&primary) => {
+                            let mut aliases = iter.copied().peekable();
+                            Some(if aliases.peek().is_none() {
+                                quote! { #[serde(rename = #primary)] }
+                            } else {
+                                quote! { #[serde(rename = #primary, #(alias = #aliases,)*)] }
+                            })
+                        }
+                        None => None,
+                    }
+                };
+
+                let v = quote! {
+                    #serde_attr
+                    #variant_name(#rust_type_name),
+                };
+
+                let type_name = &self.name;
+                let from_impl = quote! {
+                    impl ::std::convert::From<#rust_type_name> for #type_name {
+                        fn from(value: #rust_type_name) -> Self {
+                            Self::#variant_name(value)
+                        }
+                    }
+                };
+
+                (v, from_impl)
+            })
+            .collect_vec();
+
+        let discriminator_field_literal = &self.ty.tag;
+
+        let doc_attrs = self.ty.description.map(doc_attrs);
+
+        let vs = variants.iter().map(|(variant, _)| variant);
+        let fs = variants.iter().map(|(_, from_impl)| from_impl);
+        let type_name = &self.name;
+        let main = quote! {
+            #doc_attrs
+            #[derive(Debug, Clone, PartialEq, #(#extra_derives,)* ::serde::Serialize, ::serde::Deserialize)]
+            #[serde(tag = #discriminator_field_literal)]
+            pub enum #type_name {
+                #(#vs)*
+            }
+
+            #(#fs)*
+        };
+
+        tokens.append_all(main);
+    }
+}
