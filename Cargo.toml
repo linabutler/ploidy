@@ -1,46 +1,11 @@
-[package]
-name = "ploidy"
+[workspace]
+members = ["ploidy"]
+resolver = "2"
+
+[workspace.package]
 version = "0.1.0"
-description = "An OpenAPI client generator that supports polymorphic schemas"
+license = "Apache-2.0"
 edition = "2024"
 
-[dependencies]
-clap = { version = "4", features = ["cargo", "derive"] }
-compact_str = "0.9"
-heck = "0.5"
-indexmap = { version = "2", features = ["serde"] }
-indoc = "2"
-itertools = "0.14"
-miette = { version = "7", features = ["fancy"] }
-serde = { version = "1", features = ["derive"] }
-serde_json = { version = "1", features = ["preserve_order"] }
-serde_path_to_error = "0.1"
-serde_yaml = "0.9.34"
-percent-encoding = "2.3"
-petgraph = "0.7"
-prettyplease = "0.2"
-proc-macro2 = { version = "1", default-features = false }
-quote = { version = "1", default-features = false }
-semver = { version = "1", features = ["serde"] }
-syn = { version = "2", default-features = false, features = [
-    "parsing",
-    "printing",
-] }
-textwrap = { version = "0.16", default-features = false, features = [
-    "unicode-linebreak",
-    "unicode-width",
-] }
-thiserror = "2"
-toml = { version = "0.9", default-features = false, features = [
-    "display",
-    "parse",
-    "preserve_order",
-    "serde",
-] }
-unicase = "2"
-unicode-ident = "1"
-winnow = "0.7"
-
-[lib]
-name = "ploidy"
-path = "src/lib.rs"
+[workspace.lints.rust]
+unsafe_code = "forbid"
