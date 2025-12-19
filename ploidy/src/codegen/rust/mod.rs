@@ -67,8 +67,9 @@ pub fn write_types_to_disk(output: &Path, context: &CodegenContext<'_>) -> miett
             IrType::Nullable(ty) | IrType::Array(ty) | IrType::Map(ty) => {
                 CodegenSchemaTypeAlias::new(context, name, ty.as_ref()).into_code()
             }
+            ty @ IrType::Primitive(_) => CodegenSchemaTypeAlias::new(context, name, ty).into_code(),
             IrType::Any => CodegenSchemaTypeAlias::new(context, name, &IrType::Any).into_code(),
-            IrType::Primitive(_) | IrType::Inline(..) | IrType::Ref(..) => continue,
+            IrType::Inline(..) | IrType::Ref(..) => continue,
         };
         write_to_disk(output, code)?;
     }
