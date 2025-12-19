@@ -493,7 +493,7 @@ dependencies = [
 
 [[package]]
 name = "ploidy"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "clap",
  "compact_str",
@@ -524,7 +524,7 @@ dependencies = [
 
 [[package]]
 name = "ploidy-util"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "chrono",
  "serde",
