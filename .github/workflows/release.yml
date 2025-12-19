@@ -48,8 +48,15 @@ jobs:
             os-version: latest
             target: x86_64-unknown-linux-gnu
           - os: ubuntu
+            os-version: "24.04-arm"
+            target: aarch64-unknown-linux-gnu
+          - os: ubuntu
             os-version: latest
             target: x86_64-unknown-linux-musl
+            features: [mimalloc]
+          - os: ubuntu
+            os-version: "24.04-arm"
+            target: aarch64-unknown-linux-musl
             features: [mimalloc]
           - os: windows
             os-version: latest
