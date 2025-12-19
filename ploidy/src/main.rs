@@ -1,7 +1,6 @@
-use std::borrow::Cow;
 use std::collections::BTreeMap;
 
-use miette::{Context, IntoDiagnostic, Result};
+use miette::{Context, IntoDiagnostic, Result, miette};
 
 use ploidy::codegen::{rust, write_to_disk};
 use ploidy::config::{Codegen, CodegenLanguage, Command, Main};
@@ -32,12 +31,25 @@ fn main() -> Result<()> {
 
             let spec = IrSpec::from_doc(&doc).into_diagnostic()?;
 
-            let name = config
-                .package
-                .name
-                .as_deref()
-                .map(Cow::Borrowed)
-                .unwrap_or_else(|| output.to_string_lossy());
+            let name = match config.package.name.as_deref() {
+                Some(name) => name.to_owned(),
+                None => std::env::current_dir()
+                    .ok()
+                    .and_then(|path| {
+                        Some(
+                            std::path::absolute(path.join(&output))
+                                .ok()?
+                                .file_name()?
+                                .to_string_lossy()
+                                .into_owned(),
+                        )
+                    })
+                    .ok_or_else(|| {
+                        miette!(
+                            "couldn't infer package name; please specify one with `--package-name`"
+                        )
+                    })?,
+            };
 
             let context = rust::CodegenContext::new(
                 &name,
