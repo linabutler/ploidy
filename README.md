@@ -4,8 +4,10 @@ Ploidy is a code generator that supports polymorphic OpenAPI schemas. Its goal i
 
 ## Installation
 
+You can [download a pre-built binary of Ploidy for your platform](https://github.com/linabutler/ploidy/releases/latest), or install from source with:
+
 ```sh
-cargo install ploidy
+cargo install --locked ploidy
 ```
 
 ## Quick Start
