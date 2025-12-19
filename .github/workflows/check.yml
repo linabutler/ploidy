@@ -1,0 +1,104 @@
+---
+name: Run static analysis checks
+on:
+  pull_request:
+    branches:
+      - main
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  clippy:
+    name: Lint with Clippy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref }}
+
+      - name: Prepare build cache directory
+        shell: bash
+        run: |
+          echo "SCCACHE_DIR=${SCCACHE_DIR:-$HOME/.cache/sccache}" >> $GITHUB_ENV
+
+      - name: Restore Cargo packages and metadata
+        uses: actions/cache/restore@v4
+        id: restore-cargo-home
+        with:
+          path: |
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+          key: cargo-${{ hashFiles('rust-toolchain.toml') }}-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            cargo-${{ hashFiles('rust-toolchain.toml') }}-
+
+      - uses: mozilla-actions/sccache-action@65101d47ea8028ed0c98a1cdea8dd9182e9b5133 # v0.0.8
+
+      - name: Restore build cache
+        uses: actions/cache/restore@v4
+        id: restore-sccache
+        # We use a dedicated build cache for Clippy because
+        # Clippy compiles all crates with a pinned nightly compiler,
+        # which shares very few build products with the stable compiler.
+        with:
+          path: ${{ env.SCCACHE_DIR }}
+          key: sccache-clippy-${{ hashFiles('rust-toolchain.toml') }}-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            sccache-clippy-${{ hashFiles('rust-toolchain.toml') }}-
+
+      - name: Run Clippy
+        shell: bash
+        env:
+          RUSTC_WRAPPER: sccache
+        run: |
+          cargo clippy --workspace --all-targets --no-deps
+
+      - name: Cache Cargo packages and metadata
+        uses: actions/cache/save@v4
+        if: ${{ steps.restore-cargo-home.outputs.cache-hit != 'true' }}
+        with:
+          path: |
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+          key: ${{ steps.restore-cargo-home.outputs.cache-primary-key }}
+
+      - name: Cache build products
+        uses: actions/cache/save@v4
+        if: ${{ steps.restore-sccache.outputs.cache-hit != 'true' }}
+        with:
+          path: ${{ env.SCCACHE_DIR }}
+          key: ${{ steps.restore-sccache.outputs.cache-primary-key }}
+
+  rustfmt:
+    name: Check style with rustfmt
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref }}
+
+      - name: Install the nightly toolchain
+        shell: bash
+        run: |
+          rustup toolchain install nightly --profile minimal
+
+      - name: Install rustfmt
+        shell: bash
+        run: |
+          rustup component add --toolchain nightly rustfmt
+
+      - name: Check style
+        shell: bash
+        run: |
+          cargo +nightly fmt --check --all

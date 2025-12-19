@@ -1,0 +1,99 @@
+---
+name: Build and run tests
+on:
+  pull_request:
+    branches:
+      - main
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    name: Build all targets
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref }}
+
+      - name: Prepare build cache directory
+        shell: bash
+        # Set the build cache to a fixed location inside
+        # the runner user's home directory. The default location is
+        # platform-specific [1], but we want a fixed location to use with
+        # the `cache` action.
+        #
+        # sccache expects `SCCACHE_DIR` to be an absolute path, and
+        # it must be an absolute path on the runner's filesystem.
+        #
+        # [1]: https://github.com/mozilla/sccache/blob/9fb38414e2312b8f561ac6a3a3b89e1fd13184d2/docs/Local.md
+        run: |
+          echo "SCCACHE_DIR=${SCCACHE_DIR:-$HOME/.cache/sccache}" >> $GITHUB_ENV
+
+      - name: Restore Cargo packages and metadata
+        uses: actions/cache/restore@v4
+        id: restore-cargo-home
+        # [1] lists the cacheable Cargo home subdirectories. We don't use any
+        # Cargo-installed binaries in our builds, so we ignore those paths.
+        #
+        # [1]: https://doc.rust-lang.org/cargo/guide/cargo-home.html#caching-the-cargo-home-in-ci
+        with:
+          path: |
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+          key: cargo-${{ hashFiles('rust-toolchain.toml') }}-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            cargo-${{ hashFiles('rust-toolchain.toml') }}-
+
+      - uses: mozilla-actions/sccache-action@65101d47ea8028ed0c98a1cdea8dd9182e9b5133 # v0.0.8
+
+      - name: Restore build cache
+        uses: actions/cache/restore@v4
+        id: restore-sccache
+        with:
+          path: ${{ env.SCCACHE_DIR }}
+          key: sccache-${{ hashFiles('rust-toolchain.toml') }}-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            sccache-${{ hashFiles('rust-toolchain.toml') }}-
+
+      - name: Build all targets
+        shell: bash
+        env:
+          RUSTC_WRAPPER: sccache
+        run: |
+          cargo build --workspace --all-targets
+
+      - name: Cache Cargo packages and metadata
+        uses: actions/cache/save@v4
+        if: ${{ steps.restore-cargo-home.outputs.cache-hit != 'true' }}
+        with:
+          path: |
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+          key: ${{ steps.restore-cargo-home.outputs.cache-primary-key }}
+
+      - name: Cache build products
+        uses: actions/cache/save@v4
+        if: ${{ steps.restore-sccache.outputs.cache-hit != 'true' }}
+        with:
+          path: ${{ env.SCCACHE_DIR }}
+          key: ${{ steps.restore-sccache.outputs.cache-primary-key }}
+
+      - name: Run tests
+        shell: bash
+        env:
+          RUSTC_WRAPPER: sccache
+          SCCACHE_LOCAL_RW_MODE: READ_ONLY
+        run: |
+          cargo test --workspace --no-fail-fast --all-features
