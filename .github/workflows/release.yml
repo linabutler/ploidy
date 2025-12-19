@@ -1,0 +1,149 @@
+---
+name: Create a release
+on:
+  push:
+    tags:
+      - "v[0-9]+.[0-9]+.[0-9]+"
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  release:
+    name: Create release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    outputs:
+      asset_upload_url: ${{ steps.draft_release.outputs.upload_url }}
+    steps:
+      - name: Draft release
+        id: draft_release
+        uses: actions/create-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: ${{ github.ref_name }}
+          release_name: ${{ github.ref_name }}
+          draft: true
+          prerelease: false
+  bins:
+    name: Build and upload release binaries
+    needs: [release]
+    permissions:
+      contents: write
+    strategy:
+      matrix:
+        platform:
+          - os: macos
+            os-version: latest
+            target: aarch64-apple-darwin
+          - os: macos
+            os-version: latest
+            target: x86_64-apple-darwin
+          - os: ubuntu
+            os-version: latest
+            target: x86_64-unknown-linux-gnu
+          - os: ubuntu
+            os-version: latest
+            target: x86_64-unknown-linux-musl
+            features: [mimalloc]
+          - os: windows
+            os-version: latest
+            target: x86_64-pc-windows-msvc
+        binary: [ploidy]
+    runs-on: ${{ matrix.platform.os }}-${{ matrix.platform.os-version }}
+    env:
+      CARGO_TERM_COLOR: always
+    steps:
+      - name: Check out repo
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ github.ref }}
+
+      - name: Add target to Rust toolchain
+        shell: bash
+        env:
+          TARGET: ${{ matrix.platform.target }}
+        run: |
+          rustup target add $TARGET
+
+      - name: Restore Cargo packages and metadata
+        uses: actions/cache/restore@v4
+        id: restore-cargo-home
+        with:
+          path: |
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+          key: cargo-${{ matrix.platform.os }}-${{ hashFiles('rust-toolchain.toml') }}-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            cargo-${{ matrix.platform.os }}-${{ hashFiles('rust-toolchain.toml') }}-
+
+      - name: Install musl libraries and compiler wrappers
+        shell: bash
+        if: ${{ contains(matrix.platform.target, 'musl') }}
+        run: |
+          sudo apt-get -y install musl-dev musl-tools
+
+      - name: Build binaries
+        shell: bash
+        env:
+          BINARY: ${{ matrix.binary }}
+          TARGET: ${{ matrix.platform.target }}
+          FEATURES: ${{ matrix.platform.features && format('--features {0}', join(matrix.platform.features, ',')) || '' }}
+        run: |
+          cargo build --release --bin $BINARY --target $TARGET $FEATURES
+
+      - name: Create tar archive
+        if: ${{ matrix.platform.os != 'windows' }}
+        shell: bash
+        env:
+          BINARY: ${{ matrix.binary }}
+          TARGET: ${{ matrix.platform.target }}
+        run: |
+          mkdir -p ./archive/$BINARY-$GITHUB_REF_NAME-$TARGET
+          mv ./target/$TARGET/release/$BINARY ./archive/$BINARY-$GITHUB_REF_NAME-$TARGET/$BINARY
+          tar -c --format pax -C ./archive . | gzip -n > ./archive.tar.gz
+
+      - name: Add 7-Zip to PATH
+        if: ${{ matrix.platform.os == 'windows' }}
+        shell: pwsh
+        run: |
+          "C:\Program Files\7-Zip" >> $Env:GITHUB_PATH
+
+      - name: Create ZIP archive
+        if: ${{ matrix.platform.os == 'windows' }}
+        shell: bash
+        env:
+          BINARY: ${{ matrix.binary }}
+          TARGET: ${{ matrix.platform.target }}
+        run: |
+          mkdir -p ./archive/$BINARY-$GITHUB_REF_NAME-$TARGET
+          mv ./target/$TARGET/release/$BINARY ./archive/$BINARY-$GITHUB_REF_NAME-$TARGET/$BINARY
+          cd ./archive
+          7z a -tzip -mx9 -so . > ../archive.zip
+
+      - name: Upload tar archive
+        if: ${{ matrix.platform.os != 'windows' }}
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ needs.release.outputs.asset_upload_url }}
+          asset_path: ./archive.tar.gz
+          asset_name: ${{ matrix.binary }}-${{ github.ref_name }}-${{ matrix.platform.target }}.tar.gz
+          asset_content_type: application/gzip
+
+      - name: Upload ZIP archive
+        if: ${{ matrix.platform.os == 'windows' }}
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ needs.release.outputs.asset_upload_url }}
+          asset_path: ./archive.zip
+          asset_name: ${{ matrix.binary }}-${{ github.ref_name }}-${{ matrix.platform.target }}.zip
+          asset_content_type: application/zip

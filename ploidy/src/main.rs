@@ -8,6 +8,10 @@ use ploidy::config::{Codegen, CodegenLanguage, Command, Main};
 use ploidy::ir::IrSpec;
 use ploidy::parse::Document;
 
+#[cfg(feature = "mimalloc")]
+#[global_allocator]
+static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
+
 fn main() -> Result<()> {
     let Ok(main) = Main::parse().map_err(|err| err.exit());
     match main.command {
