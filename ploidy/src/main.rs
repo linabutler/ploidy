@@ -1,11 +1,13 @@
 use std::collections::BTreeMap;
 
-use miette::{Context, IntoDiagnostic, Result, miette};
+use miette::{Context, IntoDiagnostic, Result};
 
-use ploidy::codegen::{rust, write_to_disk};
-use ploidy::config::{Codegen, CodegenLanguage, Command, Main};
-use ploidy::ir::IrSpec;
-use ploidy::parse::Document;
+use ploidy::{
+    codegen::{rust, write_to_disk},
+    config::{Codegen, CodegenLanguage, Command, Main, RustPackageConfig},
+    ir::IrSpec,
+    parse::Document,
+};
 
 #[cfg(feature = "mimalloc")]
 #[global_allocator]
@@ -31,31 +33,13 @@ fn main() -> Result<()> {
 
             let spec = IrSpec::from_doc(&doc).into_diagnostic()?;
 
-            let name = match config.package.name.as_deref() {
-                Some(name) => name.to_owned(),
-                None => std::env::current_dir()
-                    .ok()
-                    .and_then(|path| {
-                        Some(
-                            std::path::absolute(path.join(&output))
-                                .ok()?
-                                .file_name()?
-                                .to_string_lossy()
-                                .into_owned(),
-                        )
-                    })
-                    .ok_or_else(|| {
-                        miette!(
-                            "couldn't infer package name; please specify one with `--package-name`"
-                        )
-                    })?,
-            };
+            let package = RustPackageConfig::resolve(&output, config.package)?;
 
             let context = rust::CodegenContext::new(
-                &name,
-                config.package.version_or_default(),
-                config.package.license_or_default(),
-                config.package.description.as_deref(),
+                &package.name,
+                package.version,
+                &package.license,
+                package.description.as_deref(),
                 &spec,
             );
 

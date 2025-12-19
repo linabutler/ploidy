@@ -26,8 +26,8 @@ This generates a complete Rust crate in the output directory, with:
 | Flag | Description |
 |------|-------------|
 | `-c`, `--check` | Run `cargo check` on the generated code |
-| `--package-name <NAME>` | Override the generated package name |
-| `--package-version <VERSION>` | Override the generated package version |
+| `--version <VERSION>` | Increment the generated package version |
+| `--name <NAME>` | Override the generated package name |
 | `--package-license <LICENSE>` | Override the generated package license |
 | `--package-description <DESCRIPTION>` | Override the generated package description |
 
@@ -36,9 +36,6 @@ This generates a complete Rust crate in the output directory, with:
 In addition to the command-line options above, you can place a `.ploidy.toml` file in the output directory to configure generation:
 
 ```toml
-[rust.package]
-name = "my-api-client"
-version = "1.0.0"
-license = "MIT"
-description = "A generated OpenAPI client for my API"
+[rust]
+version = "bump-major"
 ```
