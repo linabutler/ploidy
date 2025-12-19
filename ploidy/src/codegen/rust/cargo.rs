@@ -9,6 +9,8 @@ use super::context::CodegenContext;
 
 type TomlMap = toml::map::Map<String, TomlValue>;
 
+const PLOIDY_VERSION: &str = env!("CARGO_PKG_VERSION");
+
 #[derive(Clone, Debug)]
 pub struct CargoManifest<'a> {
     context: &'a CodegenContext<'a>,
@@ -66,6 +68,7 @@ impl<'a> CargoManifest<'a> {
             bytes = { version = "1", features = ["serde"] }
             chrono = { version = "0.4", features = ["serde"] }
             http = "1"
+            ploidy-util = PLOIDY_VERSION
             reqwest = { version = "0.12", default-features = false, features = ["http2", "json", "multipart", "rustls-tls"] }
             serde = { version = "1", features = ["derive"] }
             serde_json = "1"

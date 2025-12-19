@@ -54,12 +54,6 @@ fn main() -> Result<()> {
             println!("Generating `error.rs`...");
             write_to_disk(&output, rust::CodegenErrorModule)?;
 
-            println!("Generating `absent.rs`...");
-            write_to_disk(&output, rust::CodegenAbsentModule)?;
-
-            println!("Generating `date_time`.rs...");
-            write_to_disk(&output, rust::CodegenDateTimeModule)?;
-
             println!("Generating {} types...", context.spec.schemas().count());
             rust::write_types_to_disk(&output, &context)?;
 

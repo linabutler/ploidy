@@ -54,14 +54,14 @@ impl ToTokens for CodegenStruct<'_> {
                     }
                     (IrType::Nullable(inner), false) => {
                         let inner = CodegenBoxedRef::new(self.context, self.name, inner);
-                        quote! { crate::absent::AbsentOr<#inner> }
+                        quote! { ::ploidy_util::absent::AbsentOr<#inner> }
                     }
                     (other, true) => {
                         CodegenBoxedRef::new(self.context, self.name, other).into_token_stream()
                     }
                     (other, false) => {
                         let inner = CodegenBoxedRef::new(self.context, self.name, other);
-                        quote! { crate::absent::AbsentOr<#inner> }
+                        quote! { ::ploidy_util::absent::AbsentOr<#inner> }
                     }
                 };
 
@@ -122,7 +122,9 @@ fn field_serde_attrs(ident: &Ident, name: &str, required: bool, nullable: bool) 
     match (required, nullable) {
         (false, true) | (false, false) => {
             attrs.push(quote! { default });
-            attrs.push(quote! { skip_serializing_if = "crate::absent::AbsentOr::is_absent" });
+            attrs.push(
+                quote! { skip_serializing_if = "::ploidy_util::absent::AbsentOr::is_absent" },
+            );
         }
         _ => {}
     }

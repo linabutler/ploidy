@@ -32,7 +32,7 @@ impl ToTokens for CodegenRef<'_> {
             &IrType::Primitive(PrimitiveIrType::F64) => quote! { f64 },
             &IrType::Primitive(PrimitiveIrType::Bool) => quote! { bool },
             &IrType::Primitive(PrimitiveIrType::DateTime) => {
-                quote! { crate::date_time::UnixMilliseconds }
+                quote! { ::ploidy_util::date_time::UnixMilliseconds }
             }
             &IrType::Primitive(PrimitiveIrType::Date) => quote! { ::chrono::NaiveDate },
             &IrType::Primitive(PrimitiveIrType::Url) => quote! { ::url::Url },
