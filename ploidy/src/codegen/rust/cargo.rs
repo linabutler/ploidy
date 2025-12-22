@@ -1,6 +1,8 @@
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
+use cargo_toml::{Edition, Manifest};
 use itertools::Itertools;
+use serde::{Deserialize, Serialize};
 use toml::Value as TomlValue;
 
 use crate::codegen::IntoCode;
@@ -12,29 +14,26 @@ type TomlMap = toml::map::Map<String, TomlValue>;
 const PLOIDY_VERSION: &str = env!("CARGO_PKG_VERSION");
 
 #[derive(Clone, Debug)]
-pub struct CargoManifest<'a> {
+pub struct CodegenCargoManifest<'a> {
     context: &'a CodegenContext<'a>,
 }
 
-impl<'a> CargoManifest<'a> {
+impl<'a> CodegenCargoManifest<'a> {
     #[inline]
     pub fn new(context: &'a CodegenContext<'a>) -> Self {
         Self { context }
     }
 
-    pub fn into_map(self) -> TomlMap {
-        let name = self.context.name;
-        let version = self.context.version.to_string();
-        let license = self.context.license;
-        let mut package = toml::toml! {
-            name = name
-            version = version
-            edition = "2024"
-            license = license
-        };
-        if let Some(description) = self.context.description {
-            package.insert("description".into(), description.into());
-        }
+    pub fn to_manifest(self) -> Manifest<CargoMetadata> {
+        let mut manifest = self.context.manifest.clone();
+
+        // Ploidy generates Rust 2024-compatible code.
+        manifest
+            .package
+            .as_mut()
+            .unwrap()
+            .edition
+            .set(Edition::E2024);
 
         let features = {
             let names: BTreeSet<_> = self
@@ -44,27 +43,19 @@ impl<'a> CargoManifest<'a> {
                 .map(|view| view.op().resource)
                 .filter(|&name| name != "full")
                 .collect();
-            let mut features = names
+            let mut features: BTreeMap<_, _> = names
                 .iter()
-                .map(|&name| (name.to_owned(), TomlValue::Array(vec![])))
-                .collect::<TomlMap>();
+                .map(|&name| (name.to_owned(), vec![]))
+                .collect();
             features.insert(
                 "full".to_owned(),
-                names
-                    .iter()
-                    .map(|&name| name.to_owned())
-                    .collect_vec()
-                    .into(),
+                names.iter().map(|&name| name.to_owned()).collect_vec(),
             );
-            features.insert("default".to_owned(), TomlValue::Array(vec![]));
+            features.insert("default".to_owned(), vec![]);
             features
         };
 
-        toml::toml! {
-            package = package
-            features = features
-
-            [dependencies]
+        let dependencies = toml::toml! {
             bytes = { version = "1", features = ["serde"] }
             chrono = { version = "0.4", features = ["serde"] }
             http = "1"
@@ -76,14 +67,31 @@ impl<'a> CargoManifest<'a> {
             thiserror = "2"
             url = { version = "2.5", features = ["serde"] }
             uuid = { version = "1", features = ["serde", "v4"] }
+        }.try_into().unwrap();
+
+        Manifest {
+            features,
+            dependencies,
+            ..manifest
         }
     }
 }
 
-impl IntoCode for CargoManifest<'_> {
-    type Code = (&'static str, TomlMap);
+impl IntoCode for CodegenCargoManifest<'_> {
+    type Code = (&'static str, Manifest<CargoMetadata>);
 
     fn into_code(self) -> Self::Code {
-        ("Cargo.toml", self.into_map())
+        ("Cargo.toml", self.to_manifest())
+    }
+}
+
+/// Cargo metadata of any type.
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(transparent)]
+pub struct CargoMetadata(TomlValue);
+
+impl Default for CargoMetadata {
+    fn default() -> Self {
+        Self(TomlMap::default().into())
     }
 }

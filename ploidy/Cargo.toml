@@ -9,6 +9,7 @@ repository.workspace = true
 keywords.workspace = true
 
 [dependencies]
+cargo_toml = "0.22"
 clap = { version = "4", features = ["cargo", "derive"] }
 compact_str = "0.9"
 heck = "0.5"
@@ -39,7 +40,6 @@ thiserror = "2"
 toml = { version = "0.9", default-features = false, features = [
     "display",
     "parse",
-    "preserve_order",
     "serde",
 ] }
 unicase = "2"

@@ -1,33 +1,24 @@
-use semver::Version;
+use cargo_toml::Manifest;
+pub use toml::Value as TomlValue;
 
 use crate::ir::{InnerLeaf, InnerRef, IrSpec, IrType, PrimitiveIrType};
 
-use super::SchemaIdentMap;
+use super::{CargoMetadata, SchemaIdentMap};
+
+pub type TomlMap = toml::map::Map<String, TomlValue>;
 
 #[derive(Debug)]
 pub struct CodegenContext<'a> {
-    pub name: &'a str,
-    pub version: Version,
-    pub license: &'a str,
-    pub description: Option<&'a str>,
     pub spec: &'a IrSpec<'a>,
+    pub manifest: &'a Manifest<CargoMetadata>,
     pub map: SchemaIdentMap<'a>,
 }
 
 impl<'a> CodegenContext<'a> {
-    pub fn new(
-        name: &'a str,
-        version: Version,
-        license: &'a str,
-        description: Option<&'a str>,
-        spec: &'a IrSpec<'a>,
-    ) -> Self {
+    pub fn new(spec: &'a IrSpec<'a>, manifest: &'a Manifest<CargoMetadata>) -> Self {
         Self {
-            name,
-            version,
-            description,
-            license,
             spec,
+            manifest,
             map: SchemaIdentMap::new(spec),
         }
     }

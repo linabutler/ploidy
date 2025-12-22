@@ -1,5 +1,6 @@
 use std::path::Path;
 
+use cargo_toml::Manifest;
 use miette::{Context, IntoDiagnostic};
 use proc_macro2::TokenStream;
 use quote::ToTokens;
@@ -8,6 +9,7 @@ pub mod rust;
 
 mod unique;
 
+use serde::Serialize;
 pub use unique::{UniqueNameSpace, WordSegments};
 
 pub fn write_to_disk(output: &Path, code: impl IntoCode) -> miette::Result<()> {
@@ -43,7 +45,7 @@ impl<T: AsRef<str>> Code for (T, TokenStream) {
     }
 }
 
-impl Code for (&'static str, toml::map::Map<String, toml::Value>) {
+impl<T: Serialize> Code for (&'static str, Manifest<T>) {
     fn path(&self) -> &str {
         self.0
     }

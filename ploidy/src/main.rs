@@ -3,8 +3,11 @@ use std::collections::BTreeMap;
 use miette::{Context, IntoDiagnostic, Result};
 
 use ploidy::{
-    codegen::{rust, write_to_disk},
-    config::{Codegen, CodegenLanguage, Command, Main, RustPackageConfig},
+    codegen::{
+        rust::{self},
+        write_to_disk,
+    },
+    config::{CodegenCommand, CodegenCommandLanguage, Command, Main},
     ir::IrSpec,
     parse::Document,
 };
@@ -16,10 +19,10 @@ static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
 fn main() -> Result<()> {
     let Ok(main) = Main::parse().map_err(|err| err.exit());
     match main.command {
-        Command::Codegen(Codegen {
+        Command::Codegen(CodegenCommand {
             input,
             output,
-            language: CodegenLanguage::Rust(config),
+            language: CodegenCommandLanguage::Rust(config),
         }) => {
             let source = std::fs::read_to_string(&input)
                 .into_diagnostic()
@@ -33,20 +36,12 @@ fn main() -> Result<()> {
 
             let spec = IrSpec::from_doc(&doc).into_diagnostic()?;
 
-            let package = RustPackageConfig::resolve(&output, config.package)?;
-
-            let context = rust::CodegenContext::new(
-                &package.name,
-                package.version,
-                &package.license,
-                package.description.as_deref(),
-                &spec,
-            );
+            let context = rust::CodegenContext::new(&spec, &config.manifest);
 
             println!("Writing generated code to `{}`...", output.display());
 
             println!("Generating `Cargo.toml`...");
-            write_to_disk(&output, rust::CargoManifest::new(&context))?;
+            write_to_disk(&output, rust::CodegenCargoManifest::new(&context))?;
 
             println!("Generating `lib.rs`...");
             write_to_disk(&output, rust::CodegenLibrary)?;

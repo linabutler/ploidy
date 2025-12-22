@@ -1,18 +1,19 @@
 use std::{
-    io::ErrorKind as IoErrorKind,
-    path::{Path, PathBuf},
+    io::{Error as IoError, ErrorKind as IoErrorKind},
+    path::PathBuf,
 };
 
+use cargo_toml::{Manifest, Package};
 use clap::{
     CommandFactory, FromArgMatches,
-    error::{ErrorKind as ClapErrorKind, Result as ClapResult},
+    error::{Error as ClapError, ErrorKind as ClapErrorKind, Result as ClapResult},
 };
-use miette::miette;
 use semver::Version;
 use serde::Deserialize;
 
+use crate::codegen::rust::CargoMetadata;
+
 const DEFAULT_VERSION: Version = Version::new(0, 1, 0);
-const DEFAULT_LICENSE: &str = "UNLICENSED";
 
 #[derive(Debug)]
 pub struct Main {
@@ -28,53 +29,11 @@ impl Main {
             .map_err(|err| err.format(&mut cmd))?;
         let args =
             MainArgs::from_arg_matches_mut(&mut matches).map_err(|err| err.format(&mut cmd))?;
-
         let command = match args.command {
-            CommandArgs::Codegen(CodegenArgs {
-                input,
-                output,
-                language,
-            }) => {
-                let file: Option<ConfigFile> = {
-                    let path = output.join(".ploidy.toml");
-                    match std::fs::read_to_string(&path) {
-                        Ok(contents) => Some(toml::from_str(&contents).map_err(|err| {
-                            cmd.error(
-                                ClapErrorKind::ValueValidation,
-                                format!("Failed to parse `{}`: {err}", path.display()),
-                            )
-                        })?),
-                        Err(err) if err.kind() == IoErrorKind::NotFound => None,
-                        Err(err) => {
-                            return Err(cmd.error(
-                                ClapErrorKind::Io,
-                                format!("Failed to read `{}`: {err}", path.display()),
-                            ));
-                        }
-                    }
-                };
-
-                let language = match language {
-                    CodegenLanguageArgs::Rust(rust) => {
-                        let config = match file {
-                            Some(ConfigFile { rust: Some(file) }) => file.merge(rust.package),
-                            _ => rust.package.into(),
-                        };
-                        CodegenLanguage::Rust(CodegenRust {
-                            check: rust.check,
-                            package: config,
-                        })
-                    }
-                };
-
-                Command::Codegen(Codegen {
-                    input,
-                    output,
-                    language,
-                })
+            CommandArgs::Codegen(args) => {
+                Command::Codegen(args.into_command().map_err(|err| err.format(&mut cmd))?)
             }
         };
-
         Ok(Main {
             verbose: args.verbose,
             command,
@@ -84,101 +43,25 @@ impl Main {
 
 #[derive(Debug)]
 pub enum Command {
-    Codegen(Codegen),
+    Codegen(CodegenCommand),
 }
 
 #[derive(Debug)]
-pub struct Codegen {
+pub struct CodegenCommand {
     pub input: PathBuf,
     pub output: PathBuf,
-    pub language: CodegenLanguage,
+    pub language: CodegenCommandLanguage,
 }
 
 #[derive(Debug)]
-pub enum CodegenLanguage {
-    Rust(CodegenRust),
+pub enum CodegenCommandLanguage {
+    Rust(RustCodegenCommand),
 }
 
 #[derive(Debug)]
-pub struct CodegenRust {
+pub struct RustCodegenCommand {
+    pub manifest: Manifest<CargoMetadata>,
     pub check: bool,
-    pub package: CodegenRustPackage,
-}
-
-#[derive(Debug, Default)]
-pub struct CodegenRustPackage {
-    pub name: Option<String>,
-    pub version: Option<VersionBump>,
-    pub license: Option<String>,
-    pub description: Option<String>,
-}
-
-impl From<CodegenRustPackageArgs> for CodegenRustPackage {
-    fn from(value: CodegenRustPackageArgs) -> Self {
-        Self {
-            name: value.name,
-            version: value.version,
-            license: value.license,
-            description: value.description,
-        }
-    }
-}
-
-#[derive(Debug)]
-pub struct RustPackageConfig {
-    pub name: String,
-    pub version: Version,
-    pub license: String,
-    pub description: Option<String>,
-}
-
-impl RustPackageConfig {
-    pub fn resolve(output: &Path, config: CodegenRustPackage) -> miette::Result<Self> {
-        match CargoManifest::from_existing_output(output) {
-            Some(manifest) => {
-                let name = config.name.unwrap_or(manifest.package.name);
-                let version = match config.version {
-                    Some(version) => version.bump(
-                        manifest
-                            .package
-                            .version
-                            .as_ref()
-                            .unwrap_or(&DEFAULT_VERSION),
-                    ),
-                    None => manifest.package.version.unwrap_or(DEFAULT_VERSION),
-                };
-                let license = config
-                    .license
-                    .or(manifest.package.license)
-                    .unwrap_or_else(|| DEFAULT_LICENSE.to_owned());
-                let description = config.description.or(manifest.package.description);
-                Ok(Self {
-                    name,
-                    version,
-                    license,
-                    description,
-                })
-            }
-            None => {
-                let name = config
-                    .name
-                    .or_else(|| {
-                        let output = std::path::absolute(output).ok()?;
-                        let dir_name = output.file_name()?;
-                        Some(dir_name.to_string_lossy().into_owned())
-                    })
-                    .ok_or_else(|| {
-                        miette!("couldn't infer generated package name; please specify one with `--name`")
-                    })?;
-                Ok(Self {
-                    name,
-                    version: DEFAULT_VERSION,
-                    license: config.license.unwrap_or_else(|| DEFAULT_LICENSE.to_owned()),
-                    description: config.description,
-                })
-            }
-        }
-    }
 }
 
 #[derive(Debug, clap::Parser)]
@@ -195,11 +78,11 @@ struct MainArgs {
 #[derive(Debug, clap::Subcommand)]
 enum CommandArgs {
     /// Generate a client from an OpenAPI document.
-    Codegen(CodegenArgs),
+    Codegen(CodegenCommandArgs),
 }
 
 #[derive(Debug, clap::Args)]
-struct CodegenArgs {
+struct CodegenCommandArgs {
     /// The path to the OpenAPI document (`.yaml` or `.json`).
     input: PathBuf,
 
@@ -207,73 +90,154 @@ struct CodegenArgs {
     output: PathBuf,
 
     #[command(subcommand)]
-    language: CodegenLanguageArgs,
+    language: CodegenCommandLanguageArgs,
+}
+
+/// An error encountered when parsing a `.ploidy.toml` file.
+#[derive(Debug, thiserror::Error)]
+enum ConfigFileError {
+    #[error(transparent)]
+    Toml(#[from] toml::de::Error),
+    #[error(transparent)]
+    Io(#[from] IoError),
+}
+
+impl CodegenCommandArgs {
+    fn into_command(self) -> ClapResult<CodegenCommand> {
+        let file = {
+            let path = self.output.join(".ploidy.toml");
+            let result = match std::fs::read_to_string(&path) {
+                Ok(contents) => toml::from_str::<ConfigFile>(&contents)
+                    .map(Some)
+                    .map_err(ConfigFileError::from),
+                Err(err) if err.kind() == IoErrorKind::NotFound => Ok(None),
+                Err(err) => Err(ConfigFileError::from(err)),
+            };
+            result.map_err(|err| {
+                ClapError::raw(
+                    ClapErrorKind::ValueValidation,
+                    format!("couldn't parse `{}`: {err}", path.display()),
+                )
+            })?
+        };
+        let language = match self.language {
+            CodegenCommandLanguageArgs::Rust(args) => {
+                let path = self.output.join("Cargo.toml");
+                match Manifest::<CargoMetadata>::from_path_with_metadata(&path) {
+                    Ok(mut manifest) => {
+                        let package = manifest.package.as_mut().ok_or_else(|| {
+                            ClapError::raw(
+                                ClapErrorKind::ValueValidation,
+                                format!(
+                                    "`{}` looks like a Cargo workspace; \
+                                    Ploidy can only generate packages",
+                                    self.output.display()
+                                ),
+                            )
+                        })?;
+                        // Update the generated package name and version,
+                        // if specified on the command line.
+                        package.name = args.name.unwrap_or_else(|| package.name().to_owned());
+                        if let Some(bump) =
+                            args.version.or(file.and_then(|file| file.rust?.version))
+                        {
+                            let base = package.version().parse().map_err(|err| {
+                                ClapError::raw(
+                                    ClapErrorKind::ValueValidation,
+                                    format!(
+                                        "manifest `{}` contains invalid package version `{}`: {err}",
+                                        path.display(),
+                                        package.version()
+                                    ),
+                                )
+                            })?;
+                            package.version.set(bump_version(&base, bump).to_string());
+                        }
+                        CodegenCommandLanguage::Rust(RustCodegenCommand {
+                            manifest,
+                            check: args.check,
+                        })
+                    }
+                    Err(cargo_toml::Error::Io(err)) if err.kind() == IoErrorKind::NotFound => {
+                        let name = args
+                            .name
+                            .or_else(|| {
+                                let output = std::path::absolute(&self.output).ok()?;
+                                let dir_name = output.file_name()?;
+                                Some(dir_name.to_string_lossy().into_owned())
+                            })
+                            .ok_or_else(|| {
+                                ClapError::raw(
+                                    ClapErrorKind::ValueValidation,
+                                    "couldn't infer generated package name; \
+                                        please specify one with `--name`"
+                                        .to_string(),
+                                )
+                            })?;
+                        let manifest = Manifest {
+                            package: Some(Package::new(name, DEFAULT_VERSION.to_string())),
+                            ..Default::default()
+                        };
+                        CodegenCommandLanguage::Rust(RustCodegenCommand {
+                            manifest,
+                            check: args.check,
+                        })
+                    }
+                    Err(err) => {
+                        return Err(ClapError::raw(
+                            ClapErrorKind::ValueValidation,
+                            format!("couldn't parse manifest `{}`: {err}", path.display()),
+                        ));
+                    }
+                }
+            }
+        };
+        Ok(CodegenCommand {
+            input: self.input,
+            output: self.output,
+            language,
+        })
+    }
 }
 
 #[derive(Debug, clap::Subcommand)]
-enum CodegenLanguageArgs {
+enum CodegenCommandLanguageArgs {
     /// Generate a Rust package.
-    Rust(CodegenRustArgs),
-}
-
-#[derive(Debug, clap::Args)]
-struct CodegenRustArgs {
-    /// Run `cargo check` on the generated code.
-    #[arg(short, long)]
-    check: bool,
-
-    #[command(flatten)]
-    package: CodegenRustPackageArgs,
+    Rust(RustCodegenCommandArgs),
 }
 
 #[derive(Debug, Default, clap::Args)]
 #[command(next_help_heading = "Generated package options")]
-pub struct CodegenRustPackageArgs {
+struct RustCodegenCommandArgs {
+    /// Override the generated package name. Defaults to the existing package name,
+    /// or the output directory name if the package doesn't exist yet.
+    #[arg(name = "name", long)]
+    name: Option<String>,
+
     /// Increment the existing package version. Keeps the existing version if not set,
     /// or 0.1.0 if the package doesn't exist yet.
     #[arg(name = "version", long)]
     version: Option<VersionBump>,
 
-    /// The generated package name. Defaults to the existing package name,
-    /// or the output directory name.
-    #[arg(name = "name", long)]
-    name: Option<String>,
-
-    /// The generated package license. Defaults to the existing package license,
-    /// or `UNLICENSED` if not set.
-    #[arg(name = "license", long)]
-    license: Option<String>,
-
-    /// The generated package description. Defaults to the existing package description.
-    #[arg(name = "description", long)]
-    description: Option<String>,
+    /// Run `cargo check` on the generated code.
+    #[arg(short, long)]
+    check: bool,
 }
 
 #[derive(Debug, Deserialize)]
 struct ConfigFile {
     #[serde(default)]
-    rust: Option<RustConfigFile>,
+    rust: Option<RustConfigFileSection>,
 }
 
 #[derive(Debug, Deserialize)]
-struct RustConfigFile {
+struct RustConfigFileSection {
     #[serde(default)]
     version: Option<VersionBump>,
 }
 
-impl RustConfigFile {
-    fn merge(self, args: CodegenRustPackageArgs) -> CodegenRustPackage {
-        CodegenRustPackage {
-            name: args.name,
-            version: args.version.or(self.version),
-            license: args.license,
-            description: args.description,
-        }
-    }
-}
-
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, clap::ValueEnum)]
-pub enum VersionBump {
+enum VersionBump {
     #[clap(name = "bump-major")]
     #[serde(rename = "bump-major")]
     Major,
@@ -285,37 +249,11 @@ pub enum VersionBump {
     Patch,
 }
 
-impl VersionBump {
-    /// Apply this version bump to the given base version.
-    fn bump(self, base: &Version) -> Version {
-        match self {
-            Self::Major => Version::new(base.major + 1, 0, 0),
-            Self::Minor => Version::new(base.major, base.minor + 1, 0),
-            Self::Patch => Version::new(base.major, base.minor, base.patch + 1),
-        }
+/// Increments the major, minor, or patch component of the given base version.
+fn bump_version(base: &Version, bump: VersionBump) -> Version {
+    match bump {
+        VersionBump::Major => Version::new(base.major + 1, 0, 0),
+        VersionBump::Minor => Version::new(base.major, base.minor + 1, 0),
+        VersionBump::Patch => Version::new(base.major, base.minor, base.patch + 1),
     }
-}
-
-/// An existing `Cargo.toml`.
-#[derive(Debug, Deserialize)]
-struct CargoManifest {
-    package: CargoManifestPackage,
-}
-
-impl CargoManifest {
-    fn from_existing_output(output: &Path) -> Option<Self> {
-        let path = output.join("Cargo.toml");
-        let contents = std::fs::read_to_string(&path).ok()?;
-        let manifest: CargoManifest = toml::from_str(&contents).ok()?;
-        Some(manifest)
-    }
-}
-
-/// The `package` section of a `Cargo.toml`.
-#[derive(Debug, Deserialize)]
-pub struct CargoManifestPackage {
-    name: String,
-    version: Option<Version>,
-    license: Option<String>,
-    description: Option<String>,
 }
