@@ -26,10 +26,8 @@ This generates a complete Rust crate in the output directory, with:
 | Flag | Description |
 |------|-------------|
 | `-c`, `--check` | Run `cargo check` on the generated code |
-| `--version <VERSION>` | Increment the generated package version |
-| `--name <NAME>` | Override the generated package name |
-| `--package-license <LICENSE>` | Override the generated package license |
-| `--package-description <DESCRIPTION>` | Override the generated package description |
+| `--name <NAME>` | Set or override the generated package name. If not passed, and a package already exists in the output directory, defaults to the name of that package; otherwise, defaults to the name of the output directory |
+| `--version <bump-major, bump-minor, bump-patch>` | If a package already exists in the output directory, increment its major, minor, or patch version. If not passed, keeps the existing package version. Ignored if the package doesn't exist yet |
 
 ### Configuration File
 
