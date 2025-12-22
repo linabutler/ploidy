@@ -1,6 +1,6 @@
 # Ploidy
 
-Ploidy is a code generator that supports polymorphic OpenAPI schemas. Its goal is to generate idiomatic Rust code for schemas with complex `oneOf`, `anyOf`, and `allOf` hierarchies.
+Ploidy is an OpenAPI code generator geared toward schemas that use inheritance and polymorphism. Currently, Ploidy only generates Rust code, though support for Python and TypeScript is planned.
 
 ## Installation
 
@@ -10,7 +10,7 @@ You can [download a pre-built binary of Ploidy for your platform](https://github
 cargo install --locked ploidy
 ```
 
-## Quick Start
+## Generating Rust code
 
 ```sh
 ploidy codegen <INPUT-SPEC> <OUTPUT-DIR> rust
