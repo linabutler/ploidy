@@ -1,0 +1,23 @@
+[package]
+name = "ploidy-pointer-derive"
+description = "Derive macros for Ploidy JSON pointers"
+readme = "README.md"
+version.workspace = true
+license.workspace = true
+edition.workspace = true
+repository.workspace = true
+keywords.workspace = true
+
+[lib]
+proc-macro = true
+
+[dependencies]
+heck = "0.5"
+itertools = "0.14"
+proc-macro2 = "1"
+quote = "1"
+syn = "2"
+thiserror = "2"
+
+[dev-dependencies]
+ploidy-pointer = { workspace = true }

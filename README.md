@@ -1,6 +1,6 @@
 # Ploidy
 
-Ploidy is an OpenAPI code generator geared toward schemas that use inheritance and polymorphism. Currently, Ploidy only generates Rust code, though support for Python and TypeScript is planned.
+Ploidy is a code generator for OpenAPI schemas that use inheritance and polymorphism. Currently, Ploidy only generates Rust code, though support for Python and TypeScript is planned.
 
 ## Installation
 
