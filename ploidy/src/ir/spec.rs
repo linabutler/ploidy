@@ -6,8 +6,12 @@ use itertools::Itertools;
 use petgraph::algo::tarjan_scc;
 use petgraph::graph::{DiGraph, NodeIndex};
 use petgraph::visit::Bfs;
+use ploidy_pointer::JsonPointee;
 
-use crate::parse::{self, Document, Info, ParameterLocation, RefOrSchema};
+use crate::parse::{
+    self, Document, Info, Parameter, ParameterLocation, RefOrParameter, RefOrRequestBody,
+    RefOrResponse, RefOrSchema, RequestBody, Response,
+};
 
 use super::{
     error::IrError,
@@ -60,10 +64,18 @@ impl<'a> IrSpec<'a> {
                 let params = op
                     .parameters
                     .iter()
-                    .filter_map(|param| {
+                    .filter_map(|param_or_ref| {
+                        let param = match param_or_ref {
+                            RefOrParameter::Other(p) => p,
+                            RefOrParameter::Ref(r) => doc
+                                .resolve(r.path.pointer().clone())
+                                .ok()
+                                .and_then(|p| p.downcast_ref::<Parameter>())?,
+                        };
+
                         let ty = match &param.schema {
-                            Some(RefOrSchema::Ref(r)) => IrType::Ref(r.path.as_str()),
-                            Some(RefOrSchema::Schema(schema)) => transform(
+                            Some(RefOrSchema::Ref(r)) => IrType::Ref(&r.path),
+                            Some(RefOrSchema::Other(schema)) => transform(
                                 doc,
                                 InlineIrTypePath {
                                     root: InlineIrTypePathRoot::Resource(resource),
@@ -93,8 +105,16 @@ impl<'a> IrSpec<'a> {
                 let request = op
                     .request_body
                     .as_ref()
-                    .map(|request| {
-                        if request.content.contains_key("multipart/form-data") {
+                    .and_then(|request_or_ref| {
+                        let request = match request_or_ref {
+                            RefOrRequestBody::Other(rb) => rb,
+                            RefOrRequestBody::Ref(r) => doc
+                                .resolve(r.path.pointer().clone())
+                                .ok()
+                                .and_then(|p| p.downcast_ref::<RequestBody>())?,
+                        };
+
+                        Some(if request.content.contains_key("multipart/form-data") {
                             RequestContent::Multipart
                         } else if let Some(content) = request.content.get("application/json")
                             && let Some(schema) = &content.schema
@@ -106,14 +126,14 @@ impl<'a> IrSpec<'a> {
                             RequestContent::Json(schema)
                         } else {
                             RequestContent::Any
-                        }
+                        })
                     })
                     .map(|content| match content {
                         RequestContent::Multipart => IrRequest::Multipart,
                         RequestContent::Json(RefOrSchema::Ref(r)) => {
-                            IrRequest::Json(IrType::Ref(r.path.as_str()))
+                            IrRequest::Json(IrType::Ref(&r.path))
                         }
-                        RequestContent::Json(RefOrSchema::Schema(schema)) => {
+                        RequestContent::Json(RefOrSchema::Other(schema)) => {
                             IrRequest::Json(transform(
                                 doc,
                                 InlineIrTypePath {
@@ -144,7 +164,16 @@ impl<'a> IrSpec<'a> {
 
                     op.responses
                         .get(key)
-                        .and_then(|response| response.content.as_ref())
+                        .and_then(|response_or_ref| {
+                            let response = match response_or_ref {
+                                RefOrResponse::Other(r) => r,
+                                RefOrResponse::Ref(r) => doc
+                                    .resolve(r.path.pointer().clone())
+                                    .ok()
+                                    .and_then(|p| p.downcast_ref::<Response>())?,
+                            };
+                            response.content.as_ref()
+                        })
                         .map(|content| {
                             if let Some(content) = content.get("application/json")
                                 && let Some(schema) = &content.schema
@@ -160,9 +189,9 @@ impl<'a> IrSpec<'a> {
                         })
                         .map(|content| match content {
                             ResponseContent::Json(RefOrSchema::Ref(r)) => {
-                                IrResponse::Json(IrType::Ref(r.path.as_str()))
+                                IrResponse::Json(IrType::Ref(&r.path))
                             }
-                            ResponseContent::Json(RefOrSchema::Schema(schema)) => {
+                            ResponseContent::Json(RefOrSchema::Other(schema)) => {
                                 IrResponse::Json(transform(
                                     doc,
                                     InlineIrTypePath {

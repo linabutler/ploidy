@@ -46,8 +46,8 @@ impl ToTokens for CodegenRef<'_> {
                 let ty = CodegenRef::new(self.context, ty.as_ref());
                 quote! { ::std::collections::BTreeMap<::std::string::String, #ty> }
             }
-            IrType::Ref(name) => {
-                let name = self.context.map.ty(name);
+            IrType::Ref(r) => {
+                let name = self.context.map.ty(r.name());
                 quote! { crate::types::#name }
             }
             IrType::Nullable(ty) => {
@@ -96,8 +96,8 @@ impl ToTokens for CodegenBoxedRef<'_> {
     fn to_tokens(&self, tokens: &mut TokenStream) {
         if let CodegenTypeName::Schema(from, _) = &self.from
             && let Some(this) = self.context.spec.lookup(from)
-            && let IrType::Ref(to) = &self.to
-            && let Some(other) = self.context.spec.lookup(to)
+            && let IrType::Ref(r) = &self.to
+            && let Some(other) = self.context.spec.lookup(r.name())
             && this.requires_indirection_to(other)
         {
             let inner = CodegenRef::new(self.context, other.ty());

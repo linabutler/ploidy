@@ -1,6 +1,6 @@
 //! Language-agnostic intermediate representation types.
 
-use crate::parse::{Method, path::PathSegment};
+use crate::parse::{ComponentRef, Method, path::PathSegment};
 
 use super::visitor::{Visitable, Visitor};
 
@@ -16,7 +16,7 @@ pub enum IrType<'a> {
     /// A nullable type.
     Nullable(Box<IrType<'a>>),
     /// A reference to another named schema type.
-    Ref(&'a str),
+    Ref(&'a ComponentRef),
     /// A named schema type.
     Schema(SchemaIrType<'a>),
     /// An inline type defined within a schema.

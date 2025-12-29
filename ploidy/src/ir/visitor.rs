@@ -140,7 +140,7 @@ impl<'a> Iterator for Visitor<'a> {
                     }
                     return Some(InnerIrType::Inline(ty));
                 }
-                &IrType::Ref(name) => return Some(InnerIrType::Ref(name)),
+                &IrType::Ref(r) => return Some(InnerIrType::Ref(r.name())),
             }
         }
         None

@@ -644,6 +644,7 @@ dependencies = [
  "mimalloc",
  "percent-encoding",
  "petgraph",
+ "ploidy-pointer",
  "prettyplease",
  "proc-macro2",
  "quote",

@@ -1,6 +1,7 @@
 use std::collections::BTreeMap;
 
 use itertools::Itertools;
+use ploidy_pointer::JsonPointee;
 
 use crate::parse::{AdditionalProperties, Document, Format, RefOrSchema, Schema, Ty};
 
@@ -61,12 +62,12 @@ impl<'a> IrTransformer<'a> {
                 RefOrSchema::Ref(r) => {
                     let aliases = inverted.get(&r.path).cloned().unwrap_or_default();
                     Some(IrTaggedVariant {
-                        name: r.path.as_str(),
-                        ty: IrType::Ref(r.path.as_str()),
+                        name: r.path.name(),
+                        ty: IrType::Ref(&r.path),
                         aliases,
                     })
                 }
-                RefOrSchema::Schema(_) => None,
+                RefOrSchema::Other(_) => None,
             })
             .filter(|v| !v.aliases.is_empty())
             .collect();
@@ -92,10 +93,10 @@ impl<'a> IrTransformer<'a> {
             .map(|(index, schema)| match schema {
                 RefOrSchema::Ref(r) => IrUntaggedVariant::Some(
                     IrUntaggedVariantNameHint::Index(index),
-                    IrType::Ref(r.path.as_str()),
+                    IrType::Ref(&r.path),
                 ),
-                RefOrSchema::Schema(s) if matches!(&*s.ty, [Ty::Null]) => IrUntaggedVariant::Null,
-                RefOrSchema::Schema(schema) => {
+                RefOrSchema::Other(s) if matches!(&*s.ty, [Ty::Null]) => IrUntaggedVariant::Null,
+                RefOrSchema::Other(schema) => {
                     let path = match &self.name {
                         IrTypeName::Schema(name) => InlineIrTypePath {
                             root: InlineIrTypePathRoot::Type(name),
@@ -178,8 +179,8 @@ impl<'a> IrTransformer<'a> {
             .map(|(field_name, field)| {
                 let info = field.info();
                 let ty = match info.schema {
-                    RefOrSchema::Ref(reference) => IrType::Ref(reference.path.as_str()),
-                    RefOrSchema::Schema(schema) => {
+                    RefOrSchema::Ref(reference) => IrType::Ref(&reference.path),
+                    RefOrSchema::Other(schema) => {
                         let path = match &self.name {
                             IrTypeName::Schema(name) => InlineIrTypePath {
                                 root: InlineIrTypePathRoot::Type(name),
@@ -196,19 +197,19 @@ impl<'a> IrTransformer<'a> {
                     }
                 };
                 let description = match info.schema {
-                    RefOrSchema::Schema(schema) => schema.description.as_deref(),
+                    RefOrSchema::Other(schema) => schema.description.as_deref(),
                     RefOrSchema::Ref(r) => self
                         .doc
-                        .components
-                        .as_ref()
-                        .and_then(|c| c.schemas.get(r.path.as_str()))
+                        .resolve(r.path.pointer().clone())
+                        .ok()
+                        .and_then(|p| p.downcast_ref::<Schema>())
                         .and_then(|schema| schema.description.as_deref()),
                 };
                 let nullable = match info.schema {
-                    RefOrSchema::Schema(schema) if schema.nullable => true,
+                    RefOrSchema::Other(schema) if schema.nullable => true,
                     RefOrSchema::Ref(r) => {
-                        if let Some(components) = &self.doc.components
-                            && let Some(schema) = components.schemas.get(r.path.as_str())
+                        if let Ok(resolved) = self.doc.resolve(r.path.pointer().clone())
+                            && let Some(schema) = resolved.downcast_ref::<Schema>()
                             && schema.nullable
                         {
                             true
@@ -264,8 +265,8 @@ impl<'a> IrTransformer<'a> {
                 (Ty::Boolean, _) => PrimitiveIrType::Bool.into(),
                 (Ty::Array, _) => {
                     let items = match &self.schema.items {
-                        Some(RefOrSchema::Ref(r)) => IrType::Ref(r.path.as_str()),
-                        Some(RefOrSchema::Schema(schema)) => {
+                        Some(RefOrSchema::Ref(r)) => IrType::Ref(&r.path),
+                        Some(RefOrSchema::Other(schema)) => {
                             let path = match &self.name {
                                 IrTypeName::Schema(name) => InlineIrTypePath {
                                     root: InlineIrTypePathRoot::Type(name),
@@ -287,9 +288,9 @@ impl<'a> IrTransformer<'a> {
                 (Ty::Object, _) => {
                     let ty = match &self.schema.additional_properties {
                         Some(AdditionalProperties::RefOrSchema(RefOrSchema::Ref(r))) => {
-                            IrType::Map(IrType::Ref(r.path.as_str()).into())
+                            IrType::Map(IrType::Ref(&r.path).into())
                         }
-                        Some(AdditionalProperties::RefOrSchema(RefOrSchema::Schema(schema))) => {
+                        Some(AdditionalProperties::RefOrSchema(RefOrSchema::Other(schema))) => {
                             let path = match &self.name {
                                 IrTypeName::Schema(name) => InlineIrTypePath {
                                     root: InlineIrTypePathRoot::Type(name),

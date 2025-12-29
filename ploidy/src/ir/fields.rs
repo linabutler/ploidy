@@ -1,8 +1,9 @@
 use std::collections::BTreeSet;
 
 use indexmap::IndexMap;
+use ploidy_pointer::JsonPointee;
 
-use crate::parse::{Document, RefOrSchema, Schema, SchemaRefPath};
+use crate::parse::{ComponentRef, Document, RefOrSchema, Schema};
 
 /// Yields all the fields of this schema, including inherited fields.
 pub fn all_fields<'a>(
@@ -80,7 +81,7 @@ pub struct IrSchemaFieldInfo<'a> {
 pub struct Ancestors<'a> {
     doc: &'a Document,
     stack: Vec<&'a RefOrSchema>,
-    visited: BTreeSet<&'a SchemaRefPath>,
+    visited: BTreeSet<&'a ComponentRef>,
 }
 
 impl<'a> Ancestors<'a> {
@@ -113,15 +114,15 @@ impl<'a> Iterator for Ancestors<'a> {
                     }
                     let Some(schema) = self
                         .doc
-                        .components
-                        .as_ref()
-                        .and_then(|c| c.schemas.get(r.path.as_str()))
+                        .resolve(r.path.pointer().clone())
+                        .ok()
+                        .and_then(|p| p.downcast_ref::<Schema>())
                     else {
                         continue;
                     };
                     schema
                 }
-                RefOrSchema::Schema(schema) => schema.as_ref(),
+                RefOrSchema::Other(schema) => schema.as_ref(),
             };
             if let Some(all_of) = &schema.all_of {
                 self.stack.extend(all_of.iter().rev());
@@ -140,14 +141,14 @@ mod tests {
     use itertools::Itertools;
 
     fn make_string_field() -> RefOrSchema {
-        RefOrSchema::Schema(Box::new(Schema {
+        RefOrSchema::Other(Box::new(Schema {
             ty: vec![Ty::String],
             ..Default::default()
         }))
     }
 
     fn make_int_field() -> RefOrSchema {
-        RefOrSchema::Schema(Box::new(Schema {
+        RefOrSchema::Other(Box::new(Schema {
             ty: vec![Ty::Integer],
             ..Default::default()
         }))
@@ -162,7 +163,10 @@ mod tests {
                 description: None,
             },
             paths: IndexMap::new(),
-            components: Some(Components { schemas }),
+            components: Some(Components {
+                schemas,
+                ..Default::default()
+            }),
         }
     }
 
