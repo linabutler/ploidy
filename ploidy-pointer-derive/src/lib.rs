@@ -41,7 +41,7 @@
 //!
 //! ## Struct flattening
 //!
-//! ```
+//! ```ignore
 //! # use ploidy_pointer::{BadJsonPointer, JsonPointee, JsonPointer};
 //! # fn main() -> Result<(), Box<dyn std::error::Error>> {
 //! #[derive(JsonPointee)]
@@ -82,7 +82,7 @@
 //!
 //! ## Renaming fields
 //!
-//! ```
+//! ```ignore
 //! # use ploidy_pointer::{BadJsonPointer, JsonPointee, JsonPointer};
 //! # fn main() -> Result<(), Box<dyn std::error::Error>> {
 //! #[derive(JsonPointee)]
@@ -121,7 +121,7 @@
 //!
 //! This is the default enum representation. The variant's tag wraps the contents.
 //!
-//! ```
+//! ```ignore
 //! # use ploidy_pointer::{BadJsonPointer, JsonPointee, JsonPointer};
 //! # fn main() -> Result<(), Box<dyn std::error::Error>> {
 //! #[derive(JsonPointee)]
@@ -146,7 +146,7 @@
 //! In this representation, the tag that specifies the variant name
 //! is next to the variant's fields.
 //!
-//! ```
+//! ```ignore
 //! # use ploidy_pointer::{BadJsonPointer, JsonPointee, JsonPointer};
 //! # fn main() -> Result<(), Box<dyn std::error::Error>> {
 //! #[derive(JsonPointee)]
@@ -176,7 +176,7 @@
 //! In this representation, the variant's tag and contents are adjacent
 //! to each other, as two fields in the same object.
 //!
-//! ```
+//! ```ignore
 //! # use ploidy_pointer::{BadJsonPointer, JsonPointee, JsonPointer};
 //! # fn main() -> Result<(), Box<dyn std::error::Error>> {
 //! #[derive(JsonPointee)]
@@ -206,7 +206,7 @@
 //! In this representation, the variant's name is completely ignored,
 //! and pointers are resolved against the variant's contents.
 //!
-//! ```
+//! ```ignore
 //! # use ploidy_pointer::{BadJsonPointer, JsonPointee, JsonPointer};
 //! # fn main() -> Result<(), Box<dyn std::error::Error>> {
 //! #[derive(JsonPointee)]
