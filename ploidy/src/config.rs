@@ -1,7 +1,4 @@
-use std::{
-    io::{Error as IoError, ErrorKind as IoErrorKind},
-    path::PathBuf,
-};
+use std::{io::ErrorKind as IoErrorKind, path::PathBuf};
 
 use cargo_toml::{Manifest, Package};
 use clap::{
@@ -93,33 +90,8 @@ struct CodegenCommandArgs {
     language: CodegenCommandLanguageArgs,
 }
 
-/// An error encountered when parsing a `.ploidy.toml` file.
-#[derive(Debug, thiserror::Error)]
-enum ConfigFileError {
-    #[error(transparent)]
-    Toml(#[from] toml::de::Error),
-    #[error(transparent)]
-    Io(#[from] IoError),
-}
-
 impl CodegenCommandArgs {
     fn into_command(self) -> ClapResult<CodegenCommand> {
-        let file = {
-            let path = self.output.join(".ploidy.toml");
-            let result = match std::fs::read_to_string(&path) {
-                Ok(contents) => toml::from_str::<ConfigFile>(&contents)
-                    .map(Some)
-                    .map_err(ConfigFileError::from),
-                Err(err) if err.kind() == IoErrorKind::NotFound => Ok(None),
-                Err(err) => Err(ConfigFileError::from(err)),
-            };
-            result.map_err(|err| {
-                ClapError::raw(
-                    ClapErrorKind::ValueValidation,
-                    format!("couldn't parse `{}`: {err}", path.display()),
-                )
-            })?
-        };
         let language = match self.language {
             CodegenCommandLanguageArgs::Rust(args) => {
                 let path = self.output.join("Cargo.toml");
@@ -138,9 +110,7 @@ impl CodegenCommandArgs {
                         // Update the generated package name and version,
                         // if specified on the command line.
                         package.name = args.name.unwrap_or_else(|| package.name().to_owned());
-                        if let Some(bump) =
-                            args.version.or(file.and_then(|file| file.rust?.version))
-                        {
+                        if let Some(bump) = args.version {
                             let base = package.version().parse().map_err(|err| {
                                 ClapError::raw(
                                     ClapErrorKind::ValueValidation,
@@ -222,18 +192,6 @@ struct RustCodegenCommandArgs {
     /// Run `cargo check` on the generated code.
     #[arg(short, long)]
     check: bool,
-}
-
-#[derive(Debug, Deserialize)]
-struct ConfigFile {
-    #[serde(default)]
-    rust: Option<RustConfigFileSection>,
-}
-
-#[derive(Debug, Deserialize)]
-struct RustConfigFileSection {
-    #[serde(default)]
-    version: Option<VersionBump>,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, clap::ValueEnum)]
