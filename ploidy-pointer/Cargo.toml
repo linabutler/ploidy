@@ -2,11 +2,11 @@
 name = "ploidy-pointer"
 description = "JSON Pointers for strongly-typed data structures"
 readme = "README.md"
+keywords = ["6901", "json", "json-pointer", "rfc-6901"]
 version.workspace = true
 license.workspace = true
 edition.workspace = true
 repository.workspace = true
-keywords.workspace = true
 
 [dependencies]
 indexmap = { version = "2", optional = true }
