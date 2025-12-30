@@ -449,16 +449,18 @@ fn derive_for_enum(
                             let key = Ident::new("key", Span::mixed_site());
                             let effective_name = info.effective_name();
                             let pointee_ty = TuplePointeeTy::Variant(info, tag);
+                            let key_err = if cfg!(feature = "did-you-mean") {
+                                quote!(::ploidy_pointer::BadJsonPointerKey::with_ty(#key, #pointee_ty))
+                            } else {
+                                quote!(::ploidy_pointer::BadJsonPointerKey::new(#key))
+                            };
                             quote! {
                                 Self::#name(inner) => {
                                     let Some(#key) = #pointer.head() else {
                                         return Ok(self as &dyn ::ploidy_pointer::JsonPointee);
                                     };
                                     if #key.as_str() != #effective_name {
-                                        return Err(::ploidy_pointer::BadJsonPointerKey::new(
-                                            #key,
-                                            #pointee_ty,
-                                        ))?;
+                                        return Err(#key_err)?;
                                     }
                                     <_ as ::ploidy_pointer::JsonPointee>::resolve(inner, #pointer.tail())
                                 }
@@ -470,6 +472,15 @@ fn derive_for_enum(
                             let key = Ident::new("key", Span::mixed_site());
                             let effective_name = info.effective_name();
                             let pointee_ty = TuplePointeeTy::Variant(info, tag);
+                            let key_err = if cfg!(feature = "did-you-mean") {
+                                quote!(::ploidy_pointer::BadJsonPointerKey::with_suggestions(
+                                    #key,
+                                    #pointee_ty,
+                                    [#tag_field, #content_field],
+                                ))
+                            } else {
+                                quote!(::ploidy_pointer::BadJsonPointerKey::new(#key))
+                            };
                             quote! {
                                 Self::#name(inner) => {
                                     let Some(#key) = #pointer.head() else {
@@ -478,11 +489,7 @@ fn derive_for_enum(
                                     match #key.as_str() {
                                         #tag_field => Ok(&#effective_name as &dyn ::ploidy_pointer::JsonPointee),
                                         #content_field => <_ as ::ploidy_pointer::JsonPointee>::resolve(inner, #pointer.tail()),
-                                        _ => Err(::ploidy_pointer::BadJsonPointerKey::with_suggestions(
-                                            #key,
-                                            #pointee_ty,
-                                            [#tag_field, #content_field],
-                                        ))?,
+                                        _ => Err(#key_err)?,
                                     }
                                 }
                             }
@@ -785,12 +792,14 @@ impl ToTokens for NamedPointeeBody<'_> {
         let wildcard = {
             // For flattened fields, we build an `.or_else()` chain bottom-up
             // using a right fold.
-            let rest = quote! {
-                Err(::ploidy_pointer::BadJsonPointerKey::with_suggestions(
+            let rest = if cfg!(feature = "did-you-mean") {
+                quote!(Err(::ploidy_pointer::BadJsonPointerKey::with_suggestions(
                     #key,
                     #pointee_ty,
                     [#(#suggestions),*],
-                ))?
+                ))?)
+            } else {
+                quote!(Err(::ploidy_pointer::BadJsonPointerKey::new(#key))?)
             };
             self.fields
                 .iter()
@@ -831,15 +840,17 @@ impl ToTokens for NamedPointeeBody<'_> {
                 // must match the variant name; then the tail should resolve
                 // against the named fields.
                 let variant_name = info.effective_name();
+                let ty_err = if cfg!(feature = "did-you-mean") {
+                    quote!(::ploidy_pointer::BadJsonPointerTy::with_ty(&#pointer, #pointee_ty))
+                } else {
+                    quote!(::ploidy_pointer::BadJsonPointerTy::new(&#pointer))
+                };
                 quote! {
                     let Some(#key) = #pointer.head() else {
                         return Ok(self as &dyn ::ploidy_pointer::JsonPointee);
                     };
                     if #key.as_str() != #variant_name {
-                        return Err(::ploidy_pointer::BadJsonPointer::Ty(
-                            #pointer.to_string(),
-                            #pointee_ty,
-                        ));
+                        return Err(#ty_err)?;
                     }
                     let #pointer = #pointer.tail();
                     let Some(#key) = #pointer.head() else {
@@ -861,6 +872,15 @@ impl ToTokens for NamedPointeeBody<'_> {
                 // For adjacently tagged struct-like variants, the first segment
                 // must match either the tag or content field.
                 let variant_name = info.effective_name();
+                let key_err = if cfg!(feature = "did-you-mean") {
+                    quote!(::ploidy_pointer::BadJsonPointerKey::with_suggestions(
+                        #key,
+                        #pointee_ty,
+                        [#tag_field, #content_field],
+                    ))
+                } else {
+                    quote!(::ploidy_pointer::BadJsonPointerKey::new(#key))
+                };
                 quote! {
                     let Some(#key) = #pointer.head() else {
                         return Ok(self as &dyn ::ploidy_pointer::JsonPointee);
@@ -880,11 +900,7 @@ impl ToTokens for NamedPointeeBody<'_> {
                             }
                         }
                         _ => {
-                            return Err(::ploidy_pointer::BadJsonPointerKey::with_suggestions(
-                                #key,
-                                #pointee_ty,
-                                [#tag_field, #content_field],
-                            ))?;
+                            return Err(#key_err)?;
                         }
                     }
                 }
@@ -946,12 +962,14 @@ impl ToTokens for TuplePointeeBody<'_> {
         // Build common tail.
         let ty = self.ty;
         let len = self.fields.len();
+        let ty_err = if cfg!(feature = "did-you-mean") {
+            quote!(::ploidy_pointer::BadJsonPointerTy::with_ty(&#pointer, #ty))
+        } else {
+            quote!(::ploidy_pointer::BadJsonPointerTy::new(&#pointer))
+        };
         let tail = quote! {
             let Some(#idx) = #key.to_index() else {
-                return Err(::ploidy_pointer::BadJsonPointer::Ty(
-                    #pointer.to_string(),
-                    #ty,
-                ));
+                return Err(#ty_err)?;
             };
             match #idx {
                 #(#arms,)*
@@ -979,15 +997,17 @@ impl ToTokens for TuplePointeeBody<'_> {
                 // must match the variant name; then the tail should resolve
                 // against the tuple indices.
                 let variant_name = info.effective_name();
+                let ty_err = if cfg!(feature = "did-you-mean") {
+                    quote!(::ploidy_pointer::BadJsonPointerTy::with_ty(&#pointer, #ty))
+                } else {
+                    quote!(::ploidy_pointer::BadJsonPointerTy::new(&#pointer))
+                };
                 quote! {
                     let Some(#key) = #pointer.head() else {
                         return Ok(self as &dyn ::ploidy_pointer::JsonPointee);
                     };
                     if #key.as_str() != #variant_name {
-                        return Err(::ploidy_pointer::BadJsonPointer::Ty(
-                            #pointer.to_string(),
-                            #ty,
-                        ));
+                        return Err(#ty_err)?;
                     }
                     let #pointer = #pointer.tail();
                     let Some(#key) = #pointer.head() else {
@@ -1006,6 +1026,15 @@ impl ToTokens for TuplePointeeBody<'_> {
                 // For adjacently tagged tuple variants, the first segment
                 // must match either the tag or content field.
                 let variant_name = info.effective_name();
+                let key_err = if cfg!(feature = "did-you-mean") {
+                    quote!(::ploidy_pointer::BadJsonPointerKey::with_suggestions(
+                        #key,
+                        #ty,
+                        [#tag_field, #content_field],
+                    ))
+                } else {
+                    quote!(::ploidy_pointer::BadJsonPointerKey::new(#key))
+                };
                 quote! {
                     let Some(#key) = #pointer.head() else {
                         return Ok(self as &dyn ::ploidy_pointer::JsonPointee);
@@ -1022,11 +1051,7 @@ impl ToTokens for TuplePointeeBody<'_> {
                             #tail
                         }
                         _ => {
-                            return Err(::ploidy_pointer::BadJsonPointerKey::with_suggestions(
-                                #key,
-                                #ty,
-                                [#tag_field, #content_field],
-                            ))?;
+                            return Err(#key_err)?;
                         }
                     }
                 }
@@ -1067,6 +1092,15 @@ impl ToTokens for UnitPointeeBody<'_> {
                 // For internally tagged unit variants, only the tag field is accessible.
                 let key = Ident::new("key", Span::mixed_site());
                 let variant_name = info.effective_name();
+                let key_err = if cfg!(feature = "did-you-mean") {
+                    quote!(::ploidy_pointer::BadJsonPointerKey::with_suggestions(
+                        #key,
+                        #ty,
+                        [#tag_field],
+                    ))
+                } else {
+                    quote!(::ploidy_pointer::BadJsonPointerKey::new(#key))
+                };
                 quote! {
                     let Some(#key) = #pointer.head() else {
                         return Ok(self as &dyn ::ploidy_pointer::JsonPointee);
@@ -1074,32 +1108,32 @@ impl ToTokens for UnitPointeeBody<'_> {
                     if #key.as_str() == #tag_field {
                         return Ok(&#variant_name as &dyn ::ploidy_pointer::JsonPointee);
                     }
-                    Err(::ploidy_pointer::BadJsonPointerKey::with_suggestions(
-                        #key,
-                        #ty,
-                        [#tag_field],
-                    ))?
+                    Err(#key_err)?
                 }
             }
             ty @ UnitPointeeTy::Variant(info, VariantTag::External) => {
                 // For externally tagged unit variants, allow just the tag field.
                 let key = Ident::new("key", Span::mixed_site());
                 let variant_name = info.effective_name();
+                let key_err = if cfg!(feature = "did-you-mean") {
+                    quote!(::ploidy_pointer::BadJsonPointerKey::with_ty(#key, #ty))
+                } else {
+                    quote!(::ploidy_pointer::BadJsonPointerKey::new(#key))
+                };
+                let ty_err = if cfg!(feature = "did-you-mean") {
+                    quote!(::ploidy_pointer::BadJsonPointerTy::with_ty(&#pointer.tail(), #ty))
+                } else {
+                    quote!(::ploidy_pointer::BadJsonPointerTy::new(&#pointer.tail()))
+                };
                 quote! {
                     let Some(#key) = #pointer.head() else {
                         return Ok(self as &dyn ::ploidy_pointer::JsonPointee);
                     };
                     if #key.as_str() != #variant_name {
-                        return Err(::ploidy_pointer::BadJsonPointerKey::new(
-                            #key,
-                            #ty,
-                        ))?;
+                        return Err(#key_err)?;
                     }
                     if !#pointer.tail().is_empty() {
-                        return Err(::ploidy_pointer::BadJsonPointer::Ty(
-                            #pointer.tail().to_string(),
-                            #ty,
-                        ));
+                        return Err(#ty_err)?;
                     }
                     Ok(self as &dyn ::ploidy_pointer::JsonPointee)
                 }
@@ -1108,6 +1142,15 @@ impl ToTokens for UnitPointeeBody<'_> {
                 // For adjacently tagged unit variants, allow just the tag field.
                 let key = Ident::new("key", Span::mixed_site());
                 let variant_name = info.effective_name();
+                let key_err = if cfg!(feature = "did-you-mean") {
+                    quote!(::ploidy_pointer::BadJsonPointerKey::with_suggestions(
+                        #key,
+                        #ty,
+                        [#tag_field],
+                    ))
+                } else {
+                    quote!(::ploidy_pointer::BadJsonPointerKey::new(#key))
+                };
                 quote! {
                     let Some(#key) = #pointer.head() else {
                         return Ok(self as &dyn ::ploidy_pointer::JsonPointee);
@@ -1117,25 +1160,23 @@ impl ToTokens for UnitPointeeBody<'_> {
                             return Ok(&#variant_name as &dyn ::ploidy_pointer::JsonPointee);
                         }
                         _ => {
-                            return Err(::ploidy_pointer::BadJsonPointerKey::with_suggestions(
-                                #key,
-                                #ty,
-                                [#tag_field],
-                            ))?;
+                            return Err(#key_err)?;
                         }
                     }
                 }
             }
             ty @ (UnitPointeeTy::Struct(_) | UnitPointeeTy::Variant(_, VariantTag::Untagged)) => {
                 // For unit structs and untagged unit variants, deny all fields.
+                let ty_err = if cfg!(feature = "did-you-mean") {
+                    quote!(::ploidy_pointer::BadJsonPointerTy::with_ty(&#pointer, #ty))
+                } else {
+                    quote!(::ploidy_pointer::BadJsonPointerTy::new(&#pointer))
+                };
                 quote! {
                     if #pointer.is_empty() {
                         Ok(self as &dyn ::ploidy_pointer::JsonPointee)
                     } else {
-                        Err(::ploidy_pointer::BadJsonPointer::Ty(
-                            #pointer.to_string(),
-                            #ty,
-                        ))
+                        Err(#ty_err)?
                     }
                 }
             }
@@ -1330,6 +1371,11 @@ impl ToTokens for SkippedVariantBody<'_> {
                 // Internally tagged skipped variants allow access to the tag field only.
                 let key = Ident::new("key", Span::mixed_site());
                 let effective_name = ty.info().effective_name();
+                let ty_err = if cfg!(feature = "did-you-mean") {
+                    quote!(::ploidy_pointer::BadJsonPointerTy::with_ty(&#pointer, #ty))
+                } else {
+                    quote!(::ploidy_pointer::BadJsonPointerTy::new(&#pointer))
+                };
                 tokens.append_all(quote! {
                     #pattern => {
                         let Some(#key) = #pointer.head() else {
@@ -1338,20 +1384,19 @@ impl ToTokens for SkippedVariantBody<'_> {
                         if #key.as_str() == #tag_field {
                             return Ok(&#effective_name as &dyn ::ploidy_pointer::JsonPointee);
                         }
-                        Err(::ploidy_pointer::BadJsonPointer::Ty(
-                            #pointer.to_string(),
-                            #ty,
-                        ))
+                        Err(#ty_err)?
                     }
                 });
             }
             VariantTag::External => {
                 // Externally tagged skipped variants are completely inaccessible.
+                let ty_err = if cfg!(feature = "did-you-mean") {
+                    quote!(::ploidy_pointer::BadJsonPointerTy::with_ty(&#pointer, #ty))
+                } else {
+                    quote!(::ploidy_pointer::BadJsonPointerTy::new(&#pointer))
+                };
                 tokens.append_all(quote! {
-                    #pattern => Err(::ploidy_pointer::BadJsonPointer::Ty(
-                        #pointer.to_string(),
-                        #ty,
-                    ))
+                    #pattern => Err(#ty_err)?
                 });
             }
             VariantTag::Adjacent { tag: tag_field, .. } => {
@@ -1359,6 +1404,15 @@ impl ToTokens for SkippedVariantBody<'_> {
                 // but content field access errors.
                 let key = Ident::new("key", Span::mixed_site());
                 let effective_name = ty.info().effective_name();
+                let key_err = if cfg!(feature = "did-you-mean") {
+                    quote!(::ploidy_pointer::BadJsonPointerKey::with_suggestions(
+                        #key,
+                        #ty,
+                        [#tag_field],
+                    ))
+                } else {
+                    quote!(::ploidy_pointer::BadJsonPointerKey::new(#key))
+                };
                 tokens.append_all(quote! {
                     #pattern => {
                         let Some(#key) = #pointer.head() else {
@@ -1369,11 +1423,7 @@ impl ToTokens for SkippedVariantBody<'_> {
                                 return Ok(&#effective_name as &dyn ::ploidy_pointer::JsonPointee);
                             }
                             _ => {
-                                return Err(::ploidy_pointer::BadJsonPointerKey::with_suggestions(
-                                    #key,
-                                    #ty,
-                                    [#tag_field],
-                                ))?;
+                                return Err(#key_err)?;
                             }
                         }
                     }
@@ -1381,11 +1431,13 @@ impl ToTokens for SkippedVariantBody<'_> {
             }
             VariantTag::Untagged => {
                 // Untagged skipped variants are completely inaccessible.
+                let ty_err = if cfg!(feature = "did-you-mean") {
+                    quote!(::ploidy_pointer::BadJsonPointerTy::with_ty(&#pointer, #ty))
+                } else {
+                    quote!(::ploidy_pointer::BadJsonPointerTy::new(&#pointer))
+                };
                 tokens.append_all(quote! {
-                    #pattern => Err(::ploidy_pointer::BadJsonPointer::Ty(
-                        #pointer.to_string(),
-                        #ty,
-                    ))
+                    #pattern => Err(#ty_err)?
                 });
             }
         }

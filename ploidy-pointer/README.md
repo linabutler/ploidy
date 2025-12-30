@@ -15,7 +15,8 @@ The cornerstone of **ploidy-pointer** is the `JsonPointee` trait, which can be i
 
 ### Cargo features
 
-- `derive` (default): Enables the `#[derive(JsonPointee)]` macro.
+- `derive` (_default_): Enables the `#[derive(JsonPointee)]` macro.
+- `did-you-mean`: Adds suggestions for typos to error messages.
 - `serde_json`: Implements `JsonPointee` for `serde_json::Value`.
 - `chrono`: Implements `JsonPointee` for `chrono::DateTime<Utc>`.
 - `url`: Implements `JsonPointee` for `url::Url`.
@@ -75,9 +76,9 @@ let result = user.resolve(pointer).unwrap();
 assert_eq!(result.downcast_ref::<String>(), Some(&"Alice".to_string()));
 ```
 
-## Errors
+### Errors
 
-The crate tries to provide helpful error messages, with suggestions for typos:
+Type errors and missing key errors omit details by default, but you can enable the `did-you-mean` Cargo feature to add more context to error messages. Ploidy does this to provide more helpful errors when parsing OpenAPI documents:
 
 ```rust
 let pointer = JsonPointer::parse("/naem").unwrap();

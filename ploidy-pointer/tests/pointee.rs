@@ -603,16 +603,17 @@ fn test_skip_field() {
     let result = s.resolve(pointer).unwrap();
     assert_eq!(result.downcast_ref::<String>(), Some(&"hello".to_owned()));
 
-    // `hidden` field should NOT be accessible.
+    // `hidden` field should not be accessible.
     let pointer = JsonPointer::parse("/hidden").unwrap();
     assert!(s.resolve(pointer).is_err());
 
-    // Empty path should still resolve to the struct itself.
+    // Empty pointer should still resolve to the struct itself.
     let pointer = JsonPointer::parse("").unwrap();
     assert!(s.resolve(pointer).is_ok());
 }
 
 #[test]
+#[cfg(feature = "did-you-mean")]
 fn test_skip_not_in_suggestions() {
     #[derive(JsonPointee)]
     struct MyStruct {
@@ -626,14 +627,20 @@ fn test_skip_not_in_suggestions() {
         hidden: "secret".to_owned(),
     };
 
-    // Try accessing a non-existent field - error should suggest "visible", not "hidden".
+    // Try accessing a nonexistent field.
     let pointer = JsonPointer::parse("/nonexistent").unwrap();
     match s.resolve(pointer) {
         Err(ploidy_pointer::BadJsonPointer::Key(key_err)) => {
             // Suggestion should be `"visible"`, not `"hidden"`.
-            assert_eq!(key_err.suggestion.as_deref(), Some("visible"));
+            assert_eq!(
+                key_err
+                    .context
+                    .as_ref()
+                    .and_then(|c| c.suggestion.as_deref()),
+                Some("visible")
+            );
         }
-        _ => panic!("Expected BadJsonPointer::Key error"),
+        _ => panic!("expected `BadJsonPointer::Key` error"),
     }
 }
 

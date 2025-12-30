@@ -13,7 +13,7 @@ indexmap = { version = "2", optional = true }
 itertools = "0.14"
 ploidy-pointer-derive = { workspace = true, optional = true }
 serde_json = { version = "1", optional = true }
-strsim = "0.11"
+strsim = { version = "0.11", optional = true }
 thiserror = "2"
 
 [dependencies.chrono]
@@ -32,6 +32,7 @@ optional = true
 default = ["derive"]
 chrono = ["dep:chrono"]
 derive = ["dep:ploidy-pointer-derive"]
+did-you-mean = ["dep:strsim", "ploidy-pointer-derive/did-you-mean"]
 indexmap = ["dep:indexmap"]
 serde_json = ["dep:serde_json"]
 url = ["dep:url"]

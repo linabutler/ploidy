@@ -20,4 +20,8 @@ syn = "2"
 thiserror = "2"
 
 [dev-dependencies]
-ploidy-pointer = { workspace = true }
+ploidy-pointer = { workspace = true, features = [] }
+
+[features]
+default = []
+did-you-mean = ["ploidy-pointer/did-you-mean"]
