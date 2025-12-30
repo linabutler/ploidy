@@ -18,6 +18,7 @@ This crate provides a way to traverse typed Rust data structures using JSON Poin
 - `chrono`: Implements `JsonPointee` for `chrono::DateTime<Utc>`.
 - `url`: Implements `JsonPointee` for `url::Url`.
 - `indexmap`: Implements `JsonPointee` for `indexmap::IndexMap`.
+- `full`: Enables all features.
 
 ## JSON Pointer Syntax
 

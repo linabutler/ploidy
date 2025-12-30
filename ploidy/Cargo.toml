@@ -24,7 +24,7 @@ serde_path_to_error = "0.1"
 serde_yaml = "0.9.34"
 percent-encoding = "2.3"
 petgraph = "0.7"
-ploidy-pointer = { workspace = true, features = ["indexmap", "serde_json"] }
+ploidy-pointer = { workspace = true, features = ["full"] }
 prettyplease = "0.2"
 proc-macro2 = { version = "1", default-features = false }
 quote = { version = "1", default-features = false }

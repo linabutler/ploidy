@@ -30,6 +30,7 @@ optional = true
 
 [features]
 default = ["derive"]
+full = ["chrono", "derive", "did-you-mean", "indexmap", "serde_json", "url"]
 chrono = ["dep:chrono"]
 derive = ["dep:ploidy-pointer-derive"]
 did-you-mean = ["dep:strsim", "ploidy-pointer-derive/did-you-mean"]
