@@ -17,7 +17,7 @@ fn test_rename_field() {
     let result = s.resolve(pointer).unwrap();
     assert_eq!(result.downcast_ref::<String>(), Some(&"hello".to_owned()));
 
-    // Original name should not work.
+    // Original name should fail.
     let pointer = JsonPointer::parse("/my_field").unwrap();
     assert!(s.resolve(pointer).is_err());
 }
@@ -67,7 +67,7 @@ fn test_rename_all_camel_case() {
     let result = s.resolve(pointer).unwrap();
     assert_eq!(result.downcast_ref::<i32>(), Some(&42));
 
-    // Original snake_case should not work.
+    // Original snake_case should fail.
     let pointer = JsonPointer::parse("/my_field").unwrap();
     assert!(s.resolve(pointer).is_err());
 }
@@ -165,7 +165,7 @@ fn test_enum_with_rename() {
     let result = e.resolve(pointer).unwrap();
     assert_eq!(result.downcast_ref::<String>(), Some(&"hello".to_owned()));
 
-    // Original name should not work.
+    // Original name should fail.
     let pointer = JsonPointer::parse("/my_field").unwrap();
     assert!(e.resolve(pointer).is_err());
 
@@ -248,7 +248,8 @@ fn test_priority_regular_over_flattened() {
 
     #[derive(JsonPointee)]
     struct Outer {
-        my_field: i32, // Regular field with same name
+        // Regular field with same name.
+        my_field: i32,
         #[pointer(flatten)]
         inner: Inner,
     }
@@ -485,12 +486,12 @@ fn test_pointer_to_chrono_datetime() {
 
     let timestamp: DateTime<Utc> = "2024-01-15T10:30:00Z".parse().unwrap();
 
-    // Empty path should return the timestamp itself.
+    // Empty pointer should return the timestamp itself.
     let pointer = JsonPointer::parse("").unwrap();
     let result = timestamp.resolve(pointer).unwrap();
-    assert!(result.downcast_ref::<DateTime<Utc>>().is_some());
+    assert!(result.is::<DateTime<Utc>>());
 
-    // Non-empty path should fail.
+    // Non-empty pointer should fail.
     let pointer = JsonPointer::parse("/foo").unwrap();
     assert!(timestamp.resolve(pointer).is_err());
 }
@@ -502,12 +503,12 @@ fn test_pointer_to_url() {
 
     let url = Url::parse("https://example.com/path?query=value").unwrap();
 
-    // Empty path should return the URL itself.
+    // Empty pointer should return the URL itself.
     let pointer = JsonPointer::parse("").unwrap();
     let result = url.resolve(pointer).unwrap();
-    assert!(result.downcast_ref::<Url>().is_some());
+    assert!(result.is::<Url>());
 
-    // Non-empty path should fail.
+    // Non-empty pointer should fail.
     let pointer = JsonPointer::parse("/foo").unwrap();
     assert!(url.resolve(pointer).is_err());
 }
@@ -529,24 +530,24 @@ fn test_pointer_to_serde_json() {
     // Test object field access.
     let pointer = JsonPointer::parse("/name").unwrap();
     let result = data.resolve(pointer).unwrap();
-    assert!(result.downcast_ref::<serde_json::Value>().is_some());
+    assert!(result.is::<serde_json::Value>());
 
     // Test array index access.
     let pointer = JsonPointer::parse("/items/1").unwrap();
     let result = data.resolve(pointer).unwrap();
-    assert!(result.downcast_ref::<serde_json::Value>().is_some());
+    assert!(result.is::<serde_json::Value>());
 
     // Test nested object access.
     let pointer = JsonPointer::parse("/nested/field").unwrap();
     let result = data.resolve(pointer).unwrap();
-    assert!(result.downcast_ref::<serde_json::Value>().is_some());
+    assert!(result.is::<serde_json::Value>());
 
-    // Test empty path returns the whole value.
+    // Test empty pointer returns the whole value.
     let pointer = JsonPointer::parse("").unwrap();
     let result = data.resolve(pointer).unwrap();
-    assert!(result.downcast_ref::<serde_json::Value>().is_some());
+    assert!(result.is::<serde_json::Value>());
 
-    // Test non-existent key.
+    // Test nonexistent key.
     let pointer = JsonPointer::parse("/nonexistent").unwrap();
     assert!(data.resolve(pointer).is_err());
 
@@ -574,12 +575,12 @@ fn test_indexmap() {
     let result = map.resolve(pointer).unwrap();
     assert_eq!(result.downcast_ref::<i32>(), Some(&20));
 
-    // Test empty path returns the map itself.
+    // Test empty pointer returns the map itself.
     let pointer = JsonPointer::parse("").unwrap();
     let result = map.resolve(pointer).unwrap();
-    assert!(result.downcast_ref::<IndexMap<String, i32>>().is_some());
+    assert!(result.is::<IndexMap<String, i32>>());
 
-    // Test non-existent key.
+    // Test nonexistent key.
     let pointer = JsonPointer::parse("/nonexistent").unwrap();
     assert!(map.resolve(pointer).is_err());
 }
@@ -664,7 +665,7 @@ fn test_skip_with_rename_all() {
     let result = s.resolve(pointer).unwrap();
     assert_eq!(result.downcast_ref::<String>(), Some(&"hello".to_owned()));
 
-    // `hidden_field` should NOT be accessible (even as `hiddenField`).
+    // `hidden_field` should not be accessible (even as `hiddenField`).
     let pointer = JsonPointer::parse("/hiddenField").unwrap();
     assert!(s.resolve(pointer).is_err());
 
@@ -782,7 +783,7 @@ fn test_skip_in_tuple_struct() {
     let result = t.resolve(pointer).unwrap();
     assert_eq!(result.downcast_ref::<String>(), Some(&"hello".to_owned()));
 
-    // Index 1 NOT accessible (skipped).
+    // Index 1 not accessible (skipped).
     let pointer = JsonPointer::parse("/1").unwrap();
     assert!(t.resolve(pointer).is_err());
 
@@ -807,7 +808,7 @@ fn test_all_fields_skipped() {
         field2: 42,
     };
 
-    // Empty path should still resolve to self.
+    // Empty pointer should still resolve to self.
     let pointer = JsonPointer::parse("").unwrap();
     assert!(s.resolve(pointer).is_ok());
 
@@ -834,7 +835,7 @@ fn test_skip_unit_variant() {
     let pointer = JsonPointer::parse("").unwrap();
     assert!(e.resolve(pointer).is_err());
 
-    // Non-skipped variant should work.
+    // Non-skipped variant should succeed.
     let e = MyEnum::Active;
     let pointer = JsonPointer::parse("").unwrap();
     assert!(e.resolve(pointer).is_ok());
@@ -926,7 +927,7 @@ fn test_multiple_variants_with_skip() {
     let s = Status::Pending;
     assert!(s.resolve(JsonPointer::parse("").unwrap()).is_err());
 
-    // Deleted blocked - both empty pointer and field access.
+    // Deleted blocked, with both empty pointer and field access.
     let s = Status::Deleted {
         reason: "test".to_owned(),
     };
@@ -943,8 +944,7 @@ fn test_multiple_variants_with_skip() {
 #[test]
 fn test_generic_type_with_bounds() {
     // Test that the derive macro correctly generates `JsonPointee` bounds for
-    // generic type parameters. This mirrors the `RefOr<T>` type in the main
-    // codebase.
+    // generic type parameters. This mirrors the `RefOr<T>` type in Ploidy.
     #[derive(JsonPointee)]
     #[pointer(untagged)]
     enum GenericWrapper<T> {

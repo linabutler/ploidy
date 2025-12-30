@@ -321,12 +321,10 @@ fn test_newtype_variant_empty_pointer_returns_enum() {
 
     let container = Container::Value("test".to_owned());
 
-    // Empty pointer should return the enum variant, not the inner `String`.
+    // Empty pointer should return the enum variant, not the inner string.
     let pointer = JsonPointer::parse("").unwrap();
     let result = container.resolve(pointer).unwrap();
-
-    // This should succeed but not give us the inner `String` directly.
-    assert!(result.downcast_ref::<String>().is_none());
+    assert!(result.is::<Container>());
 }
 
 #[test]

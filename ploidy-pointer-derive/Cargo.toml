@@ -1,6 +1,6 @@
 [package]
 name = "ploidy-pointer-derive"
-description = "Derive macros for Ploidy JSON pointers"
+description = "Derive macros for Ploidy JSON Pointers"
 readme = "README.md"
 version.workspace = true
 license.workspace = true
