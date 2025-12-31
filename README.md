@@ -1,5 +1,9 @@
 # Ploidy
 
+[![crates.io](https://img.shields.io/crates/v/ploidy?style=for-the-badge)](https://crates.io/crates/ploidy)
+[![Build status](https://img.shields.io/github/actions/workflow/status/linabutler/ploidy/test.yml?style=for-the-badge)](https://github.com/linabutler/ploidy/actions?query=branch%3Amain)
+[![Documentation](https://img.shields.io/docsrs/ploidy/latest?style=for-the-badge)](https://docs.rs/ploidy)
+
 Ploidy is a code generator for OpenAPI schemas that use inheritance and polymorphism. Currently, Ploidy only generates Rust code, though support for Python and TypeScript is planned.
 
 ## Installation
