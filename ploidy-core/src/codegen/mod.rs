@@ -1,15 +1,12 @@
 use std::path::Path;
 
-use cargo_toml::Manifest;
 use miette::{Context, IntoDiagnostic};
-use proc_macro2::TokenStream;
-use quote::ToTokens;
 
+#[cfg(feature = "rust")]
 pub mod rust;
 
 mod unique;
 
-use serde::Serialize;
 pub use unique::{UniqueNameSpace, WordSegments};
 
 pub fn write_to_disk(output: &Path, code: impl IntoCode) -> miette::Result<()> {
@@ -32,12 +29,14 @@ pub trait Code {
     fn into_string(self) -> miette::Result<String>;
 }
 
-impl<T: AsRef<str>> Code for (T, TokenStream) {
+#[cfg(feature = "rust")]
+impl<T: AsRef<str>> Code for (T, proc_macro2::TokenStream) {
     fn path(&self) -> &str {
         self.0.as_ref()
     }
 
     fn into_string(self) -> miette::Result<String> {
+        use quote::ToTokens;
         let file = syn::parse2(self.1.into_token_stream())
             .into_diagnostic()
             .with_context(|| format!("Failed to format `{}`", self.0.as_ref()))?;
@@ -45,7 +44,8 @@ impl<T: AsRef<str>> Code for (T, TokenStream) {
     }
 }
 
-impl<T: Serialize> Code for (&'static str, Manifest<T>) {
+#[cfg(feature = "rust")]
+impl<T: serde::Serialize> Code for (&'static str, cargo_toml::Manifest<T>) {
     fn path(&self) -> &str {
         self.0
     }

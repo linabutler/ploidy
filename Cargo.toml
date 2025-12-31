@@ -1,5 +1,11 @@
 [workspace]
-members = ["ploidy", "ploidy-pointer", "ploidy-pointer-derive", "ploidy-util"]
+members = [
+    "ploidy",
+    "ploidy-core",
+    "ploidy-pointer",
+    "ploidy-pointer-derive",
+    "ploidy-util",
+]
 resolver = "2"
 
 [workspace.package]
@@ -10,6 +16,7 @@ repository = "https://github.com/linabutler/ploidy"
 keywords = ["openapi", "swagger"]
 
 [workspace.dependencies]
+ploidy-core = { path = "ploidy-core", version = "0.2.0" }
 ploidy-pointer = { path = "ploidy-pointer", version = "0.2.0" }
 ploidy-pointer-derive = { path = "ploidy-pointer-derive", version = "0.2.0" }
 

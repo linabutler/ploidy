@@ -6,15 +6,13 @@ use clap::{
     error::{Error as ClapError, ErrorKind as ClapErrorKind, Result as ClapResult},
 };
 use semver::Version;
-use serde::Deserialize;
 
-use crate::codegen::rust::CargoMetadata;
+use ploidy_core::codegen::rust::CargoMetadata;
 
 const DEFAULT_VERSION: Version = Version::new(0, 1, 0);
 
 #[derive(Debug)]
 pub struct Main {
-    pub verbose: bool,
     pub command: Command,
 }
 
@@ -31,10 +29,7 @@ impl Main {
                 Command::Codegen(args.into_command().map_err(|err| err.format(&mut cmd))?)
             }
         };
-        Ok(Main {
-            verbose: args.verbose,
-            command,
-        })
+        Ok(Main { command })
     }
 }
 
@@ -194,16 +189,13 @@ struct RustCodegenCommandArgs {
     check: bool,
 }
 
-#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, clap::ValueEnum)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, clap::ValueEnum)]
 enum VersionBump {
     #[clap(name = "bump-major")]
-    #[serde(rename = "bump-major")]
     Major,
     #[clap(name = "bump-minor")]
-    #[serde(rename = "bump-minor")]
     Minor,
     #[clap(name = "bump-patch")]
-    #[serde(rename = "bump-patch")]
     Patch,
 }
 

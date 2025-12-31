@@ -2,15 +2,15 @@ use std::collections::BTreeMap;
 
 use miette::{Context, IntoDiagnostic, Result};
 
-use ploidy::{
-    codegen::{
-        rust::{self},
-        write_to_disk,
-    },
-    config::{CodegenCommand, CodegenCommandLanguage, Command, Main},
+use ploidy_core::{
+    codegen::{rust, write_to_disk},
     ir::IrSpec,
     parse::Document,
 };
+
+mod config;
+
+use self::config::{CodegenCommand, CodegenCommandLanguage, Command, Main};
 
 #[cfg(feature = "mimalloc")]
 #[global_allocator]

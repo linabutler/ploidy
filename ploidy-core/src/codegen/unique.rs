@@ -28,7 +28,7 @@ impl<'a> UniqueNameSpace<'a> {
     /// # Examples
     ///
     /// ```
-    /// # use ploidy::codegen::UniqueNameSpace;
+    /// # use ploidy_core::codegen::UniqueNameSpace;
     /// # let mut space = UniqueNameSpace::new();
     /// assert_eq!(space.uniquify("HTTPResponse"), "HTTPResponse");
     /// assert_eq!(space.uniquify("HTTP_Response"), "HTTP_Response2");
@@ -59,7 +59,7 @@ impl<'a> UniqueNameSpace<'a> {
 ///
 /// ```
 /// # use itertools::Itertools;
-/// # use ploidy::codegen::WordSegments;
+/// # use ploidy_core::codegen::WordSegments;
 /// assert_eq!(WordSegments::new("HTTPResponse").collect_vec(), vec!["HTTP", "Response"]);
 /// assert_eq!(WordSegments::new("HTTP_Response").collect_vec(), vec!["HTTP", "Response"]);
 /// assert_eq!(WordSegments::new("httpResponse").collect_vec(), vec!["http", "Response"]);
