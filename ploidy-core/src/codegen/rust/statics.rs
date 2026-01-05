@@ -52,6 +52,10 @@ impl ToTokens for CodegenErrorModule {
                 #[error("Can't use URL as base URL")]
                 UrlCannotBeABase,
 
+                /// Invalid query parameter.
+                #[error("Invalid query parameter")]
+                QueryParam(#[from] ::ploidy_util::QueryParamError),
+
                 /// Invalid HTTP header name.
                 #[error("invalid header name")]
                 BadHeaderName(#[source] http::Error),

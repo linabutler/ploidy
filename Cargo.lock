@@ -668,8 +668,11 @@ name = "ploidy-util"
 version = "0.2.0"
 dependencies = [
  "chrono",
+ "itertools",
+ "percent-encoding",
  "serde",
  "thiserror",
+ "url",
 ]
 
 [[package]]
@@ -1024,6 +1027,7 @@ dependencies = [
  "form_urlencoded",
  "idna",
  "percent-encoding",
+ "serde",
 ]
 
 [[package]]

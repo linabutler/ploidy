@@ -46,6 +46,7 @@ pub enum CodegenIdent<'a> {
     Field(&'a str),
     Variant(&'a str),
     Param(&'a str),
+    Var(&'a str),
     Method(&'a str),
 }
 
@@ -56,6 +57,7 @@ impl<'a> CodegenIdent<'a> {
         | Self::Field(s)
         | Self::Variant(s)
         | Self::Param(s)
+        | Self::Var(s)
         | Self::Method(s)) = self;
         s
     }
@@ -64,9 +66,11 @@ impl<'a> CodegenIdent<'a> {
 impl ToTokens for CodegenIdent<'_> {
     fn to_tokens(&self, tokens: &mut TokenStream) {
         let cased = match self {
-            Self::Module(name) | Self::Field(name) | Self::Param(name) | Self::Method(name) => {
-                name.to_snake_case()
-            }
+            Self::Module(name)
+            | Self::Field(name)
+            | Self::Param(name)
+            | Self::Method(name)
+            | Self::Var(name) => name.to_snake_case(),
             Self::Type(name) | Self::Variant(name) => name.to_pascal_case(),
         };
         let cleaned = clean(&cased);

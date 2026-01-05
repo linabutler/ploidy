@@ -110,6 +110,10 @@ pub struct Parameter {
     pub description: Option<String>,
     #[serde(default)]
     pub schema: Option<RefOrSchema>,
+    #[serde(default)]
+    pub style: Option<ParameterStyle>,
+    #[serde(default)]
+    pub explode: Option<bool>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, JsonPointee)]
@@ -120,6 +124,19 @@ pub enum ParameterLocation {
     Query,
     Header,
     Cookie,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, JsonPointee)]
+#[serde(rename_all = "camelCase")]
+#[pointer(untagged, rename_all = "camelCase")]
+pub enum ParameterStyle {
+    Matrix,
+    Label,
+    Form,
+    Simple,
+    SpaceDelimited,
+    PipeDelimited,
+    DeepObject,
 }
 
 /// Request body definition.

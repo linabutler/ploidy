@@ -261,10 +261,19 @@ pub enum IrParameter<'a> {
     Query(IrParameterInfo<'a>),
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum IrParameterStyle {
+    Form { exploded: bool },
+    PipeDelimited,
+    SpaceDelimited,
+    DeepObject,
+}
+
 #[derive(Clone, Debug)]
 pub struct IrParameterInfo<'a> {
     pub name: &'a str,
     pub ty: IrType<'a>,
     pub required: bool,
     pub description: Option<&'a str>,
+    pub style: Option<IrParameterStyle>,
 }

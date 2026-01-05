@@ -9,8 +9,8 @@ use petgraph::visit::Bfs;
 use ploidy_pointer::JsonPointee;
 
 use crate::parse::{
-    self, Document, Info, Parameter, ParameterLocation, RefOrParameter, RefOrRequestBody,
-    RefOrResponse, RefOrSchema, RequestBody, Response,
+    self, Document, Info, Parameter, ParameterLocation, ParameterStyle, RefOrParameter,
+    RefOrRequestBody, RefOrResponse, RefOrSchema, RequestBody, Response,
 };
 
 use super::{
@@ -18,7 +18,7 @@ use super::{
     transform::transform,
     types::{
         InlineIrTypePath, InlineIrTypePathRoot, InlineIrTypePathSegment, IrOperation, IrParameter,
-        IrParameterInfo, IrRequest, IrResponse, IrType, IrTypeName,
+        IrParameterInfo, IrParameterStyle, IrRequest, IrResponse, IrType, IrTypeName,
     },
     visitor::InnerRef,
 };
@@ -88,11 +88,30 @@ impl<'a> IrSpec<'a> {
                             ),
                             None => IrType::Any,
                         };
+                        let style = match (param.style, param.explode) {
+                            (Some(ParameterStyle::DeepObject), Some(true) | None) => {
+                                Some(IrParameterStyle::DeepObject)
+                            }
+                            (Some(ParameterStyle::SpaceDelimited), Some(false) | None) => {
+                                Some(IrParameterStyle::SpaceDelimited)
+                            }
+                            (Some(ParameterStyle::PipeDelimited), Some(false) | None) => {
+                                Some(IrParameterStyle::PipeDelimited)
+                            }
+                            (Some(ParameterStyle::Form) | None, Some(true) | None) => {
+                                Some(IrParameterStyle::Form { exploded: true })
+                            }
+                            (Some(ParameterStyle::Form) | None, Some(false)) => {
+                                Some(IrParameterStyle::Form { exploded: false })
+                            }
+                            _ => None,
+                        };
                         let info = IrParameterInfo {
                             name: param.name.as_str(),
                             ty,
                             required: param.required,
                             description: param.description.as_deref(),
+                            style,
                         };
                         Some(match param.location {
                             ParameterLocation::Path => IrParameter::Path(info),

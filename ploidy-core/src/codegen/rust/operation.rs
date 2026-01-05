@@ -4,8 +4,10 @@ use quote::{ToTokens, TokenStreamExt, quote};
 use syn::Ident;
 
 use crate::{
-    codegen::rust::doc_attrs,
-    ir::{IrOperation, IrParameter, IrParameterInfo, IrRequest, IrResponse, IrType},
+    codegen::{rust::doc_attrs, unique::UniqueNameSpace},
+    ir::{
+        IrOperation, IrParameter, IrParameterInfo, IrParameterStyle, IrRequest, IrResponse, IrType,
+    },
     parse::{Method, path::PathFragment},
 };
 
@@ -23,15 +25,21 @@ impl<'a> CodegenOperation<'a> {
     }
 
     /// Generates code to build the request URL, with path parameters substituted.
-    fn url(&self, params: &[&IrParameterInfo<'_>]) -> TokenStream {
+    fn url(
+        &self,
+        url: CodegenIdent<'_>,
+        params: &[(CodegenIdent<'_>, &IrParameterInfo<'_>)],
+    ) -> TokenStream {
         let segments = &self.op.path;
         let segs = segments.iter().map(|segment| match segment.fragments() {
             [] => quote! { "" },
             [PathFragment::Literal(text)] => quote! { #text },
             [PathFragment::Param(name)] => {
-                let info = params.iter().find(|param| param.name == *name).unwrap();
-                let value = CodegenIdent::Param(info.name);
-                quote! { #value }
+                let (ident, _) = params
+                    .iter()
+                    .find(|(_, param)| param.name == *name)
+                    .unwrap();
+                quote!(#ident)
             }
             fragments => {
                 // Build a format string, with placeholders for parameter fragments.
@@ -54,81 +62,69 @@ impl<'a> CodegenOperation<'a> {
                         // `url::PathSegmentsMut::push` percent-encodes the
                         // full segment, so we can interpolate fragments
                         // directly.
-                        let info = params.iter().find(|param| param.name == *name).unwrap();
-                        CodegenIdent::Param(info.name)
+                        let (ident, _) = params
+                            .iter()
+                            .find(|(_, param)| param.name == *name)
+                            .unwrap();
+                        ident
                     });
                 quote! { &format!(#format, #(#args),*) }
             }
         });
         quote! {
-            let url = {
-                let mut url = self.base_url.clone();
-                url
+            let #url = {
+                let mut #url = self.base_url.clone();
+                #url
                     .path_segments_mut()
                     .map_err(|()| crate::error::Error::UrlCannotBeABase)?
                     .pop_if_empty()
                     #(.push(#segs))*;
-                url
+                #url
             };
         }
     }
 
     /// Generates code to append query parameters.
-    fn query(&self, params: &[&IrParameterInfo<'_>]) -> TokenStream {
-        if params.is_empty() {
-            return quote! {};
-        }
-
-        let mut param_serializations = Vec::new();
-
-        for param in params {
-            let param_name_str = &param.name;
-            let param_ident = CodegenIdent::Param(param.name);
-
-            let serialization = match (&param.ty, param.required) {
-                (IrType::Array(_), true) => {
-                    quote! {
-                        for value in &#param_ident {
-                            url.query_pairs_mut()
-                                .append_pair(#param_name_str, &value.to_string());
-                        }
+    fn query(
+        &self,
+        url: CodegenIdent<'_>,
+        params: &[(CodegenIdent<'_>, &IrParameterInfo<'_>)],
+    ) -> TokenStream {
+        let appends = params
+            .iter()
+            .map(|(ident, param)| {
+                let name = &param.name;
+                let style = match param.style {
+                    Some(IrParameterStyle::DeepObject) => {
+                        quote!(::ploidy_util::QueryStyle::DeepObject)
                     }
-                }
-                (IrType::Array(_), false) => {
-                    quote! {
-                        if let Some(ref values) = #param_ident {
-                            for value in values {
-                                url.query_pairs_mut()
-                                    .append_pair(#param_name_str, &value.to_string());
-                            }
-                        }
+                    Some(IrParameterStyle::SpaceDelimited) => {
+                        quote!(::ploidy_util::QueryStyle::SpaceDelimited)
                     }
-                }
-                (_, true) => {
-                    quote! {
-                        url.query_pairs_mut()
-                            .append_pair(#param_name_str, &#param_ident.to_string());
+                    Some(IrParameterStyle::PipeDelimited) => {
+                        quote!(::ploidy_util::QueryStyle::PipeDelimited)
                     }
-                }
-                (_, false) => {
-                    quote! {
-                        if let Some(ref value) = #param_ident {
-                            url.query_pairs_mut()
-                                .append_pair(#param_name_str, &value.to_string());
-                        }
+                    Some(IrParameterStyle::Form { exploded }) => {
+                        quote!(::ploidy_util::QueryStyle::Form { exploded: #exploded })
                     }
-                }
-            };
-
-            param_serializations.push(serialization);
-        }
-
-        quote! {
-            let url = {
-                let mut url = url;
-                #(#param_serializations)*
-                url
-            };
+                    None => quote!(::ploidy_util::QueryStyle::default()),
+                };
+                Some(quote! {
+                    .style(#style)
+                    .append(#name, &#ident)?
+                })
+            })
+            .collect_vec();
+        match &*appends {
+            [] => quote! {},
+            appends => quote! {
+                let #url = {
+                    let mut #url = #url;
+                    let serializer = ::ploidy_util::QuerySerializer::new(&mut #url);
+                    serializer #(#appends)*;
+                    #url
+                };
+            },
         }
     }
 }
@@ -138,9 +134,10 @@ impl ToTokens for CodegenOperation<'_> {
         let operation_id = self.op.id;
         let method_name = CodegenIdent::Method(operation_id);
 
-        let mut params = Vec::new();
+        let mut space = UniqueNameSpace::new();
+        let mut params = vec![];
 
-        let path_params = self
+        let paths = self
             .op
             .params
             .iter()
@@ -148,13 +145,17 @@ impl ToTokens for CodegenOperation<'_> {
                 IrParameter::Path(info) => Some(info),
                 _ => None,
             })
+            .map(|param| (space.uniquify(param.name), param))
             .collect_vec();
-        for param in &path_params {
-            let param_name = CodegenIdent::Param(param.name);
-            params.push(quote! { #param_name: &str });
+        let paths = paths
+            .iter()
+            .map(|(name, param)| (CodegenIdent::Param(name), *param))
+            .collect_vec();
+        for (ident, _) in &paths {
+            params.push(quote! { #ident: &str });
         }
 
-        let query_params = self
+        let queries = self
             .op
             .params
             .iter()
@@ -162,26 +163,37 @@ impl ToTokens for CodegenOperation<'_> {
                 IrParameter::Query(info) => Some(info),
                 _ => None,
             })
+            .map(|param| (space.uniquify(param.name), param))
             .collect_vec();
-        for param in &query_params {
-            let param_name = CodegenIdent::Param(param.name);
-            let base_type = CodegenRef::new(self.context, &param.ty);
-            let param_type = if param.required || matches!(param.ty, IrType::Nullable(_)) {
-                quote!(#base_type)
+        let queries = queries
+            .iter()
+            .map(|(name, param)| (CodegenIdent::Param(name), *param))
+            .collect_vec();
+        for (ident, param) in &queries {
+            let ty = if param.required || matches!(param.ty, IrType::Nullable(_)) {
+                let path = CodegenRef::new(self.context, &param.ty);
+                quote!(#path)
             } else {
-                quote! { ::std::option::Option<#base_type> }
+                let path = CodegenRef::new(self.context, &param.ty);
+                quote! { ::std::option::Option<#path> }
             };
-            params.push(quote! { #param_name: #param_type });
+            params.push(quote! { #ident: #ty });
         }
+
+        // Local variables and parameters that might conflict
+        // with path and query parameter names.
+        let url_var = CodegenIdent::Var(&space.uniquify("url"));
+        let request_param = CodegenIdent::Param(&space.uniquify("request"));
+        let form_param = CodegenIdent::Param(&space.uniquify("form"));
 
         if let Some(body_info) = &self.op.request {
             match body_info {
                 IrRequest::Json(ty) => {
                     let param_type = CodegenRef::new(self.context, ty);
-                    params.push(quote! { request: impl Into<#param_type> });
+                    params.push(quote! { #request_param: impl Into<#param_type> });
                 }
                 IrRequest::Multipart => {
-                    params.push(quote! { form: reqwest::multipart::Form });
+                    params.push(quote! { #form_param: reqwest::multipart::Form });
                 }
             }
         }
@@ -191,32 +203,32 @@ impl ToTokens for CodegenOperation<'_> {
             None => quote! { () },
         };
 
-        let build_url = self.url(&path_params);
-        let build_query = self.query(&query_params);
+        let build_url = self.url(url_var, &paths);
+        let build_query = self.query(url_var, &queries);
 
         let http_method = CodegenMethod(self.op.method);
         let build_request = match &self.op.request {
             Some(IrRequest::Json(_)) => quote! {
                 let response = self.client
-                    .#http_method(url)
+                    .#http_method(#url_var)
                     .headers(self.headers.clone())
-                    .json(&request.into())
+                    .json(&#request_param.into())
                     .send()
                     .await?
                     .error_for_status()?;
             },
             Some(IrRequest::Multipart) => quote! {
                 let response = self.client
-                    .#http_method(url)
+                    .#http_method(#url_var)
                     .headers(self.headers.clone())
-                    .multipart(form)
+                    .multipart(#form_param)
                     .send()
                     .await?
                     .error_for_status()?;
             },
             None => quote! {
                 let response = self.client
-                    .#http_method(url)
+                    .#http_method(#url_var)
                     .headers(self.headers.clone())
                     .send()
                     .await?
