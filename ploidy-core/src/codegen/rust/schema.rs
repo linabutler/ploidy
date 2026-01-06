@@ -65,7 +65,7 @@ impl ToTokens for CodegenSchemaType<'_> {
             });
         let fields_module = inlines.next().map(|head| {
             quote! {
-                pub mod fields {
+                pub mod types {
                     #head
                     #(#inlines)*
                 }

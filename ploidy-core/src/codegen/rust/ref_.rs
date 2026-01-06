@@ -64,7 +64,7 @@ impl ToTokens for CodegenRef<'_> {
                     }
                     InlineIrTypePathRoot::Type(a) => {
                         let m = CodegenIdent::Module(a);
-                        parse_quote!(crate::types::#m::fields)
+                        parse_quote!(crate::types::#m::types)
                     }
                 };
                 let name = CodegenTypeName::Inline(path);
