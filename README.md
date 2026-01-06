@@ -1,10 +1,10 @@
 # Ploidy
 
-**An OpenAPI code generator for polymorphic types.**
+**An OpenAPI code generator for polymorphic specs.**
 
 [![crates.io](https://img.shields.io/crates/v/ploidy?style=for-the-badge)](https://crates.io/crates/ploidy)
 [![Build status](https://img.shields.io/github/actions/workflow/status/linabutler/ploidy/test.yml?style=for-the-badge)](https://github.com/linabutler/ploidy/actions?query=branch%3Amain)
-[![Documentation](https://img.shields.io/docsrs/ploidy/latest?style=for-the-badge)](https://docs.rs/ploidy)
+[![Documentation](https://img.shields.io/docsrs/ploidy-core/latest?style=for-the-badge)](https://docs.rs/ploidy-core)
 
 Many OpenAPI specs use `allOf` to model inheritance; and `oneOf`, `anyOf`, and discriminators to model [polymorphic or algebraic data types](https://swagger.io/docs/specification/v3_0/data-models/inheritance-and-polymorphism/). These patterns are powerful, but can be tricky to support correctly, and most code generators struggle with them. Ploidy was built specifically with inheritance and polymorphism in mind, and aims to generate clean, type-safe, and idiomatic Rust that looks like how you'd write it by hand.
 
@@ -117,7 +117,7 @@ Ploidy processes an OpenAPI spec in three stages:
 
 📝 **Parsing** a JSON or YAML OpenAPI spec into Rust data structures. The parser is intentionally forgiving: short of syntax errors and type mismatches, Ploidy doesn't rigorously enforce OpenAPI (or JSON Schema Draft 2020-12) semantics.
 
-🏗️ **Constructing an IR** (intermediate representation). Ploidy constructs a reference graph from the spec's types, which lets it answer questions like "which types can derive `Eq`, `Hash`, and `Default`?" and "which fields need `Box<T>` to break cycles?"
+🏗️ **Constructing an IR** (intermediate representation). Ploidy constructs a type graph from the spec, which lets it answer questions like "which types can derive `Eq`, `Hash`, and `Default`?" and "which fields need `Box<T>` to break cycles?"
 
 ✍️ **Generating code** from the IR. During the final stage, Ploidy builds proper Rust syntax trees from the processed schema, prettifies the code, and writes the generated code to disk.
 

@@ -14,49 +14,8 @@ use super::{
     types::{InlineIrType, IrOperation, IrType, IrUntaggedVariant, PrimitiveIrType, SchemaIrType},
 };
 
-/// The reference graph.
+/// The type graph.
 type Refs<'a> = DiGraph<IrGraphNode<'a>, ()>;
-
-/// A node in the reference graph.
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-pub enum IrGraphNode<'a> {
-    Schema(&'a SchemaIrType<'a>),
-    Inline(&'a InlineIrType<'a>),
-    Array(&'a IrType<'a>),
-    Map(&'a IrType<'a>),
-    Nullable(&'a IrType<'a>),
-    Primitive(PrimitiveIrType),
-    Any,
-}
-
-impl<'a> IrGraphNode<'a> {
-    /// Converts an [`IrType`] to an [`IrGraphNode`],
-    /// recursively resolving referenced schemas.
-    pub fn from_ty(spec: &'a IrSpec<'a>, ty: IrTypeRef<'a>) -> Self {
-        match ty {
-            IrTypeRef::Schema(ty) => IrGraphNode::Schema(ty),
-            IrTypeRef::Inline(ty) => IrGraphNode::Inline(ty),
-            IrTypeRef::Array(ty) => IrGraphNode::Array(ty),
-            IrTypeRef::Map(ty) => IrGraphNode::Map(ty),
-            IrTypeRef::Nullable(ty) => IrGraphNode::Nullable(ty),
-            IrTypeRef::Ref(r) => Self::from_ty(spec, spec.schemas[r.name()].as_ref()),
-            IrTypeRef::Primitive(ty) => IrGraphNode::Primitive(ty),
-            IrTypeRef::Any => IrGraphNode::Any,
-        }
-    }
-
-    pub fn to_ref(self) -> IrTypeRef<'a> {
-        match self {
-            Self::Schema(ty) => IrTypeRef::Schema(ty),
-            Self::Inline(ty) => IrTypeRef::Inline(ty),
-            Self::Array(ty) => IrTypeRef::Array(ty),
-            Self::Map(ty) => IrTypeRef::Map(ty),
-            Self::Nullable(ty) => IrTypeRef::Nullable(ty),
-            Self::Primitive(ty) => IrTypeRef::Primitive(ty),
-            Self::Any => IrTypeRef::Any,
-        }
-    }
-}
 
 /// A graph of all types in an [`IrSpec`], where each arc
 /// is a reference from one type to another.
@@ -68,8 +27,8 @@ pub struct IrGraph<'a> {
     nodes: IndexMap<IrGraphNode<'a>, NodeIndex>,
     /// Edges that are part of a cycle.
     circular_refs: BTreeSet<(NodeIndex, NodeIndex)>,
-    /// An inverted mapping of nodes to the set of operations
-    /// that transitively use them.
+    /// A mapping of nodes to the set of operations that
+    /// transitively use them.
     ops: IndexMap<NodeIndex, IndexSet<ByAddress<&'a IrOperation<'a>>>>,
 }
 
@@ -78,21 +37,21 @@ impl<'a> IrGraph<'a> {
         let mut nodes = IndexMap::new();
         let mut refs = DiGraph::new();
 
-        // All root components: named schemas, parameters,
-        // request and response bodies.
+        // All roots (named schemas, parameters, request and response bodies),
+        // and all the types within them (inline schemas, wrappers, primitives).
         let tys = itertools::chain!(
             spec.schemas.values(),
             spec.operations.iter().flat_map(|op| op.types()),
-        );
+        )
+        .flat_map(IrTypeVisitor::new);
 
-        // Visit all types within those root components:
-        // inline schemas, wrappers, and leaf types.
-        for (parent, child) in tys.flat_map(Visitor::new) {
+        // Add nodes and edges for all types.
+        for (parent, child) in tys {
             use indexmap::map::Entry;
-            let &mut to = match nodes.entry(IrGraphNode::from_ty(spec, child.as_ref())) {
-                // We might see the same schema multiple times,
-                // if it's referenced multiple times in the spec.
-                // Only add a new node if we haven't seen it yet.
+            let &mut to = match nodes.entry(IrGraphNode::from_ref(spec, child.as_ref())) {
+                // We might see the same schema multiple times, if it's
+                // referenced multiple times in the spec. Only add a new node
+                // for the schema if we haven't seen it before.
                 Entry::Occupied(entry) => entry.into_mut(),
                 Entry::Vacant(entry) => {
                     let index = refs.add_node(*entry.key());
@@ -100,7 +59,7 @@ impl<'a> IrGraph<'a> {
                 }
             };
             if let Some(parent) = parent {
-                let &mut from = match nodes.entry(IrGraphNode::from_ty(spec, parent.as_ref())) {
+                let &mut from = match nodes.entry(IrGraphNode::from_ref(spec, parent.as_ref())) {
                     Entry::Occupied(entry) => entry.into_mut(),
                     Entry::Vacant(entry) => {
                         let index = refs.add_node(*entry.key());
@@ -112,10 +71,11 @@ impl<'a> IrGraph<'a> {
             }
         }
 
-        // Find all circular reference edges in this graph, where each edge
-        // forms a cycle that requires indirection to break. It's much better
-        // to run Tarjan's algorithm over the graph once, than a DFS for
-        // every field of every struct, to detect cyclic edges.
+        // Precompute all circular reference edges, where each edge forms a cycle
+        // that requires indirection to break. This speeds up `needs_indirection_to()`:
+        // Tarjan's algorithm runs in O(V + E) time over the entire graph; a naive DFS
+        // in `needs_indirection_to()` would run in O(N * (V + E)) time, where N is
+        // the total number of fields in all structs.
         let circular_refs = {
             let mut edges = BTreeSet::new();
             for scc in tarjan_scc(&refs) {
@@ -131,13 +91,16 @@ impl<'a> IrGraph<'a> {
             edges
         };
 
-        // Build a reverse index of types to all the operations that use them,
-        // for faster lookup.
+        // Precompute a mapping of types to all the operations that use them.
+        // This speeds up `used_by()`: precomputing runs in O(P * (V + E)) time,
+        // where P is the number of operations; a BFS in `used_by()` would
+        // run in O(C * P * (V + E)) time, where C is the number of calls to
+        // `used_by()`.
         let mut ops = IndexMap::<_, IndexSet<_>>::new();
         for op in spec.operations.iter() {
             let stack = op
                 .types()
-                .map(|ty| IrGraphNode::from_ty(spec, ty.as_ref()))
+                .map(|ty| IrGraphNode::from_ref(spec, ty.as_ref()))
                 .map(|node| nodes[&node])
                 .collect();
             let mut discovered = refs.visit_map();
@@ -159,30 +122,32 @@ impl<'a> IrGraph<'a> {
         }
     }
 
+    /// Returns the spec used to build this graph.
+    #[inline]
     pub fn spec(&self) -> &'a IrSpec<'a> {
         self.spec
     }
 
-    /// Looks up a schema by name, and returns a view for that schema.
+    /// Looks up a type definition, and returns a view of that type.
     #[inline]
     pub fn lookup(&self, ty: IrTypeRef<'a>) -> Option<IrTypeView<'_>> {
-        let ty = IrGraphNode::from_ty(self.spec, ty);
+        let ty = IrGraphNode::from_ref(self.spec, ty);
         self.nodes
             .get(&ty)
             .map(|&index| IrTypeView { graph: self, index })
     }
 
-    /// Returns an iterator over all named schemas in this graph.
+    /// Returns an iterator over all the named schemas in this graph.
     #[inline]
     pub fn schemas(&self) -> impl Iterator<Item = (&'a str, IrTypeView<'_>)> {
         self.spec.schemas.iter().map(|(&name, ty)| {
-            let ty = IrGraphNode::from_ty(self.spec, ty.as_ref());
+            let ty = IrGraphNode::from_ref(self.spec, ty.as_ref());
             let index = self.nodes[&ty];
             (name, IrTypeView { graph: self, index })
         })
     }
 
-    /// Returns an iterator over all operations in this graph.
+    /// Returns an iterator over all the operations in this graph.
     #[inline]
     pub fn operations(&self) -> impl Iterator<Item = IrOperationView<'_>> {
         self.spec
@@ -192,6 +157,49 @@ impl<'a> IrGraph<'a> {
     }
 }
 
+/// A node in the type graph.
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub enum IrGraphNode<'a> {
+    Schema(&'a SchemaIrType<'a>),
+    Inline(&'a InlineIrType<'a>),
+    Array(&'a IrType<'a>),
+    Map(&'a IrType<'a>),
+    Nullable(&'a IrType<'a>),
+    Primitive(PrimitiveIrType),
+    Any,
+}
+
+impl<'a> IrGraphNode<'a> {
+    /// Converts an [`IrTypeRef`] to an [`IrGraphNode`],
+    /// recursively resolving referenced schemas.
+    pub fn from_ref(spec: &'a IrSpec<'a>, ty: IrTypeRef<'a>) -> Self {
+        match ty {
+            IrTypeRef::Schema(ty) => IrGraphNode::Schema(ty),
+            IrTypeRef::Inline(ty) => IrGraphNode::Inline(ty),
+            IrTypeRef::Array(ty) => IrGraphNode::Array(ty),
+            IrTypeRef::Map(ty) => IrGraphNode::Map(ty),
+            IrTypeRef::Nullable(ty) => IrGraphNode::Nullable(ty),
+            IrTypeRef::Ref(r) => Self::from_ref(spec, spec.schemas[r.name()].as_ref()),
+            IrTypeRef::Primitive(ty) => IrGraphNode::Primitive(ty),
+            IrTypeRef::Any => IrGraphNode::Any,
+        }
+    }
+
+    /// Converts this node back to an [`IrTypeRef`].
+    pub fn to_ref(self) -> IrTypeRef<'a> {
+        match self {
+            Self::Schema(ty) => IrTypeRef::Schema(ty),
+            Self::Inline(ty) => IrTypeRef::Inline(ty),
+            Self::Array(ty) => IrTypeRef::Array(ty),
+            Self::Map(ty) => IrTypeRef::Map(ty),
+            Self::Nullable(ty) => IrTypeRef::Nullable(ty),
+            Self::Primitive(ty) => IrTypeRef::Primitive(ty),
+            Self::Any => IrTypeRef::Any,
+        }
+    }
+}
+
+/// A view of an operation in the spec.
 #[derive(Clone, Copy, Debug)]
 pub struct IrOperationView<'a> {
     graph: &'a IrGraph<'a>,
@@ -199,8 +207,9 @@ pub struct IrOperationView<'a> {
 }
 
 impl<'a> IrOperationView<'a> {
+    /// Returns the underlying operation.
     #[inline]
-    pub fn op(self) -> &'a IrOperation<'a> {
+    pub fn as_operation(self) -> &'a IrOperation<'a> {
         self.op
     }
 
@@ -223,11 +232,11 @@ impl<'a> IrOperationView<'a> {
     fn bfs(self) -> Bfs<NodeIndex, <Refs<'a> as Visitable>::Map> {
         // `Bfs::new()` starts with just one root on the stack,
         // but operations aren't roots; they reference types that are roots,
-        // so we construct our own visitor with all those roots on the stack.
+        // so we construct our own visitor with all those types on the stack.
         let stack = self
             .op
             .types()
-            .map(|ty| IrGraphNode::from_ty(self.graph.spec, ty.as_ref()))
+            .map(|ty| IrGraphNode::from_ref(self.graph.spec, ty.as_ref()))
             .map(|node| self.graph.nodes[&node])
             .collect();
         let mut discovered = self.graph.refs.visit_map();
@@ -238,20 +247,11 @@ impl<'a> IrOperationView<'a> {
     }
 }
 
-/// A view into any node in the type graph
+/// A view of a type in the graph.
 #[derive(Clone, Copy, Debug)]
 pub struct IrTypeView<'a> {
     graph: &'a IrGraph<'a>,
     index: NodeIndex,
-}
-
-impl<'a> Deref for IrTypeView<'a> {
-    type Target = IrGraphNode<'a>;
-
-    #[inline]
-    fn deref(&self) -> &Self::Target {
-        &self.graph.refs[self.index]
-    }
 }
 
 impl<'a> IrTypeView<'a> {
@@ -276,7 +276,7 @@ impl<'a> IrTypeView<'a> {
     /// Returns `true` if a reference from this node to the `other` node
     /// requires indirection (with [`Box`], [`Vec`], etc.)
     #[inline]
-    pub fn requires_indirection_to(&self, other: &IrTypeView<'_>) -> bool {
+    pub fn needs_indirection_to(&self, other: &IrTypeView<'_>) -> bool {
         self.graph
             .circular_refs
             .contains(&(self.index, other.index))
@@ -325,12 +325,23 @@ impl<'a> IrTypeView<'a> {
     }
 }
 
+impl<'a> Deref for IrTypeView<'a> {
+    type Target = IrGraphNode<'a>;
+
+    #[inline]
+    fn deref(&self) -> &Self::Target {
+        &self.graph.refs[self.index]
+    }
+}
+
+/// Visits all the types and references contained within a type.
 #[derive(Debug)]
-pub struct Visitor<'a> {
+pub struct IrTypeVisitor<'a> {
     stack: Vec<(Option<&'a IrType<'a>>, &'a IrType<'a>)>,
 }
 
-impl<'a> Visitor<'a> {
+impl<'a> IrTypeVisitor<'a> {
+    /// Creates a visitor with `root` on the stack of types to visit.
     #[inline]
     pub fn new(root: &'a IrType<'a>) -> Self {
         Self {
@@ -339,7 +350,7 @@ impl<'a> Visitor<'a> {
     }
 }
 
-impl<'a> Iterator for Visitor<'a> {
+impl<'a> Iterator for IrTypeVisitor<'a> {
     type Item = (Option<&'a IrType<'a>>, &'a IrType<'a>);
 
     fn next(&mut self) -> Option<Self::Item> {

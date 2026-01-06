@@ -58,6 +58,7 @@ impl<'a> From<InlineIrType<'a>> for IrType<'a> {
     }
 }
 
+/// A reference to a schema type.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub enum IrTypeRef<'a> {
     Primitive(PrimitiveIrType),

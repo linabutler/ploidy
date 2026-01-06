@@ -106,7 +106,7 @@ impl<'a> CodegenBoxedRef<'a> {
         if let Some(from) = self.context.graph.lookup(self.from)
             && let Some(to) = self.context.graph.lookup(self.to.as_ref())
         {
-            from.requires_indirection_to(&to)
+            from.needs_indirection_to(&to)
         } else {
             false
         }

@@ -57,7 +57,7 @@ fn main() -> Result<()> {
                 graph
                     .operations()
                     .fold(BTreeMap::<&str, usize>::new(), |mut counts, view| {
-                        *counts.entry(view.op().resource).or_default() += 1;
+                        *counts.entry(view.as_operation().resource).or_default() += 1;
                         counts
                     });
             println!(

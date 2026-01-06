@@ -27,7 +27,10 @@ impl ToTokens for CodegenTypesModule<'_> {
             let Some(info) = self.context.map.0.get(name) else {
                 continue;
             };
-            let resources: BTreeSet<_> = view.used_by().map(|op| op.op().resource).collect();
+            let resources: BTreeSet<_> = view
+                .used_by()
+                .map(|op| op.as_operation().resource)
+                .collect();
             let Some(cfg_attr) = cfg_attr(&resources) else {
                 continue;
             };

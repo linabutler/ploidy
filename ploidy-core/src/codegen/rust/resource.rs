@@ -40,7 +40,9 @@ impl ToTokens for CodegenResource<'_> {
         let methods: Vec<TokenStream> = self
             .operations
             .iter()
-            .map(|view| CodegenOperation::new(self.context, view.op()).into_token_stream())
+            .map(|view| {
+                CodegenOperation::new(self.context, view.as_operation()).into_token_stream()
+            })
             .collect();
 
         let mut inlines = self

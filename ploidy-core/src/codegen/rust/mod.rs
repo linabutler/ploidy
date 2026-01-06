@@ -70,7 +70,7 @@ pub fn write_types_to_disk(output: &Path, context: &CodegenContext<'_>) -> miett
 pub fn write_client_to_disk(output: &Path, context: &CodegenContext<'_>) -> miette::Result<()> {
     let mut operations_by_resource: BTreeMap<&str, Vec<IrOperationView<'_>>> = BTreeMap::new();
     for view in context.graph.operations() {
-        let resource = view.op().resource;
+        let resource = view.as_operation().resource;
         operations_by_resource
             .entry(resource)
             .or_default()

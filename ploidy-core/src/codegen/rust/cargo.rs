@@ -40,7 +40,7 @@ impl<'a> CodegenCargoManifest<'a> {
                 .context
                 .graph
                 .operations()
-                .map(|view| view.op().resource)
+                .map(|view| view.as_operation().resource)
                 .filter(|&name| name != "full")
                 .collect();
             let mut features: BTreeMap<_, _> = names
