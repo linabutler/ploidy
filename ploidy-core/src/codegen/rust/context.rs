@@ -1,7 +1,7 @@
 use cargo_toml::Manifest;
 pub use toml::Value as TomlValue;
 
-use crate::ir::{InnerLeaf, InnerRef, IrSpec, IrType, PrimitiveIrType};
+use crate::ir::{IrGraph, IrType, IrTypeRef, PrimitiveIrType};
 
 use super::{CargoMetadata, SchemaIdentMap};
 
@@ -9,32 +9,28 @@ pub type TomlMap = toml::map::Map<String, TomlValue>;
 
 #[derive(Debug)]
 pub struct CodegenContext<'a> {
-    pub spec: &'a IrSpec<'a>,
+    pub graph: &'a IrGraph<'a>,
     pub manifest: &'a Manifest<CargoMetadata>,
     pub map: SchemaIdentMap<'a>,
 }
 
 impl<'a> CodegenContext<'a> {
-    pub fn new(spec: &'a IrSpec<'a>, manifest: &'a Manifest<CargoMetadata>) -> Self {
+    pub fn new(graph: &'a IrGraph<'a>, manifest: &'a Manifest<CargoMetadata>) -> Self {
         Self {
-            spec,
+            graph,
             manifest,
-            map: SchemaIdentMap::new(spec),
+            map: SchemaIdentMap::new(graph),
         }
     }
 
     pub fn hashable(&self, ty: &IrType<'_>) -> bool {
-        itertools::chain!(
-            ty.visit::<InnerLeaf>(),
-            ty.visit::<InnerRef>()
-                .flat_map(|r| self.spec.lookup(r.name()))
-                .flat_map(|view| view.refs())
-                .flat_map(|view| view.ty().visit::<InnerLeaf>()),
-        )
-        .all(|leaf| {
+        let Some(view) = self.graph.lookup(ty.as_ref()) else {
+            return false;
+        };
+        view.reachable().all(|view| {
             !matches!(
-                leaf,
-                InnerLeaf::Primitive(PrimitiveIrType::F32 | PrimitiveIrType::F64)
+                view.to_ref(),
+                IrTypeRef::Primitive(PrimitiveIrType::F32 | PrimitiveIrType::F64)
             )
         })
     }

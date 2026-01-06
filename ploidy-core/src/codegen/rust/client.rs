@@ -34,7 +34,7 @@ impl ToTokens for CodegenClientModule<'_> {
             .collect_vec();
 
         let client_doc = {
-            let info = self.context.spec.info();
+            let info = self.context.graph.spec().info;
             format!("API client for {} (version {})", info.title, info.version)
         };
 

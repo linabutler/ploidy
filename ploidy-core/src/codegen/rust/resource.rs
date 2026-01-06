@@ -2,8 +2,10 @@ use heck::ToSnakeCase;
 use proc_macro2::TokenStream;
 use quote::{ToTokens, TokenStreamExt, quote};
 
-use crate::codegen::IntoCode;
-use crate::ir::{InlineIrType, IrOperationView, IrParameter, IrRequest, IrResponse};
+use crate::{
+    codegen::IntoCode,
+    ir::{InlineIrType, InlineIrTypePathRoot, IrOperationView},
+};
 
 use super::{
     context::CodegenContext, enum_::CodegenEnum, naming::CodegenTypeName,
@@ -44,34 +46,15 @@ impl ToTokens for CodegenResource<'_> {
         let mut inlines = self
             .operations
             .iter()
-            .flat_map(|op| {
-                itertools::chain!(
-                    op.op()
-                        .params
-                        .iter()
-                        .filter_map(|param| match param {
-                            IrParameter::Path(_) => None,
-                            IrParameter::Query(info) => Some(info),
-                        })
-                        .flat_map(|info| info.ty.visit()),
-                    op.op()
-                        .request
-                        .iter()
-                        .filter_map(|request| match request {
-                            IrRequest::Json(ty) => Some(ty),
-                            IrRequest::Multipart => None,
-                        })
-                        .flat_map(|ty| ty.visit()),
-                    op.op()
-                        .response
-                        .iter()
-                        .map(|response| match response {
-                            IrResponse::Json(ty) => ty,
-                        })
-                        .flat_map(|ty| ty.visit()),
-                )
+            .flat_map(|op| op.inlines())
+            .filter(|ty| {
+                // Only emit Rust definitions for inline types contained
+                // within the operation. Inline types contained within schemas
+                // that the operation _references_ will be generated as part of
+                // `CodegenSchemaType`.
+                matches!(ty.path().root, InlineIrTypePathRoot::Resource(r) if r == self.resource)
             })
-            .map(|ty: &InlineIrType<'_>| match ty {
+            .map(|ty| match ty {
                 InlineIrType::Enum(path, ty) => {
                     CodegenEnum::new(CodegenTypeName::Inline(path), ty).into_token_stream()
                 }

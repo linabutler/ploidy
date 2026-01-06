@@ -3,8 +3,11 @@ use quote::{ToTokens, TokenStreamExt, quote};
 use syn::{Ident, parse_quote};
 
 use crate::{
-    codegen::{rust::CodegenIdent, unique::UniqueNameSpace},
-    ir::{IrStruct, IrType},
+    codegen::{
+        rust::{CodegenIdent, CodegenStructFieldName},
+        unique::UniqueNameSpace,
+    },
+    ir::{InlineIrType, IrStruct, IrStructFieldName, IrType, SchemaIrType},
 };
 
 use super::{
@@ -27,60 +30,78 @@ impl<'a> CodegenStruct<'a> {
     ) -> Self {
         Self { context, name, ty }
     }
+
+    fn to_ty(self) -> IrType<'a> {
+        match self.name {
+            CodegenTypeName::Schema(name, _) => {
+                IrType::Schema(SchemaIrType::Struct(name, self.ty.clone()))
+            }
+            CodegenTypeName::Inline(path) => {
+                IrType::Inline(InlineIrType::Struct(path.clone(), self.ty.clone()))
+            }
+        }
+    }
 }
 
 impl ToTokens for CodegenStruct<'_> {
     fn to_tokens(&self, tokens: &mut TokenStream) {
         let mut space = UniqueNameSpace::new();
         let mut all_optional = true;
-        let fields = self
-            .ty
-            .fields
-            .iter()
-            .filter(|field| !field.discriminator)
-            .map(|field| {
-                let field_name = {
-                    let name = CodegenIdent::Field(&space.uniquify(field.name));
-                    parse_quote!(#name)
-                };
-                if field.required {
-                    all_optional = false;
-                }
-
-                let final_type = match (&field.ty, field.required) {
-                    (IrType::Nullable(inner), true) => {
-                        let inner = CodegenBoxedRef::new(self.context, self.name, inner);
-                        quote! { ::std::option::Option<#inner> }
+        let fields =
+            self.ty
+                .fields
+                .iter()
+                .filter(|field| !field.discriminator)
+                .map(|field| {
+                    let field_name = match field.name {
+                        IrStructFieldName::Name(n) => {
+                            let name = CodegenIdent::Field(&space.uniquify(n));
+                            parse_quote!(#name)
+                        }
+                        IrStructFieldName::Hint(hint) => {
+                            let name = CodegenStructFieldName(hint);
+                            parse_quote!(#name)
+                        }
+                    };
+                    if field.required {
+                        all_optional = false;
                     }
-                    (IrType::Nullable(inner), false) => {
-                        let inner = CodegenBoxedRef::new(self.context, self.name, inner);
-                        quote! { ::ploidy_util::absent::AbsentOr<#inner> }
-                    }
-                    (other, true) => {
-                        CodegenBoxedRef::new(self.context, self.name, other).into_token_stream()
-                    }
-                    (other, false) => {
-                        let inner = CodegenBoxedRef::new(self.context, self.name, other);
-                        quote! { ::ploidy_util::absent::AbsentOr<#inner> }
-                    }
-                };
 
-                let serde_attrs = field_serde_attrs(
-                    &field_name,
-                    field.name,
-                    field.required,
-                    matches!(field.ty, IrType::Nullable(_)),
-                );
+                    let ty = self.to_ty();
+                    let final_type = match (&field.ty, field.required) {
+                        (IrType::Nullable(inner), true) => {
+                            let inner = CodegenBoxedRef::new(self.context, ty.as_ref(), inner);
+                            quote! { ::std::option::Option<#inner> }
+                        }
+                        (IrType::Nullable(inner), false) => {
+                            let inner = CodegenBoxedRef::new(self.context, ty.as_ref(), inner);
+                            quote! { ::ploidy_util::absent::AbsentOr<#inner> }
+                        }
+                        (other, true) => CodegenBoxedRef::new(self.context, ty.as_ref(), other)
+                            .into_token_stream(),
+                        (other, false) => {
+                            let inner = CodegenBoxedRef::new(self.context, ty.as_ref(), other);
+                            quote! { ::ploidy_util::absent::AbsentOr<#inner> }
+                        }
+                    };
 
-                let doc_attrs = field.description.map(doc_attrs);
+                    let serde_attrs = field_serde_attrs(
+                        &field.name,
+                        &field_name,
+                        field.required,
+                        matches!(field.ty, IrType::Nullable(_)),
+                        field.flattened,
+                    );
 
-                quote! {
-                    #doc_attrs
-                    #serde_attrs
-                    pub #field_name: #final_type,
-                }
-            })
-            .collect::<Vec<_>>();
+                    let doc_attrs = field.description.map(doc_attrs);
+
+                    quote! {
+                        #doc_attrs
+                        #serde_attrs
+                        pub #field_name: #final_type,
+                    }
+                })
+                .collect::<Vec<_>>();
 
         let mut extra_derives = vec![];
         let is_hashable = self
@@ -110,13 +131,25 @@ impl ToTokens for CodegenStruct<'_> {
 }
 
 /// Generates `#[serde(...)]` attributes for a field.
-fn field_serde_attrs(ident: &Ident, name: &str, required: bool, nullable: bool) -> TokenStream {
+fn field_serde_attrs(
+    field_name: &IrStructFieldName,
+    field_ident: &Ident,
+    required: bool,
+    nullable: bool,
+    flattened: bool,
+) -> TokenStream {
     let mut attrs = Vec::new();
 
-    // `rename` if the field name doesn't match the identifier.
-    let f = ident.to_string();
-    if f.strip_prefix("r#").unwrap_or(&f) != name {
-        attrs.push(quote! { rename = #name });
+    // Add `flatten` xor `rename` (specifying both
+    // on the same field isn't meaningful).
+    if flattened {
+        attrs.push(quote! { flatten });
+    } else if let &IrStructFieldName::Name(name) = field_name {
+        // `rename` if the field name doesn't match the identifier.
+        let f = field_ident.to_string();
+        if f.strip_prefix("r#").unwrap_or(&f) != name {
+            attrs.push(quote! { rename = #name });
+        }
     }
 
     match (required, nullable) {

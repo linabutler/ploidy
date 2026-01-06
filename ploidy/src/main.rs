@@ -4,7 +4,7 @@ use miette::{Context, IntoDiagnostic, Result};
 
 use ploidy_core::{
     codegen::{rust, write_to_disk},
-    ir::IrSpec,
+    ir::{IrGraph, IrSpec},
     parse::Document,
 };
 
@@ -35,8 +35,9 @@ fn main() -> Result<()> {
             println!("OpenAPI: {} (version {})", doc.info.title, doc.info.version);
 
             let spec = IrSpec::from_doc(&doc).into_diagnostic()?;
+            let graph = IrGraph::new(&spec);
 
-            let context = rust::CodegenContext::new(&spec, &config.manifest);
+            let context = rust::CodegenContext::new(&graph, &config.manifest);
 
             println!("Writing generated code to `{}`...", output.display());
 
@@ -49,16 +50,16 @@ fn main() -> Result<()> {
             println!("Generating `error.rs`...");
             write_to_disk(&output, rust::CodegenErrorModule)?;
 
-            println!("Generating {} types...", context.spec.schemas().count());
+            println!("Generating {} types...", graph.schemas().count());
             rust::write_types_to_disk(&output, &context)?;
 
-            let counts = context.spec.operations().fold(
-                BTreeMap::<&str, usize>::new(),
-                |mut counts, view| {
-                    *counts.entry(view.op().resource).or_default() += 1;
-                    counts
-                },
-            );
+            let counts =
+                graph
+                    .operations()
+                    .fold(BTreeMap::<&str, usize>::new(), |mut counts, view| {
+                        *counts.entry(view.op().resource).or_default() += 1;
+                        counts
+                    });
             println!(
                 "Generating {} client methods for {} resources...",
                 counts.values().copied().sum::<usize>(),

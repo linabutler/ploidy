@@ -37,10 +37,11 @@ impl<T: AsRef<str>> Code for (T, proc_macro2::TokenStream) {
 
     fn into_string(self) -> miette::Result<String> {
         use quote::ToTokens;
-        let file = syn::parse2(self.1.into_token_stream())
-            .into_diagnostic()
-            .with_context(|| format!("Failed to format `{}`", self.0.as_ref()))?;
-        Ok(prettyplease::unparse(&file))
+        let file = syn::parse2(self.1.into_token_stream()).into_diagnostic();
+        match file {
+            Ok(file) => Ok(prettyplease::unparse(&file)),
+            Err(err) => Err(err.context(format!("Failed to format `{}`", self.0.as_ref()))),
+        }
     }
 }
 

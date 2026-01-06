@@ -38,7 +38,7 @@ impl<'a> CodegenCargoManifest<'a> {
         let features = {
             let names: BTreeSet<_> = self
                 .context
-                .spec
+                .graph
                 .operations()
                 .map(|view| view.op().resource)
                 .filter(|&name| name != "full")

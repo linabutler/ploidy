@@ -59,7 +59,7 @@ pub enum Method {
 }
 
 impl PathItem {
-    /// Yields all operations and their HTTP methods.
+    /// Returns an iterator over the operations for each HTTP method.
     pub fn operations(&self) -> impl Iterator<Item = (Method, &Operation)> {
         [
             (Method::Get, self.get.as_ref()),
@@ -285,6 +285,8 @@ pub enum Ty {
 pub enum Format {
     #[serde(rename = "date-time")]
     DateTime,
+    #[serde(rename = "unixtime", alias = "unix-time")]
+    UnixTime,
     Date,
     Uri,
     Uuid,
@@ -294,6 +296,8 @@ pub enum Format {
     Int64,
     Float,
     Double,
+    Currency,
+    Decimal,
 }
 
 #[derive(Clone, Debug, Deserialize, JsonPointee)]

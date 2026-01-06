@@ -5,7 +5,8 @@ use ploidy_pointer::JsonPointee;
 
 use crate::parse::{ComponentRef, Document, RefOrSchema, Schema};
 
-/// Yields all the fields of this schema, including inherited fields.
+/// Returns an iterator over all the fields of this schema,
+/// including inherited fields.
 pub fn all_fields<'a>(
     doc: &'a Document,
     schema: &'a Schema,
@@ -29,6 +30,7 @@ pub fn all_fields<'a>(
                     schema: property,
                     required: schema.required.contains(name),
                     discriminator: discriminators.contains(name.as_str()),
+                    flattened: false,
                 }),
             )
         })
@@ -48,6 +50,7 @@ pub fn all_fields<'a>(
                     schema: property,
                     required: ancestor.required.contains(name),
                     discriminator: discriminators.contains(name.as_str()),
+                    flattened: false,
                 })
             });
         }
@@ -75,9 +78,10 @@ pub struct IrSchemaFieldInfo<'a> {
     pub schema: &'a RefOrSchema,
     pub required: bool,
     pub discriminator: bool,
+    pub flattened: bool,
 }
 
-/// Yields all ancestors of a schema in linear order.
+/// An iterator over all the ancestors of a schema, in linear order.
 pub struct Ancestors<'a> {
     doc: &'a Document,
     stack: Vec<&'a RefOrSchema>,

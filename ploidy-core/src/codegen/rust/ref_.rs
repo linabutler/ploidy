@@ -5,7 +5,7 @@ use syn::parse_quote;
 
 use crate::{
     codegen::rust::CodegenIdent,
-    ir::{InlineIrTypePathRoot, IrType, PrimitiveIrType},
+    ir::{InlineIrTypePathRoot, IrType, IrTypeRef, PrimitiveIrType},
 };
 
 use super::{context::CodegenContext, naming::CodegenTypeName};
@@ -47,8 +47,8 @@ impl ToTokens for CodegenRef<'_> {
                 quote! { ::std::collections::BTreeMap<::std::string::String, #ty> }
             }
             IrType::Ref(r) => {
-                let name = self.context.map.ty(r.name());
-                quote! { crate::types::#name }
+                let ty = &self.context.graph.spec().schemas[r.name()];
+                CodegenRef::new(self.context, ty).to_token_stream()
             }
             IrType::Nullable(ty) => {
                 let ty = CodegenRef::new(self.context, ty.as_ref());
@@ -71,7 +71,7 @@ impl ToTokens for CodegenRef<'_> {
                 parse_quote!(#root::#name)
             }
             IrType::Schema(s) => {
-                let name = self.context.map.ty(s.name());
+                let name = self.context.map.ty(s.name()).unwrap();
                 quote! { crate::types::#name }
             }
         })
@@ -79,28 +79,44 @@ impl ToTokens for CodegenRef<'_> {
 }
 
 /// A reference from one type to another type that may require boxing.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Debug)]
 pub struct CodegenBoxedRef<'a> {
     context: &'a CodegenContext<'a>,
-    from: CodegenTypeName<'a>,
+    from: IrTypeRef<'a>,
     to: &'a IrType<'a>,
 }
 
 impl<'a> CodegenBoxedRef<'a> {
-    pub fn new(context: &'a CodegenContext, from: CodegenTypeName<'a>, to: &'a IrType<'a>) -> Self {
+    pub fn new(context: &'a CodegenContext, from: IrTypeRef<'a>, to: &'a IrType<'a>) -> Self {
         Self { context, from, to }
+    }
+}
+
+impl<'a> CodegenBoxedRef<'a> {
+    fn needs_box(&self) -> bool {
+        if matches!(
+            self.to,
+            IrType::Array(_) | IrType::Map(_) | IrType::Primitive(_) | IrType::Any
+        ) {
+            // Leaf types like primitives and `Any` don't contain any references,
+            // and arrays (`Vec`) and maps (`BTreeMap`) are heap-allocated,
+            // so we never need to box these types.
+            return false;
+        }
+        if let Some(from) = self.context.graph.lookup(self.from)
+            && let Some(to) = self.context.graph.lookup(self.to.as_ref())
+        {
+            from.requires_indirection_to(&to)
+        } else {
+            false
+        }
     }
 }
 
 impl ToTokens for CodegenBoxedRef<'_> {
     fn to_tokens(&self, tokens: &mut TokenStream) {
-        if let CodegenTypeName::Schema(from, _) = &self.from
-            && let Some(this) = self.context.spec.lookup(from)
-            && let IrType::Ref(r) = &self.to
-            && let Some(other) = self.context.spec.lookup(r.name())
-            && this.requires_indirection_to(other)
-        {
-            let inner = CodegenRef::new(self.context, other.ty());
+        if self.needs_box() {
+            let inner = CodegenRef::new(self.context, self.to);
             tokens.append_all(quote! { ::std::boxed::Box<#inner> });
         } else {
             CodegenRef::new(self.context, self.to).to_tokens(tokens);

@@ -9,6 +9,7 @@ repository.workspace = true
 keywords.workspace = true
 
 [dependencies]
+by_address = "1"
 cargo_toml = { version = "0.22", optional = true }
 heck = "0.5"
 indexmap = { version = "2", features = ["serde"] }

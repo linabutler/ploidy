@@ -9,8 +9,9 @@ use super::{
     fields::{IrSchemaField, all_fields},
     types::{
         InlineIrType, InlineIrTypePath, InlineIrTypePathRoot, InlineIrTypePathSegment, IrEnum,
-        IrEnumVariant, IrStruct, IrStructField, IrTagged, IrTaggedVariant, IrType, IrTypeName,
-        IrUntagged, IrUntaggedVariant, IrUntaggedVariantNameHint, PrimitiveIrType, SchemaIrType,
+        IrEnumVariant, IrStruct, IrStructField, IrStructFieldName, IrStructFieldNameHint, IrTagged,
+        IrTaggedVariant, IrType, IrTypeName, IrUntagged, IrUntaggedVariant,
+        IrUntaggedVariantNameHint, PrimitiveIrType, SchemaIrType,
     },
 };
 
@@ -38,6 +39,7 @@ impl<'a> IrTransformer<'a> {
     fn transform(self) -> IrType<'a> {
         self.try_tagged()
             .or_else(Self::try_untagged)
+            .or_else(Self::try_any_of)
             .or_else(Self::try_enum)
             .or_else(Self::try_struct)
             .unwrap_or_else(Self::other)
@@ -138,14 +140,162 @@ impl<'a> IrTransformer<'a> {
         })
     }
 
+    fn try_any_of(self) -> Result<IrType<'a>, Self> {
+        let Some(any_of) = &self.schema.any_of else {
+            return Err(self);
+        };
+        if any_of.len() == 1 {
+            // A single-variant `anyOf` should unwrap to the variant type.
+            return Err(self);
+        }
+
+        let any_of_fields = any_of
+            .iter()
+            .enumerate()
+            .map(|(index, schema)| {
+                let (field_name, ty, description) = match schema {
+                    RefOrSchema::Ref(r) => {
+                        // For references, use the referenced type's name
+                        // as the field name. For example, a pointer like
+                        // `#/components/schemas/Address` becomes `address`.
+                        let name = IrStructFieldName::Name(r.path.name());
+                        let ty = IrType::Ref(&r.path);
+                        let desc = self
+                            .doc
+                            .resolve(r.path.pointer().clone())
+                            .ok()
+                            .and_then(|p| p.downcast_ref::<Schema>())
+                            .and_then(|s| s.description.as_deref());
+                        (name, ty, desc)
+                    }
+                    RefOrSchema::Other(schema) => {
+                        // For inline schemas, we don't have a name that we can use,
+                        // so use its index in `anyOf` as a naming hint.
+                        let name = IrStructFieldName::Hint(IrStructFieldNameHint::Index(index + 1));
+                        let path = match &self.name {
+                            IrTypeName::Schema(n) => InlineIrTypePath {
+                                root: InlineIrTypePathRoot::Type(n),
+                                segments: vec![InlineIrTypePathSegment::Field(name)],
+                            },
+                            IrTypeName::Inline(path) => {
+                                let mut path = path.clone();
+                                path.segments.push(InlineIrTypePathSegment::Field(name));
+                                path
+                            }
+                        };
+                        let ty = transform(self.doc, path, schema);
+                        let desc = schema.description.as_deref();
+                        (name, ty, desc)
+                    }
+                };
+                IrStructField {
+                    name: field_name,
+                    ty,
+                    required: false,
+                    description,
+                    inherited: false,
+                    discriminator: false,
+                    flattened: true,
+                }
+            })
+            .collect_vec();
+
+        // Collect inherited and own fields from `allOf` and `properties`,
+        // if present.
+        let regular_fields = all_fields(self.doc, self.schema).map(|(field_name, field)| {
+            let info = field.info();
+            let ty = match info.schema {
+                RefOrSchema::Ref(r) => IrType::Ref(&r.path),
+                RefOrSchema::Other(schema) => {
+                    let path = match &self.name {
+                        IrTypeName::Schema(name) => InlineIrTypePath {
+                            root: InlineIrTypePathRoot::Type(name),
+                            segments: vec![InlineIrTypePathSegment::Field(
+                                IrStructFieldName::Name(field_name),
+                            )],
+                        },
+                        IrTypeName::Inline(path) => {
+                            let mut path = path.clone();
+                            path.segments.push(InlineIrTypePathSegment::Field(
+                                IrStructFieldName::Name(field_name),
+                            ));
+                            path
+                        }
+                    };
+                    transform(self.doc, path, schema)
+                }
+            };
+            let description = match info.schema {
+                RefOrSchema::Other(schema) => schema.description.as_deref(),
+                RefOrSchema::Ref(r) => self
+                    .doc
+                    .resolve(r.path.pointer().clone())
+                    .ok()
+                    .and_then(|p| p.downcast_ref::<Schema>())
+                    .and_then(|schema| schema.description.as_deref()),
+            };
+            let nullable = match info.schema {
+                RefOrSchema::Other(schema) if schema.nullable => true,
+                RefOrSchema::Ref(r) => {
+                    if let Ok(resolved) = self.doc.resolve(r.path.pointer().clone())
+                        && let Some(schema) = resolved.downcast_ref::<Schema>()
+                        && schema.nullable
+                    {
+                        true
+                    } else {
+                        false
+                    }
+                }
+                _ => false,
+            };
+            let ty = if nullable {
+                IrType::Nullable(ty.into())
+            } else {
+                ty
+            };
+            IrStructField {
+                name: IrStructFieldName::Name(field_name),
+                ty,
+                required: info.required,
+                description,
+                inherited: matches!(field, IrSchemaField::Inherited(_)),
+                discriminator: info.discriminator,
+                flattened: info.flattened,
+            }
+        });
+
+        // Combine all the fields: regular properties first,
+        // followed by the flattened `anyOf` fields. This ordering
+        // ensures that regular properties take precedence during
+        // (de)serialization.
+        let all_fields = itertools::chain!(regular_fields, any_of_fields).collect();
+
+        let ty = IrStruct {
+            description: self.schema.description.as_deref(),
+            fields: all_fields,
+        };
+
+        Ok(match self.name {
+            IrTypeName::Schema(name) => SchemaIrType::Struct(name, ty).into(),
+            IrTypeName::Inline(path) => InlineIrType::Struct(path, ty).into(),
+        })
+    }
+
     fn try_enum(self) -> Result<IrType<'a>, Self> {
         let Some(values) = &self.schema.variants else {
             return Err(self);
         };
         let variants = values
             .iter()
-            .filter_map(|value| value.as_str())
-            .map(IrEnumVariant::String)
+            .filter_map(|value| {
+                if let Some(s) = value.as_str() {
+                    Some(IrEnumVariant::String(s))
+                } else if let Some(n) = value.as_number() {
+                    Some(IrEnumVariant::Number(n.clone()))
+                } else {
+                    value.as_bool().map(IrEnumVariant::Bool)
+                }
+            })
             .collect();
         let ty = IrEnum {
             description: self.schema.description.as_deref(),
@@ -184,12 +334,15 @@ impl<'a> IrTransformer<'a> {
                         let path = match &self.name {
                             IrTypeName::Schema(name) => InlineIrTypePath {
                                 root: InlineIrTypePathRoot::Type(name),
-                                segments: vec![InlineIrTypePathSegment::Field(field_name)],
+                                segments: vec![InlineIrTypePathSegment::Field(
+                                    IrStructFieldName::Name(field_name),
+                                )],
                             },
                             IrTypeName::Inline(path) => {
                                 let mut path = path.clone();
-                                path.segments
-                                    .push(InlineIrTypePathSegment::Field(field_name));
+                                path.segments.push(InlineIrTypePathSegment::Field(
+                                    IrStructFieldName::Name(field_name),
+                                ));
                                 path
                             }
                         };
@@ -225,12 +378,13 @@ impl<'a> IrTransformer<'a> {
                     ty
                 };
                 IrStructField {
-                    name: field_name,
+                    name: IrStructFieldName::Name(field_name),
                     ty,
                     required: info.required,
                     description,
                     inherited: matches!(field, IrSchemaField::Inherited(_)),
                     discriminator: info.discriminator,
+                    flattened: false,
                 }
             })
             .collect_vec();
@@ -259,8 +413,10 @@ impl<'a> IrTransformer<'a> {
                 }
                 (Ty::String, _) => PrimitiveIrType::String.into(),
                 (Ty::Integer, Some(Format::Int64)) => PrimitiveIrType::I64.into(),
+                (Ty::Integer, Some(Format::UnixTime)) => PrimitiveIrType::DateTime.into(),
                 (Ty::Integer, Some(Format::Int32) | _) => PrimitiveIrType::I32.into(),
                 (Ty::Number, Some(Format::Float)) => PrimitiveIrType::F32.into(),
+                (Ty::Number, Some(Format::UnixTime)) => PrimitiveIrType::DateTime.into(),
                 (Ty::Number, Some(Format::Double) | _) => PrimitiveIrType::F64.into(),
                 (Ty::Boolean, _) => PrimitiveIrType::Bool.into(),
                 (Ty::Array, _) => {

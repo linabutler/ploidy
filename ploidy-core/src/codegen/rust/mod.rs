@@ -1,7 +1,4 @@
-use std::{
-    collections::{BTreeMap, BTreeSet},
-    path::Path,
-};
+use std::{collections::BTreeMap, path::Path};
 
 use indexmap::IndexMap;
 use itertools::Itertools;
@@ -11,7 +8,7 @@ use syn::{Ident, parse_quote};
 
 use crate::{
     codegen::{IntoCode, unique::UniqueNameSpace, write_to_disk},
-    ir::{IrOperationView, IrSpec, IrType},
+    ir::{IrGraph, IrOperationView, IrType, IrTypeRef},
 };
 
 mod cargo;
@@ -41,35 +38,26 @@ pub use statics::*;
 pub use types::*;
 
 pub fn write_types_to_disk(output: &Path, context: &CodegenContext<'_>) -> miette::Result<()> {
-    let mut resources_by_type = BTreeMap::<&str, BTreeSet<&str>>::new();
-    for view in context.spec.operations() {
-        let resource = view.op().resource;
-        for v in view.refs() {
-            resources_by_type
-                .entry(v.name())
-                .or_default()
-                .insert(resource);
-        }
-    }
-
-    for view in context.spec.schemas() {
-        let name = view.name();
-        let ty = view.ty();
+    for (name, view) in context.graph.schemas() {
         let Some(info) = context.map.0.get(name) else {
             continue;
         };
-        if !resources_by_type.contains_key(name) {
+        if view.used_by().next().is_none() {
+            // Skip types that aren't used by any operations.
             continue;
         }
         let name = CodegenTypeName::Schema(name, &info.ty);
-        let code = match ty {
-            IrType::Schema(ty) => CodegenSchemaType::new(context, name, ty).into_code(),
-            IrType::Nullable(ty) | IrType::Array(ty) | IrType::Map(ty) => {
-                CodegenSchemaTypeAlias::new(context, name, ty.as_ref()).into_code()
+        let code = match view.to_ref() {
+            IrTypeRef::Schema(ty) => CodegenSchemaType::new(context, name, ty).into_code(),
+            IrTypeRef::Nullable(ty) | IrTypeRef::Array(ty) | IrTypeRef::Map(ty) => {
+                CodegenSchemaTypeAlias::new(context, name, ty).into_code()
             }
-            ty @ IrType::Primitive(_) => CodegenSchemaTypeAlias::new(context, name, ty).into_code(),
-            IrType::Any => CodegenSchemaTypeAlias::new(context, name, &IrType::Any).into_code(),
-            IrType::Inline(..) | IrType::Ref(..) => continue,
+            IrTypeRef::Primitive(ty) => {
+                let ty = IrType::Primitive(ty);
+                CodegenSchemaTypeAlias::new(context, name, &ty).into_code()
+            }
+            IrTypeRef::Any => CodegenSchemaTypeAlias::new(context, name, &IrType::Any).into_code(),
+            IrTypeRef::Inline(..) | IrTypeRef::Ref(..) => continue,
         };
         write_to_disk(output, code)?;
     }
@@ -81,7 +69,7 @@ pub fn write_types_to_disk(output: &Path, context: &CodegenContext<'_>) -> miett
 
 pub fn write_client_to_disk(output: &Path, context: &CodegenContext<'_>) -> miette::Result<()> {
     let mut operations_by_resource: BTreeMap<&str, Vec<IrOperationView<'_>>> = BTreeMap::new();
-    for view in context.spec.operations() {
+    for view in context.graph.operations() {
         let resource = view.op().resource;
         operations_by_resource
             .entry(resource)
@@ -122,12 +110,11 @@ pub struct SchemaIdents {
 pub struct SchemaIdentMap<'a>(pub IndexMap<&'a str, SchemaIdents>);
 
 impl<'a> SchemaIdentMap<'a> {
-    pub fn new(spec: &'a IrSpec<'a>) -> Self {
+    pub fn new(graph: &'a IrGraph<'a>) -> Self {
         let mut space = UniqueNameSpace::new();
-        let map = spec
+        let map = graph
             .schemas()
-            .map(|view| {
-                let name = view.name();
+            .map(|(name, _)| {
                 let unique_name = space.uniquify(name);
                 let module = CodegenIdent::Module(&unique_name);
                 let ty = CodegenIdent::Type(&unique_name);

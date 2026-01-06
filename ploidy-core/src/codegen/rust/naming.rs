@@ -5,7 +5,8 @@ use proc_macro2::{Ident, Span, TokenStream};
 use quote::{IdentFragment, ToTokens, TokenStreamExt, format_ident};
 
 use crate::ir::{
-    InlineIrTypePath, InlineIrTypePathSegment, IrUntaggedVariantNameHint, PrimitiveIrType,
+    InlineIrTypePath, InlineIrTypePathSegment, IrStructFieldName, IrStructFieldNameHint,
+    IrUntaggedVariantNameHint, PrimitiveIrType,
 };
 
 #[derive(Clone, Copy, Debug)]
@@ -120,6 +121,19 @@ impl ToTokens for CodegenUntaggedVariantName {
 }
 
 #[derive(Clone, Copy, Debug)]
+pub struct CodegenStructFieldName(pub IrStructFieldNameHint);
+
+impl ToTokens for CodegenStructFieldName {
+    fn to_tokens(&self, tokens: &mut TokenStream) {
+        match self.0 {
+            IrStructFieldNameHint::Index(index) => {
+                CodegenIdent::Field(&format!("variant_{index}")).to_tokens(tokens)
+            }
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
 pub struct CodegenTypePathSegment<'a>(&'a InlineIrTypePathSegment<'a>);
 
 impl IdentFragment for CodegenTypePathSegment<'_> {
@@ -129,7 +143,12 @@ impl IdentFragment for CodegenTypePathSegment<'_> {
             InlineIrTypePathSegment::Parameter(name) => f.write_str(&name.to_pascal_case()),
             InlineIrTypePathSegment::Request => f.write_str("Request"),
             InlineIrTypePathSegment::Response => f.write_str("Response"),
-            InlineIrTypePathSegment::Field(name) => f.write_str(&name.to_pascal_case()),
+            InlineIrTypePathSegment::Field(name) => match name {
+                IrStructFieldName::Name(name) => f.write_str(&name.to_pascal_case()),
+                IrStructFieldName::Hint(IrStructFieldNameHint::Index(index)) => {
+                    write!(f, "Variant{index}")
+                }
+            },
             InlineIrTypePathSegment::MapValue => f.write_str("Value"),
             InlineIrTypePathSegment::ArrayItem => f.write_str("Item"),
             InlineIrTypePathSegment::Variant(index) => write!(f, "V{index}"),

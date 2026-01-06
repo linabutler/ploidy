@@ -30,47 +30,50 @@ impl<'a> CodegenOperation<'a> {
         url: CodegenIdent<'_>,
         params: &[(CodegenIdent<'_>, &IrParameterInfo<'_>)],
     ) -> TokenStream {
-        let segments = &self.op.path;
-        let segs = segments.iter().map(|segment| match segment.fragments() {
-            [] => quote! { "" },
-            [PathFragment::Literal(text)] => quote! { #text },
-            [PathFragment::Param(name)] => {
-                let (ident, _) = params
-                    .iter()
-                    .find(|(_, param)| param.name == *name)
-                    .unwrap();
-                quote!(#ident)
-            }
-            fragments => {
-                // Build a format string, with placeholders for parameter fragments.
-                let format = fragments.iter().fold(String::new(), |mut f, fragment| {
-                    match fragment {
-                        PathFragment::Literal(text) => {
-                            f.push_str(&text.replace('{', "{{").replace('}', "}}"))
+        let segments = self
+            .op
+            .path
+            .iter()
+            .map(|segment| match segment.fragments() {
+                [] => quote! { "" },
+                [PathFragment::Literal(text)] => quote! { #text },
+                [PathFragment::Param(name)] => {
+                    let (ident, _) = params
+                        .iter()
+                        .find(|(_, param)| param.name == *name)
+                        .unwrap();
+                    quote!(#ident)
+                }
+                fragments => {
+                    // Build a format string, with placeholders for parameter fragments.
+                    let format = fragments.iter().fold(String::new(), |mut f, fragment| {
+                        match fragment {
+                            PathFragment::Literal(text) => {
+                                f.push_str(&text.replace('{', "{{").replace('}', "}}"))
+                            }
+                            PathFragment::Param(_) => f.push_str("{}"),
                         }
-                        PathFragment::Param(_) => f.push_str("{}"),
-                    }
-                    f
-                });
-                let args = fragments
-                    .iter()
-                    .filter_map(|fragment| match fragment {
-                        PathFragment::Param(name) => Some(name),
-                        PathFragment::Literal(_) => None,
-                    })
-                    .map(|name| {
-                        // `url::PathSegmentsMut::push` percent-encodes the
-                        // full segment, so we can interpolate fragments
-                        // directly.
-                        let (ident, _) = params
-                            .iter()
-                            .find(|(_, param)| param.name == *name)
-                            .unwrap();
-                        ident
+                        f
                     });
-                quote! { &format!(#format, #(#args),*) }
-            }
-        });
+                    let args = fragments
+                        .iter()
+                        .filter_map(|fragment| match fragment {
+                            PathFragment::Param(name) => Some(name),
+                            PathFragment::Literal(_) => None,
+                        })
+                        .map(|name| {
+                            // `url::PathSegmentsMut::push` percent-encodes the
+                            // full segment, so we can interpolate fragments
+                            // directly.
+                            let (ident, _) = params
+                                .iter()
+                                .find(|(_, param)| param.name == *name)
+                                .unwrap();
+                            ident
+                        });
+                    quote! { &format!(#format, #(#args),*) }
+                }
+            });
         quote! {
             let #url = {
                 let mut #url = self.base_url.clone();
@@ -78,7 +81,7 @@ impl<'a> CodegenOperation<'a> {
                     .path_segments_mut()
                     .map_err(|()| crate::error::Error::UrlCannotBeABase)?
                     .pop_if_empty()
-                    #(.push(#segs))*;
+                    #(.push(#segments))*;
                 #url
             };
         }

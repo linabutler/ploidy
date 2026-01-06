@@ -1,11 +1,11 @@
 //! Language-agnostic intermediate representation types.
 
+use serde_json::Number;
+
 use crate::parse::{ComponentRef, Method, path::PathSegment};
 
-use super::visitor::{Visitable, Visitor};
-
 /// A schema type ready for code generation.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub enum IrType<'a> {
     /// A primitive type.
     Primitive(PrimitiveIrType),
@@ -26,10 +26,17 @@ pub enum IrType<'a> {
 }
 
 impl IrType<'_> {
-    /// Visits the inner types within this schema type.
-    #[inline]
-    pub fn visit<'a, F: Visitable<'a>>(&'a self) -> impl Iterator<Item = F> {
-        Visitor::new(self).filter_map(F::accept)
+    pub fn as_ref(&self) -> IrTypeRef<'_> {
+        match self {
+            Self::Schema(ty) => IrTypeRef::Schema(ty),
+            Self::Inline(ty) => IrTypeRef::Inline(ty),
+            Self::Array(ty) => IrTypeRef::Array(ty),
+            Self::Map(ty) => IrTypeRef::Map(ty),
+            Self::Nullable(ty) => IrTypeRef::Nullable(ty),
+            Self::Ref(r) => IrTypeRef::Ref(r),
+            &Self::Primitive(ty) => IrTypeRef::Primitive(ty),
+            Self::Any => IrTypeRef::Any,
+        }
     }
 }
 
@@ -52,6 +59,18 @@ impl<'a> From<InlineIrType<'a>> for IrType<'a> {
 }
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub enum IrTypeRef<'a> {
+    Primitive(PrimitiveIrType),
+    Array(&'a IrType<'a>),
+    Map(&'a IrType<'a>),
+    Nullable(&'a IrType<'a>),
+    Ref(&'a ComponentRef),
+    Schema(&'a SchemaIrType<'a>),
+    Inline(&'a InlineIrType<'a>),
+    Any,
+}
+
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub enum PrimitiveIrType {
     String,
     I32,
@@ -67,7 +86,7 @@ pub enum PrimitiveIrType {
 }
 
 /// A named schema type.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub enum SchemaIrType<'a> {
     /// An enum with named variants.
     Enum(&'a str, IrEnum<'a>),
@@ -77,14 +96,6 @@ pub enum SchemaIrType<'a> {
     Tagged(&'a str, IrTagged<'a>),
     /// An untagged union.
     Untagged(&'a str, IrUntagged<'a>),
-}
-
-impl SchemaIrType<'_> {
-    /// Visits the inner types within this named schema type.
-    #[inline]
-    pub fn visit<'a, F: Visitable<'a>>(&'a self) -> impl Iterator<Item = F> {
-        Visitor::for_schema_ty(self).filter_map(F::accept)
-    }
 }
 
 impl<'a> SchemaIrType<'a> {
@@ -99,7 +110,7 @@ impl<'a> SchemaIrType<'a> {
 }
 
 /// An inline schema type.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub enum InlineIrType<'a> {
     Enum(InlineIrTypePath<'a>, IrEnum<'a>),
     Struct(InlineIrTypePath<'a>, IrStruct<'a>),
@@ -115,65 +126,68 @@ impl<'a> InlineIrType<'a> {
 }
 
 /// A path to an inline type.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub struct InlineIrTypePath<'a> {
     pub root: InlineIrTypePathRoot<'a>,
     pub segments: Vec<InlineIrTypePathSegment<'a>>,
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub enum InlineIrTypePathRoot<'a> {
     Resource(&'a str),
     Type(&'a str),
 }
 
 /// A segment of an inline type path.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub enum InlineIrTypePathSegment<'a> {
     Operation(&'a str),
     Parameter(&'a str),
     Request,
     Response,
-    Field(&'a str),
+    Field(IrStructFieldName<'a>),
     MapValue,
     ArrayItem,
     Variant(usize),
 }
 
 /// An enum type.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub struct IrEnum<'a> {
     pub description: Option<&'a str>,
     pub variants: Vec<IrEnumVariant<'a>>,
 }
 
 /// A variant of an enum.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub enum IrEnumVariant<'a> {
     String(&'a str),
+    Number(Number),
+    Bool(bool),
 }
 
 /// A struct, created from a schema with named properties.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub struct IrStruct<'a> {
     pub description: Option<&'a str>,
     pub fields: Vec<IrStructField<'a>>,
 }
 
 /// A field in a struct.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub struct IrStructField<'a> {
-    pub name: &'a str,
+    pub name: IrStructFieldName<'a>,
     pub ty: IrType<'a>,
     pub required: bool,
     pub description: Option<&'a str>,
     pub inherited: bool,
     pub discriminator: bool,
+    pub flattened: bool,
 }
 
 /// A tagged union, created from a `oneOf` schema
 /// with an explicit `discriminator`.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub struct IrTagged<'a> {
     pub description: Option<&'a str>,
     pub tag: &'a str,
@@ -181,7 +195,7 @@ pub struct IrTagged<'a> {
 }
 
 /// A variant of a tagged union.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub struct IrTaggedVariant<'a> {
     pub name: &'a str,
     pub aliases: Vec<&'a str>,
@@ -191,15 +205,16 @@ pub struct IrTaggedVariant<'a> {
 /// An untagged union, created from a `oneOf` schema
 /// without a discriminator, or an OpenAPI 3.1 schema
 /// with multiple types in its `type` field.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Eq, Hash, PartialEq)]
 pub struct IrUntagged<'a> {
     pub description: Option<&'a str>,
     pub variants: Vec<IrUntaggedVariant<'a>>,
 }
 
 /// A hint that's used to generate a more descriptive name
-/// for an untagged union variant.
-#[derive(Clone, Copy, Debug)]
+/// for an untagged union variant. These are emitted for
+/// `oneOf` schemas without a discriminator.
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub enum IrUntaggedVariantNameHint {
     Primitive(PrimitiveIrType),
     Array,
@@ -207,8 +222,24 @@ pub enum IrUntaggedVariantNameHint {
     Index(usize),
 }
 
+/// A struct field name, either explicit or generated from a hint.
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub enum IrStructFieldName<'a> {
+    /// Explicit name from a schema or reference.
+    Name(&'a str),
+    /// Generated name, deferred until generation time.
+    Hint(IrStructFieldNameHint),
+}
+
+/// A hint that's used to generate a name for a struct field.
+/// These are emitted for inline `anyOf` schemas.
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub enum IrStructFieldNameHint {
+    Index(usize),
+}
+
 /// A variant of an untagged union.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Eq, Hash, PartialEq)]
 pub enum IrUntaggedVariant<'a> {
     Some(IrUntaggedVariantNameHint, IrType<'a>),
     Null,
@@ -220,7 +251,7 @@ impl From<PrimitiveIrType> for IrUntaggedVariant<'_> {
     }
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub enum IrTypeName<'a> {
     Schema(&'a str),
     Inline(InlineIrTypePath<'a>),
@@ -244,6 +275,26 @@ pub struct IrOperation<'a> {
     pub response: Option<IrResponse<'a>>,
 }
 
+impl<'a> IrOperation<'a> {
+    /// Returns an iterator over all the types that this operation
+    /// references directly.
+    pub fn types(&self) -> impl Iterator<Item = &IrType<'a>> {
+        itertools::chain!(
+            self.params.iter().map(|param| match param {
+                IrParameter::Path(info) => &info.ty,
+                IrParameter::Query(info) => &info.ty,
+            }),
+            self.request.as_ref().and_then(|request| match request {
+                IrRequest::Json(ty) => Some(ty),
+                IrRequest::Multipart => None,
+            }),
+            self.response.as_ref().map(|response| match response {
+                IrResponse::Json(ty) => ty,
+            })
+        )
+    }
+}
+
 #[derive(Clone, Debug)]
 pub enum IrResponse<'a> {
     Json(IrType<'a>),
@@ -261,7 +312,7 @@ pub enum IrParameter<'a> {
     Query(IrParameterInfo<'a>),
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub enum IrParameterStyle {
     Form { exploded: bool },
     PipeDelimited,

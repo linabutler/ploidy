@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeSet;
 
 use proc_macro2::TokenStream;
 use quote::{ToTokens, TokenStreamExt, quote};
@@ -10,26 +10,11 @@ use super::context::CodegenContext;
 /// Generates the `types/mod.rs` module.
 pub struct CodegenTypesModule<'a> {
     context: &'a CodegenContext<'a>,
-    resources_by_type: BTreeMap<&'a str, BTreeSet<&'a str>>,
 }
 
 impl<'a> CodegenTypesModule<'a> {
     pub fn new(context: &'a CodegenContext<'a>) -> Self {
-        let mut resources_by_type = BTreeMap::<&str, BTreeSet<&str>>::new();
-        for view in context.spec.operations() {
-            let resource = view.op().resource;
-            for v in view.refs() {
-                resources_by_type
-                    .entry(v.name())
-                    .or_default()
-                    .insert(resource);
-            }
-        }
-
-        Self {
-            context,
-            resources_by_type,
-        }
+        Self { context }
     }
 }
 
@@ -38,12 +23,14 @@ impl ToTokens for CodegenTypesModule<'_> {
         let mut mods = Vec::new();
         let mut uses = Vec::new();
 
-        for (name, info) in self.context.map.iter() {
-            let Some(resources) = self.resources_by_type.get(name) else {
+        for (name, view) in self.context.graph.schemas() {
+            let Some(info) = self.context.map.0.get(name) else {
                 continue;
             };
-
-            let cfg_attr = cfg_attr(resources);
+            let resources: BTreeSet<_> = view.used_by().map(|op| op.op().resource).collect();
+            let Some(cfg_attr) = cfg_attr(&resources) else {
+                continue;
+            };
 
             let module = &info.module;
             mods.push(quote! {
