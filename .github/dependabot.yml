@@ -1,0 +1,15 @@
+# Dependabot configuration file options:
+# https://docs.github.com/code-security/dependabot/dependabot-version-updates/configuration-options-for-the-dependabot.yml-file
+
+version: 2
+updates:
+  - package-ecosystem: "cargo" # See documentation for possible values
+    directories:
+      - "/"
+      - "/ploidy"
+      - "/ploidy-core"
+      - "/ploidy-pointer"
+      - "/ploidy-pointer-derive"
+      - "/ploidy-util"
+    schedule:
+      interval: "weekly"
