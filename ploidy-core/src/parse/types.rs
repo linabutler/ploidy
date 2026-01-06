@@ -76,7 +76,7 @@ impl PathItem {
 /// An HTTP operation.
 #[derive(Debug, Deserialize, JsonPointee)]
 #[serde(rename_all = "camelCase")]
-#[pointer(rename_all = "camelCase")]
+#[ploidy(rename_all = "camelCase")]
 pub struct Operation {
     #[serde(default)]
     pub description: Option<String>,
@@ -102,7 +102,7 @@ impl Operation {
 pub struct Parameter {
     pub name: String,
     #[serde(rename = "in")]
-    #[pointer(rename = "in")]
+    #[ploidy(rename = "in")]
     pub location: ParameterLocation,
     #[serde(default)]
     pub required: bool,
@@ -118,7 +118,7 @@ pub struct Parameter {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, JsonPointee)]
 #[serde(rename_all = "lowercase")]
-#[pointer(untagged, rename_all = "lowercase")]
+#[ploidy(untagged, rename_all = "lowercase")]
 pub enum ParameterLocation {
     Path,
     Query,
@@ -128,7 +128,7 @@ pub enum ParameterLocation {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, JsonPointee)]
 #[serde(rename_all = "camelCase")]
-#[pointer(untagged, rename_all = "camelCase")]
+#[ploidy(untagged, rename_all = "camelCase")]
 pub enum ParameterStyle {
     Matrix,
     Label,
@@ -204,7 +204,7 @@ pub struct MediaType {
 /// Components section containing reusable schemas.
 #[derive(Debug, Default, Deserialize, JsonPointee)]
 #[serde(rename_all = "camelCase")]
-#[pointer(rename_all = "camelCase")]
+#[ploidy(rename_all = "camelCase")]
 pub struct Components {
     #[serde(default)]
     pub schemas: IndexMap<String, Schema>,
@@ -235,13 +235,13 @@ pub struct Components {
 /// inline definition.
 ///
 /// The type uses `#[serde(untagged)]` to match the OpenAPI specification's
-/// untagged union semantics, and `#[pointer(untagged)]` for JSON Pointer traversal.
+/// untagged union semantics, and `#[ploidy(untagged)]` for JSON Pointer traversal.
 #[derive(Clone, Debug, Deserialize, JsonPointee)]
 #[serde(untagged)]
-#[pointer(untagged)]
+#[ploidy(untagged)]
 pub enum RefOr<T> {
     /// A reference to a component definition via `$ref`.
-    #[pointer(skip)]
+    #[ploidy(skip)]
     Ref(Ref),
     /// An inline component definition.
     Other(T),
@@ -268,7 +268,7 @@ pub struct Ref {
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, JsonPointee)]
 #[serde(rename_all = "lowercase")]
-#[pointer(untagged, rename_all = "lowercase")]
+#[ploidy(untagged, rename_all = "lowercase")]
 pub enum Ty {
     String,
     Integer,
@@ -281,7 +281,7 @@ pub enum Ty {
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, JsonPointee)]
 #[serde(rename_all = "lowercase")]
-#[pointer(untagged, rename_all = "lowercase")]
+#[ploidy(untagged, rename_all = "lowercase")]
 pub enum Format {
     #[serde(rename = "date-time")]
     DateTime,
@@ -302,7 +302,7 @@ pub enum Format {
 
 #[derive(Clone, Debug, Deserialize, JsonPointee)]
 #[serde(untagged)]
-#[pointer(untagged)]
+#[ploidy(untagged)]
 pub enum AdditionalProperties {
     Bool(bool),
     RefOrSchema(RefOrSchema),
@@ -311,10 +311,10 @@ pub enum AdditionalProperties {
 /// An OpenAPI schema definition.
 #[derive(Debug, Clone, Default, Deserialize, JsonPointee)]
 #[serde(rename_all = "camelCase")]
-#[pointer(rename_all = "camelCase")]
+#[ploidy(rename_all = "camelCase")]
 pub struct Schema {
     #[serde(rename = "type", default, deserialize_with = "deserialize_type")]
-    #[pointer(rename = "type")]
+    #[ploidy(rename = "type")]
     pub ty: Vec<Ty>,
     #[serde(default)]
     pub format: Option<Format>,
@@ -353,7 +353,7 @@ pub struct Schema {
 /// A discriminator for a polymorphic type.
 #[derive(Debug, Clone, Deserialize, JsonPointee)]
 #[serde(rename_all = "camelCase")]
-#[pointer(rename_all = "camelCase")]
+#[ploidy(rename_all = "camelCase")]
 pub struct Discriminator {
     pub property_name: String,
     #[serde(default)]
@@ -364,7 +364,7 @@ pub struct Discriminator {
 #[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, JsonPointee)]
 pub struct ComponentRef {
     /// The parsed JSON pointer (without the '#' prefix)
-    #[pointer(skip)]
+    #[ploidy(skip)]
     pointer: JsonPointer<'static>,
 }
 

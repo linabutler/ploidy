@@ -8,12 +8,12 @@
 //!
 //! Container-level attributes apply to structs and enums:
 //!
-//! * `#[pointer(tag = "field")]` - Use the internally tagged enum representation,
+//! * `#[ploidy(tag = "field")]` - Use the internally tagged enum representation,
 //!   with the given field name for the tag. Supported on enums only.
-//! * `#[pointer(tag = "t", content = "c")]` - Use the adjacently tagged enum representation,
+//! * `#[ploidy(tag = "t", content = "c")]` - Use the adjacently tagged enum representation,
 //!   with the given field names for the tag and contents. Supported on enums only.
-//! * `#[pointer(untagged)]` - Use the untagged enum representation. Supported on enums only.
-//! * `#[pointer(rename_all = "case")]` - Rename all struct fields or enum variants
+//! * `#[ploidy(untagged)]` - Use the untagged enum representation. Supported on enums only.
+//! * `#[ploidy(rename_all = "case")]` - Rename all struct fields or enum variants
 //!   according to the given case. The supported cases are `lowercase`, `UPPERCASE`,
 //!   `PascalCase`, `camelCase`, `snake_case`, `SCREAMING_SNAKE_CASE`, `kebab-case`, and
 //!   `SCREAMING-KEBAB-CASE`.
@@ -22,20 +22,20 @@
 //!
 //! Variant-level attributes apply to enum variants:
 //!
-//! * `#[pointer(rename = "name")]` - Access this variant using the given name,
+//! * `#[ploidy(rename = "name")]` - Access this variant using the given name,
 //!   instead of its Rust name.
-//! * `#[pointer(skip)]` - Make this variant inaccessible, except for the tag field
+//! * `#[ploidy(skip)]` - Make this variant inaccessible, except for the tag field
 //!   if using the internally or adjacently tagged enum representation.
 //!
 //! # Field Attributes
 //!
 //! Field-level attributes apply to struct and enum variant fields:
 //!
-//! * `#[pointer(rename = "name")]` - Access this variant using the given name,
+//! * `#[ploidy(rename = "name")]` - Access this variant using the given name,
 //!   instead of its Rust name.
-//! * `#[pointer(flatten)]` - Remove one layer of structure between the container
+//! * `#[ploidy(flatten)]` - Remove one layer of structure between the container
 //!   and field. Supported on named fields only.
-//! * `#[pointer(skip)]` - Exclude the field from pointer access.
+//! * `#[ploidy(skip)]` - Exclude the field from pointer access.
 //!
 //! # Examples
 //!
@@ -47,7 +47,7 @@
 //! #[derive(JsonPointee)]
 //! struct User {
 //!     name: String,
-//!     #[pointer(flatten)]
+//!     #[ploidy(flatten)]
 //!     contact: ContactInfo,
 //! }
 //!
@@ -86,10 +86,10 @@
 //! # use ploidy_pointer::{BadJsonPointer, JsonPointee, JsonPointer};
 //! # fn main() -> Result<(), Box<dyn std::error::Error>> {
 //! #[derive(JsonPointee)]
-//! #[pointer(rename_all = "snake_case")]
+//! #[ploidy(rename_all = "snake_case")]
 //! enum ApiResponse {
 //!     SuccessResponse { data: String },
-//!     #[pointer(rename = "error")]
+//!     #[ploidy(rename = "error")]
 //!     ErrorResponse { message: String },
 //! }
 //!
@@ -150,7 +150,7 @@
 //! # use ploidy_pointer::{BadJsonPointer, JsonPointee, JsonPointer};
 //! # fn main() -> Result<(), Box<dyn std::error::Error>> {
 //! #[derive(JsonPointee)]
-//! #[pointer(tag = "type")]
+//! #[ploidy(tag = "type")]
 //! enum Message {
 //!     Text { content: String },
 //!     Image { url: String },
@@ -180,7 +180,7 @@
 //! # use ploidy_pointer::{BadJsonPointer, JsonPointee, JsonPointer};
 //! # fn main() -> Result<(), Box<dyn std::error::Error>> {
 //! #[derive(JsonPointee)]
-//! #[pointer(tag = "type", content = "value")]
+//! #[ploidy(tag = "type", content = "value")]
 //! enum Message {
 //!     Text { content: String },
 //!     Image { url: String },
@@ -210,7 +210,7 @@
 //! # use ploidy_pointer::{BadJsonPointer, JsonPointee, JsonPointer};
 //! # fn main() -> Result<(), Box<dyn std::error::Error>> {
 //! #[derive(JsonPointee)]
-//! #[pointer(untagged)]
+//! #[ploidy(untagged)]
 //! enum Message {
 //!     Text { content: String },
 //!     Image { url: String },
@@ -245,7 +245,7 @@ use syn::{
 /// Derives the `JsonPointee` trait for JSON Pointer (RFC 6901) traversal.
 ///
 /// See the [module documentation][crate] for detailed usage and examples.
-#[proc_macro_derive(JsonPointee, attributes(pointer))]
+#[proc_macro_derive(JsonPointee, attributes(ploidy))]
 pub fn derive_pointee(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
     let input = parse_macro_input!(input as DeriveInput);
     derive_for(&input)
@@ -1462,7 +1462,7 @@ enum ContainerAttr {
 
 impl ContainerAttr {
     fn parse_all(attr: &Attribute) -> syn::Result<Vec<Self>> {
-        if !attr.path().is_ident("pointer") {
+        if !attr.path().is_ident("ploidy") {
             return Ok(vec![]);
         }
         let mut attrs = vec![];
@@ -1500,7 +1500,7 @@ enum FieldAttr {
 
 impl FieldAttr {
     fn parse_all(attr: &Attribute) -> syn::Result<Vec<Self>> {
-        if !attr.path().is_ident("pointer") {
+        if !attr.path().is_ident("ploidy") {
             return Ok(vec![]);
         }
         let mut attrs = vec![];
@@ -1528,7 +1528,7 @@ enum VariantAttr {
 
 impl VariantAttr {
     fn parse_all(attr: &Attribute) -> syn::Result<Vec<Self>> {
-        if !attr.path().is_ident("pointer") {
+        if !attr.path().is_ident("ploidy") {
             return Ok(vec![]);
         }
         let mut attrs = vec![];
