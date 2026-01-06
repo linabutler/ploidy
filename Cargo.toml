@@ -9,16 +9,16 @@ members = [
 resolver = "2"
 
 [workspace.package]
-version = "0.2.0"
+version = "0.3.0"
 license = "Apache-2.0"
 edition = "2024"
 repository = "https://github.com/linabutler/ploidy"
-keywords = ["openapi", "swagger"]
+keywords = ["codegen", "openapi", "swagger"]
 
 [workspace.dependencies]
-ploidy-core = { path = "ploidy-core", version = "0.2.0" }
-ploidy-pointer = { path = "ploidy-pointer", version = "0.2.0" }
-ploidy-pointer-derive = { path = "ploidy-pointer-derive", version = "0.2.0" }
+ploidy-core = { path = "ploidy-core", version = "0.3.0" }
+ploidy-pointer = { path = "ploidy-pointer", version = "0.3.0" }
+ploidy-pointer-derive = { path = "ploidy-pointer-derive", version = "0.3.0" }
 
 [workspace.lints.rust]
 unsafe_code = "forbid"

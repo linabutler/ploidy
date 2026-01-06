@@ -605,7 +605,7 @@ dependencies = [
 
 [[package]]
 name = "ploidy"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "cargo_toml",
  "clap",
@@ -617,7 +617,7 @@ dependencies = [
 
 [[package]]
 name = "ploidy-core"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "by_address",
  "cargo_toml",
@@ -646,7 +646,7 @@ dependencies = [
 
 [[package]]
 name = "ploidy-pointer"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "chrono",
  "indexmap",
@@ -660,7 +660,7 @@ dependencies = [
 
 [[package]]
 name = "ploidy-pointer-derive"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "heck",
  "itertools",
@@ -672,7 +672,7 @@ dependencies = [
 
 [[package]]
 name = "ploidy-util"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "chrono",
  "itertools",
