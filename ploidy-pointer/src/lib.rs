@@ -3,6 +3,7 @@ use std::{
     borrow::Cow,
     collections::{BTreeMap, HashMap},
     fmt::{Debug, Display},
+    hash::BuildHasher,
     ops::{Deref, Range},
     rc::Rc,
     sync::Arc,
@@ -340,7 +341,11 @@ impl<T: JsonPointee> JsonPointee for Vec<T> {
     }
 }
 
-impl<T: JsonPointee> JsonPointee for HashMap<String, T> {
+impl<T, H> JsonPointee for HashMap<String, T, H>
+where
+    T: JsonPointee,
+    H: BuildHasher + 'static,
+{
     fn resolve(&self, pointer: JsonPointer<'_>) -> Result<&dyn JsonPointee, BadJsonPointer> {
         let Some(key) = pointer.head() else {
             return Ok(self);
@@ -387,7 +392,11 @@ impl<T: JsonPointee> JsonPointee for BTreeMap<String, T> {
 }
 
 #[cfg(feature = "indexmap")]
-impl<T: JsonPointee> JsonPointee for indexmap::IndexMap<String, T> {
+impl<T, H> JsonPointee for indexmap::IndexMap<String, T, H>
+where
+    T: JsonPointee,
+    H: BuildHasher + 'static,
+{
     fn resolve(&self, pointer: JsonPointer<'_>) -> Result<&dyn JsonPointee, BadJsonPointer> {
         let Some(key) = pointer.head() else {
             return Ok(self);
