@@ -1,6 +1,7 @@
 use std::collections::BTreeSet;
 
 use indexmap::IndexMap;
+use itertools::Itertools;
 use ploidy_pointer::JsonPointee;
 
 use crate::parse::{ComponentRef, Document, RefOrSchema, Schema};
@@ -11,7 +12,7 @@ pub fn all_fields<'a>(
     doc: &'a Document,
     schema: &'a Schema,
 ) -> impl Iterator<Item = (&'a str, IrSchemaField<'a>)> {
-    let ancestors = Vec::from_iter(Ancestors::new(doc, schema));
+    let ancestors = Ancestors::new(doc, schema).collect_vec();
 
     let discriminators: BTreeSet<_> = ancestors
         .iter()

@@ -4,43 +4,43 @@ use quote::{ToTokens, TokenStreamExt, quote};
 use syn::Ident;
 
 use crate::{
-    codegen::{rust::doc_attrs, unique::UniqueNameSpace},
+    codegen::unique::UniqueNameSpace,
     ir::{
-        IrOperation, IrParameter, IrParameterInfo, IrParameterStyle, IrRequest, IrResponse, IrType,
+        IrOperationView, IrParameterStyle, IrParameterView, IrPathParameter, IrQueryParameter,
+        IrRequestView, IrResponseView, IrTypeView,
     },
     parse::{Method, path::PathFragment},
 };
 
-use super::{context::CodegenContext, naming::CodegenIdent, ref_::CodegenRef};
+use super::{doc_attrs, naming::CodegenIdent, ref_::CodegenRef};
 
 /// Generates a single client method for an API operation.
 pub struct CodegenOperation<'a> {
-    context: &'a CodegenContext<'a>,
-    op: &'a IrOperation<'a>,
+    op: &'a IrOperationView<'a>,
 }
 
 impl<'a> CodegenOperation<'a> {
-    pub fn new(context: &'a CodegenContext<'a>, op: &'a IrOperation<'a>) -> Self {
-        Self { context, op }
+    pub fn new(op: &'a IrOperationView<'a>) -> Self {
+        Self { op }
     }
 
     /// Generates code to build the request URL, with path parameters substituted.
     fn url(
         &self,
         url: CodegenIdent<'_>,
-        params: &[(CodegenIdent<'_>, &IrParameterInfo<'_>)],
+        params: &[(CodegenIdent<'_>, &IrParameterView<'_, IrPathParameter>)],
     ) -> TokenStream {
         let segments = self
             .op
-            .path
-            .iter()
+            .path()
+            .segments()
             .map(|segment| match segment.fragments() {
                 [] => quote! { "" },
                 [PathFragment::Literal(text)] => quote! { #text },
                 [PathFragment::Param(name)] => {
                     let (ident, _) = params
                         .iter()
-                        .find(|(_, param)| param.name == *name)
+                        .find(|(_, param)| param.name() == *name)
                         .unwrap();
                     quote!(#ident)
                 }
@@ -67,7 +67,7 @@ impl<'a> CodegenOperation<'a> {
                             // directly.
                             let (ident, _) = params
                                 .iter()
-                                .find(|(_, param)| param.name == *name)
+                                .find(|(_, param)| param.name() == *name)
                                 .unwrap();
                             ident
                         });
@@ -91,13 +91,13 @@ impl<'a> CodegenOperation<'a> {
     fn query(
         &self,
         url: CodegenIdent<'_>,
-        params: &[(CodegenIdent<'_>, &IrParameterInfo<'_>)],
+        params: &[(CodegenIdent<'_>, &IrParameterView<'_, IrQueryParameter>)],
     ) -> TokenStream {
         let appends = params
             .iter()
             .map(|(ident, param)| {
-                let name = &param.name;
-                let style = match param.style {
+                let name = param.name();
+                let style = match param.style() {
                     Some(IrParameterStyle::DeepObject) => {
                         quote!(::ploidy_util::QueryStyle::DeepObject)
                     }
@@ -134,7 +134,7 @@ impl<'a> CodegenOperation<'a> {
 
 impl ToTokens for CodegenOperation<'_> {
     fn to_tokens(&self, tokens: &mut TokenStream) {
-        let operation_id = self.op.id;
+        let operation_id = self.op.id();
         let method_name = CodegenIdent::Method(operation_id);
 
         let mut space = UniqueNameSpace::new();
@@ -142,17 +142,13 @@ impl ToTokens for CodegenOperation<'_> {
 
         let paths = self
             .op
-            .params
-            .iter()
-            .filter_map(|param| match param {
-                IrParameter::Path(info) => Some(info),
-                _ => None,
-            })
-            .map(|param| (space.uniquify(param.name), param))
+            .path()
+            .params()
+            .map(|param| (space.uniquify(param.name()), param))
             .collect_vec();
         let paths = paths
             .iter()
-            .map(|(name, param)| (CodegenIdent::Param(name), *param))
+            .map(|(name, param)| (CodegenIdent::Param(name), param))
             .collect_vec();
         for (ident, _) in &paths {
             params.push(quote! { #ident: &str });
@@ -160,24 +156,20 @@ impl ToTokens for CodegenOperation<'_> {
 
         let queries = self
             .op
-            .params
-            .iter()
-            .filter_map(|param| match param {
-                IrParameter::Query(info) => Some(info),
-                _ => None,
-            })
-            .map(|param| (space.uniquify(param.name), param))
+            .query()
+            .map(|param| (space.uniquify(param.name()), param))
             .collect_vec();
         let queries = queries
             .iter()
-            .map(|(name, param)| (CodegenIdent::Param(name), *param))
+            .map(|(name, param)| (CodegenIdent::Param(name), param))
             .collect_vec();
         for (ident, param) in &queries {
-            let ty = if param.required || matches!(param.ty, IrType::Nullable(_)) {
-                let path = CodegenRef::new(self.context, &param.ty);
+            let view = param.ty();
+            let ty = if param.required() || matches!(view, IrTypeView::Nullable(_)) {
+                let path = CodegenRef::new(&view);
                 quote!(#path)
             } else {
-                let path = CodegenRef::new(self.context, &param.ty);
+                let path = CodegenRef::new(&view);
                 quote! { ::std::option::Option<#path> }
             };
             params.push(quote! { #ident: #ty });
@@ -189,29 +181,31 @@ impl ToTokens for CodegenOperation<'_> {
         let request_param = CodegenIdent::Param(&space.uniquify("request"));
         let form_param = CodegenIdent::Param(&space.uniquify("form"));
 
-        if let Some(body_info) = &self.op.request {
-            match body_info {
-                IrRequest::Json(ty) => {
-                    let param_type = CodegenRef::new(self.context, ty);
+        if let Some(request) = self.op.request() {
+            match request {
+                IrRequestView::Json(view) => {
+                    let param_type = CodegenRef::new(&view);
                     params.push(quote! { #request_param: impl Into<#param_type> });
                 }
-                IrRequest::Multipart => {
+                IrRequestView::Multipart => {
                     params.push(quote! { #form_param: reqwest::multipart::Form });
                 }
             }
         }
 
-        let return_type = match &self.op.response {
-            Some(IrResponse::Json(ty)) => CodegenRef::new(self.context, ty).into_token_stream(),
+        let return_type = match self.op.response() {
+            Some(response) => match response {
+                IrResponseView::Json(view) => CodegenRef::new(&view).into_token_stream(),
+            },
             None => quote! { () },
         };
 
         let build_url = self.url(url_var, &paths);
         let build_query = self.query(url_var, &queries);
 
-        let http_method = CodegenMethod(self.op.method);
-        let build_request = match &self.op.request {
-            Some(IrRequest::Json(_)) => quote! {
+        let http_method = CodegenMethod(self.op.method());
+        let build_request = match self.op.request() {
+            Some(IrRequestView::Json(_)) => quote! {
                 let response = self.client
                     .#http_method(#url_var)
                     .headers(self.headers.clone())
@@ -220,7 +214,7 @@ impl ToTokens for CodegenOperation<'_> {
                     .await?
                     .error_for_status()?;
             },
-            Some(IrRequest::Multipart) => quote! {
+            Some(IrRequestView::Multipart) => quote! {
                 let response = self.client
                     .#http_method(#url_var)
                     .headers(self.headers.clone())
@@ -239,7 +233,7 @@ impl ToTokens for CodegenOperation<'_> {
             },
         };
 
-        let parse_response = if self.op.response.is_some() {
+        let parse_response = if self.op.response().is_some() {
             quote! {
                 let body = response.bytes().await?;
                 let deserializer = &mut serde_json::Deserializer::from_slice(&body);
@@ -254,7 +248,7 @@ impl ToTokens for CodegenOperation<'_> {
             }
         };
 
-        let doc = self.op.description.map(doc_attrs);
+        let doc = self.op.description().map(doc_attrs);
 
         tokens.append_all(quote! {
             #doc

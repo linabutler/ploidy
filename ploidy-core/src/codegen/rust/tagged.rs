@@ -3,40 +3,38 @@ use proc_macro2::TokenStream;
 use quote::{ToTokens, TokenStreamExt, quote};
 
 use crate::{
-    codegen::{rust::CodegenIdent, unique::UniqueNameSpace},
-    ir::IrTagged,
+    codegen::unique::UniqueNameSpace,
+    ir::{IrTaggedView, IrTypeView, PrimitiveIrType, View},
 };
 
 use super::{
-    context::CodegenContext, derives::ExtraDerive, doc_attrs, naming::CodegenTypeName,
+    derives::ExtraDerive, doc_attrs, naming::CodegenIdent, naming::CodegenTypeName,
     ref_::CodegenRef,
 };
 
 #[derive(Clone, Copy, Debug)]
 pub struct CodegenTagged<'a> {
-    context: &'a CodegenContext<'a>,
     name: CodegenTypeName<'a>,
-    ty: &'a IrTagged<'a>,
+    ty: &'a IrTaggedView<'a>,
 }
 
 impl<'a> CodegenTagged<'a> {
-    pub fn new(
-        context: &'a CodegenContext,
-        name: CodegenTypeName<'a>,
-        ty: &'a IrTagged<'a>,
-    ) -> Self {
-        Self { context, name, ty }
+    pub fn new(name: CodegenTypeName<'a>, ty: &'a IrTaggedView<'a>) -> Self {
+        Self { name, ty }
     }
 }
 
 impl ToTokens for CodegenTagged<'_> {
     fn to_tokens(&self, tokens: &mut TokenStream) {
         let mut extra_derives = vec![];
-        let is_hashable = self
-            .ty
-            .variants
-            .iter()
-            .all(|variant| self.context.hashable(&variant.ty));
+        let is_hashable = self.ty.variants().all(|variant| {
+            variant.reachable().all(|view| {
+                !matches!(
+                    view,
+                    IrTypeView::Primitive(PrimitiveIrType::F32 | PrimitiveIrType::F64)
+                )
+            })
+        });
         if is_hashable {
             extra_derives.push(ExtraDerive::Eq);
             extra_derives.push(ExtraDerive::Hash);
@@ -45,17 +43,17 @@ impl ToTokens for CodegenTagged<'_> {
         let mut space = UniqueNameSpace::new();
         let variants = self
             .ty
-            .variants
-            .iter()
+            .variants()
             .map(|variant| {
                 // Look up the proper Rust type name.
-                let variant_name = CodegenIdent::Variant(&space.uniquify(variant.name));
-                let rust_type_name = CodegenRef::new(self.context, &variant.ty);
+                let view = variant.ty();
+                let variant_name = CodegenIdent::Variant(&space.uniquify(variant.name()));
+                let rust_type_name = CodegenRef::new(&view);
 
                 // Add `#[serde(alias = ...)]` attributes for multiple
                 // discriminator values that map to the same type.
                 let serde_attr = {
-                    let mut iter = variant.aliases.iter();
+                    let mut iter = variant.aliases().iter();
                     match iter.next() {
                         Some(&primary) => {
                             let mut aliases = iter.copied().peekable();
@@ -87,9 +85,9 @@ impl ToTokens for CodegenTagged<'_> {
             })
             .collect_vec();
 
-        let discriminator_field_literal = &self.ty.tag;
+        let discriminator_field_literal = self.ty.tag();
 
-        let doc_attrs = self.ty.description.map(doc_attrs);
+        let doc_attrs = self.ty.description().map(doc_attrs);
 
         let vs = variants.iter().map(|(variant, _)| variant);
         let fs = variants.iter().map(|(_, from_impl)| from_impl);

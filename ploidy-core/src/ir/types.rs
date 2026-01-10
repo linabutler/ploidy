@@ -127,20 +127,20 @@ impl<'a> InlineIrType<'a> {
 }
 
 /// A path to an inline type.
-#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub struct InlineIrTypePath<'a> {
     pub root: InlineIrTypePathRoot<'a>,
     pub segments: Vec<InlineIrTypePathSegment<'a>>,
 }
 
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub enum InlineIrTypePathRoot<'a> {
     Resource(&'a str),
     Type(&'a str),
 }
 
 /// A segment of an inline type path.
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub enum InlineIrTypePathSegment<'a> {
     Operation(&'a str),
     Parameter(&'a str),
@@ -224,7 +224,7 @@ pub enum IrUntaggedVariantNameHint {
 }
 
 /// A struct field name, either explicit or generated from a hint.
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub enum IrStructFieldName<'a> {
     /// Explicit name from a schema or reference.
     Name(&'a str),
@@ -234,7 +234,7 @@ pub enum IrStructFieldName<'a> {
 
 /// A hint that's used to generate a name for a struct field.
 /// These are emitted for inline `anyOf` schemas.
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub enum IrStructFieldNameHint {
     Index(usize),
 }

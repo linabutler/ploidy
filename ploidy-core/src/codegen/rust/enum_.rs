@@ -2,7 +2,7 @@ use proc_macro2::TokenStream;
 use quote::{ToTokens, TokenStreamExt, format_ident, quote};
 use syn::{Ident, parse_quote};
 
-use crate::ir::{IrEnum, IrEnumVariant};
+use crate::ir::{IrEnumVariant, IrEnumView};
 
 use super::{
     doc_attrs,
@@ -12,11 +12,11 @@ use super::{
 #[derive(Clone, Copy, Debug)]
 pub struct CodegenEnum<'a> {
     name: CodegenTypeName<'a>,
-    ty: &'a IrEnum<'a>,
+    ty: &'a IrEnumView<'a>,
 }
 
 impl<'a> CodegenEnum<'a> {
-    pub fn new(name: CodegenTypeName<'a>, ty: &'a IrEnum<'a>) -> Self {
+    pub fn new(name: CodegenTypeName<'a>, ty: &'a IrEnumView<'a>) -> Self {
         Self { name, ty }
     }
 }
@@ -26,7 +26,7 @@ impl ToTokens for CodegenEnum<'_> {
         // Non-string variants, and string variants that are either empty
         // or have no identifier characters, can't be represented as
         // Rust enum variants.
-        let has_unrepresentable = self.ty.variants.iter().any(|variant| match variant {
+        let has_unrepresentable = self.ty.variants().iter().any(|variant| match variant {
             IrEnumVariant::Number(_) | IrEnumVariant::Bool(_) => true,
             IrEnumVariant::String(s) => s
                 .chars()
@@ -40,7 +40,7 @@ impl ToTokens for CodegenEnum<'_> {
                 let name = self.name;
                 parse_quote!(#name)
             };
-            let doc_attrs = self.ty.description.map(doc_attrs);
+            let doc_attrs = self.ty.description().map(doc_attrs);
             tokens.append_all(quote! {
                 #doc_attrs
                 pub type #type_name = ::std::string::String;
@@ -51,7 +51,7 @@ impl ToTokens for CodegenEnum<'_> {
             let mut display_arms = Vec::new();
             let mut from_str_arms = Vec::new();
 
-            for variant in &self.ty.variants {
+            for variant in self.ty.variants() {
                 match variant {
                     IrEnumVariant::String(json_value) => {
                         let variant_name = CodegenIdent::Variant(json_value);
@@ -80,7 +80,7 @@ impl ToTokens for CodegenEnum<'_> {
                 format!("can't serialize variant `{type_name}::{other_name}`");
             let expecting = format!("a variant of `{type_name}`");
 
-            let doc_attrs = self.ty.description.map(doc_attrs);
+            let doc_attrs = self.ty.description().map(doc_attrs);
 
             tokens.append_all(quote! {
                 #doc_attrs

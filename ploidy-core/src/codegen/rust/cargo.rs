@@ -5,9 +5,7 @@ use itertools::Itertools;
 use serde::{Deserialize, Serialize};
 use toml::Value as TomlValue;
 
-use crate::codegen::IntoCode;
-
-use super::context::CodegenContext;
+use crate::codegen::{IntoCode, rust::CodegenGraph};
 
 type TomlMap = toml::map::Map<String, TomlValue>;
 
@@ -15,17 +13,18 @@ const PLOIDY_VERSION: &str = env!("CARGO_PKG_VERSION");
 
 #[derive(Clone, Debug)]
 pub struct CodegenCargoManifest<'a> {
-    context: &'a CodegenContext<'a>,
+    graph: &'a CodegenGraph<'a>,
+    manifest: &'a Manifest<CargoMetadata>,
 }
 
 impl<'a> CodegenCargoManifest<'a> {
     #[inline]
-    pub fn new(context: &'a CodegenContext<'a>) -> Self {
-        Self { context }
+    pub fn new(graph: &'a CodegenGraph<'a>, manifest: &'a Manifest<CargoMetadata>) -> Self {
+        Self { graph, manifest }
     }
 
     pub fn to_manifest(self) -> Manifest<CargoMetadata> {
-        let mut manifest = self.context.manifest.clone();
+        let mut manifest = self.manifest.clone();
 
         // Ploidy generates Rust 2024-compatible code.
         manifest
@@ -37,10 +36,9 @@ impl<'a> CodegenCargoManifest<'a> {
 
         let features = {
             let names: BTreeSet<_> = self
-                .context
                 .graph
                 .operations()
-                .map(|view| view.as_operation().resource)
+                .map(|view| view.resource())
                 .filter(|&name| name != "full")
                 .collect();
             let mut features: BTreeMap<_, _> = names

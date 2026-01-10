@@ -3,18 +3,18 @@ use std::collections::BTreeSet;
 use proc_macro2::TokenStream;
 use quote::{ToTokens, TokenStreamExt, quote};
 
-use crate::codegen::IntoCode;
+use crate::{codegen::IntoCode, ir::View};
 
-use super::context::CodegenContext;
+use super::{graph::CodegenGraph, naming::SchemaIdent};
 
 /// Generates the `types/mod.rs` module.
 pub struct CodegenTypesModule<'a> {
-    context: &'a CodegenContext<'a>,
+    graph: &'a CodegenGraph<'a>,
 }
 
 impl<'a> CodegenTypesModule<'a> {
-    pub fn new(context: &'a CodegenContext<'a>) -> Self {
-        Self { context }
+    pub fn new(graph: &'a CodegenGraph<'a>) -> Self {
+        Self { graph }
     }
 }
 
@@ -23,25 +23,21 @@ impl ToTokens for CodegenTypesModule<'_> {
         let mut mods = Vec::new();
         let mut uses = Vec::new();
 
-        for (name, view) in self.context.graph.schemas() {
-            let Some(info) = self.context.map.0.get(name) else {
-                continue;
-            };
-            let resources: BTreeSet<_> = view
-                .used_by()
-                .map(|op| op.as_operation().resource)
-                .collect();
+        for view in self.graph.schemas() {
+            let resources: BTreeSet<_> = view.used_by().map(|op| op.resource()).collect();
             let Some(cfg_attr) = cfg_attr(&resources) else {
                 continue;
             };
 
-            let module = &info.module;
+            let ext = view.extensions();
+            let info = ext.get::<SchemaIdent>().unwrap();
+            let module = info.module();
             mods.push(quote! {
                 #cfg_attr
                 pub mod #module;
             });
 
-            let ty = &info.ty;
+            let ty = info.ty();
             uses.push(quote! {
                 #cfg_attr
                 pub use #module::#ty;

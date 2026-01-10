@@ -9,16 +9,31 @@ use crate::ir::{
     IrUntaggedVariantNameHint, PrimitiveIrType,
 };
 
-#[derive(Clone, Copy, Debug)]
+/// A name for a schema type that's guaranteed to be unique through
+/// different identifier case transformations.
+#[derive(Debug, Eq, Ord, PartialEq, PartialOrd)]
+pub struct SchemaIdent(pub String);
+
+impl SchemaIdent {
+    pub fn module(&self) -> CodegenIdent<'_> {
+        CodegenIdent::Module(&self.0)
+    }
+
+    pub fn ty(&self) -> CodegenIdent<'_> {
+        CodegenIdent::Type(&self.0)
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
 pub enum CodegenTypeName<'a> {
-    Schema(&'a str, &'a Ident),
+    Schema(&'a str, &'a SchemaIdent),
     Inline(&'a InlineIrTypePath<'a>),
 }
 
 impl ToTokens for CodegenTypeName<'_> {
     fn to_tokens(&self, tokens: &mut TokenStream) {
         match self {
-            &Self::Schema(_, ident) => tokens.append(ident.clone()),
+            &Self::Schema(_, ident) => tokens.append_all(ident.ty().to_token_stream()),
             Self::Inline(path) => {
                 let ident = path
                     .segments

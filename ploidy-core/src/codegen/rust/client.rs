@@ -2,20 +2,20 @@ use itertools::Itertools;
 use proc_macro2::TokenStream;
 use quote::{ToTokens, TokenStreamExt, quote};
 
-use crate::codegen::{IntoCode, rust::CodegenIdent};
+use crate::codegen::IntoCode;
 
-use super::context::CodegenContext;
+use super::{graph::CodegenGraph, naming::CodegenIdent};
 
 /// Generates the `client/mod.rs` source file.
 #[derive(Clone, Copy, Debug)]
 pub struct CodegenClientModule<'a> {
-    context: &'a CodegenContext<'a>,
+    graph: &'a CodegenGraph<'a>,
     resources: &'a [&'a str],
 }
 
 impl<'a> CodegenClientModule<'a> {
-    pub fn new(context: &'a CodegenContext<'a>, resources: &'a [&'a str]) -> Self {
-        Self { context, resources }
+    pub fn new(graph: &'a CodegenGraph<'a>, resources: &'a [&'a str]) -> Self {
+        Self { graph, resources }
     }
 }
 
@@ -34,7 +34,7 @@ impl ToTokens for CodegenClientModule<'_> {
             .collect_vec();
 
         let client_doc = {
-            let info = self.context.graph.spec().info;
+            let info = self.graph.spec().info;
             format!("API client for {} (version {})", info.title, info.version)
         };
 

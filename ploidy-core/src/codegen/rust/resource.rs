@@ -4,30 +4,24 @@ use quote::{ToTokens, TokenStreamExt, quote};
 
 use crate::{
     codegen::IntoCode,
-    ir::{InlineIrType, InlineIrTypePathRoot, IrOperationView},
+    ir::{InlineIrTypePathRoot, InlineIrTypeView, IrOperationView},
 };
 
 use super::{
-    context::CodegenContext, enum_::CodegenEnum, naming::CodegenTypeName,
-    operation::CodegenOperation, struct_::CodegenStruct, untagged::CodegenUntagged,
+    enum_::CodegenEnum, naming::CodegenTypeName, operation::CodegenOperation,
+    struct_::CodegenStruct, untagged::CodegenUntagged,
 };
 
 /// Generates a feature-gated `impl Client` block for a resource,
 /// with all its operations.
 pub struct CodegenResource<'a> {
-    context: &'a CodegenContext<'a>,
     resource: &'a str,
     operations: &'a [IrOperationView<'a>],
 }
 
 impl<'a> CodegenResource<'a> {
-    pub fn new(
-        context: &'a CodegenContext<'a>,
-        resource: &'a str,
-        operations: &'a [IrOperationView<'a>],
-    ) -> Self {
+    pub fn new(resource: &'a str, operations: &'a [IrOperationView<'a>]) -> Self {
         Self {
-            context,
             resource,
             operations,
         }
@@ -40,9 +34,7 @@ impl ToTokens for CodegenResource<'_> {
         let methods: Vec<TokenStream> = self
             .operations
             .iter()
-            .map(|view| {
-                CodegenOperation::new(self.context, view.as_operation()).into_token_stream()
-            })
+            .map(|view| CodegenOperation::new(view).into_token_stream())
             .collect();
 
         let mut inlines = self
@@ -56,17 +48,15 @@ impl ToTokens for CodegenResource<'_> {
                 // `CodegenSchemaType`.
                 matches!(ty.path().root, InlineIrTypePathRoot::Resource(r) if r == self.resource)
             })
-            .map(|ty| match ty {
-                InlineIrType::Enum(path, ty) => {
-                    CodegenEnum::new(CodegenTypeName::Inline(path), ty).into_token_stream()
+            .map(|view| match view {
+                InlineIrTypeView::Enum(path, view) => {
+                    CodegenEnum::new(CodegenTypeName::Inline(path), &view).into_token_stream()
                 }
-                InlineIrType::Struct(path, ty) => {
-                    CodegenStruct::new(self.context, CodegenTypeName::Inline(path), ty)
-                        .into_token_stream()
+                InlineIrTypeView::Struct(path, view) => {
+                    CodegenStruct::new(CodegenTypeName::Inline(path), &view).into_token_stream()
                 }
-                InlineIrType::Untagged(path, ty) => {
-                    CodegenUntagged::new(self.context, CodegenTypeName::Inline(path), ty)
-                        .into_token_stream()
+                InlineIrTypeView::Untagged(path, view) => {
+                    CodegenUntagged::new(CodegenTypeName::Inline(path), &view).into_token_stream()
                 }
             });
         let fields_module = inlines.next().map(|head| {

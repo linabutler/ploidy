@@ -35,14 +35,15 @@ fn main() -> Result<()> {
             println!("OpenAPI: {} (version {})", doc.info.title, doc.info.version);
 
             let spec = IrSpec::from_doc(&doc).into_diagnostic()?;
-            let graph = IrGraph::new(&spec);
-
-            let context = rust::CodegenContext::new(&graph, &config.manifest);
+            let graph = rust::CodegenGraph::new(IrGraph::new(&spec));
 
             println!("Writing generated code to `{}`...", output.display());
 
             println!("Generating `Cargo.toml`...");
-            write_to_disk(&output, rust::CodegenCargoManifest::new(&context))?;
+            write_to_disk(
+                &output,
+                rust::CodegenCargoManifest::new(&graph, &config.manifest),
+            )?;
 
             println!("Generating `lib.rs`...");
             write_to_disk(&output, rust::CodegenLibrary)?;
@@ -51,13 +52,13 @@ fn main() -> Result<()> {
             write_to_disk(&output, rust::CodegenErrorModule)?;
 
             println!("Generating {} types...", graph.schemas().count());
-            rust::write_types_to_disk(&output, &context)?;
+            rust::write_types_to_disk(&output, &graph)?;
 
             let counts =
                 graph
                     .operations()
                     .fold(BTreeMap::<&str, usize>::new(), |mut counts, view| {
-                        *counts.entry(view.as_operation().resource).or_default() += 1;
+                        *counts.entry(view.resource()).or_default() += 1;
                         counts
                     });
             println!(
@@ -65,7 +66,7 @@ fn main() -> Result<()> {
                 counts.values().copied().sum::<usize>(),
                 counts.keys().count(),
             );
-            rust::write_client_to_disk(&output, &context)?;
+            rust::write_client_to_disk(&output, &graph)?;
 
             println!("Generation complete");
 
