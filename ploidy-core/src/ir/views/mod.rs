@@ -112,8 +112,8 @@ pub trait Extendable<'graph>: private::Sealed {
     // always memory-safe; we just want some extra type safety).
     //
     // This approach handles the obvious case of overlapping borrows from
-    // `extensions()` and `extensions_mut()`, and the `AtomicRefCell` avoids
-    // plumbing mutable references to the graph through every IR layer.
+    // `ext()` and `ext_mut()`, and the `AtomicRefCell` avoids plumbing
+    // mutable references to the graph through every IR layer.
 
     fn ext<'view>(&'view self) -> AtomicRef<'view, ExtensionMap>
     where
