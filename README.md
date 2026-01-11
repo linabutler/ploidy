@@ -10,7 +10,13 @@ Many OpenAPI specs use `allOf` to model inheritance; and `oneOf`, `anyOf`, and d
 
 ## Getting Started
 
-You can [download a pre-built binary of Ploidy for your platform](https://github.com/linabutler/ploidy/releases/latest), or install from source with:
+To get started, [download a pre-built binary of Ploidy for your platform](https://github.com/linabutler/ploidy/releases/latest), or install Ploidy via [**cargo-binstall**](https://github.com/cargo-bins/cargo-binstall):
+
+```sh
+cargo binstall ploidy
+```
+
+...Or, if you'd prefer to install from source:
 
 ```sh
 cargo install --locked ploidy
@@ -44,7 +50,7 @@ This produces a ready-to-use crate that includes:
 
 ## Why Ploidy?
 
-🎉 Ploidy is a good choice if:
+🎉 Ploidy is a good fit if:
 
 * Your OpenAPI spec uses `allOf`, `oneOf`, or `anyOf`.
 * You have a large or complex spec that's challenging for other generators.
@@ -54,10 +60,10 @@ This produces a ready-to-use crate that includes:
 ⚠️ Ploidy might **not** be the right fit if:
 
 * Your spec uses OpenAPI features that Ploidy doesn't support yet. [**Progenitor**](https://github.com/oxidecomputer/progenitor), [**Schema Tools**](https://github.com/kstasik/schema-tools) or [**openapi-generator**](https://openapi-generator.tech) might be better choices, especially if your spec is simpler...but please [open an issue](https://github.com/linabutler/ploidy/issues/new) for Ploidy to support the features you need!
-* You'd like to use a custom template for the generated code, or a different HTTP client; or to generate synchronous code. A template-based generator like **openapi-generator** could better meet your needs.
+* You'd like to use a custom template for the generated code, or a different HTTP client; or to generate synchronous code. For these cases, consider a template-based generator like **openapi-generator**.
 * You need to target a language other than Rust. **openapi-generator** supports many more languages; as does [**swagger-codegen**](https://github.com/swagger-api/swagger-codegen), if you don't need OpenAPI 3.1+ support.
 * Your spec uses OpenAPI (Swagger) 2.0. Ploidy only supports OpenAPI 3.0+, but **openapi-generator** and **swagger-codegen** support older versions.
-* You need to generate server stubs. Ploidy only generates clients, but **openapi-generator** can generate server stubs for Rust, and [Dropshot](https://github.com/oxidecomputer/dropshot) could be a good alternative.
+* You need to generate server stubs. Ploidy only generates clients, but **openapi-generator** can produce stubs for different Rust web frameworks. Alternatively, you can define your models and endpoints in Rust, and use [Dropshot](https://github.com/oxidecomputer/dropshot) to generate a Ploidy-compatible OpenAPI spec from those definitions.
 * You'd like a more mature, established tool.
 
 Here are some of the things that make Ploidy different.
@@ -79,13 +85,7 @@ Ploidy gives you speed and correctness, for quick iteration and zero manual fixe
 
 ### Strongly opinionated, zero configuration
 
-Ploidy makes the choices that a Rust developer would make:
-
-* **Async by default**, using the Tokio runtime.
-* **Reqwest**, the most popular HTTP client, for making requests.
-* **Idiomatic type names**, with collision detection across case transformations.
-
-Ploidy intentionally keeps configuration to a minimum: just a handful of command-line options; no settings files; and no design choices to make.
+Ploidy intentionally keeps configuration to a minimum: just a handful of command-line options; no config files; and no design choices to make.
 
 This philosophy means that Ploidy might not be the right tool for every job. Ploidy's goal is to produce ready-to-use code for ~90% of use cases with zero configuration, but if you'd like more control over the generated code, check out one of the other great tools mentioned above!
 
@@ -93,7 +93,10 @@ This philosophy means that Ploidy might not be the right tool for every job. Plo
 
 Generated code looks like it was written by an experienced Rust developer:
 
+* **[Serde](https://serde.rs)-compatible type definitions**: Structs for `object` types and `anyOf` schemas, enums with data for `oneOf` schemas, unit-only enums for string `enum` types.
 * **Built-in traits** for generated Rust types: `From<T>` for each polymorphic enum variant; `FromStr` and `Display` for string enums; standard derives for all types (plus `Hash` and `Eq` for all hashable types, and `Default` for types with all optional fields; all derived automatically).
+* **Boxing** for recursive types.
+* **A RESTful client with async endpoints**, using [Reqwest](https://docs.rs/reqwest) with the [Tokio](https://tokio.rs) runtime.
 
 For example:
 
@@ -123,7 +126,7 @@ Ploidy processes an OpenAPI spec in three stages:
 
 ### AST-based generation
 
-Unlike code generators that use string templates, Ploidy uses Rust's `syn` and `quote` crates to generate **real syntax trees**. The generated code has the advantage of being syntactically valid by construction.
+Most code generators use string templates, but Ploidy uses Rust's `syn` and `quote` crates to generate **syntax trees**. The generated code has the advantage of being syntactically valid by construction.
 
 ### Smart boxing
 
@@ -213,6 +216,10 @@ Other areas where we'd love help are:
 * Additional examples, with real-world specs.
 * Test coverage, especially for edge cases.
 * Documentation improvements.
+
+We welcome LLM-assisted contributions, but hold them to the same quality bar: the code should fit in with the existing architecture and style of the project. Please [start a discussion](https://github.com/linabutler/ploidy/discussions) before vibing non-trivial features, as these usually take a bit more up-front design work.
+
+Thanks!
 
 ### New languages
 
