@@ -1,8 +1,7 @@
 use itertools::Itertools;
+use ploidy_core::codegen::IntoCode;
 use proc_macro2::TokenStream;
 use quote::{ToTokens, TokenStreamExt, quote};
-
-use crate::codegen::IntoCode;
 
 use super::{graph::CodegenGraph, naming::CodegenIdent};
 

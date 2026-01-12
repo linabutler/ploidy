@@ -626,8 +626,29 @@ dependencies = [
  "clap",
  "miette",
  "mimalloc",
+ "ploidy-codegen-rust",
  "ploidy-core",
  "semver",
+]
+
+[[package]]
+name = "ploidy-codegen-rust"
+version = "0.4.0"
+dependencies = [
+ "cargo_toml",
+ "heck",
+ "itertools",
+ "miette",
+ "ploidy-core",
+ "prettyplease",
+ "proc-macro2",
+ "quote",
+ "serde",
+ "syn",
+ "textwrap",
+ "thiserror",
+ "toml",
+ "unicode-ident",
 ]
 
 [[package]]
@@ -637,7 +658,6 @@ dependencies = [
  "atomic_refcell",
  "by_address",
  "cargo_toml",
- "heck",
  "indexmap",
  "indoc",
  "itertools",
@@ -655,11 +675,9 @@ dependencies = [
  "serde_path_to_error",
  "serde_yaml",
  "syn",
- "textwrap",
  "thiserror",
  "toml",
  "unicase",
- "unicode-ident",
  "winnow",
 ]
 

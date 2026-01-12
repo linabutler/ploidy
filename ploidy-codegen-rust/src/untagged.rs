@@ -1,7 +1,6 @@
+use ploidy_core::ir::{IrTypeView, IrUntaggedView, PrimitiveIrType, SomeIrUntaggedVariant};
 use proc_macro2::TokenStream;
 use quote::{ToTokens, TokenStreamExt, quote};
-
-use crate::ir::{IrTypeView, IrUntaggedView, PrimitiveIrType, SomeIrUntaggedVariant};
 
 use super::{
     derives::ExtraDerive,

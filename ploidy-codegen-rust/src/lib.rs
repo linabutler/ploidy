@@ -4,7 +4,7 @@ use itertools::Itertools;
 use proc_macro2::TokenStream;
 use quote::quote;
 
-use crate::{
+use ploidy_core::{
     codegen::{IntoCode, write_to_disk},
     ir::View,
 };

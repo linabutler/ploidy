@@ -1,13 +1,12 @@
 use std::borrow::Cow;
 
 use heck::{ToPascalCase, ToSnakeCase};
-use proc_macro2::{Ident, Span, TokenStream};
-use quote::{IdentFragment, ToTokens, TokenStreamExt, format_ident};
-
-use crate::ir::{
+use ploidy_core::ir::{
     InlineIrTypePath, InlineIrTypePathSegment, IrStructFieldName, IrStructFieldNameHint,
     IrUntaggedVariantNameHint, PrimitiveIrType,
 };
+use proc_macro2::{Ident, Span, TokenStream};
+use quote::{IdentFragment, ToTokens, TokenStreamExt, format_ident};
 
 /// A name for a schema type that's guaranteed to be unique through
 /// different identifier case transformations.

@@ -1,11 +1,10 @@
 use heck::ToSnakeCase;
-use proc_macro2::TokenStream;
-use quote::{ToTokens, TokenStreamExt, quote};
-
-use crate::{
+use ploidy_core::{
     codegen::IntoCode,
     ir::{InlineIrTypePathRoot, InlineIrTypeView, IrOperationView},
 };
+use proc_macro2::TokenStream;
+use quote::{ToTokens, TokenStreamExt, quote};
 
 use super::{
     enum_::CodegenEnum, naming::CodegenTypeName, operation::CodegenOperation,

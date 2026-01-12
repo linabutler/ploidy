@@ -5,9 +5,8 @@ use clap::{
     CommandFactory, FromArgMatches,
     error::{Error as ClapError, ErrorKind as ClapErrorKind, Result as ClapResult},
 };
+use ploidy_codegen_rust::CargoMetadata;
 use semver::Version;
-
-use ploidy_core::codegen::rust::CargoMetadata;
 
 const DEFAULT_VERSION: Version = Version::new(0, 1, 0);
 

@@ -1,8 +1,7 @@
+use ploidy_core::ir::{IrEnumVariant, IrEnumView};
 use proc_macro2::TokenStream;
 use quote::{ToTokens, TokenStreamExt, format_ident, quote};
 use syn::{Ident, parse_quote};
-
-use crate::ir::{IrEnumVariant, IrEnumView};
 
 use super::{
     doc_attrs,

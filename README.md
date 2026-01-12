@@ -63,7 +63,7 @@ This produces a ready-to-use crate that includes:
 * You'd like to use a custom template for the generated code, or a different HTTP client; or to generate synchronous code. For these cases, consider a template-based generator like **openapi-generator**.
 * You need to target a language other than Rust. **openapi-generator** supports many more languages; as does [**swagger-codegen**](https://github.com/swagger-api/swagger-codegen), if you don't need OpenAPI 3.1+ support.
 * Your spec uses OpenAPI (Swagger) 2.0. Ploidy only supports OpenAPI 3.0+, but **openapi-generator** and **swagger-codegen** support older versions.
-* You need to generate server stubs. Ploidy only generates clients, but **openapi-generator** can produce stubs for different Rust web frameworks. Alternatively, you can define your models and endpoints in Rust, and use [Dropshot](https://github.com/oxidecomputer/dropshot) to generate a Ploidy-compatible OpenAPI spec from those definitions.
+* You need to generate server stubs. Ploidy only generates clients, but **openapi-generator** can produce stubs for different Rust web frameworks. Alternatively, you can define your models and endpoints in Rust, and use [Dropshot](https://github.com/oxidecomputer/dropshot) to generate a Ploidy- or Progenitor-compatible OpenAPI spec from those definitions.
 * You'd like a more mature, established tool.
 
 Here are some of the things that make Ploidy different.
@@ -98,17 +98,34 @@ Generated code looks like it was written by an experienced Rust developer:
 * **Boxing** for recursive types.
 * **A RESTful client with async endpoints**, using [Reqwest](https://docs.rs/reqwest) with the [Tokio](https://tokio.rs) runtime.
 
-For example:
+For example, given this schema:
+
+```yaml
+Customer:
+  type: object
+  required: [id, email]
+  properties:
+    id:
+      type: string
+    email:
+      type: string
+    name:
+      type: string
+```
+
+Ploidy generates:
 
 ```rust
-#[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct Customer {
     pub id: String,
     pub email: String,
-    #[serde(skip_serializing_if = "Absent::is_absent")]
-    pub name: Option<String>,
+    #[serde(default, skip_serializing_if = "AbsentOr::is_absent")]
+    pub name: AbsentOr<String>,
 }
 ```
+
+The optional `name` field uses [`AbsentOr<T>`](https://docs.rs/ploidy-util/latest/ploidy_util/absent/enum.AbsentOr.html), a three-valued type that matches how OpenAPI represents optional fields: either "present with a value", "present and explicitly set to `null`", or "absent from the payload".
 
 ## Under the Hood
 
@@ -136,32 +153,33 @@ For example, given a schema like:
 
 ```yaml
 Comment:
-    type: object
-    properties:
-        text:
-            type: string
-            required: true
-        parent:
-            schema:
-                $ref: "#/components/schemas/Comment"
-        children:
-            type: array
-            items:
-                $ref: "#/components/schemas/Comment"
+  type: object
+  required: [text]
+  properties:
+    text:
+      type: string
+    parent:
+      $ref: "#/components/schemas/Comment"
+    children:
+      type: array
+      items:
+        $ref: "#/components/schemas/Comment"
 ```
 
 Ploidy generates:
 
 ```rust
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct Comment {
     pub text: String,
-    pub parent: Option<Box<Comment>>,
-    pub children: Vec<Comment>,
+    #[serde(default, skip_serializing_if = "AbsentOr::is_absent")]
+    pub parent: AbsentOr<Box<Comment>>,
+    #[serde(default, skip_serializing_if = "AbsentOr::is_absent")]
+    pub children: AbsentOr<Vec<Comment>>,
 }
 ```
 
-(Since `Vec<T>` is already indirect, only the `parent` field needs boxing).
+Since `Vec<T>` is already heap-allocated, only the `parent` field needs boxing to break the cycle.
 
 ### Inline schemas
 
@@ -175,12 +193,20 @@ For example, given an operation with an inline response schema:
 /users/{id}:
   get:
     operationId: getUser
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
     responses:
       '200':
+        description: Success
         content:
           application/json:
             schema:
               type: object
+              required: [id, email, name]
               properties:
                 id:
                   type: string
@@ -193,8 +219,13 @@ For example, given an operation with an inline response schema:
 Ploidy generates:
 
 ```rust
-mod types {
-    #[derive(Clone, Debug, Serialize, Deserialize)]
+impl Client {
+    pub async fn get_user(&self, id: &str) -> Result<types::GetUserResponse, Error> {
+        // ...
+    }
+}
+pub mod types {
+    #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
     pub struct GetUserResponse {
         pub id: String,
         pub email: String,
@@ -203,21 +234,21 @@ mod types {
 }
 ```
 
-The inline schema gets a descriptive name, and the same derives as any named schema. This "just works": inline schemas are first-class types in the generated code.
+The inline schema gets a descriptive name (in this case, `GetUserResponse`; derived from the `operationId` and its use as a response schema), and the same derives as any named schema. This "just works": inline schemas are first-class types in the generated code.
 
 ## Contributing
 
 We love contributions: issues, feature requests, discussions, code, documentation, and examples are all welcome!
 
-If you find a case where Ploidy fails, or generates incorrect or unidiomatic code, please [open an issue](https://github.com/linabutler/ploidy/issues/new) with your OpenAPI spec.
+If you find a case where Ploidy fails, or generates incorrect or unidiomatic code, please [open an issue](https://github.com/linabutler/ploidy/issues/new) with your OpenAPI spec. For questions, or for planning larger contributions, please [start a discussion](https://github.com/linabutler/ploidy/discussions).
 
-Other areas where we'd love help are:
+Some areas where we'd especially love help are:
 
 * Additional examples, with real-world specs.
 * Test coverage, especially for edge cases.
 * Documentation improvements.
 
-We welcome LLM-assisted contributions, but hold them to the same quality bar: the code should fit in with the existing architecture and style of the project. Please [start a discussion](https://github.com/linabutler/ploidy/discussions) before vibing non-trivial features, as these usually take a bit more up-front design work.
+🤖 We welcome LLM-assisted contributions, but hold them to the same quality bar: the code should fit in with the existing architecture, approach, and overall style of the project.
 
 Thanks!
 
@@ -225,8 +256,8 @@ Thanks!
 
 Ploidy only targets Rust now, but its architecture is designed to support other languages. Our philosophy is to only support languages where we can:
 
-1. Parse the target language properly.
-2. Generate valid syntax trees that are correct by construction, rather than interpolating string templates.
+1. Generate code from valid syntax trees that are correct by construction, rather than from string templates.
+2. Leverage existing tools for those languages, like parsers, linters, and formatters, that are written _in_ Rust.
 3. Maintain the same correctness guarantees and generated code quality as our Rust pipeline.
 
 This does mean that Ploidy won't target every language. We'd rather support three languages perfectly, than a dozen languages with gaps.

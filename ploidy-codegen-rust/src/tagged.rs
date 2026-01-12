@@ -1,11 +1,10 @@
 use itertools::Itertools;
-use proc_macro2::TokenStream;
-use quote::{ToTokens, TokenStreamExt, quote};
-
-use crate::{
-    codegen::unique::UniqueNameSpace,
+use ploidy_core::{
+    codegen::UniqueNameSpace,
     ir::{IrTaggedView, IrTypeView, PrimitiveIrType, View},
 };
+use proc_macro2::TokenStream;
+use quote::{ToTokens, TokenStreamExt, quote};
 
 use super::{
     derives::ExtraDerive, doc_attrs, naming::CodegenIdent, naming::CodegenTypeName,

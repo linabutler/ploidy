@@ -1,9 +1,8 @@
 use heck::ToSnakeCase;
+use ploidy_core::ir::{InlineIrTypePathRoot, IrTypeView, PrimitiveIrType, View};
 use proc_macro2::TokenStream;
 use quote::{ToTokens, TokenStreamExt, format_ident, quote};
 use syn::parse_quote;
-
-use crate::ir::{InlineIrTypePathRoot, IrTypeView, PrimitiveIrType, View};
 
 use super::{
     naming::CodegenTypeName,

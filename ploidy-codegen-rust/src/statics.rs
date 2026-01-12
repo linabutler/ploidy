@@ -1,7 +1,6 @@
+use ploidy_core::codegen::IntoCode;
 use proc_macro2::TokenStream;
 use quote::{ToTokens, TokenStreamExt, quote};
-
-use crate::codegen::IntoCode;
 
 #[derive(Clone, Copy, Debug)]
 pub struct CodegenLibrary;

@@ -1,16 +1,15 @@
 use itertools::Itertools;
-use proc_macro2::{Span, TokenStream};
-use quote::{ToTokens, TokenStreamExt, quote};
-use syn::Ident;
-
-use crate::{
-    codegen::unique::UniqueNameSpace,
+use ploidy_core::{
+    codegen::UniqueNameSpace,
     ir::{
         IrOperationView, IrParameterStyle, IrParameterView, IrPathParameter, IrQueryParameter,
         IrRequestView, IrResponseView, IrTypeView,
     },
     parse::{Method, path::PathFragment},
 };
+use proc_macro2::{Span, TokenStream};
+use quote::{ToTokens, TokenStreamExt, quote};
+use syn::Ident;
 
 use super::{doc_attrs, naming::CodegenIdent, ref_::CodegenRef};
 

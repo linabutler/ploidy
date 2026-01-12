@@ -2,10 +2,11 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use cargo_toml::{Edition, Manifest};
 use itertools::Itertools;
+use ploidy_core::codegen::IntoCode;
 use serde::{Deserialize, Serialize};
 use toml::Value as TomlValue;
 
-use crate::codegen::{IntoCode, rust::CodegenGraph};
+use super::graph::CodegenGraph;
 
 type TomlMap = toml::map::Map<String, TomlValue>;
 

@@ -1,6 +1,7 @@
 [workspace]
 members = [
     "ploidy",
+    "ploidy-codegen-rust",
     "ploidy-core",
     "ploidy-pointer",
     "ploidy-pointer-derive",
@@ -16,6 +17,7 @@ repository = "https://github.com/linabutler/ploidy"
 keywords = ["codegen", "openapi", "swagger"]
 
 [workspace.dependencies]
+ploidy-codegen-rust = { path = "ploidy-codegen-rust", version = "0.4.0" }
 ploidy-core = { path = "ploidy-core", version = "0.4.0" }
 ploidy-pointer = { path = "ploidy-pointer", version = "0.4.0" }
 ploidy-pointer-derive = { path = "ploidy-pointer-derive", version = "0.4.0" }

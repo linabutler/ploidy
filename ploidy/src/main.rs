@@ -1,9 +1,9 @@
 use std::collections::BTreeMap;
 
 use miette::{Context, IntoDiagnostic, Result};
-
+use ploidy_codegen_rust::{CodegenCargoManifest, CodegenErrorModule, CodegenGraph, CodegenLibrary};
 use ploidy_core::{
-    codegen::{rust, write_to_disk},
+    codegen::write_to_disk,
     ir::{IrGraph, IrSpec},
     parse::Document,
 };
@@ -35,24 +35,21 @@ fn main() -> Result<()> {
             println!("OpenAPI: {} (version {})", doc.info.title, doc.info.version);
 
             let spec = IrSpec::from_doc(&doc).into_diagnostic()?;
-            let graph = rust::CodegenGraph::new(IrGraph::new(&spec));
+            let graph = CodegenGraph::new(IrGraph::new(&spec));
 
             println!("Writing generated code to `{}`...", output.display());
 
             println!("Generating `Cargo.toml`...");
-            write_to_disk(
-                &output,
-                rust::CodegenCargoManifest::new(&graph, &config.manifest),
-            )?;
+            write_to_disk(&output, CodegenCargoManifest::new(&graph, &config.manifest))?;
 
             println!("Generating `lib.rs`...");
-            write_to_disk(&output, rust::CodegenLibrary)?;
+            write_to_disk(&output, CodegenLibrary)?;
 
             println!("Generating `error.rs`...");
-            write_to_disk(&output, rust::CodegenErrorModule)?;
+            write_to_disk(&output, CodegenErrorModule)?;
 
             println!("Generating {} types...", graph.schemas().count());
-            rust::write_types_to_disk(&output, &graph)?;
+            ploidy_codegen_rust::write_types_to_disk(&output, &graph)?;
 
             let counts =
                 graph
@@ -66,7 +63,7 @@ fn main() -> Result<()> {
                 counts.values().copied().sum::<usize>(),
                 counts.keys().count(),
             );
-            rust::write_client_to_disk(&output, &graph)?;
+            ploidy_codegen_rust::write_client_to_disk(&output, &graph)?;
 
             println!("Generation complete");
 

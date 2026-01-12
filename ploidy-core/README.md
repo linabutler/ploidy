@@ -1,5 +1,5 @@
 # ploidy-core
 
-This crate is the core (or nucleus! 🧬) of the [Ploidy](https://crates.io/crates/ploidy) OpenAPI code generator. It exposes structures for parsing OpenAPI types, and code generators for different languages.
+This crate is the nucleus (🧬) of the [Ploidy](https://crates.io/crates/ploidy) OpenAPI code generator. It exposes structures for constructing a language-agnostic **intermediate representation** of an OpenAPI spec, which code generators then use to target different languages.
 
-You can use **ploidy-core** as part of a larger project, or from a [build script](https://doc.rust-lang.org/cargo/reference/build-scripts.html) if you're targeting Rust.
+⚠️ The **ploidy-core** API isn't stable yet.

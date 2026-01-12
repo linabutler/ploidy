@@ -1,11 +1,10 @@
+use ploidy_core::{
+    codegen::UniqueNameSpace,
+    ir::{IrStructFieldName, IrStructFieldView, IrStructView, IrTypeView, PrimitiveIrType, View},
+};
 use proc_macro2::TokenStream;
 use quote::{ToTokens, TokenStreamExt, quote};
 use syn::{Ident, parse_quote};
-
-use crate::{
-    codegen::unique::UniqueNameSpace,
-    ir::{IrStructFieldName, IrStructFieldView, IrStructView, IrTypeView, PrimitiveIrType, View},
-};
 
 use super::{
     derives::ExtraDerive,

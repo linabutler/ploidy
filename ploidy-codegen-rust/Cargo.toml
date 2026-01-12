@@ -1,0 +1,38 @@
+[package]
+name = "ploidy-codegen-rust"
+description = "A Ploidy generator that emits Rust code"
+readme = "README.md"
+version.workspace = true
+license.workspace = true
+edition.workspace = true
+repository.workspace = true
+keywords.workspace = true
+
+[dependencies]
+cargo_toml = "0.22"
+heck = "0.5"
+itertools = "0.14"
+serde = { version = "1", features = ["derive"] }
+miette = "7"
+ploidy-core = { workspace = true, features = ["cargo_toml", "proc-macro2"] }
+prettyplease = "0.2"
+proc-macro2 = { version = "1", default-features = false }
+quote = { version = "1", default-features = false }
+syn = { version = "2", default-features = false, features = [
+    "parsing",
+    "printing",
+] }
+textwrap = { version = "0.16", default-features = false, features = [
+    "unicode-linebreak",
+    "unicode-width",
+] }
+thiserror = "2"
+toml = { version = "0.9", default-features = false, features = [
+    "display",
+    "parse",
+    "serde",
+] }
+unicode-ident = "1"
+
+[lints]
+workspace = true

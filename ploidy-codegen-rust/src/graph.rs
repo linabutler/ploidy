@@ -1,6 +1,6 @@
 use std::ops::Deref;
 
-use crate::{
+use ploidy_core::{
     codegen::UniqueNameSpace,
     ir::{IrGraph, View},
 };

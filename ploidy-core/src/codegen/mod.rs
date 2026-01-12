@@ -2,9 +2,6 @@ use std::path::Path;
 
 use miette::{Context, IntoDiagnostic};
 
-#[cfg(feature = "rust")]
-pub mod rust;
-
 mod unique;
 
 pub use unique::{UniqueNameSpace, WordSegments};
@@ -29,7 +26,7 @@ pub trait Code {
     fn into_string(self) -> miette::Result<String>;
 }
 
-#[cfg(feature = "rust")]
+#[cfg(feature = "proc-macro2")]
 impl<T: AsRef<str>> Code for (T, proc_macro2::TokenStream) {
     fn path(&self) -> &str {
         self.0.as_ref()
@@ -45,7 +42,7 @@ impl<T: AsRef<str>> Code for (T, proc_macro2::TokenStream) {
     }
 }
 
-#[cfg(feature = "rust")]
+#[cfg(feature = "cargo_toml")]
 impl<T: serde::Serialize> Code for (&'static str, cargo_toml::Manifest<T>) {
     fn path(&self) -> &str {
         self.0

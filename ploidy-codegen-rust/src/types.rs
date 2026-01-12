@@ -1,9 +1,8 @@
 use std::collections::BTreeSet;
 
+use ploidy_core::{codegen::IntoCode, ir::View};
 use proc_macro2::TokenStream;
 use quote::{ToTokens, TokenStreamExt, quote};
-
-use crate::{codegen::IntoCode, ir::View};
 
 use super::{graph::CodegenGraph, naming::SchemaIdent};
 

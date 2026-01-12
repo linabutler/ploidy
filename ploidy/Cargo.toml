@@ -13,7 +13,8 @@ cargo_toml = "0.22"
 clap = { version = "4", features = ["cargo", "derive"] }
 miette = { version = "7", features = ["fancy"] }
 mimalloc = { version = "0.1", optional = true }
-ploidy-core = { workspace = true, features = ["rust"] }
+ploidy-codegen-rust = { workspace = true }
+ploidy-core = { workspace = true }
 semver = "1"
 
 [features]

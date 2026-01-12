@@ -1,10 +1,9 @@
-use proc_macro2::TokenStream;
-use quote::{ToTokens, TokenStreamExt, quote};
-
-use crate::{
+use ploidy_core::{
     codegen::IntoCode,
     ir::{InlineIrTypeView, SchemaIrTypeView, View},
 };
+use proc_macro2::TokenStream;
+use quote::{ToTokens, TokenStreamExt, quote};
 
 use super::{
     enum_::CodegenEnum, naming::CodegenTypeName, struct_::CodegenStruct, tagged::CodegenTagged,
