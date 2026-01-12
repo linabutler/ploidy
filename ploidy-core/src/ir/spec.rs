@@ -205,7 +205,7 @@ impl<'a> IrSpec<'a> {
                                         root: InlineIrTypePathRoot::Resource(resource),
                                         segments: vec![
                                             InlineIrTypePathSegment::Operation(id),
-                                            InlineIrTypePathSegment::Request,
+                                            InlineIrTypePathSegment::Response,
                                         ],
                                     },
                                     schema,

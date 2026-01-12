@@ -4,9 +4,9 @@ use itertools::Itertools;
 
 use crate::{
     ir::{
-        InlineIrTypePathSegment, InlineIrTypeView, IrEnumVariant, IrGraph, IrParameterStyle,
-        IrRequestView, IrResponseView, IrSpec, IrStructFieldName, IrTypeView, PrimitiveIrType,
-        SchemaIrTypeView, SomeIrUntaggedVariant, View,
+        InlineIrTypePathRoot, InlineIrTypePathSegment, InlineIrTypeView, IrEnumVariant, IrGraph,
+        IrParameterStyle, IrRequestView, IrResponseView, IrSpec, IrStructFieldName, IrTypeView,
+        PrimitiveIrType, SchemaIrTypeView, SomeIrUntaggedVariant, View,
     },
     parse::{Document, Method, path::PathFragment},
     tests::assert_matches,
@@ -2272,4 +2272,169 @@ fn test_operation_query() {
     assert!(limit.required());
     assert_eq!(offset.name(), "offset");
     assert!(!offset.required());
+}
+
+#[test]
+fn test_operation_view_inlines_finds_inline_types() {
+    let doc = Document::from_yaml(indoc::indoc! {"
+        openapi: 3.0.0
+        info:
+          title: Test
+          version: 1.0
+        paths:
+          /users:
+            post:
+              operationId: createUser
+              requestBody:
+                content:
+                  application/json:
+                    schema:
+                      type: object
+                      properties:
+                        name:
+                          type: string
+                        address:
+                          type: object
+                          properties:
+                            street:
+                              type: string
+              responses:
+                '201':
+                  description: Created
+                  content:
+                    application/json:
+                      schema:
+                        type: object
+                        properties:
+                          id:
+                            type: string
+        components:
+          schemas: {}
+    "})
+    .unwrap();
+
+    let spec = IrSpec::from_doc(&doc).unwrap();
+    let graph = IrGraph::new(&spec);
+
+    let operation = graph.operations().next().unwrap();
+
+    // `createUser` references two inline types: the request body,
+    // and the response body. The request body also contains a nested
+    // inline type (`address`), so the total is 3.
+    let inlines = operation.inlines().collect_vec();
+    assert_eq!(inlines.len(), 3);
+
+    let address = inlines
+        .iter()
+        .find(|inline| {
+            let path = inline.path();
+            matches!(
+                &*path.segments,
+                [
+                    InlineIrTypePathSegment::Operation("createUser"),
+                    InlineIrTypePathSegment::Request,
+                    InlineIrTypePathSegment::Field(IrStructFieldName::Name("address")),
+                ],
+            )
+        })
+        .unwrap();
+    assert_matches!(address, InlineIrTypeView::Struct(_, _));
+
+    let request = inlines
+        .iter()
+        .find(|inline| {
+            let path = inline.path();
+            matches!(
+                &*path.segments,
+                [
+                    InlineIrTypePathSegment::Operation("createUser"),
+                    InlineIrTypePathSegment::Request,
+                ],
+            )
+        })
+        .unwrap();
+    assert_matches!(request, InlineIrTypeView::Struct(_, _));
+
+    let response = inlines
+        .iter()
+        .find(|inline| {
+            let path = inline.path();
+            matches!(
+                &*path.segments,
+                [
+                    InlineIrTypePathSegment::Operation("createUser"),
+                    InlineIrTypePathSegment::Response,
+                ],
+            )
+        })
+        .unwrap();
+    assert_matches!(response, InlineIrTypeView::Struct(_, _));
+}
+
+#[test]
+fn test_operation_request_and_response() {
+    let doc = Document::from_yaml(indoc::indoc! {"
+        openapi: 3.0.0
+        info:
+          title: Test
+          version: 1.0
+        paths:
+          /users:
+            post:
+              operationId: createUser
+              requestBody:
+                content:
+                  application/json:
+                    schema:
+                      type: object
+                      properties:
+                        name:
+                          type: string
+              responses:
+                '201':
+                  description: Created
+                  content:
+                    application/json:
+                      schema:
+                        type: object
+                        properties:
+                          id:
+                            type: string
+    "})
+    .unwrap();
+
+    let spec = IrSpec::from_doc(&doc).unwrap();
+    let graph = IrGraph::new(&spec);
+
+    let operation = graph.operations().next().unwrap();
+
+    let Some(IrRequestView::Json(IrTypeView::Inline(request))) = operation.request() else {
+        panic!(
+            "expected inline request schema; got {:?}",
+            operation.request(),
+        );
+    };
+    assert_matches!(request.path().root, InlineIrTypePathRoot::Resource("full"));
+    assert_matches!(
+        &*request.path().segments,
+        [
+            InlineIrTypePathSegment::Operation("createUser"),
+            InlineIrTypePathSegment::Request,
+        ],
+    );
+
+    let Some(IrResponseView::Json(IrTypeView::Inline(response))) = operation.response() else {
+        panic!(
+            "expected inline response schema; got {:?}",
+            operation.response(),
+        );
+    };
+    assert_matches!(response.path().root, InlineIrTypePathRoot::Resource("full"));
+    assert_matches!(
+        &*response.path().segments,
+        [
+            InlineIrTypePathSegment::Operation("createUser"),
+            InlineIrTypePathSegment::Response,
+        ],
+    );
 }
