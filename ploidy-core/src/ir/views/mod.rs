@@ -4,7 +4,7 @@
 //! for code generation. Each view decorates an IR type with
 //! additional information from the type graph.
 
-use std::{any::TypeId, fmt::Debug, ops::Deref};
+use std::{any::TypeId, fmt::Debug};
 
 use atomic_refcell::{AtomicRef, AtomicRefMut};
 use petgraph::{
@@ -40,13 +40,13 @@ pub trait View<'a> {
     /// Returns an iterator over all the types that are reachable from this type.
     fn reachable(&self) -> impl Iterator<Item = IrTypeView<'a>>;
 
-    /// Returns a read-only view of this type's extended data.
+    /// Returns a reference to this type's extended data.
     fn extensions(&self) -> &IrViewExtensions<Self>
     where
         Self: Extendable<'a> + Sized;
 
-    /// Returns a read-write view of this type's extended data.
-    fn extensions_mut(&mut self) -> &mut IrViewExtensionsMut<Self>
+    /// Returns a mutable reference to this type's extended data.
+    fn extensions_mut(&mut self) -> &mut IrViewExtensions<Self>
     where
         Self: Extendable<'a> + Sized;
 }
@@ -92,17 +92,17 @@ where
     }
 
     #[inline]
-    fn extensions_mut(&mut self) -> &mut IrViewExtensionsMut<Self> {
-        IrViewExtensionsMut::new(self)
+    fn extensions_mut(&mut self) -> &mut IrViewExtensions<Self> {
+        IrViewExtensions::new_mut(self)
     }
 }
 
-pub trait ViewNode<'a>: private::Sealed {
+pub trait ViewNode<'a> {
     fn graph(&self) -> &'a IrGraph<'a>;
     fn index(&self) -> NodeIndex;
 }
 
-pub trait Extendable<'graph>: private::Sealed {
+pub trait Extendable<'graph> {
     // These lifetime requirements might look redundant, but they're not:
     // we're shortening the lifetime of the `AtomicRef` from `'graph` to `'view`,
     // to prevent overlapping mutable borrows of the underlying `AtomicRefCell`
@@ -124,14 +124,14 @@ pub trait Extendable<'graph>: private::Sealed {
         'graph: 'view;
 }
 
-impl<'a, T> Extendable<'a> for T
+impl<'graph, T> Extendable<'graph> for T
 where
-    T: ViewNode<'a>,
+    T: ViewNode<'graph>,
 {
     #[inline]
-    fn ext<'b>(&'b self) -> AtomicRef<'b, ExtensionMap>
+    fn ext<'view>(&'view self) -> AtomicRef<'view, ExtensionMap>
     where
-        'a: 'b,
+        'graph: 'view,
     {
         self.graph().metadata[&self.index()].extensions.borrow()
     }
@@ -139,24 +139,30 @@ where
     #[inline]
     fn ext_mut<'b>(&'b mut self) -> AtomicRefMut<'b, ExtensionMap>
     where
-        'a: 'b,
+        'graph: 'b,
     {
         self.graph().metadata[&self.index()].extensions.borrow_mut()
     }
 }
 
-/// A view of the extended data attached to a type.
+/// Extended data attached to a type in the graph.
 ///
-/// Generators can use extended data to decorate types with
-/// additional information, like name mappings.
+/// Generators can use extended data to decorate types with extra information,
+/// like name mappings. For example, the Rust generator stores a normalized,
+/// deduplicated identifier name on every named schema type.
 #[derive(RefCastCustom)]
 #[repr(transparent)]
 pub struct IrViewExtensions<X>(X);
 
-impl<'a, X: Extendable<'a>> IrViewExtensions<X> {
+impl<X> IrViewExtensions<X> {
     #[ref_cast_custom]
     fn new(view: &X) -> &Self;
 
+    #[ref_cast_custom]
+    fn new_mut(view: &mut X) -> &mut Self;
+}
+
+impl<'a, X: Extendable<'a>> IrViewExtensions<X> {
     /// Returns a reference to a value of an arbitrary type that was
     /// previously inserted into this extended data.
     #[inline]
@@ -173,22 +179,6 @@ impl<'a, X: Extendable<'a>> IrViewExtensions<X> {
             )
         })
     }
-}
-
-impl<X> Debug for IrViewExtensions<X> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_tuple("IrViewExtensions").finish_non_exhaustive()
-    }
-}
-
-/// A mutable view of the extended data attached to a type.
-#[derive(RefCastCustom)]
-#[repr(transparent)]
-pub struct IrViewExtensionsMut<X>(X);
-
-impl<'a, X: Extendable<'a>> IrViewExtensionsMut<X> {
-    #[ref_cast_custom]
-    fn new(view: &mut X) -> &mut Self;
 
     /// Inserts a value of an arbitrary type into this extended data,
     /// and returns the previous value for that type.
@@ -201,49 +191,8 @@ impl<'a, X: Extendable<'a>> IrViewExtensionsMut<X> {
     }
 }
 
-impl<X> Debug for IrViewExtensionsMut<X> {
+impl<X> Debug for IrViewExtensions<X> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_tuple("IrViewExtensionsMut").finish_non_exhaustive()
+        f.debug_tuple("IrViewExtensions").finish_non_exhaustive()
     }
-}
-
-impl<'a, X: Extendable<'a>> Deref for IrViewExtensionsMut<X> {
-    type Target = IrViewExtensions<X>;
-
-    fn deref(&self) -> &Self::Target {
-        IrViewExtensions::new(&self.0)
-    }
-}
-
-mod private {
-    use super::*;
-    use super::{
-        enum_::IrEnumView,
-        inline::InlineIrTypeView,
-        ir::IrTypeView,
-        operation::IrParameterView,
-        schema::SchemaIrTypeView,
-        struct_::{IrStructFieldView, IrStructView},
-        tagged::{IrTaggedVariantView, IrTaggedView},
-        untagged::{IrUntaggedVariantView, IrUntaggedView},
-        wrappers::{IrArrayView, IrMapView, IrNullableView},
-    };
-
-    pub trait Sealed {}
-
-    impl<'a> Sealed for (&'a IrGraph<'a>, NodeIndex) {}
-    impl Sealed for IrArrayView<'_> {}
-    impl Sealed for IrMapView<'_> {}
-    impl Sealed for IrNullableView<'_> {}
-    impl<T> Sealed for IrParameterView<'_, T> {}
-    impl Sealed for IrTypeView<'_> {}
-    impl Sealed for IrTaggedView<'_> {}
-    impl Sealed for IrTaggedVariantView<'_> {}
-    impl Sealed for InlineIrTypeView<'_> {}
-    impl Sealed for IrStructView<'_> {}
-    impl Sealed for IrStructFieldView<'_, '_> {}
-    impl Sealed for IrUntaggedView<'_> {}
-    impl Sealed for IrUntaggedVariantView<'_, '_> {}
-    impl Sealed for IrEnumView<'_> {}
-    impl Sealed for SchemaIrTypeView<'_> {}
 }
