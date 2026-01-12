@@ -141,197 +141,430 @@ impl<'a> Iterator for Ancestors<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::parse::{Components, RefOrSchema, Schema, Ty};
-    use indexmap::IndexMap;
+
     use itertools::Itertools;
 
-    fn make_string_field() -> RefOrSchema {
-        RefOrSchema::Other(Box::new(Schema {
-            ty: vec![Ty::String],
-            ..Default::default()
-        }))
-    }
-
-    fn make_int_field() -> RefOrSchema {
-        RefOrSchema::Other(Box::new(Schema {
-            ty: vec![Ty::Integer],
-            ..Default::default()
-        }))
-    }
-
-    fn make_doc(schemas: IndexMap<String, Schema>) -> Document {
-        Document {
-            openapi: "3.0.0".to_string(),
-            info: crate::parse::Info {
-                title: "Test".to_string(),
-                version: "1.0".to_string(),
-                description: None,
-            },
-            paths: IndexMap::new(),
-            components: Some(Components {
-                schemas,
-                ..Default::default()
-            }),
-        }
-    }
-
-    fn make_ref(name: &str) -> crate::parse::Ref {
-        crate::parse::Ref {
-            path: format!("#/components/schemas/{name}").parse().unwrap(),
-        }
-    }
+    use crate::tests::assert_matches;
 
     #[test]
     fn test_multi_level_inheritance() {
-        // Entity -> NamedEntity -> User chain
-        let mut schemas = IndexMap::new();
+        // Entity -> NamedEntity -> User chain.
+        let doc = Document::from_yaml(indoc::indoc! {"
+            openapi: 3.0.0
+            info:
+              title: Test
+              version: 1.0.0
+            components:
+              schemas:
+                Entity:
+                  properties:
+                    id:
+                      type: string
+                NamedEntity:
+                  allOf:
+                    - $ref: '#/components/schemas/Entity'
+                  properties:
+                    name:
+                      type: string
+                User:
+                  allOf:
+                    - $ref: '#/components/schemas/NamedEntity'
+                  properties:
+                    email:
+                      type: string
+        "})
+        .unwrap();
 
-        let mut entity_props = IndexMap::new();
-        entity_props.insert("id".to_string(), make_string_field());
-        schemas.insert(
-            "Entity".to_string(),
-            Schema {
-                properties: Some(entity_props),
-                ..Default::default()
-            },
-        );
-
-        let mut named_entity_props = IndexMap::new();
-        named_entity_props.insert("name".to_string(), make_string_field());
-        schemas.insert(
-            "NamedEntity".to_string(),
-            Schema {
-                all_of: Some(vec![RefOrSchema::Ref(make_ref("Entity"))]),
-                properties: Some(named_entity_props),
-                ..Default::default()
-            },
-        );
-
-        let mut user_props = IndexMap::new();
-        user_props.insert("email".to_string(), make_string_field());
-        schemas.insert(
-            "User".to_string(),
-            Schema {
-                all_of: Some(vec![RefOrSchema::Ref(make_ref("NamedEntity"))]),
-                properties: Some(user_props),
-                ..Default::default()
-            },
-        );
-
-        let doc = make_doc(schemas);
-        let user_schema = doc
-            .components
-            .as_ref()
-            .unwrap()
-            .schemas
-            .get("User")
-            .unwrap();
+        let user_schema = &doc.components.as_ref().unwrap().schemas["User"];
         let all_fields = all_fields(&doc, user_schema).collect_vec();
 
-        // Should have 3 fields total: id (inherited), name (inherited), email (own)
-        assert_eq!(all_fields.len(), 3);
-
-        // Check inherited fields
-        let inherited: Vec<_> = all_fields
-            .iter()
-            .filter_map(|(name, f)| match f {
-                IrSchemaField::Inherited(info) => Some((name, info)),
-                _ => None,
-            })
-            .collect();
-        assert_eq!(inherited.len(), 2);
-        let inherited_names: Vec<&str> = inherited.iter().map(|(n, _)| **n).collect();
-        assert!(inherited_names.contains(&"id"));
-        assert!(inherited_names.contains(&"name"));
-
-        // Check own fields
-        let own: Vec<_> = all_fields
-            .iter()
-            .filter_map(|(name, f)| match f {
-                IrSchemaField::Own(info) => Some((name, info)),
-                _ => None,
-            })
-            .collect();
-        assert_eq!(own.len(), 1);
-        assert_eq!(*own[0].0, "email");
+        assert_matches!(
+            &*all_fields,
+            [
+                ("name", IrSchemaField::Inherited(_)),
+                ("id", IrSchemaField::Inherited(_)),
+                ("email", IrSchemaField::Own(_))
+            ]
+        );
     }
 
     #[test]
     fn test_diamond_inheritance_no_duplicate() {
-        // Product -> [NamedEntity, Entity], NamedEntity -> Entity
-        // Entity should only appear once
-        let mut schemas = IndexMap::new();
+        // Product -> [NamedEntity, Entity], NamedEntity -> Entity;
+        // `Entity` should only appear once.
+        let doc = Document::from_yaml(indoc::indoc! {"
+            openapi: 3.0.0
+            info:
+              title: Test
+              version: 1.0.0
+            components:
+              schemas:
+                Entity:
+                  properties:
+                    id:
+                      type: string
+                NamedEntity:
+                  allOf:
+                    - $ref: '#/components/schemas/Entity'
+                  properties:
+                    name:
+                      type: string
+                Product:
+                  allOf:
+                    - $ref: '#/components/schemas/NamedEntity'
+                    - $ref: '#/components/schemas/Entity'
+                  properties:
+                    price:
+                      type: integer
+        "})
+        .unwrap();
 
-        let mut entity_props = IndexMap::new();
-        entity_props.insert("id".to_string(), make_string_field());
-        schemas.insert(
-            "Entity".to_string(),
-            Schema {
-                properties: Some(entity_props),
-                ..Default::default()
-            },
+        let product_schema = &doc.components.as_ref().unwrap().schemas["Product"];
+        let all_fields = all_fields(&doc, product_schema).collect_vec();
+
+        assert_matches!(
+            &*all_fields,
+            [
+                ("name", IrSchemaField::Inherited(_)),
+                ("id", IrSchemaField::Inherited(_)),
+                ("price", IrSchemaField::Own(_))
+            ]
         );
+    }
 
-        let mut named_entity_props = IndexMap::new();
-        named_entity_props.insert("name".to_string(), make_string_field());
-        schemas.insert(
-            "NamedEntity".to_string(),
-            Schema {
-                all_of: Some(vec![RefOrSchema::Ref(make_ref("Entity"))]),
-                properties: Some(named_entity_props),
-                ..Default::default()
-            },
+    #[test]
+    fn test_single_parent_inheritance() {
+        // Simple case: Child -> Parent with `allOf`.
+        let doc = Document::from_yaml(indoc::indoc! {"
+            openapi: 3.0.0
+            info:
+              title: Test
+              version: 1.0.0
+            components:
+              schemas:
+                Parent:
+                  properties:
+                    parent_field:
+                      type: string
+                Child:
+                  allOf:
+                    - $ref: '#/components/schemas/Parent'
+                  properties:
+                    child_field:
+                      type: integer
+        "})
+        .unwrap();
+
+        let child_schema = &doc.components.as_ref().unwrap().schemas["Child"];
+        let all_fields = all_fields(&doc, child_schema).collect_vec();
+
+        assert_matches!(
+            &*all_fields,
+            [
+                ("parent_field", IrSchemaField::Inherited(_)),
+                ("child_field", IrSchemaField::Own(_))
+            ]
         );
+    }
 
-        let mut product_props = IndexMap::new();
-        product_props.insert("price".to_string(), make_int_field());
-        schemas.insert(
-            "Product".to_string(),
-            Schema {
-                all_of: Some(vec![
-                    RefOrSchema::Ref(make_ref("NamedEntity")),
-                    RefOrSchema::Ref(make_ref("Entity")),
-                ]),
-                properties: Some(product_props),
-                ..Default::default()
-            },
-        );
+    #[test]
+    fn test_field_override_in_child_schema() {
+        // Child redefines a field from parent; the overridden field
+        // should be "own", not "inherited".
+        let doc = Document::from_yaml(indoc::indoc! {"
+            openapi: 3.0.0
+            info:
+              title: Test
+              version: 1.0.0
+            components:
+              schemas:
+                Parent:
+                  properties:
+                    name:
+                      type: string
+                Child:
+                  allOf:
+                    - $ref: '#/components/schemas/Parent'
+                  properties:
+                    name:
+                      type: integer
+        "})
+        .unwrap();
 
-        let doc = make_doc(schemas);
-        let product = doc
-            .components
-            .as_ref()
-            .unwrap()
-            .schemas
-            .get("Product")
+        let child_schema = &doc.components.as_ref().unwrap().schemas["Child"];
+        let all_fields = all_fields(&doc, child_schema).collect_vec();
+
+        assert_matches!(&*all_fields, [("name", IrSchemaField::Own(_))]);
+    }
+
+    #[test]
+    fn test_required_field_inheritance() {
+        // Fields marked as required in the parent maintain their
+        // required status when inherited.
+        let doc = Document::from_yaml(indoc::indoc! {"
+            openapi: 3.0.0
+            info:
+              title: Test
+              version: 1.0.0
+            components:
+              schemas:
+                Parent:
+                  properties:
+                    id:
+                      type: string
+                    optional_field:
+                      type: string
+                  required:
+                    - id
+                Child:
+                  allOf:
+                    - $ref: '#/components/schemas/Parent'
+                  properties:
+                    child_required:
+                      type: string
+                  required:
+                    - child_required
+        "})
+        .unwrap();
+
+        let child_schema = &doc.components.as_ref().unwrap().schemas["Child"];
+        let all_fields = all_fields(&doc, child_schema).collect_vec();
+
+        // Check inherited required field.
+        let id_field = all_fields
+            .iter()
+            .find(|(n, _)| *n == "id")
+            .map(|(_, f)| f.info())
             .unwrap();
-        let all_fields = all_fields(&doc, product).collect_vec();
+        assert!(id_field.required);
 
-        // Should have 3 fields total: id (inherited), name (inherited), price (own)
-        assert_eq!(all_fields.len(), 3);
-
-        // Should inherit: name, id (Entity only once)
-        let inherited: Vec<_> = all_fields
+        // Check inherited optional field.
+        let optional_field = all_fields
             .iter()
-            .filter_map(|(name, f)| match f {
-                IrSchemaField::Inherited(info) => Some((name, info)),
-                _ => None,
-            })
-            .collect();
-        assert_eq!(inherited.len(), 2);
-        let inherited_names: Vec<&str> = inherited.iter().map(|(n, _)| **n).collect();
-        assert!(inherited_names.contains(&"id"));
-        assert!(inherited_names.contains(&"name"));
+            .find(|(n, _)| *n == "optional_field")
+            .map(|(_, f)| f.info())
+            .unwrap();
+        assert!(!optional_field.required);
 
-        // Own: price
-        let own: Vec<_> = all_fields
+        // Check own required field.
+        let child_required = all_fields
             .iter()
-            .filter_map(|(name, f)| match f {
-                IrSchemaField::Own(info) => Some((name, info)),
-                _ => None,
-            })
-            .collect();
-        assert_eq!(own.len(), 1);
-        assert_eq!(*own[0].0, "price");
+            .find(|(n, _)| *n == "child_required")
+            .map(|(_, f)| f.info())
+            .unwrap();
+        assert!(child_required.required);
+    }
+
+    #[test]
+    fn test_empty_parent_schema_handling() {
+        // Inheriting from a parent with no properties should work correctly.
+        let doc = Document::from_yaml(indoc::indoc! {"
+            openapi: 3.0.0
+            info:
+              title: Test
+              version: 1.0.0
+            components:
+              schemas:
+                EmptyParent:
+                  type: object
+                Child:
+                  allOf:
+                    - $ref: '#/components/schemas/EmptyParent'
+                  properties:
+                    child_field:
+                      type: string
+        "})
+        .unwrap();
+
+        let child_schema = &doc.components.as_ref().unwrap().schemas["Child"];
+        let all_fields = all_fields(&doc, child_schema).collect_vec();
+
+        assert_matches!(&*all_fields, [("child_field", IrSchemaField::Own(_))]);
+    }
+
+    #[test]
+    fn test_inline_allof_handling() {
+        // `allOf` with inline schemas should be processed correctly.
+        let doc = Document::from_yaml(indoc::indoc! {"
+            openapi: 3.0.0
+            info:
+              title: Test
+              version: 1.0.0
+            components:
+              schemas:
+                Child:
+                  allOf:
+                    - properties:
+                        inline_field:
+                          type: string
+                  properties:
+                    child_field:
+                      type: integer
+        "})
+        .unwrap();
+
+        let child_schema = &doc.components.as_ref().unwrap().schemas["Child"];
+        let all_fields = all_fields(&doc, child_schema).collect_vec();
+
+        assert_matches!(
+            &*all_fields,
+            [
+                ("inline_field", IrSchemaField::Inherited(_)),
+                ("child_field", IrSchemaField::Own(_))
+            ]
+        );
+    }
+
+    #[test]
+    fn test_own_field_required_status() {
+        // Own fields respect the local `required` array,
+        // independent of the parent.
+        let doc = Document::from_yaml(indoc::indoc! {"
+            openapi: 3.0.0
+            info:
+              title: Test
+              version: 1.0.0
+            components:
+              schemas:
+                Parent:
+                  properties:
+                    parent_field:
+                      type: string
+                  required:
+                    - parent_field
+                Child:
+                  allOf:
+                    - $ref: '#/components/schemas/Parent'
+                  properties:
+                    own_required:
+                      type: string
+                    own_optional:
+                      type: string
+                  required:
+                    - own_required
+        "})
+        .unwrap();
+
+        let child_schema = &doc.components.as_ref().unwrap().schemas["Child"];
+        let all_fields = all_fields(&doc, child_schema).collect_vec();
+
+        let own_required = all_fields
+            .iter()
+            .find(|(n, _)| *n == "own_required")
+            .map(|(_, f)| f.info())
+            .unwrap();
+        assert!(own_required.required);
+
+        let own_optional = all_fields
+            .iter()
+            .find(|(n, _)| *n == "own_optional")
+            .map(|(_, f)| f.info())
+            .unwrap();
+        assert!(!own_optional.required);
+    }
+
+    #[test]
+    fn test_discriminator_field_detection() {
+        let doc = Document::from_yaml(indoc::indoc! {"
+            openapi: 3.0.0
+            info:
+              title: Test
+              version: 1.0.0
+            components:
+              schemas:
+                Parent:
+                  properties:
+                    type:
+                      type: string
+                    name:
+                      type: string
+                  discriminator:
+                    propertyName: type
+                Child:
+                  allOf:
+                    - $ref: '#/components/schemas/Parent'
+                  properties:
+                    child_field:
+                      type: string
+        "})
+        .unwrap();
+
+        let child_schema = &doc.components.as_ref().unwrap().schemas["Child"];
+        let all_fields = all_fields(&doc, child_schema).collect_vec();
+
+        // The `type` field should be marked as the discriminator.
+        let type_field = all_fields
+            .iter()
+            .find(|(n, _)| *n == "type")
+            .map(|(_, f)| f.info())
+            .unwrap();
+        assert!(type_field.discriminator);
+
+        // The `name` field should not be marked as a discriminator.
+        let name_field = all_fields
+            .iter()
+            .find(|(n, _)| *n == "name")
+            .map(|(_, f)| f.info())
+            .unwrap();
+        assert!(!name_field.discriminator);
+    }
+
+    #[test]
+    fn test_multiple_discriminators() {
+        // Schemas with multiple discriminators from different parents.
+        let doc = Document::from_yaml(indoc::indoc! {"
+            openapi: 3.0.0
+            info:
+              title: Test
+              version: 1.0.0
+            components:
+              schemas:
+                Parent1:
+                  properties:
+                    type1:
+                      type: string
+                  discriminator:
+                    propertyName: type1
+                Parent2:
+                  properties:
+                    type2:
+                      type: string
+                  discriminator:
+                    propertyName: type2
+                Child:
+                  allOf:
+                    - $ref: '#/components/schemas/Parent1'
+                    - $ref: '#/components/schemas/Parent2'
+                  properties:
+                    name:
+                      type: string
+        "})
+        .unwrap();
+
+        let child_schema = &doc.components.as_ref().unwrap().schemas["Child"];
+        let all_fields = all_fields(&doc, child_schema).collect_vec();
+
+        // Both discriminator fields should be marked.
+        let type1_field = all_fields
+            .iter()
+            .find(|(n, _)| *n == "type1")
+            .map(|(_, f)| f.info())
+            .unwrap();
+        assert!(type1_field.discriminator);
+
+        let type2_field = all_fields
+            .iter()
+            .find(|(n, _)| *n == "type2")
+            .map(|(_, f)| f.info())
+            .unwrap();
+        assert!(type2_field.discriminator);
+
+        // The `name` field should not be marked as a discriminator.
+        let name_field = all_fields
+            .iter()
+            .find(|(n, _)| *n == "name")
+            .map(|(_, f)| f.info())
+            .unwrap();
+        assert!(!name_field.discriminator);
     }
 }

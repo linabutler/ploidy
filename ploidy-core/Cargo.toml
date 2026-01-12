@@ -46,6 +46,9 @@ unicase = "2"
 unicode-ident = { version = "1", optional = true }
 winnow = "0.7"
 
+[dev-dependencies]
+indoc = "2"
+
 [features]
 default = []
 rust = [

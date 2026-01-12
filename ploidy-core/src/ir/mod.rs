@@ -6,6 +6,9 @@ mod transform;
 mod types;
 mod views;
 
+#[cfg(test)]
+mod tests;
+
 pub use graph::IrGraph;
 pub use spec::IrSpec;
 pub use types::*;
