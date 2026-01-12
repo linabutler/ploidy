@@ -153,10 +153,7 @@ mod test {
             result[0].fragments(),
             &[PathFragment::Literal("users".into())]
         );
-        assert_eq!(
-            result[1].fragments(),
-            &[PathFragment::Param("userId".into())]
-        );
+        assert_eq!(result[1].fragments(), &[PathFragment::Param("userId")]);
     }
 
     #[test]

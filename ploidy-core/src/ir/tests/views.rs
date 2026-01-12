@@ -4,14 +4,15 @@ use itertools::Itertools;
 
 use crate::{
     ir::{
-        InlineIrTypeView, IrGraph, IrSpec, IrStructFieldName, IrTypeView, PrimitiveIrType,
-        SchemaIrTypeView, View,
+        InlineIrTypePathSegment, InlineIrTypeView, IrEnumVariant, IrGraph, IrParameterStyle,
+        IrRequestView, IrResponseView, IrSpec, IrStructFieldName, IrTypeView, PrimitiveIrType,
+        SchemaIrTypeView, SomeIrUntaggedVariant, View,
     },
-    parse::Document,
+    parse::{Document, Method, path::PathFragment},
     tests::assert_matches,
 };
 
-// MARK: View construction tests
+// MARK: View construction
 
 #[test]
 fn test_struct_view_fields_iterator() {
@@ -134,6 +135,7 @@ fn test_operation_view_types() {
           /users:
             get:
               operationId: getUsers
+              description: Get all users
               responses:
                 '200':
                   description: OK
@@ -157,6 +159,7 @@ fn test_operation_view_types() {
     // Should be able to access the operation and its types.
     let operation = graph.operations().next().unwrap();
     assert_eq!(operation.id(), "getUsers");
+    assert_eq!(operation.description(), Some("Get all users"));
 
     // `getUsers` should reference the `User` schema.
     let user_schema = graph.schemas().find(|s| s.name() == "User").unwrap();
@@ -166,7 +169,7 @@ fn test_operation_view_types() {
     assert_matches!(&*used_by_ops, ["getUsers"]);
 }
 
-// MARK: Extension system tests
+// MARK: Extension system
 
 #[test]
 fn test_extension_insertion_retrieval() {
@@ -319,7 +322,7 @@ fn test_extension_per_node_type() {
     assert_eq!(*ref2_ext.unwrap(), "data_2");
 }
 
-// MARK: `reachable()` tests
+// MARK: `reachable()`
 
 #[test]
 fn test_reachable_multiple_dependencies() {
@@ -426,7 +429,366 @@ fn test_reachable_handles_cycles_without_infinite_loop() {
     assert_eq!(a_schema.reachable().count(), 2);
 }
 
-// MARK: `inlines()` tests
+#[test]
+fn test_reachable_from_array_includes_inner_types() {
+    let doc = Document::from_yaml(indoc::indoc! {"
+        openapi: 3.0.0
+        info:
+          title: Test
+          version: 1.0.0
+        components:
+          schemas:
+            Item:
+              type: object
+              properties:
+                value:
+                  type: string
+            Container:
+              type: object
+              properties:
+                items:
+                  type: array
+                  items:
+                    $ref: '#/components/schemas/Item'
+    "})
+    .unwrap();
+
+    let spec = IrSpec::from_doc(&doc).unwrap();
+    let graph = IrGraph::new(&spec);
+
+    let container_schema = graph.schemas().find(|s| s.name() == "Container").unwrap();
+    let container_struct = match container_schema {
+        SchemaIrTypeView::Struct(_, view) => view,
+        other => panic!("expected struct `Container`; got {other:?}"),
+    };
+
+    let items_field = container_struct
+        .fields()
+        .find(|f| matches!(f.name(), IrStructFieldName::Name("items")))
+        .unwrap();
+
+    let array_view = match items_field.ty() {
+        IrTypeView::Array(view) => view,
+        other => panic!("expected array; got {other:?}"),
+    };
+
+    // `reachable()` from the array should include the array, the schema
+    // reference, and the primitive field in `Item`.
+    let reachable_types = array_view.reachable().collect_vec();
+    assert_eq!(reachable_types.len(), 3);
+
+    // Verify the array itself is reachable.
+    assert!(
+        reachable_types
+            .iter()
+            .any(|t| matches!(t, IrTypeView::Array(_)))
+    );
+
+    // Verify the `Item` schema is reachable.
+    assert!(
+        reachable_types
+            .iter()
+            .any(|t| matches!(t, IrTypeView::Schema(SchemaIrTypeView::Struct("Item", _))))
+    );
+
+    // Verify the primitive field is reachable.
+    assert!(
+        reachable_types
+            .iter()
+            .any(|t| matches!(t, IrTypeView::Primitive(PrimitiveIrType::String)))
+    );
+}
+
+#[test]
+fn test_reachable_from_map_includes_inner_types() {
+    let doc = Document::from_yaml(indoc::indoc! {"
+        openapi: 3.0.0
+        info:
+          title: Test
+          version: 1.0.0
+        components:
+          schemas:
+            Item:
+              type: object
+              properties:
+                name:
+                  type: string
+            Container:
+              type: object
+              properties:
+                map_field:
+                  type: object
+                  additionalProperties:
+                    $ref: '#/components/schemas/Item'
+    "})
+    .unwrap();
+
+    let spec = IrSpec::from_doc(&doc).unwrap();
+    let graph = IrGraph::new(&spec);
+
+    let container_schema = graph.schemas().find(|s| s.name() == "Container").unwrap();
+    let container_struct = match container_schema {
+        SchemaIrTypeView::Struct(_, view) => view,
+        other => panic!("expected struct `Container`; got {other:?}"),
+    };
+
+    let map_field = container_struct
+        .fields()
+        .find(|f| matches!(f.name(), IrStructFieldName::Name("map_field")))
+        .unwrap();
+
+    let map_view = match map_field.ty() {
+        IrTypeView::Map(view) => view,
+        other => panic!("expected map; got {other:?}"),
+    };
+
+    // `reachable()` from the map should include the map, the schema
+    // reference, and the primitive field in `Item`.
+    let reachable_types = map_view.reachable().collect_vec();
+    assert_eq!(reachable_types.len(), 3);
+
+    // Verify the map itself is reachable.
+    assert!(
+        reachable_types
+            .iter()
+            .any(|t| matches!(t, IrTypeView::Map(_)))
+    );
+
+    // Verify the `Item` schema is reachable.
+    assert!(
+        reachable_types
+            .iter()
+            .any(|t| matches!(t, IrTypeView::Schema(SchemaIrTypeView::Struct("Item", _))))
+    );
+
+    // Verify the primitive field is reachable.
+    assert!(
+        reachable_types
+            .iter()
+            .any(|t| matches!(t, IrTypeView::Primitive(PrimitiveIrType::String)))
+    );
+}
+
+#[test]
+fn test_reachable_from_nullable_includes_inner_types() {
+    let doc = Document::from_yaml(indoc::indoc! {"
+        openapi: 3.0.0
+        info:
+          title: Test
+          version: 1.0.0
+        components:
+          schemas:
+            Item:
+              type: object
+              nullable: true
+              properties:
+                value:
+                  type: string
+            Container:
+              type: object
+              properties:
+                nullable_field:
+                  $ref: '#/components/schemas/Item'
+    "})
+    .unwrap();
+
+    let spec = IrSpec::from_doc(&doc).unwrap();
+    let graph = IrGraph::new(&spec);
+
+    let container_schema = graph.schemas().find(|s| s.name() == "Container").unwrap();
+    let container_struct = match container_schema {
+        SchemaIrTypeView::Struct(_, view) => view,
+        other => panic!("expected struct `Container`; got {other:?}"),
+    };
+
+    let nullable_field = container_struct
+        .fields()
+        .find(|f| matches!(f.name(), IrStructFieldName::Name("nullable_field")))
+        .unwrap();
+
+    let nullable_view = match nullable_field.ty() {
+        IrTypeView::Nullable(view) => view,
+        other => panic!("expected nullable; got {other:?}"),
+    };
+
+    // `reachable()` from the nullable should include the nullable, the schema
+    // reference, and the primitive field in `Item`.
+    let reachable_types = nullable_view.reachable().collect_vec();
+    assert_eq!(reachable_types.len(), 3);
+
+    // Verify the nullable itself is reachable.
+    assert!(
+        reachable_types
+            .iter()
+            .any(|t| matches!(t, IrTypeView::Nullable(_)))
+    );
+
+    // Verify the `Item` schema is reachable.
+    assert!(
+        reachable_types
+            .iter()
+            .any(|t| matches!(t, IrTypeView::Schema(SchemaIrTypeView::Struct("Item", _))))
+    );
+
+    // Verify the primitive field is reachable.
+    assert!(
+        reachable_types
+            .iter()
+            .any(|t| matches!(t, IrTypeView::Primitive(PrimitiveIrType::String)))
+    );
+}
+
+#[test]
+fn test_reachable_from_inline_includes_inner_types() {
+    let doc = Document::from_yaml(indoc::indoc! {"
+        openapi: 3.0.0
+        info:
+          title: Test
+          version: 1.0.0
+        components:
+          schemas:
+            RefSchema:
+              type: object
+              properties:
+                value:
+                  type: string
+            Container:
+              type: object
+              properties:
+                inline_field:
+                  type: object
+                  properties:
+                    ref_field:
+                      $ref: '#/components/schemas/RefSchema'
+    "})
+    .unwrap();
+
+    let spec = IrSpec::from_doc(&doc).unwrap();
+    let graph = IrGraph::new(&spec);
+
+    let container_schema = graph.schemas().find(|s| s.name() == "Container").unwrap();
+    let container_struct = match container_schema {
+        SchemaIrTypeView::Struct(_, view) => view,
+        other => panic!("expected struct `Container`; got {other:?}"),
+    };
+
+    let inline_field = container_struct
+        .fields()
+        .find(|f| matches!(f.name(), IrStructFieldName::Name("inline_field")))
+        .unwrap();
+
+    let inline_view = match inline_field.ty() {
+        IrTypeView::Inline(view) => view,
+        other => panic!("expected inline; got {other:?}"),
+    };
+
+    // `reachable()` from an inline type should include the inline struct,
+    // the schema reference, and the primitive field in `RefSchema`.
+    let reachable_types = inline_view.reachable().collect_vec();
+    assert_eq!(reachable_types.len(), 3);
+
+    // Verify the inline itself is reachable.
+    assert!(
+        reachable_types
+            .iter()
+            .any(|t| matches!(t, IrTypeView::Inline(_)))
+    );
+
+    // Verify the `RefSchema` schema is reachable.
+    assert!(reachable_types.iter().any(|t| matches!(
+        t,
+        IrTypeView::Schema(SchemaIrTypeView::Struct("RefSchema", _))
+    )));
+
+    // Verify the primitive field is reachable.
+    assert!(
+        reachable_types
+            .iter()
+            .any(|t| matches!(t, IrTypeView::Primitive(PrimitiveIrType::String)))
+    );
+}
+
+#[test]
+fn test_reachable_from_primitive_returns_no_items() {
+    let doc = Document::from_yaml(indoc::indoc! {"
+        openapi: 3.0.0
+        info:
+          title: Test
+          version: 1.0.0
+        components:
+          schemas:
+            Simple:
+              type: object
+              properties:
+                name:
+                  type: string
+    "})
+    .unwrap();
+
+    let spec = IrSpec::from_doc(&doc).unwrap();
+    let graph = IrGraph::new(&spec);
+
+    let simple_schema = graph.schemas().next().unwrap();
+    let simple_struct = match simple_schema {
+        SchemaIrTypeView::Struct(_, view) => view,
+        other => panic!("expected struct `Simple`; got {other:?}"),
+    };
+
+    let name_field = simple_struct
+        .fields()
+        .find(|f| matches!(f.name(), IrStructFieldName::Name("name")))
+        .unwrap();
+
+    let primitive_view = match name_field.ty() {
+        IrTypeView::Primitive(_) => name_field.ty(),
+        other => panic!("expected primitive; got {other:?}"),
+    };
+
+    // Primitives have no graph edges, so `reachable()` should return no items.
+    assert_eq!(primitive_view.reachable().count(), 0);
+}
+
+#[test]
+fn test_reachable_from_any_returns_no_items() {
+    let doc = Document::from_yaml(indoc::indoc! {"
+        openapi: 3.0.0
+        info:
+          title: Test
+          version: 1.0.0
+        components:
+          schemas:
+            Container:
+              type: object
+              properties:
+                untyped:
+                  additionalProperties: true
+    "})
+    .unwrap();
+
+    let spec = IrSpec::from_doc(&doc).unwrap();
+    let graph = IrGraph::new(&spec);
+
+    let container_schema = graph.schemas().next().unwrap();
+    let container_struct = match container_schema {
+        SchemaIrTypeView::Struct(_, view) => view,
+        other => panic!("expected struct `Container`; got {other:?}"),
+    };
+
+    let untyped_field = container_struct
+        .fields()
+        .find(|f| matches!(f.name(), IrStructFieldName::Name("untyped")))
+        .unwrap();
+
+    let any_view = match untyped_field.ty() {
+        IrTypeView::Any => untyped_field.ty(),
+        other => panic!("expected any; got {other:?}"),
+    };
+
+    // `Any` has no graph edges, so `reachable()` should return no items.
+    assert_eq!(any_view.reachable().count(), 0);
+}
+
+// MARK: `inlines()`
 
 #[test]
 fn test_inlines_finds_inline_structs_in_struct_fields() {
@@ -519,7 +881,7 @@ fn test_inlines_empty_for_schemas_with_no_inlines() {
     assert_eq!(simple_schema.inlines().count(), 0);
 }
 
-// MARK: Tagged union variant view tests
+// MARK: Tagged union variant views
 
 #[test]
 fn test_tagged_variant_iteration() {
@@ -651,7 +1013,7 @@ fn test_tagged_variant_type_access() {
     assert_matches!(ty, IrTypeView::Schema(view) if view.name() == "Cat");
 }
 
-// MARK: Untagged union variant view tests
+// MARK: Untagged union variant views
 
 #[test]
 fn test_untagged_variant_iteration() {
@@ -692,7 +1054,7 @@ fn test_untagged_variant_iteration() {
     assert_eq!(untagged_view.variants().count(), 2);
 }
 
-// MARK: Wrapper view tests
+// MARK: Wrapper views
 
 #[test]
 fn test_array_view_provides_access_to_item_type() {
@@ -727,15 +1089,15 @@ fn test_array_view_provides_access_to_item_type() {
         .find(|f| matches!(f.name(), IrStructFieldName::Name("items")))
         .unwrap();
 
-    // Access the array type through the field.
-    let field_ty = items_field.ty();
-    let array_view = match field_ty {
-        IrTypeView::Array(array_view) => array_view,
-        other => panic!("expected array; got {other:?}"),
-    };
-    // Verify inner type is accessible and is a string primitive.
-    let inner = array_view.inner();
-    assert_matches!(inner, IrTypeView::Primitive(PrimitiveIrType::String));
+    // Verify the array's inner type is accessible,
+    // and is a string primitive.
+    assert_matches!(
+        items_field.ty(),
+        IrTypeView::Array(view) if matches!(
+            view.inner(),
+            IrTypeView::Primitive(PrimitiveIrType::String),
+        ),
+    );
 }
 
 #[test]
@@ -771,15 +1133,15 @@ fn test_map_view_provides_access_to_value_type() {
         .find(|f| matches!(f.name(), IrStructFieldName::Name("map_field")))
         .unwrap();
 
-    // Access the map type through the field.
-    let field_ty = map_field.ty();
-    let map_view = match field_ty {
-        IrTypeView::Map(map_view) => map_view,
-        other => panic!("expected map; got {other:?}"),
-    };
-    // Verify inner type is accessible and is a string primitive.
-    let inner = map_view.inner();
-    assert_matches!(inner, IrTypeView::Primitive(PrimitiveIrType::String));
+    // Verify the map's inner type is accessible,
+    // and is a string primitive.
+    assert_matches!(
+        map_field.ty(),
+        IrTypeView::Map(view) if matches!(
+            view.inner(),
+            IrTypeView::Primitive(PrimitiveIrType::String),
+        ),
+    );
 }
 
 #[test]
@@ -817,21 +1179,749 @@ fn test_nullable_view_provides_access_to_inner_type() {
         .find(|f| matches!(f.name(), IrStructFieldName::Name("nullable_field")))
         .unwrap();
 
-    // Access the nullable type through the field.
-    let field_ty = nullable_field.ty();
-    let nullable_view = match field_ty {
-        IrTypeView::Nullable(nullable_view) => nullable_view,
-        other => panic!("expected nullable; got {other:?}"),
-    };
-    // Verify inner type is accessible and is an inline struct.
-    let inner = nullable_view.inner();
-    assert_matches!(inner, IrTypeView::Inline(InlineIrTypeView::Struct(_, _)));
+    // Verify the nullable's inner type is accessible,
+    // and is an inline struct.
+    assert_matches!(
+        nullable_field.ty(),
+        IrTypeView::Nullable(view) if matches!(
+            view.inner(),
+            IrTypeView::Inline(InlineIrTypeView::Struct(_, _)),
+        ),
+    );
 }
 
-// MARK: Operation view detailed tests
+// MARK: Inline type views
 
 #[test]
-fn test_operation_view_path_method() {
+fn test_inline_struct_view_construction_and_path_access() {
+    let doc = Document::from_yaml(indoc::indoc! {"
+        openapi: 3.0.0
+        info:
+          title: Test
+          version: 1.0.0
+        components:
+          schemas:
+            Container:
+              type: object
+              properties:
+                inline_obj:
+                  type: object
+                  properties:
+                    nested_field:
+                      type: string
+    "})
+    .unwrap();
+
+    let spec = IrSpec::from_doc(&doc).unwrap();
+    let graph = IrGraph::new(&spec);
+
+    let container_schema = graph.schemas().next().unwrap();
+    let container_struct = match container_schema {
+        SchemaIrTypeView::Struct(_, view) => view,
+        other => panic!("expected struct `Container`; got {other:?}"),
+    };
+
+    let inline_field = container_struct
+        .fields()
+        .find(|f| matches!(f.name(), IrStructFieldName::Name("inline_obj")))
+        .unwrap();
+
+    let field_ty = inline_field.ty();
+    let inline_view = match field_ty {
+        IrTypeView::Inline(inline_view) => inline_view,
+        other => panic!("expected inline type; got {other:?}"),
+    };
+
+    // Should be able to match on the `Struct` variant.
+    assert_matches!(inline_view, InlineIrTypeView::Struct(_, _));
+
+    // `path()` should return the path to the inline type.
+    let path = inline_view.path();
+    assert_eq!(path.segments.len(), 1);
+}
+
+#[test]
+fn test_inline_enum_view_construction() {
+    let doc = Document::from_yaml(indoc::indoc! {"
+        openapi: 3.0.0
+        info:
+          title: Test
+          version: 1.0.0
+        components:
+          schemas:
+            Container:
+              type: object
+              properties:
+                status:
+                  type: string
+                  enum: [active, inactive, pending]
+    "})
+    .unwrap();
+
+    let spec = IrSpec::from_doc(&doc).unwrap();
+    let graph = IrGraph::new(&spec);
+
+    let container_schema = graph.schemas().next().unwrap();
+    let container_struct = match container_schema {
+        SchemaIrTypeView::Struct(_, view) => view,
+        other => panic!("expected struct `Container`; got {other:?}"),
+    };
+
+    let status_field = container_struct
+        .fields()
+        .find(|f| matches!(f.name(), IrStructFieldName::Name("status")))
+        .unwrap();
+
+    let field_ty = status_field.ty();
+    let inline_view = match field_ty {
+        IrTypeView::Inline(inline_view) => inline_view,
+        other => panic!("expected inline enum; got {other:?}"),
+    };
+
+    // Should construct an `Enum` variant.
+    let enum_view = match inline_view {
+        InlineIrTypeView::Enum(_, view) => view,
+        other => panic!("expected inline enum; got {other:?}"),
+    };
+
+    // Verify the enum has the expected variants.
+    assert_eq!(enum_view.variants().len(), 3);
+}
+
+#[test]
+fn test_inline_untagged_view_construction() {
+    let doc = Document::from_yaml(indoc::indoc! {"
+        openapi: 3.0.0
+        info:
+          title: Test
+          version: 1.0.0
+        components:
+          schemas:
+            Container:
+              type: object
+              properties:
+                value:
+                  oneOf:
+                    - type: string
+                    - type: integer
+    "})
+    .unwrap();
+
+    let spec = IrSpec::from_doc(&doc).unwrap();
+    let graph = IrGraph::new(&spec);
+
+    let container_schema = graph.schemas().next().unwrap();
+    let container_struct = match container_schema {
+        SchemaIrTypeView::Struct(_, view) => view,
+        other => panic!("expected struct `Container`; got {other:?}"),
+    };
+
+    let value_field = container_struct
+        .fields()
+        .find(|f| matches!(f.name(), IrStructFieldName::Name("value")))
+        .unwrap();
+
+    let field_ty = value_field.ty();
+    let inline_view = match field_ty {
+        IrTypeView::Inline(inline_view) => inline_view,
+        other => panic!("expected inline untagged union; got {other:?}"),
+    };
+
+    // Should construct an `Untagged` variant.
+    let untagged_view = match inline_view {
+        InlineIrTypeView::Untagged(_, view) => view,
+        other => panic!("expected inline untagged union; got {other:?}"),
+    };
+
+    // Verify the untagged union has the expected number of variants.
+    assert_eq!(untagged_view.variants().count(), 2);
+}
+
+#[test]
+fn test_inline_view_path_method() {
+    let doc = Document::from_yaml(indoc::indoc! {"
+        openapi: 3.0.0
+        info:
+          title: Test
+          version: 1.0.0
+        components:
+          schemas:
+            Parent:
+              type: object
+              properties:
+                nested:
+                  type: object
+                  properties:
+                    deep:
+                      type: object
+                      properties:
+                        field:
+                          type: string
+    "})
+    .unwrap();
+
+    let spec = IrSpec::from_doc(&doc).unwrap();
+    let graph = IrGraph::new(&spec);
+
+    let parent_schema = graph.schemas().next().unwrap();
+    let parent_struct = match parent_schema {
+        SchemaIrTypeView::Struct(_, view) => view,
+        other => panic!("expected struct `Parent`; got {other:?}"),
+    };
+
+    let nested_field = parent_struct
+        .fields()
+        .find(|f| matches!(f.name(), IrStructFieldName::Name("nested")))
+        .unwrap();
+
+    let nested_ty = nested_field.ty();
+    let nested_inline = match nested_ty {
+        IrTypeView::Inline(inline_view) => inline_view,
+        other => panic!("expected inline type; got {other:?}"),
+    };
+
+    // `path()` should return a path with one segment.
+    let path = nested_inline.path();
+    assert_matches!(
+        &*path.segments,
+        [InlineIrTypePathSegment::Field(IrStructFieldName::Name(
+            "nested"
+        ))]
+    );
+}
+
+#[test]
+fn test_inline_view_with_view_trait_methods() {
+    let doc = Document::from_yaml(indoc::indoc! {"
+        openapi: 3.0.0
+        info:
+          title: Test
+          version: 1.0
+        paths:
+          /records:
+            post:
+              operationId: createRecord
+              requestBody:
+                content:
+                  application/json:
+                    schema:
+                      type: object
+                      properties:
+                        status:
+                          type: string
+                          enum: [draft, published]
+              responses:
+                '201':
+                  description: Created
+        components:
+          schemas: {}
+    "})
+    .unwrap();
+
+    let spec = IrSpec::from_doc(&doc).unwrap();
+    let graph = IrGraph::new(&spec);
+
+    let operation = graph.operations().next().unwrap();
+    let request = operation.request().unwrap();
+
+    let request_ty = match request {
+        IrRequestView::Json(ty) => ty,
+        other => panic!("expected JSON request; got `{other:?}`"),
+    };
+
+    let request_struct = match request_ty {
+        IrTypeView::Inline(InlineIrTypeView::Struct(_, view)) => view,
+        other => panic!("expected inline struct; got {other:?}"),
+    };
+
+    let status_field = request_struct
+        .fields()
+        .find(|f| matches!(f.name(), IrStructFieldName::Name("status")))
+        .unwrap();
+
+    let status_ty = status_field.ty();
+    let inline_enum = match status_ty {
+        IrTypeView::Inline(inline_view) => inline_view,
+        other => panic!("expected inline type; got {other:?}"),
+    };
+
+    // `used_by()` should find the operations that use this inline type.
+    let operations = inline_enum.used_by().map(|op| op.id()).collect_vec();
+    assert_matches!(&*operations, ["createRecord"]);
+
+    // `inlines()` includes the starting node.
+    assert_eq!(inline_enum.inlines().count(), 1);
+
+    // `reachable()` should include the inline enum itself.
+    assert_eq!(inline_enum.reachable().count(), 1);
+}
+
+#[test]
+fn test_untagged_variant_with_null_type() {
+    let doc = Document::from_yaml(indoc::indoc! {"
+        openapi: 3.0.0
+        info:
+          title: Test
+          version: 1.0
+        components:
+          schemas:
+            Cat:
+              type: object
+              properties:
+                meow:
+                  type: string
+            Dog:
+              type: object
+              properties:
+                bark:
+                  type: string
+            Animal:
+              oneOf:
+                - $ref: '#/components/schemas/Cat'
+                - $ref: '#/components/schemas/Dog'
+                - type: 'null'
+    "})
+    .unwrap();
+
+    let spec = IrSpec::from_doc(&doc).unwrap();
+    let graph = IrGraph::new(&spec);
+
+    let animal_schema = graph.schemas().find(|s| s.name() == "Animal").unwrap();
+    let untagged_view = match animal_schema {
+        SchemaIrTypeView::Untagged(_, view) => view,
+        other => panic!("expected untagged union `Animal`; got {other:?}"),
+    };
+
+    let variants = untagged_view.variants().collect_vec();
+    assert_eq!(variants.len(), 3);
+
+    // The first two variants should be schema references.
+    let cat_variant = &variants[0];
+    assert_matches!(
+        cat_variant.ty(),
+        Some(SomeIrUntaggedVariant {
+            view: IrTypeView::Schema(view),
+            ..
+        }) if view.name() == "Cat",
+    );
+
+    let dog_variant = &variants[1];
+    assert_matches!(
+        dog_variant.ty(),
+        Some(SomeIrUntaggedVariant {
+            view: IrTypeView::Schema(view),
+            ..
+        }) if view.name() == "Dog",
+    );
+
+    // The third variant should be `null`, returning `None`.
+    let null_variant = &variants[2];
+    assert!(null_variant.ty().is_none());
+}
+
+// MARK: Enum views
+
+#[test]
+fn test_enum_view_variants() {
+    let doc = Document::from_yaml(indoc::indoc! {"
+        openapi: 3.0.0
+        info:
+          title: Test
+          version: 1.0.0
+        components:
+          schemas:
+            Status:
+              type: string
+              enum: [active, inactive, pending]
+    "})
+    .unwrap();
+
+    let spec = IrSpec::from_doc(&doc).unwrap();
+    let graph = IrGraph::new(&spec);
+
+    let status_schema = graph.schemas().find(|s| s.name() == "Status").unwrap();
+    let enum_view = match status_schema {
+        SchemaIrTypeView::Enum(_, view) => view,
+        other => panic!("expected enum `Status`; got {other:?}"),
+    };
+    let variants = enum_view.variants();
+
+    // Verify the actual variant values.
+    assert_matches!(
+        variants,
+        [
+            IrEnumVariant::String("active"),
+            IrEnumVariant::String("inactive"),
+            IrEnumVariant::String("pending"),
+        ]
+    );
+}
+
+#[test]
+fn test_enum_view_with_description() {
+    let doc = Document::from_yaml(indoc::indoc! {"
+        openapi: 3.0.0
+        info:
+          title: Test
+          version: 1.0.0
+        components:
+          schemas:
+            Priority:
+              type: string
+              description: Task priority level
+              enum: [low, medium, high]
+    "})
+    .unwrap();
+
+    let spec = IrSpec::from_doc(&doc).unwrap();
+    let graph = IrGraph::new(&spec);
+
+    let priority_schema = graph.schemas().find(|s| s.name() == "Priority").unwrap();
+    let enum_view = match priority_schema {
+        SchemaIrTypeView::Enum(_, view) => view,
+        other => panic!("expected enum `Priority`; got {other:?}"),
+    };
+    assert_matches!(enum_view.description(), Some("Task priority level"));
+}
+
+#[test]
+fn test_enum_view_without_description() {
+    let doc = Document::from_yaml(indoc::indoc! {"
+        openapi: 3.0.0
+        info:
+          title: Test
+          version: 1.0.0
+        components:
+          schemas:
+            Status:
+              type: string
+              enum: [active, inactive]
+    "})
+    .unwrap();
+
+    let spec = IrSpec::from_doc(&doc).unwrap();
+    let graph = IrGraph::new(&spec);
+
+    let status_schema = graph.schemas().find(|s| s.name() == "Status").unwrap();
+    let enum_view = match status_schema {
+        SchemaIrTypeView::Enum(_, view) => view,
+        other => panic!("expected enum `Status`; got {other:?}"),
+    };
+    assert_matches!(enum_view.description(), None);
+}
+
+#[test]
+fn test_enum_view_variants_with_numbers() {
+    let doc = Document::from_yaml(indoc::indoc! {"
+        openapi: 3.0.0
+        info:
+          title: Test
+          version: 1.0.0
+        components:
+          schemas:
+            Priority:
+              type: integer
+              enum: [1, 2, 3]
+    "})
+    .unwrap();
+
+    let spec = IrSpec::from_doc(&doc).unwrap();
+    let graph = IrGraph::new(&spec);
+
+    let priority_schema = graph.schemas().find(|s| s.name() == "Priority").unwrap();
+    let enum_view = match priority_schema {
+        SchemaIrTypeView::Enum(_, view) => view,
+        other => panic!("expected enum `Priority`; got {other:?}"),
+    };
+    let variants = enum_view.variants();
+
+    // Verify the actual variant values.
+    let [
+        IrEnumVariant::Number(n1),
+        IrEnumVariant::Number(n2),
+        IrEnumVariant::Number(n3),
+    ] = variants
+    else {
+        panic!("expected 3 variants; got {variants:?}");
+    };
+    assert_eq!(n1.as_i64(), Some(1));
+    assert_eq!(n2.as_i64(), Some(2));
+    assert_eq!(n3.as_i64(), Some(3));
+}
+
+#[test]
+fn test_enum_view_variants_with_booleans() {
+    let doc = Document::from_yaml(indoc::indoc! {"
+        openapi: 3.0.0
+        info:
+          title: Test
+          version: 1.0.0
+        components:
+          schemas:
+            Toggle:
+              type: boolean
+              enum: [true, false]
+    "})
+    .unwrap();
+
+    let spec = IrSpec::from_doc(&doc).unwrap();
+    let graph = IrGraph::new(&spec);
+
+    let toggle_schema = graph.schemas().find(|s| s.name() == "Toggle").unwrap();
+    let enum_view = match toggle_schema {
+        SchemaIrTypeView::Enum(_, view) => view,
+        other => panic!("expected enum `Toggle`; got {other:?}"),
+    };
+    let variants = enum_view.variants();
+
+    // Verify the actual variant values.
+    let &[IrEnumVariant::Bool(b1), IrEnumVariant::Bool(b2)] = variants else {
+        panic!("expected 2 variants; got {variants:?}");
+    };
+    assert!(b1);
+    assert!(!b2);
+}
+
+#[test]
+fn test_enum_view_with_view_trait_methods() {
+    let doc = Document::from_yaml(indoc::indoc! {"
+        openapi: 3.0.0
+        info:
+          title: Test
+          version: 1.0
+        paths:
+          /tasks:
+            get:
+              operationId: getTasks
+              responses:
+                '200':
+                  description: OK
+                  content:
+                    application/json:
+                      schema:
+                        type: object
+                        properties:
+                          status:
+                            $ref: '#/components/schemas/Status'
+        components:
+          schemas:
+            Status:
+              type: string
+              enum: [pending, completed, cancelled]
+    "})
+    .unwrap();
+
+    let spec = IrSpec::from_doc(&doc).unwrap();
+    let graph = IrGraph::new(&spec);
+
+    let status_schema = graph.schemas().find(|s| s.name() == "Status").unwrap();
+    let enum_view = match status_schema {
+        SchemaIrTypeView::Enum(_, view) => view,
+        other => panic!("expected enum `Status`; got {other:?}"),
+    };
+
+    // `used_by()` should find the operations that use this enum.
+    let operations = enum_view.used_by().map(|op| op.id()).collect_vec();
+    assert_matches!(&*operations, ["getTasks"]);
+
+    // Enums can't contain inline types, so `inlines()` should be empty.
+    assert_eq!(enum_view.inlines().count(), 0);
+
+    // `reachable()` should include the enum itself.
+    assert_eq!(enum_view.reachable().count(), 1);
+}
+
+// MARK: Operation views
+
+#[test]
+fn test_operation_view_resource() {
+    let doc = Document::from_yaml(indoc::indoc! {"
+        openapi: 3.0.0
+        info:
+          title: Test
+          version: 1.0
+        paths:
+          /users:
+            get:
+              operationId: getUsers
+              x-resource-name: UserResource
+              responses:
+                '200':
+                  description: OK
+                  content:
+                    application/json:
+                      schema:
+                        type: object
+        components:
+          schemas: {}
+    "})
+    .unwrap();
+
+    let spec = IrSpec::from_doc(&doc).unwrap();
+    let graph = IrGraph::new(&spec);
+
+    let operation = graph.operations().next().unwrap();
+    assert_eq!(operation.resource(), "UserResource");
+}
+
+#[test]
+fn test_operation_view_method() {
+    let doc = Document::from_yaml(indoc::indoc! {"
+        openapi: 3.0.0
+        info:
+          title: Test
+          version: 1.0
+        paths:
+          /users:
+            get:
+              operationId: getUsers
+              responses:
+                '200':
+                  description: OK
+            post:
+              operationId: createUser
+              responses:
+                '201':
+                  description: Created
+            put:
+              operationId: updateUser
+              responses:
+                '200':
+                  description: OK
+            patch:
+              operationId: patchUser
+              responses:
+                '200':
+                  description: OK
+            delete:
+              operationId: deleteUser
+              responses:
+                '204':
+                  description: No Content
+        components:
+          schemas: {}
+    "})
+    .unwrap();
+
+    let spec = IrSpec::from_doc(&doc).unwrap();
+    let graph = IrGraph::new(&spec);
+
+    let operations = graph.operations().collect_vec();
+    assert_eq!(operations.len(), 5);
+
+    let get_op = operations.iter().find(|op| op.id() == "getUsers").unwrap();
+    assert_matches!(get_op.method(), Method::Get);
+
+    let post_op = operations
+        .iter()
+        .find(|op| op.id() == "createUser")
+        .unwrap();
+    assert_matches!(post_op.method(), Method::Post);
+
+    let put_op = operations
+        .iter()
+        .find(|op| op.id() == "updateUser")
+        .unwrap();
+    assert_matches!(put_op.method(), Method::Put);
+
+    let patch_op = operations.iter().find(|op| op.id() == "patchUser").unwrap();
+    assert_matches!(patch_op.method(), Method::Patch);
+
+    let delete_op = operations
+        .iter()
+        .find(|op| op.id() == "deleteUser")
+        .unwrap();
+    assert_matches!(delete_op.method(), Method::Delete);
+}
+
+#[test]
+fn test_operation_view_inlines_excludes_schema_references() {
+    let doc = Document::from_yaml(indoc::indoc! {"
+        openapi: 3.0.0
+        info:
+          title: Test
+          version: 1.0
+        paths:
+          /users:
+            get:
+              operationId: getUsers
+              responses:
+                '200':
+                  description: OK
+                  content:
+                    application/json:
+                      schema:
+                        $ref: '#/components/schemas/User'
+        components:
+          schemas:
+            User:
+              type: object
+              properties:
+                name:
+                  type: string
+    "})
+    .unwrap();
+
+    let spec = IrSpec::from_doc(&doc).unwrap();
+    let graph = IrGraph::new(&spec);
+
+    let operation = graph.operations().next().unwrap();
+
+    // The operation references a named schema, not an inline type.
+    assert_eq!(operation.inlines().count(), 0);
+}
+
+#[test]
+fn test_operation_view_inlines_with_mixed_types() {
+    let doc = Document::from_yaml(indoc::indoc! {"
+        openapi: 3.0.0
+        info:
+          title: Test
+          version: 1.0
+        paths:
+          /users:
+            post:
+              operationId: createUser
+              requestBody:
+                content:
+                  application/json:
+                    schema:
+                      type: object
+                      properties:
+                        profile:
+                          $ref: '#/components/schemas/Profile'
+                        metadata:
+                          type: object
+                          properties:
+                            tags:
+                              type: array
+                              items:
+                                type: string
+              responses:
+                '201':
+                  description: Created
+        components:
+          schemas:
+            Profile:
+              type: object
+              properties:
+                name:
+                  type: string
+    "})
+    .unwrap();
+
+    let spec = IrSpec::from_doc(&doc).unwrap();
+    let graph = IrGraph::new(&spec);
+
+    let operation = graph.operations().next().unwrap();
+
+    // Should find the inline request body and the inline metadata object.
+    // `Profile` is a schema reference, and should be excluded.
+    assert_eq!(operation.inlines().count(), 2);
+}
+
+#[test]
+fn test_operation_parameter_ty() {
     let doc = Document::from_yaml(indoc::indoc! {"
         openapi: 3.0.0
         info:
@@ -847,18 +1937,15 @@ fn test_operation_view_path_method() {
                   required: true
                   schema:
                     type: string
+                - name: tags
+                  in: query
+                  schema:
+                    type: array
+                    items:
+                      type: string
               responses:
                 '200':
                   description: OK
-                  content:
-                    application/json:
-                      schema:
-                        type: object
-                        properties:
-                          id:
-                            type: string
-        components:
-          schemas: {}
     "})
     .unwrap();
 
@@ -866,13 +1953,27 @@ fn test_operation_view_path_method() {
     let graph = IrGraph::new(&spec);
 
     let operation = graph.operations().next().unwrap();
-    let path_view = operation.path();
 
-    assert_eq!(path_view.segments().len(), 2);
+    // String path parameter.
+    let path_param = operation.path().params().next().unwrap();
+    assert_matches!(
+        path_param.ty(),
+        IrTypeView::Primitive(PrimitiveIrType::String),
+    );
+
+    // Array-of-strings query parameter.
+    let query_param = operation.query().next().unwrap();
+    assert_matches!(
+        query_param.ty(),
+        IrTypeView::Array(view) if matches!(
+            view.inner(),
+            IrTypeView::Primitive(PrimitiveIrType::String),
+        ),
+    );
 }
 
 #[test]
-fn test_operation_view_query_iterator() {
+fn test_operation_parameter_style() {
     let doc = Document::from_yaml(indoc::indoc! {"
         openapi: 3.0.0
         info:
@@ -883,23 +1984,48 @@ fn test_operation_view_query_iterator() {
             get:
               operationId: listUsers
               parameters:
-                - name: limit
+                - name: tags
                   in: query
                   schema:
-                    type: integer
-                - name: offset
+                    type: array
+                    items:
+                      type: string
+                  style: form
+                  explode: false
+                - name: filters
                   in: query
                   schema:
-                    type: integer
+                    type: array
+                    items:
+                      type: string
+                  style: pipeDelimited
+                - name: space_separated
+                  in: query
+                  schema:
+                    type: array
+                    items:
+                      type: string
+                  style: spaceDelimited
+                - name: form_exploded
+                  in: query
+                  schema:
+                    type: array
+                    items:
+                      type: string
+                  style: form
+                  explode: true
+                - name: deep_obj
+                  in: query
+                  schema:
+                    type: object
+                  style: deepObject
+                - name: no_style
+                  in: query
+                  schema:
+                    type: string
               responses:
                 '200':
                   description: OK
-                  content:
-                    application/json:
-                      schema:
-                        type: object
-        components:
-          schemas: {}
     "})
     .unwrap();
 
@@ -907,13 +2033,56 @@ fn test_operation_view_query_iterator() {
     let graph = IrGraph::new(&spec);
 
     let operation = graph.operations().next().unwrap();
-    let query_param_names = operation.query().map(|p| p.name()).collect_vec();
+    let query_params = operation.query().collect_vec();
 
-    assert_matches!(&*query_param_names, ["limit", "offset"]);
+    // Non-exploded `form` style.
+    let tags = query_params.iter().find(|p| p.name() == "tags").unwrap();
+    assert_matches!(
+        tags.style(),
+        Some(IrParameterStyle::Form { exploded: false }),
+    );
+
+    // `pipeDelimited` style.
+    let filters = query_params.iter().find(|p| p.name() == "filters").unwrap();
+    assert_matches!(filters.style(), Some(IrParameterStyle::PipeDelimited));
+
+    // `spaceDelimited` style.
+    let space = query_params
+        .iter()
+        .find(|p| p.name() == "space_separated")
+        .unwrap();
+    assert_matches!(space.style(), Some(IrParameterStyle::SpaceDelimited));
+
+    // Exploded `form` style, explicitly specified.
+    let form_exploded = query_params
+        .iter()
+        .find(|p| p.name() == "form_exploded")
+        .unwrap();
+    assert_matches!(
+        form_exploded.style(),
+        Some(IrParameterStyle::Form { exploded: true }),
+    );
+
+    // `deepObject` style.
+    let deep_obj = query_params
+        .iter()
+        .find(|p| p.name() == "deep_obj")
+        .unwrap();
+    assert_matches!(deep_obj.style(), Some(IrParameterStyle::DeepObject));
+
+    // No explicit style; defaults to the exploded `form` style.
+    let no_style = query_params
+        .iter()
+        .find(|p| p.name() == "no_style")
+        .unwrap();
+    assert_matches!(
+        no_style.style(),
+        Some(IrParameterStyle::Form { exploded: true }),
+    );
 }
 
 #[test]
-fn test_operation_view_request_and_response_methods() {
+fn test_operation_request_json() {
     let doc = Document::from_yaml(indoc::indoc! {"
         openapi: 3.0.0
         info:
@@ -934,15 +2103,6 @@ fn test_operation_view_request_and_response_methods() {
               responses:
                 '201':
                   description: Created
-                  content:
-                    application/json:
-                      schema:
-                        type: object
-                        properties:
-                          id:
-                            type: string
-        components:
-          schemas: {}
     "})
     .unwrap();
 
@@ -950,13 +2110,47 @@ fn test_operation_view_request_and_response_methods() {
     let graph = IrGraph::new(&spec);
 
     let operation = graph.operations().next().unwrap();
-
-    assert!(operation.request().is_some());
-    assert!(operation.response().is_some());
+    assert_matches!(
+        operation.request(),
+        Some(IrRequestView::Json(IrTypeView::Inline(_))),
+    );
 }
 
 #[test]
-fn test_ir_parameter_view_accessors() {
+fn test_operation_request_multipart() {
+    let doc = Document::from_yaml(indoc::indoc! {"
+        openapi: 3.0.0
+        info:
+          title: Test
+          version: 1.0
+        paths:
+          /upload:
+            post:
+              operationId: uploadFile
+              requestBody:
+                content:
+                  multipart/form-data:
+                    schema:
+                      type: object
+                      properties:
+                        file:
+                          type: string
+                          format: binary
+              responses:
+                '200':
+                  description: OK
+    "})
+    .unwrap();
+
+    let spec = IrSpec::from_doc(&doc).unwrap();
+    let graph = IrGraph::new(&spec);
+
+    let operation = graph.operations().next().unwrap();
+    assert_matches!(operation.request(), Some(IrRequestView::Multipart));
+}
+
+#[test]
+fn test_operation_path() {
     let doc = Document::from_yaml(indoc::indoc! {"
         openapi: 3.0.0
         info:
@@ -972,11 +2166,6 @@ fn test_ir_parameter_view_accessors() {
                   required: true
                   schema:
                     type: string
-                - name: include_details
-                  in: query
-                  required: false
-                  schema:
-                    type: boolean
               responses:
                 '200':
                   description: OK
@@ -984,6 +2173,44 @@ fn test_ir_parameter_view_accessors() {
                     application/json:
                       schema:
                         type: object
+                        properties:
+                          id:
+                            type: string
+    "})
+    .unwrap();
+
+    let spec = IrSpec::from_doc(&doc).unwrap();
+    let graph = IrGraph::new(&spec);
+
+    let operation = graph.operations().next().unwrap();
+    let segments = operation.path().segments().as_slice();
+    let [a, b] = segments else {
+        panic!("expected two path segments; got {segments:?}");
+    };
+    assert_matches!(
+        a.fragments(),
+        [PathFragment::Literal(n)] if n == "users",
+    );
+    assert_matches!(b.fragments(), [PathFragment::Param("id")]);
+}
+
+#[test]
+fn test_operation_response_without_schema() {
+    let doc = Document::from_yaml(indoc::indoc! {"
+        openapi: 3.0.0
+        info:
+          title: Test
+          version: 1.0
+        paths:
+          /resource:
+            get:
+              operationId: getResource
+              responses:
+                '200':
+                  description: OK
+                  content:
+                    application/json:
+                      schema: {}
         components:
           schemas: {}
     "})
@@ -994,25 +2221,15 @@ fn test_ir_parameter_view_accessors() {
 
     let operation = graph.operations().next().unwrap();
 
-    // Test path parameters.
-    let path_params = operation.path().params().collect_vec();
-    let [param] = &*path_params else {
-        panic!("expected single path parameter; got {path_params:?}");
-    };
-    assert_eq!(param.name(), "id");
-    assert!(param.required());
-
-    // Test query parameters.
-    let query_params = operation.query().collect_vec();
-    let [param] = &*query_params else {
-        panic!("expected single query parameter; got {query_params:?}");
-    };
-    assert_eq!(param.name(), "include_details");
-    assert!(!param.required());
+    // Empty response schema becomes `IrResponse::Json(IrType::Any)`.
+    assert_matches!(
+        operation.response(),
+        Some(IrResponseView::Json(IrTypeView::Any))
+    );
 }
 
 #[test]
-fn test_operation_view_operation_info_accessors() {
+fn test_operation_query() {
     let doc = Document::from_yaml(indoc::indoc! {"
         openapi: 3.0.0
         info:
@@ -1022,7 +2239,16 @@ fn test_operation_view_operation_info_accessors() {
           /users:
             get:
               operationId: listUsers
-              description: Get all users
+              parameters:
+                - name: limit
+                  in: query
+                  required: true
+                  schema:
+                    type: integer
+                - name: offset
+                  in: query
+                  schema:
+                    type: integer
               responses:
                 '200':
                   description: OK
@@ -1030,15 +2256,20 @@ fn test_operation_view_operation_info_accessors() {
                     application/json:
                       schema:
                         type: object
-        components:
-          schemas: {}
     "})
     .unwrap();
+
     let spec = IrSpec::from_doc(&doc).unwrap();
     let graph = IrGraph::new(&spec);
 
     let operation = graph.operations().next().unwrap();
 
-    assert_eq!(operation.id(), "listUsers");
-    assert_matches!(operation.description(), Some("Get all users"));
+    let query_params = operation.query().collect_vec();
+    let [limit, offset] = &*query_params else {
+        panic!("expected two query parameters; got {query_params:?}");
+    };
+    assert_eq!(limit.name(), "limit");
+    assert!(limit.required());
+    assert_eq!(offset.name(), "offset");
+    assert!(!offset.required());
 }

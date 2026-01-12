@@ -1410,7 +1410,7 @@ fn test_any_of_with_allof() {
     );
 }
 
-// MARK: Edge case tests
+// MARK: Edge cases
 
 #[test]
 fn test_boolean_primitive_transformation() {
