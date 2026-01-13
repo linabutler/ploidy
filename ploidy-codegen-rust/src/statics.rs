@@ -12,6 +12,10 @@ impl ToTokens for CodegenLibrary {
             pub mod client;
             pub mod error;
 
+            // Re-export `ploidy-util`, so that consumers don't need to
+            // depend on it directly.
+            pub use ::ploidy_util as util;
+
             pub use client::Client;
             pub use error::Error;
         });
