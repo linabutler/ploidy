@@ -637,7 +637,7 @@ dependencies = [
 
 [[package]]
 name = "ploidy"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "cargo_toml",
  "clap",
@@ -650,7 +650,7 @@ dependencies = [
 
 [[package]]
 name = "ploidy-codegen-rust"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "cargo_toml",
  "heck",
@@ -670,7 +670,7 @@ dependencies = [
 
 [[package]]
 name = "ploidy-core"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "atomic_refcell",
  "by_address",
@@ -700,7 +700,7 @@ dependencies = [
 
 [[package]]
 name = "ploidy-pointer"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "chrono",
  "indexmap",
@@ -714,7 +714,7 @@ dependencies = [
 
 [[package]]
 name = "ploidy-pointer-derive"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "heck",
  "itertools",
@@ -726,7 +726,7 @@ dependencies = [
 
 [[package]]
 name = "ploidy-util"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "chrono",
  "itertools",
