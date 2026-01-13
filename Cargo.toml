@@ -15,6 +15,7 @@ license = "Apache-2.0"
 edition = "2024"
 repository = "https://github.com/linabutler/ploidy"
 keywords = ["codegen", "openapi", "swagger"]
+rust-version = "1.89"
 
 [workspace.dependencies]
 ploidy-codegen-rust = { path = "ploidy-codegen-rust", version = "0.5.0" }

@@ -24,6 +24,10 @@ cargo install --locked ploidy
 
 💡 **Tip**: The `-linux-musl` binaries are statically linked with [musl](https://www.musl-libc.org/intro.html), and are a good choice for running Ploidy on CI platforms like GitHub Actions.
 
+🦀 Ploidy's minimum supported Rust version (MSRV) is **Rust 1.89.0**. This only applies if you're installing from source, or depending on one of the **ploidy-\*** packages as a library. _Generated Rust code_ has a different MSRV; please see below.
+
+Our policy for the **ploidy-\*** packages is that the MSRV can be increased in minor version updates. (For example, all releases of Ploidy 1.0.x will require the same MSRV, but Ploidy 1.1 may require a newer MSRV).
+
 ## Generating Code
 
 ### Rust
@@ -39,6 +43,10 @@ This produces a ready-to-use crate that includes:
 * A `Cargo.toml` file, which you can extend with additional metadata, dependencies, or examples...
 * A `types` module, which contains Rust types for every schema defined in your spec, and...
 * A `client` module, with a RESTful HTTP client that provides async methods for every operation in your spec.
+
+#### Minimum supported Rust version
+
+The minimum supported Rust version (MSRV) for generated code is **Rust 1.85.0**, the first stable release to support the [2024 edition](https://doc.rust-lang.org/edition-guide/rust-2024/index.html).
 
 #### Options
 

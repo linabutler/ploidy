@@ -175,7 +175,7 @@ impl<'a> KeyPath<'a> {
     }
 
     fn len(&self) -> usize {
-        self.1.len().strict_add(1)
+        self.1.len() + 1
     }
 
     fn push(&mut self, segment: impl Into<Cow<'a, str>>) {

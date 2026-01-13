@@ -17,8 +17,8 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  build:
-    name: Build all targets
+  test:
+    name: Build and test
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -97,3 +97,67 @@ jobs:
           SCCACHE_LOCAL_RW_MODE: READ_ONLY
         run: |
           cargo test --workspace --no-fail-fast --all-features
+
+  test-msrv:
+    name: Test on minimum supported Rust version
+    needs: [test]
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: workspace
+            rust: "1.89.0"
+            packages: --workspace
+          - name: ploidy-util
+            rust: "1.85.0"
+            packages: -p ploidy-util
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref }}
+
+      - name: Prepare build cache directory
+        shell: bash
+        run: |
+          echo "SCCACHE_DIR=${SCCACHE_DIR:-$HOME/.cache/sccache}" >> $GITHUB_ENV
+
+      - name: Restore Cargo packages and metadata
+        uses: actions/cache/restore@v4
+        id: restore-cargo-home
+        with:
+          # The Cargo cache format is backward-compatible, so we can
+          # reuse the cache from the `test` job.
+          path: |
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+          key: cargo-${{ hashFiles('rust-toolchain.toml') }}-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            cargo-${{ hashFiles('rust-toolchain.toml') }}-
+
+      - uses: mozilla-actions/sccache-action@65101d47ea8028ed0c98a1cdea8dd9182e9b5133 # v0.0.8
+
+      - name: Restore build cache
+        uses: actions/cache/restore@v4
+        id: restore-sccache
+        with:
+          path: ${{ env.SCCACHE_DIR }}
+          key: sccache-${{ matrix.rust }}-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            sccache-${{ matrix.rust }}-
+
+      - name: Run tests
+        shell: bash
+        env:
+          RUSTUP_TOOLCHAIN: ${{ matrix.rust }}
+          RUSTC_WRAPPER: sccache
+        run: |
+          cargo test ${{ matrix.packages }} --no-fail-fast --all-features
+
+      - name: Cache build products
+        uses: actions/cache/save@v4
+        if: ${{ steps.restore-sccache.outputs.cache-hit != 'true' }}
+        with:
+          path: ${{ env.SCCACHE_DIR }}
+          key: ${{ steps.restore-sccache.outputs.cache-primary-key }}
