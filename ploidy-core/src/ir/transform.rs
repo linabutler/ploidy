@@ -92,29 +92,35 @@ impl<'a> IrTransformer<'a> {
             .iter()
             .enumerate()
             .map(|(index, schema)| (index + 1, schema))
-            .map(|(index, schema)| match schema {
-                RefOrSchema::Ref(r) => IrUntaggedVariant::Some(
-                    IrUntaggedVariantNameHint::Index(index),
-                    IrType::Ref(&r.path),
-                ),
-                RefOrSchema::Other(s) if matches!(&*s.ty, [Ty::Null]) => IrUntaggedVariant::Null,
-                RefOrSchema::Other(schema) => {
-                    let path = match &self.name {
-                        IrTypeName::Schema(name) => InlineIrTypePath {
-                            root: InlineIrTypePathRoot::Type(name),
-                            segments: vec![InlineIrTypePathSegment::Variant(index)],
-                        },
-                        IrTypeName::Inline(path) => {
-                            let mut path = path.clone();
-                            path.segments.push(InlineIrTypePathSegment::Variant(index));
-                            path
-                        }
+            .map(|(index, schema)| {
+                let ty = match schema {
+                    RefOrSchema::Ref(r) => Some(IrType::Ref(&r.path)),
+                    RefOrSchema::Other(s) if matches!(&*s.ty, [Ty::Null]) => None,
+                    RefOrSchema::Other(schema) => {
+                        let path = match &self.name {
+                            IrTypeName::Schema(name) => InlineIrTypePath {
+                                root: InlineIrTypePathRoot::Type(name),
+                                segments: vec![InlineIrTypePathSegment::Variant(index)],
+                            },
+                            IrTypeName::Inline(path) => {
+                                let mut path = path.clone();
+                                path.segments.push(InlineIrTypePathSegment::Variant(index));
+                                path
+                            }
+                        };
+                        Some(transform(self.doc, path, schema))
+                    }
+                };
+                ty.map(|ty| {
+                    let hint = match &ty {
+                        &IrType::Primitive(ty) => IrUntaggedVariantNameHint::Primitive(ty),
+                        IrType::Array(_) => IrUntaggedVariantNameHint::Array,
+                        IrType::Map(_) => IrUntaggedVariantNameHint::Map,
+                        _ => IrUntaggedVariantNameHint::Index(index),
                     };
-                    IrUntaggedVariant::Some(
-                        IrUntaggedVariantNameHint::Index(index),
-                        transform(self.doc, path, schema),
-                    )
-                }
+                    IrUntaggedVariant::Some(hint, ty)
+                })
+                .unwrap_or(IrUntaggedVariant::Null)
             })
             .collect_vec();
         Ok(match &*variants {
