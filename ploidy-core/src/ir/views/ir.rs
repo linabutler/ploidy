@@ -1,3 +1,4 @@
+use either::Either;
 use petgraph::{graph::NodeIndex, visit::Bfs};
 
 use crate::ir::{
@@ -39,21 +40,26 @@ impl<'a> IrTypeView<'a> {
         }
     }
 
-    /// Returns an iterator over all the types that are reachable from this type.
+    /// Returns an iterator over all the types that are reachable from this type,
+    /// including this type.
     #[inline]
     pub fn reachable(&self) -> impl Iterator<Item = IrTypeView<'a>> {
-        let node = match self {
-            Self::Any | Self::Primitive(_) => None,
-            Self::Array(v) => Some((v.graph(), v.index())),
-            Self::Map(v) => Some((v.graph(), v.index())),
-            Self::Nullable(v) => Some((v.graph(), v.index())),
-            Self::Schema(v) => Some((v.graph(), v.index())),
-            Self::Inline(v) => Some((v.graph(), v.index())),
-        };
-        node.into_iter().flat_map(|(graph, index)| {
+        fn bfs<'a>(
+            graph: &'a IrGraph<'a>,
+            index: NodeIndex,
+        ) -> impl Iterator<Item = IrTypeView<'a>> {
             let mut bfs = Bfs::new(&graph.g, index);
             std::iter::from_fn(move || bfs.next(&graph.g))
                 .map(|index| IrTypeView::new(graph, index))
-        })
+        }
+        match self {
+            Self::Any => Either::Left(std::iter::once(IrTypeView::Any)),
+            &Self::Primitive(ty) => Either::Left(std::iter::once(IrTypeView::Primitive(ty))),
+            Self::Array(v) => Either::Right(bfs(v.graph(), v.index())),
+            Self::Map(v) => Either::Right(bfs(v.graph(), v.index())),
+            Self::Nullable(v) => Either::Right(bfs(v.graph(), v.index())),
+            Self::Schema(v) => Either::Right(bfs(v.graph(), v.index())),
+            Self::Inline(v) => Either::Right(bfs(v.graph(), v.index())),
+        }
     }
 }

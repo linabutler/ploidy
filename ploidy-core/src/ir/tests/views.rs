@@ -709,7 +709,7 @@ fn test_reachable_from_inline_includes_inner_types() {
 }
 
 #[test]
-fn test_reachable_from_primitive_returns_no_items() {
+fn test_reachable_from_primitive_returns_itself() {
     let doc = Document::from_yaml(indoc::indoc! {"
         openapi: 3.0.0
         info:
@@ -744,12 +744,17 @@ fn test_reachable_from_primitive_returns_no_items() {
         other => panic!("expected primitive; got {other:?}"),
     };
 
-    // Primitives have no graph edges, so `reachable()` should return no items.
-    assert_eq!(primitive_view.reachable().count(), 0);
+    // A primitive has no graph edges, so `reachable()` should
+    // only include itself.
+    let reachable_types = primitive_view.reachable().collect_vec();
+    assert_matches!(
+        &*reachable_types,
+        [IrTypeView::Primitive(PrimitiveIrType::String)]
+    );
 }
 
 #[test]
-fn test_reachable_from_any_returns_no_items() {
+fn test_reachable_from_any_returns_itself() {
     let doc = Document::from_yaml(indoc::indoc! {"
         openapi: 3.0.0
         info:
@@ -784,8 +789,9 @@ fn test_reachable_from_any_returns_no_items() {
         other => panic!("expected any; got {other:?}"),
     };
 
-    // `Any` has no graph edges, so `reachable()` should return no items.
-    assert_eq!(any_view.reachable().count(), 0);
+    // `Any` has no graph edges, so `reachable()` should only include itself.
+    let reachable_types = any_view.reachable().collect_vec();
+    assert_matches!(&*reachable_types, [IrTypeView::Any]);
 }
 
 // MARK: `inlines()`

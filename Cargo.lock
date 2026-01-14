@@ -675,6 +675,7 @@ dependencies = [
  "atomic_refcell",
  "by_address",
  "cargo_toml",
+ "either",
  "indexmap",
  "indoc",
  "itertools",
