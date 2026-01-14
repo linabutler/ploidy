@@ -269,6 +269,14 @@ impl<'a> Iterator for IrTypeVisitor<'a> {
             IrType::Primitive(_) => (),
             IrType::Inline(ty) => match ty {
                 InlineIrType::Enum(..) => (),
+                InlineIrType::Tagged(_, ty) => {
+                    self.stack.extend(
+                        ty.variants
+                            .iter()
+                            .map(|variant| (Some(top), &variant.ty))
+                            .rev(),
+                    );
+                }
                 InlineIrType::Untagged(_, ty) => {
                     self.stack.extend(
                         ty.variants

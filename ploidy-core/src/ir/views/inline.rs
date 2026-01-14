@@ -2,13 +2,17 @@ use petgraph::graph::NodeIndex;
 
 use crate::ir::{InlineIrTypePath, graph::IrGraph, types::InlineIrType};
 
-use super::{ViewNode, enum_::IrEnumView, struct_::IrStructView, untagged::IrUntaggedView};
+use super::{
+    ViewNode, enum_::IrEnumView, struct_::IrStructView, tagged::IrTaggedView,
+    untagged::IrUntaggedView,
+};
 
 /// A graph-aware view of an [`InlineIrType`].
 #[derive(Debug)]
 pub enum InlineIrTypeView<'a> {
     Enum(&'a InlineIrTypePath<'a>, IrEnumView<'a>),
     Struct(&'a InlineIrTypePath<'a>, IrStructView<'a>),
+    Tagged(&'a InlineIrTypePath<'a>, IrTaggedView<'a>),
     Untagged(&'a InlineIrTypePath<'a>, IrUntaggedView<'a>),
 }
 
@@ -23,6 +27,9 @@ impl<'a> InlineIrTypeView<'a> {
             InlineIrType::Struct(name, ty) => {
                 Self::Struct(name, IrStructView::new(graph, index, ty))
             }
+            InlineIrType::Tagged(name, ty) => {
+                Self::Tagged(name, IrTaggedView::new(graph, index, ty))
+            }
             InlineIrType::Untagged(name, ty) => {
                 Self::Untagged(name, IrUntaggedView::new(graph, index, ty))
             }
@@ -31,7 +38,10 @@ impl<'a> InlineIrTypeView<'a> {
 
     #[inline]
     pub fn path(&self) -> &'a InlineIrTypePath<'a> {
-        let (Self::Enum(path, _) | Self::Struct(path, _) | Self::Untagged(path, _)) = self;
+        let (Self::Enum(path, _)
+        | Self::Struct(path, _)
+        | Self::Tagged(path, _)
+        | Self::Untagged(path, _)) = self;
         path
     }
 }
@@ -42,6 +52,7 @@ impl<'a> ViewNode<'a> for InlineIrTypeView<'a> {
         match self {
             Self::Enum(_, view) => view.graph(),
             Self::Struct(_, view) => view.graph(),
+            Self::Tagged(_, view) => view.graph(),
             Self::Untagged(_, view) => view.graph(),
         }
     }
@@ -50,6 +61,7 @@ impl<'a> ViewNode<'a> for InlineIrTypeView<'a> {
         match self {
             Self::Enum(_, view) => view.index(),
             Self::Struct(_, view) => view.index(),
+            Self::Tagged(_, view) => view.index(),
             Self::Untagged(_, view) => view.index(),
         }
     }

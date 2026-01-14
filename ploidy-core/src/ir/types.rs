@@ -115,13 +115,17 @@ impl<'a> SchemaIrType<'a> {
 pub enum InlineIrType<'a> {
     Enum(InlineIrTypePath<'a>, IrEnum<'a>),
     Struct(InlineIrTypePath<'a>, IrStruct<'a>),
+    Tagged(InlineIrTypePath<'a>, IrTagged<'a>),
     Untagged(InlineIrTypePath<'a>, IrUntagged<'a>),
 }
 
 impl<'a> InlineIrType<'a> {
     #[inline]
     pub fn path(&self) -> &InlineIrTypePath<'a> {
-        let (Self::Enum(path, _) | Self::Struct(path, _) | Self::Untagged(path, _)) = self;
+        let (Self::Enum(path, _)
+        | Self::Struct(path, _)
+        | Self::Tagged(path, _)
+        | Self::Untagged(path, _)) = self;
         path
     }
 }

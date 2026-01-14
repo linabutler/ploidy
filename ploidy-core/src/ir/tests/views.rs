@@ -2438,3 +2438,175 @@ fn test_operation_request_and_response() {
         ],
     );
 }
+
+// MARK: Inline tagged union views
+
+#[test]
+fn test_inline_tagged_view_construction() {
+    let doc = Document::from_yaml(indoc::indoc! {"
+        openapi: 3.0.0
+        info:
+          title: Test
+          version: 1.0.0
+        components:
+          schemas:
+            Cat:
+              type: object
+              properties:
+                meow:
+                  type: string
+            Dog:
+              type: object
+              properties:
+                bark:
+                  type: string
+            Container:
+              type: object
+              properties:
+                animal:
+                  oneOf:
+                    - $ref: '#/components/schemas/Cat'
+                    - $ref: '#/components/schemas/Dog'
+                  discriminator:
+                    propertyName: kind
+                    mapping:
+                      cat: '#/components/schemas/Cat'
+                      dog: '#/components/schemas/Dog'
+    "})
+    .unwrap();
+
+    let spec = IrSpec::from_doc(&doc).unwrap();
+    let graph = IrGraph::new(&spec);
+
+    let container_schema = graph.schemas().find(|s| s.name() == "Container").unwrap();
+    let container_struct = match container_schema {
+        SchemaIrTypeView::Struct(_, view) => view,
+        other => panic!("expected struct `Container`; got {other:?}"),
+    };
+
+    let animal_field = container_struct
+        .fields()
+        .find(|f| matches!(f.name(), IrStructFieldName::Name("animal")))
+        .unwrap();
+
+    let field_ty = animal_field.ty();
+    let inline_view = match field_ty {
+        IrTypeView::Inline(inline_view) => inline_view,
+        other => panic!("expected inline tagged union; got {other:?}"),
+    };
+
+    // Should construct a `Tagged` variant.
+    let tagged_view = match inline_view {
+        InlineIrTypeView::Tagged(_, view) => view,
+        other => panic!("expected inline tagged union; got {other:?}"),
+    };
+
+    // Verify the tag property.
+    assert_eq!(tagged_view.tag(), "kind");
+
+    // Verify the variants.
+    let mut variant_names = tagged_view.variants().map(|v| v.name()).collect_vec();
+    variant_names.sort();
+    assert_matches!(&*variant_names, ["Cat", "Dog"]);
+}
+
+#[test]
+fn test_inline_tagged_view_variant_types() {
+    let doc = Document::from_yaml(indoc::indoc! {"
+        openapi: 3.0.0
+        info:
+          title: Test
+          version: 1.0.0
+        components:
+          schemas:
+            Cat:
+              type: object
+              properties:
+                meow:
+                  type: string
+            Container:
+              type: object
+              properties:
+                animal:
+                  oneOf:
+                    - $ref: '#/components/schemas/Cat'
+                  discriminator:
+                    propertyName: kind
+                    mapping:
+                      cat: '#/components/schemas/Cat'
+    "})
+    .unwrap();
+
+    let spec = IrSpec::from_doc(&doc).unwrap();
+    let graph = IrGraph::new(&spec);
+
+    let container_schema = graph.schemas().find(|s| s.name() == "Container").unwrap();
+    let container_struct = match container_schema {
+        SchemaIrTypeView::Struct(_, view) => view,
+        other => panic!("expected struct `Container`; got {other:?}"),
+    };
+
+    let animal_field = container_struct
+        .fields()
+        .find(|f| matches!(f.name(), IrStructFieldName::Name("animal")))
+        .unwrap();
+
+    let inline_view = match animal_field.ty() {
+        IrTypeView::Inline(inline_view) => inline_view,
+        other => panic!("expected inline type; got {other:?}"),
+    };
+
+    let tagged_view = match inline_view {
+        InlineIrTypeView::Tagged(_, view) => view,
+        other => panic!("expected inline tagged union; got {other:?}"),
+    };
+
+    // Verify the variant type is accessible.
+    let variant = tagged_view.variants().next().unwrap();
+    assert_eq!(variant.name(), "Cat");
+    assert_matches!(variant.ty(), IrTypeView::Schema(view) if view.name() == "Cat");
+}
+
+#[test]
+fn test_inlines_finds_inline_tagged_unions() {
+    let doc = Document::from_yaml(indoc::indoc! {"
+        openapi: 3.0.0
+        info:
+          title: Test
+          version: 1.0.0
+        components:
+          schemas:
+            Cat:
+              type: object
+              properties:
+                meow:
+                  type: string
+            Dog:
+              type: object
+              properties:
+                bark:
+                  type: string
+            Container:
+              type: object
+              properties:
+                animal:
+                  oneOf:
+                    - $ref: '#/components/schemas/Cat'
+                    - $ref: '#/components/schemas/Dog'
+                  discriminator:
+                    propertyName: kind
+                    mapping:
+                      cat: '#/components/schemas/Cat'
+                      dog: '#/components/schemas/Dog'
+    "})
+    .unwrap();
+
+    let spec = IrSpec::from_doc(&doc).unwrap();
+    let graph = IrGraph::new(&spec);
+
+    let container_schema = graph.schemas().find(|s| s.name() == "Container").unwrap();
+
+    // Should find the inline tagged union.
+    let inlines = container_schema.inlines().collect_vec();
+    assert_matches!(&*inlines, [InlineIrTypeView::Tagged(_, _)]);
+}

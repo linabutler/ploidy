@@ -41,6 +41,9 @@ impl ToTokens for CodegenSchemaType<'_> {
             InlineIrTypeView::Struct(path, view) => {
                 CodegenStruct::new(CodegenTypeName::Inline(path), &view).into_token_stream()
             }
+            InlineIrTypeView::Tagged(path, view) => {
+                CodegenTagged::new(CodegenTypeName::Inline(path), &view).into_token_stream()
+            }
             InlineIrTypeView::Untagged(path, view) => {
                 CodegenUntagged::new(CodegenTypeName::Inline(path), &view).into_token_stream()
             }

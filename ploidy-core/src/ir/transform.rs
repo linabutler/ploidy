@@ -80,7 +80,7 @@ impl<'a> IrTransformer<'a> {
         };
         Ok(match self.name {
             IrTypeName::Schema(name) => SchemaIrType::Tagged(name, tagged).into(),
-            IrTypeName::Inline(_path) => todo!(),
+            IrTypeName::Inline(path) => InlineIrType::Tagged(path, tagged).into(),
         })
     }
 

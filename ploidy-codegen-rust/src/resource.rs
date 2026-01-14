@@ -8,7 +8,7 @@ use quote::{ToTokens, TokenStreamExt, quote};
 
 use super::{
     enum_::CodegenEnum, naming::CodegenTypeName, operation::CodegenOperation,
-    struct_::CodegenStruct, untagged::CodegenUntagged,
+    struct_::CodegenStruct, tagged::CodegenTagged, untagged::CodegenUntagged,
 };
 
 /// Generates a feature-gated `impl Client` block for a resource,
@@ -53,6 +53,9 @@ impl ToTokens for CodegenResource<'_> {
                 }
                 InlineIrTypeView::Struct(path, view) => {
                     CodegenStruct::new(CodegenTypeName::Inline(path), &view).into_token_stream()
+                }
+                InlineIrTypeView::Tagged(path, view) => {
+                    CodegenTagged::new(CodegenTypeName::Inline(path), &view).into_token_stream()
                 }
                 InlineIrTypeView::Untagged(path, view) => {
                     CodegenUntagged::new(CodegenTypeName::Inline(path), &view).into_token_stream()

@@ -1856,3 +1856,89 @@ fn test_struct_inline_path_construction() {
         ))],
     );
 }
+
+// MARK: Inline tagged unions
+
+#[test]
+fn test_inline_tagged_union_in_struct_field() {
+    let doc = Document::from_yaml(indoc::indoc! {"
+        openapi: 3.0.0
+        info:
+          title: Test API
+          version: 1.0.0
+        components:
+          schemas:
+            Cat:
+              type: object
+              properties:
+                meow:
+                  type: string
+            Dog:
+              type: object
+              properties:
+                bark:
+                  type: string
+    "})
+    .unwrap();
+    let schema: Schema = serde_yaml::from_str(indoc::indoc! {"
+        type: object
+        properties:
+          animal:
+            oneOf:
+              - $ref: '#/components/schemas/Cat'
+              - $ref: '#/components/schemas/Dog'
+            discriminator:
+              propertyName: kind
+              mapping:
+                cat: '#/components/schemas/Cat'
+                dog: '#/components/schemas/Dog'
+    "})
+    .unwrap();
+
+    let result = transform(&doc, IrTypeName::Schema("Container"), &schema);
+
+    let struct_ = match result {
+        IrType::Schema(SchemaIrType::Struct("Container", struct_)) => struct_,
+        other => panic!("expected struct `Container`; got `{other:?}`"),
+    };
+
+    let [
+        IrStructField {
+            name: IrStructFieldName::Name("animal"),
+            ty: IrType::Inline(InlineIrType::Tagged(path, tagged)),
+            ..
+        },
+    ] = &*struct_.fields
+    else {
+        panic!(
+            "expected single inline tagged union field; got `{:?}`",
+            struct_.fields,
+        );
+    };
+
+    // Verify the path.
+    assert_matches!(path.root, InlineIrTypePathRoot::Type("Container"));
+    assert_matches!(
+        &*path.segments,
+        [InlineIrTypePathSegment::Field(IrStructFieldName::Name(
+            "animal"
+        ))],
+    );
+
+    // Verify the tag.
+    assert_eq!(tagged.tag, "kind");
+
+    // Verify the variants.
+    let [
+        cat_variant @ IrTaggedVariant { name: "Cat", .. },
+        dog_variant @ IrTaggedVariant { name: "Dog", .. },
+    ] = &*tagged.variants
+    else {
+        panic!(
+            "expected `Cat` and `Dog` variants; got `{:?}`",
+            tagged.variants
+        );
+    };
+    assert_eq!(&*cat_variant.aliases, ["cat"]);
+    assert_eq!(&*dog_variant.aliases, ["dog"]);
+}
