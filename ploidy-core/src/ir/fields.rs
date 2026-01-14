@@ -14,9 +14,9 @@ pub fn all_fields<'a>(
 ) -> impl Iterator<Item = (&'a str, IrSchemaField<'a>)> {
     let ancestors = Ancestors::new(doc, schema).collect_vec();
 
-    let discriminators: BTreeSet<_> = ancestors
-        .iter()
-        .filter_map(|ancestor| ancestor.discriminator.as_ref())
+    let discriminators: BTreeSet<_> = std::iter::once(schema)
+        .chain(ancestors.iter().copied())
+        .filter_map(|s| s.discriminator.as_ref())
         .map(|d| d.property_name.as_str())
         .collect();
 
