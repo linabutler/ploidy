@@ -139,16 +139,31 @@ impl<'view, 'a> CodegenField<'view, 'a> {
     }
 
     fn needs_box(&self) -> bool {
-        if matches!(
-            self.field.ty(),
-            IrTypeView::Array(_) | IrTypeView::Map(_) | IrTypeView::Primitive(_) | IrTypeView::Any
-        ) {
-            // Leaf types like primitives and `Any` don't contain any references,
-            // and arrays (`Vec`) and maps (`BTreeMap`) are heap-allocated,
-            // so we never need to box them.
-            return false;
+        let mut ty = self.field.ty();
+        loop {
+            match ty {
+                IrTypeView::Optional(optional) => {
+                    // Unwrap nested optionals, since `Optional(T)`
+                    // doesn't determine whether T needs to be boxed.
+                    ty = optional.inner();
+                }
+                IrTypeView::Array(_)
+                | IrTypeView::Map(_)
+                | IrTypeView::Primitive(_)
+                | IrTypeView::Any => {
+                    // Arrays and maps are heap-allocated, and so already
+                    // provide their own indirection. Leaf types like primitives
+                    // and `Any` don't contain references, and don't need
+                    // boxing, either.
+                    return false;
+                }
+                _ => {
+                    // For other types, consult whether the struct field has
+                    // an edge back to the struct.
+                    return self.field.needs_indirection();
+                }
+            }
         }
-        self.field.needs_indirection()
     }
 }
 
