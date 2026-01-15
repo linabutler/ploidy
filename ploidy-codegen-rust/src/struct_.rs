@@ -86,24 +86,29 @@ impl ToTokens for CodegenStruct<'_> {
                         // and arrays and maps don't require `T: Default`.
                         Traversal::Ignore
                     }
+                    IrTypeView::Schema(SchemaIrTypeView::Struct(_, view))
+                    | IrTypeView::Inline(InlineIrTypeView::Struct(_, view)) => {
+                        // If all non-discriminator fields of all reachable structs are _optional_
+                        // (not just nullable; a field can be nullable and required), then
+                        // this struct can derive `Default`.
+                        if view
+                            .fields()
+                            .filter(|f| !f.discriminator())
+                            .all(|f| !f.required())
+                        {
+                            Traversal::Ignore
+                        } else {
+                            Traversal::Visit
+                        }
+                    }
                     _ => Traversal::Visit,
                 }
             })
-            .all(|view| match view {
-                IrTypeView::Schema(SchemaIrTypeView::Struct(_, ref view))
-                | IrTypeView::Inline(InlineIrTypeView::Struct(_, ref view)) => {
-                    // If all non-discriminator fields of all reachable structs are _optional_
-                    // (not just nullable; a field can be nullable and required), then
-                    // this struct can derive `Default`.
-                    view.fields()
-                        .filter(|f| !f.discriminator())
-                        .all(|f| !f.required())
-                }
-                IrTypeView::Schema(_) | IrTypeView::Inline(_) => false,
+            .all(|_| {
                 // We filtered wrappers out above, and other types
                 // (other schema and inline types, primitives, and `Any`)
                 // don't have meaningful `Default` values.
-                _ => false,
+                false
             });
         if is_defaultable {
             extra_derives.push(ExtraDerive::Default);
