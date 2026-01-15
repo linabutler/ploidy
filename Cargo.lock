@@ -653,6 +653,7 @@ name = "ploidy-codegen-rust"
 version = "0.5.1"
 dependencies = [
  "cargo_toml",
+ "either",
  "heck",
  "itertools",
  "miette",

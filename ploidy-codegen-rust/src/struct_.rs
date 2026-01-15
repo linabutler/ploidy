@@ -1,6 +1,10 @@
+use either::Either;
 use ploidy_core::{
     codegen::UniqueNameSpace,
-    ir::{IrStructFieldName, IrStructFieldView, IrStructView, IrTypeView, PrimitiveIrType, View},
+    ir::{
+        InlineIrTypeView, IrStructFieldName, IrStructFieldView, IrStructView, IrTypeView,
+        PrimitiveIrType, SchemaIrTypeView, View,
+    },
 };
 use proc_macro2::TokenStream;
 use quote::{ToTokens, TokenStreamExt, quote};
@@ -29,7 +33,6 @@ impl<'a> CodegenStruct<'a> {
 impl ToTokens for CodegenStruct<'_> {
     fn to_tokens(&self, tokens: &mut TokenStream) {
         let mut space = UniqueNameSpace::new();
-        let mut all_optional = true;
         let fields = self
             .ty
             .fields()
@@ -45,21 +48,11 @@ impl ToTokens for CodegenStruct<'_> {
                         parse_quote!(#name)
                     }
                 };
-                if field.required() {
-                    all_optional = false;
-                }
 
                 let codegen_field = CodegenField::new(&field);
                 let final_type = codegen_field.to_token_stream();
 
-                let serde_attrs = field_serde_attrs(
-                    &field.name(),
-                    &field_name,
-                    field.required(),
-                    matches!(field.ty(), IrTypeView::Nullable(_)),
-                    field.flattened(),
-                );
-
+                let serde_attrs = SerdeFieldAttr::new(&field_name, &field);
                 let doc_attrs = field.description().map(doc_attrs);
 
                 quote! {
@@ -72,6 +65,8 @@ impl ToTokens for CodegenStruct<'_> {
 
         let mut extra_derives = vec![];
         let is_hashable = self.ty.reachable().all(|view| {
+            // If this struct doesn't reach any floating-point types, then it can
+            // derive `Eq` and `Hash`. (Rust doesn't define equivalence for floats).
             !matches!(
                 view,
                 IrTypeView::Primitive(PrimitiveIrType::F32 | PrimitiveIrType::F64)
@@ -81,7 +76,24 @@ impl ToTokens for CodegenStruct<'_> {
             extra_derives.push(ExtraDerive::Eq);
             extra_derives.push(ExtraDerive::Hash);
         }
-        if all_optional && !fields.is_empty() {
+        let is_defaultable = self.ty.reachable().all(|view| match view {
+            IrTypeView::Schema(SchemaIrTypeView::Struct(_, ref view))
+            | IrTypeView::Inline(InlineIrTypeView::Struct(_, ref view)) => {
+                // If all non-discriminator fields of all reachable structs are optional,
+                // then this struct can derive `Default`.
+                view.fields()
+                    .filter(|f| !f.discriminator())
+                    .all(|f| !f.required())
+            }
+            // Other schema and inline types don't derive `Default`,
+            // so structs that contain them can't, either.
+            IrTypeView::Schema(_) | IrTypeView::Inline(_) => false,
+            // All primitives implement `Default`, and wrappers
+            // implement it if their containing type does, which
+            // `reachable()` will also visit.
+            _ => true,
+        });
+        if is_defaultable {
             extra_derives.push(ExtraDerive::Default);
         }
 
@@ -125,59 +137,74 @@ impl<'view, 'a> CodegenField<'view, 'a> {
 
 impl ToTokens for CodegenField<'_, '_> {
     fn to_tokens(&self, tokens: &mut TokenStream) {
-        let view = self.field.ty();
-        let inner_ty = CodegenRef::new(&view);
+        // For a nullable `T`, we emit either `Option<T>` or `AbsentOr<T>`,
+        // depending on whether the field is required, while `CodegenRef`
+        // always emits `Option<T>`, so we extract the inner T to avoid
+        // double-wrapping.
+        let inner_view = match self.field.ty() {
+            IrTypeView::Nullable(nullable) => Either::Left(nullable.inner()),
+            other => Either::Right(other),
+        };
+
+        let inner_ty = CodegenRef::new(inner_view.as_ref().into_inner());
         let inner = if self.needs_box() {
             quote! { ::std::boxed::Box<#inner_ty> }
         } else {
             quote! { #inner_ty }
         };
-        tokens.append_all(match (self.field.ty(), self.field.required()) {
-            (IrTypeView::Nullable(_), true) => quote! { ::std::option::Option<#inner_ty> },
-            (IrTypeView::Nullable(_), false) => {
-                quote! { ::ploidy_util::absent::AbsentOr<#inner_ty> }
-            }
-            (_, true) => inner,
+
+        tokens.append_all(match (inner_view, self.field.required()) {
+            // Since `AbsentOr` can represent `null`,
+            // always emit it for optional fields.
             (_, false) => quote! { ::ploidy_util::absent::AbsentOr<#inner> },
+            // For required fields, use `Option` if it's nullable,
+            // or the original type if not.
+            (Either::Left(_), true) => quote! { ::std::option::Option<#inner> },
+            (Either::Right(_), true) => inner,
         });
     }
 }
 
-/// Generates `#[serde(...)]` attributes for a field.
-fn field_serde_attrs(
-    field_name: &IrStructFieldName,
-    field_ident: &Ident,
-    required: bool,
-    nullable: bool,
-    flattened: bool,
-) -> TokenStream {
-    let mut attrs = Vec::new();
+/// Generates a `#[serde(...)]` attribute for a struct field.
+#[derive(Debug)]
+struct SerdeFieldAttr<'view, 'a> {
+    ident: &'a Ident,
+    field: &'a IrStructFieldView<'view, 'a>,
+}
 
-    // Add `flatten` xor `rename` (specifying both
-    // on the same field isn't meaningful).
-    if flattened {
-        attrs.push(quote! { flatten });
-    } else if let &IrStructFieldName::Name(name) = field_name {
-        // `rename` if the field name doesn't match the identifier.
-        let f = field_ident.to_string();
-        if f.strip_prefix("r#").unwrap_or(&f) != name {
-            attrs.push(quote! { rename = #name });
-        }
+impl<'view, 'a> SerdeFieldAttr<'view, 'a> {
+    fn new(ident: &'a Ident, field: &'a IrStructFieldView<'view, 'a>) -> Self {
+        Self { ident, field }
     }
+}
 
-    match (required, nullable) {
-        (false, true) | (false, false) => {
+impl ToTokens for SerdeFieldAttr<'_, '_> {
+    fn to_tokens(&self, tokens: &mut TokenStream) {
+        let mut attrs = Vec::new();
+
+        // Add `flatten` xor `rename` (specifying both on the same field
+        // isn't meaningful).
+        if self.field.flattened() {
+            attrs.push(quote! { flatten });
+        } else if let &IrStructFieldName::Name(name) = &self.field.name() {
+            // `rename` if the OpenAPI field name doesn't match
+            // the Rust identifier.
+            let f = self.ident.to_string();
+            if f.strip_prefix("r#").unwrap_or(&f) != name {
+                attrs.push(quote! { rename = #name });
+            }
+        }
+
+        if !self.field.required() {
+            // `CodegenField` always emits `AbsentOr` for optional fields.
             attrs.push(quote! { default });
             attrs.push(
                 quote! { skip_serializing_if = "::ploidy_util::absent::AbsentOr::is_absent" },
             );
         }
-        _ => {}
-    }
 
-    if attrs.is_empty() {
-        quote! {}
-    } else {
-        quote! { #[serde(#(#attrs,)*)] }
+        if !attrs.is_empty() {
+            tokens.append_all(quote! { #[serde(#(#attrs,)*)] });
+        }
     }
 }

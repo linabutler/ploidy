@@ -11,6 +11,7 @@ rust-version.workspace = true
 
 [dependencies]
 cargo_toml = "0.22"
+either = "1"
 heck = "0.5"
 itertools = "0.14"
 serde = { version = "1", features = ["derive"] }
