@@ -443,6 +443,7 @@ fn test_struct_with_own_properties() {
     .unwrap();
     let schema: Schema = serde_yaml::from_str(indoc::indoc! {"
         type: object
+        required: [name, age]
         properties:
           name:
             type: string
@@ -575,7 +576,7 @@ fn test_struct_with_nullable_field_ref() {
     let [
         IrStructField {
             name: IrStructFieldName::Name("value"),
-            ty: IrType::Nullable(inner),
+            ty: IrType::Optional(inner),
             ..
         },
     ] = &*struct_.fields
@@ -612,12 +613,56 @@ fn test_struct_with_nullable_field_inline() {
     let [
         IrStructField {
             name: IrStructFieldName::Name("value"),
-            ty: IrType::Nullable(inner),
+            ty: IrType::Optional(inner),
             ..
         },
     ] = &*struct_.fields
     else {
         panic!("expected single nullable field; got `{:?}`", struct_.fields);
+    };
+    assert_matches!(&**inner, IrType::Primitive(PrimitiveIrType::String));
+}
+
+#[test]
+fn test_struct_with_nullable_field_openapi_31_syntax() {
+    let doc = Document::from_yaml(indoc::indoc! {"
+        openapi: 3.1.0
+        info:
+          title: Test
+          version: 1.0.0
+    "})
+    .unwrap();
+    let schema: Schema = serde_yaml::from_str(indoc::indoc! {"
+        type: object
+        properties:
+          value:
+            type: [string, 'null']
+        required:
+          - value
+    "})
+    .unwrap();
+
+    let result = transform(&doc, IrTypeName::Schema("Container"), &schema);
+
+    // OpenAPI 3.1 `type: [T, 'null']` syntax should produce an `Optional(T)` field,
+    // identical to OpenAPI 3.0 `nullable: true`.
+    let struct_ = match result {
+        IrType::Schema(SchemaIrType::Struct("Container", struct_)) => struct_,
+        other => panic!("expected struct `Container`; got `{other:?}`"),
+    };
+    let [
+        IrStructField {
+            name: IrStructFieldName::Name("value"),
+            ty: IrType::Optional(inner),
+            required: true,
+            ..
+        },
+    ] = &*struct_.fields
+    else {
+        panic!(
+            "expected single required nullable field; got `{:?}`",
+            struct_.fields
+        );
     };
     assert_matches!(&**inner, IrType::Primitive(PrimitiveIrType::String));
 }
@@ -1083,7 +1128,7 @@ fn test_untagged_null_detection() {
 
     let result = transform(&doc, IrTypeName::Schema("StringOrNull"), &schema);
 
-    assert_matches!(result, IrType::Nullable(_));
+    assert_matches!(result, IrType::Optional(_));
 }
 
 // MARK: `try_any_of()`
@@ -1475,7 +1520,7 @@ fn test_binary_format_maps_to_bytes() {
 #[test]
 fn test_empty_type_array_produces_any() {
     let doc = Document::from_yaml(indoc::indoc! {"
-        openapi: 3.0.0
+        openapi: 3.1.0
         info:
           title: Test
           version: 1.0.0
@@ -1562,7 +1607,7 @@ fn test_schema_without_type_or_properties_produces_any() {
 #[test]
 fn test_type_and_null_in_type_array_creates_nullable() {
     let doc = Document::from_yaml(indoc::indoc! {"
-        openapi: 3.0.0
+        openapi: 3.1.0
         info:
           title: Test
           version: 1.0.0
@@ -1575,10 +1620,10 @@ fn test_type_and_null_in_type_array_creates_nullable() {
 
     let result = transform(&doc, IrTypeName::Schema("StringOrNull"), &schema);
 
-    // As a special case, `string` + `null` should produce `Nullable(String)`,
+    // As a special case, any type + `null` should produce `Optional(T)`,
     // not an untagged union.
     let inner = match result {
-        IrType::Nullable(inner) => inner,
+        IrType::Optional(inner) => inner,
         other => panic!("expected nullable; got `{other:?}`"),
     };
     assert_matches!(*inner, IrType::Primitive(PrimitiveIrType::String));
@@ -1587,7 +1632,7 @@ fn test_type_and_null_in_type_array_creates_nullable() {
 #[test]
 fn test_multiple_types_string_and_integer_untagged() {
     let doc = Document::from_yaml(indoc::indoc! {"
-        openapi: 3.0.0
+        openapi: 3.1.0
         info:
           title: Test
           version: 1.0.0
@@ -1630,11 +1675,13 @@ fn test_deeply_nested_inline_types() {
     .unwrap();
     let schema: Schema = serde_yaml::from_str(indoc::indoc! {"
         type: object
+        required: [items]
         properties:
           items:
             type: array
             items:
               type: object
+              required: [field]
               properties:
                 field:
                   type: string
@@ -1718,6 +1765,7 @@ fn test_additional_properties_false_creates_struct() {
     .unwrap();
     let schema: Schema = serde_yaml::from_str(indoc::indoc! {"
         type: object
+        required: [name]
         properties:
           name:
             type: string
@@ -1820,6 +1868,7 @@ fn test_struct_inline_path_construction() {
     .unwrap();
     let schema: Schema = serde_yaml::from_str(indoc::indoc! {"
         type: object
+        required: [nested]
         properties:
           nested:
             type: object
@@ -1882,6 +1931,7 @@ fn test_inline_tagged_union_in_struct_field() {
     .unwrap();
     let schema: Schema = serde_yaml::from_str(indoc::indoc! {"
         type: object
+        required: [animal]
         properties:
           animal:
             oneOf:

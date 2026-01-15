@@ -13,8 +13,8 @@ pub enum IrType<'a> {
     Array(Box<IrType<'a>>),
     /// A map with string keys.
     Map(Box<IrType<'a>>),
-    /// A nullable type.
-    Nullable(Box<IrType<'a>>),
+    /// A nullable value, or an optional struct field.
+    Optional(Box<IrType<'a>>),
     /// A reference to another named schema type.
     Ref(&'a ComponentRef),
     /// A named schema type.
@@ -32,7 +32,7 @@ impl IrType<'_> {
             Self::Inline(ty) => IrTypeRef::Inline(ty),
             Self::Array(ty) => IrTypeRef::Array(ty),
             Self::Map(ty) => IrTypeRef::Map(ty),
-            Self::Nullable(ty) => IrTypeRef::Nullable(ty),
+            Self::Optional(ty) => IrTypeRef::Optional(ty),
             Self::Ref(r) => IrTypeRef::Ref(r),
             &Self::Primitive(ty) => IrTypeRef::Primitive(ty),
             Self::Any => IrTypeRef::Any,
@@ -64,7 +64,7 @@ pub enum IrTypeRef<'a> {
     Primitive(PrimitiveIrType),
     Array(&'a IrType<'a>),
     Map(&'a IrType<'a>),
-    Nullable(&'a IrType<'a>),
+    Optional(&'a IrType<'a>),
     Ref(&'a ComponentRef),
     Schema(&'a SchemaIrType<'a>),
     Inline(&'a InlineIrType<'a>),

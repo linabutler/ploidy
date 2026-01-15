@@ -91,15 +91,15 @@ impl<'a> ViewNode<'a> for IrMapView<'a> {
     }
 }
 
-/// A graph-aware view of a nullable type.
+/// A graph-aware view of an optional value.
 #[derive(Debug)]
-pub struct IrNullableView<'a> {
+pub struct IrOptionalView<'a> {
     graph: &'a IrGraph<'a>,
     index: NodeIndex,
     inner: &'a IrType<'a>,
 }
 
-impl<'a> IrNullableView<'a> {
+impl<'a> IrOptionalView<'a> {
     #[inline]
     pub(in crate::ir) fn new(
         graph: &'a IrGraph<'a>,
@@ -121,7 +121,7 @@ impl<'a> IrNullableView<'a> {
     }
 }
 
-impl<'a> ViewNode<'a> for IrNullableView<'a> {
+impl<'a> ViewNode<'a> for IrOptionalView<'a> {
     #[inline]
     fn graph(&self) -> &'a IrGraph<'a> {
         self.graph

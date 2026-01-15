@@ -10,7 +10,7 @@ use super::{
     ViewNode,
     inline::InlineIrTypeView,
     schema::SchemaIrTypeView,
-    wrappers::{IrArrayView, IrMapView, IrNullableView},
+    wrappers::{IrArrayView, IrMapView, IrOptionalView},
 };
 
 /// A graph-aware view of an [`IrType`][crate::ir::IrType].
@@ -20,7 +20,7 @@ pub enum IrTypeView<'a> {
     Primitive(PrimitiveIrType),
     Array(IrArrayView<'a>),
     Map(IrMapView<'a>),
-    Nullable(IrNullableView<'a>),
+    Optional(IrOptionalView<'a>),
     Schema(SchemaIrTypeView<'a>),
     Inline(InlineIrTypeView<'a>),
 }
@@ -32,8 +32,8 @@ impl<'a> IrTypeView<'a> {
             &IrGraphNode::Primitive(ty) => IrTypeView::Primitive(ty),
             IrGraphNode::Array(inner) => IrTypeView::Array(IrArrayView::new(graph, index, inner)),
             IrGraphNode::Map(inner) => IrTypeView::Map(IrMapView::new(graph, index, inner)),
-            IrGraphNode::Nullable(inner) => {
-                IrTypeView::Nullable(IrNullableView::new(graph, index, inner))
+            IrGraphNode::Optional(inner) => {
+                IrTypeView::Optional(IrOptionalView::new(graph, index, inner))
             }
             IrGraphNode::Schema(ty) => Self::Schema(SchemaIrTypeView::new(graph, index, ty)),
             IrGraphNode::Inline(ty) => Self::Inline(InlineIrTypeView::new(graph, index, ty)),
@@ -57,7 +57,7 @@ impl<'a> IrTypeView<'a> {
             &Self::Primitive(ty) => Either::Left(std::iter::once(IrTypeView::Primitive(ty))),
             Self::Array(v) => Either::Right(bfs(v.graph(), v.index())),
             Self::Map(v) => Either::Right(bfs(v.graph(), v.index())),
-            Self::Nullable(v) => Either::Right(bfs(v.graph(), v.index())),
+            Self::Optional(v) => Either::Right(bfs(v.graph(), v.index())),
             Self::Schema(v) => Either::Right(bfs(v.graph(), v.index())),
             Self::Inline(v) => Either::Right(bfs(v.graph(), v.index())),
         }

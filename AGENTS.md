@@ -243,7 +243,7 @@ assert!(fields[0].required);
 // `&*` for Vec<T> → &[T]
 assert_matches!(&*struct_.fields, [field1, field2]);
 
-// `&**` for &Box<T> → &T (e.g., `inner` from `let IrType::Nullable(inner) = ty`)
+// `&**` for &Box<T> → &T (e.g., `inner` from `let IrType::Optional(inner) = ty`)
 assert_matches!(&**inner, IrType::Ref(_));
 ```
 

@@ -172,7 +172,7 @@ pub enum IrGraphNode<'a> {
     Inline(&'a InlineIrType<'a>),
     Array(&'a IrType<'a>),
     Map(&'a IrType<'a>),
-    Nullable(&'a IrType<'a>),
+    Optional(&'a IrType<'a>),
     Primitive(PrimitiveIrType),
     Any,
 }
@@ -186,7 +186,7 @@ impl<'a> IrGraphNode<'a> {
             IrTypeRef::Inline(ty) => IrGraphNode::Inline(ty),
             IrTypeRef::Array(ty) => IrGraphNode::Array(ty),
             IrTypeRef::Map(ty) => IrGraphNode::Map(ty),
-            IrTypeRef::Nullable(ty) => IrGraphNode::Nullable(ty),
+            IrTypeRef::Optional(ty) => IrGraphNode::Optional(ty),
             IrTypeRef::Ref(r) => Self::from_ref(spec, spec.schemas[r.name()].as_ref()),
             IrTypeRef::Primitive(ty) => IrGraphNode::Primitive(ty),
             IrTypeRef::Any => IrGraphNode::Any,
@@ -238,7 +238,7 @@ impl<'a> Iterator for IrTypeVisitor<'a> {
             IrType::Map(ty) => {
                 self.stack.push((Some(top), ty.as_ref()));
             }
-            IrType::Nullable(ty) => {
+            IrType::Optional(ty) => {
                 self.stack.push((Some(top), ty.as_ref()));
             }
             IrType::Schema(SchemaIrType::Struct(_, ty)) => {

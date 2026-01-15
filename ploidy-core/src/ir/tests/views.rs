@@ -6,7 +6,7 @@ use crate::{
     ir::{
         InlineIrTypePathRoot, InlineIrTypePathSegment, InlineIrTypeView, IrEnumVariant, IrGraph,
         IrParameterStyle, IrRequestView, IrResponseView, IrSpec, IrStructFieldName, IrTypeView,
-        PrimitiveIrType, SchemaIrTypeView, SomeIrUntaggedVariant, View,
+        PrimitiveIrType, SchemaIrTypeView, SomeIrUntaggedVariant, Traversal, View,
     },
     parse::{Document, Method, path::PathFragment},
     tests::assert_matches,
@@ -248,16 +248,19 @@ fn test_extension_per_node_type() {
           schemas:
             Struct1:
               type: object
+              required: [field]
               properties:
                 field:
                   type: string
             Struct2:
               type: object
+              required: [field]
               properties:
                 field:
                   type: string
             Struct3:
               type: object
+              required: [ref1, ref2]
               properties:
                 ref1:
                   $ref: '#/components/schemas/Struct1'
@@ -381,6 +384,7 @@ fn test_reachable_no_dependencies() {
           schemas:
             Standalone:
               type: object
+              required: [field]
               properties:
                 field:
                   type: string
@@ -393,8 +397,8 @@ fn test_reachable_no_dependencies() {
     let standalone_schema = graph.schemas().next().unwrap();
 
     // `reachable()` is a BFS from the starting node to all reachable nodes.
-    // For a struct with a primitive field, the reachable set includes
-    // both the struct and the primitive type.
+    // For a struct with a required primitive field, the reachable set includes
+    // the struct and the primitive type.
     assert_eq!(standalone_schema.reachable().count(), 2);
 }
 
@@ -409,11 +413,13 @@ fn test_reachable_handles_cycles_without_infinite_loop() {
           schemas:
             A:
               type: object
+              required: [b]
               properties:
                 b:
                   $ref: '#/components/schemas/B'
             B:
               type: object
+              required: [a]
               properties:
                 a:
                   $ref: '#/components/schemas/A'
@@ -440,11 +446,13 @@ fn test_reachable_from_array_includes_inner_types() {
           schemas:
             Item:
               type: object
+              required: [value]
               properties:
                 value:
                   type: string
             Container:
               type: object
+              required: [items]
               properties:
                 items:
                   type: array
@@ -510,11 +518,13 @@ fn test_reachable_from_map_includes_inner_types() {
           schemas:
             Item:
               type: object
+              required: [name]
               properties:
                 name:
                   type: string
             Container:
               type: object
+              required: [map_field]
               properties:
                 map_field:
                   type: object
@@ -581,11 +591,13 @@ fn test_reachable_from_nullable_includes_inner_types() {
             Item:
               type: object
               nullable: true
+              required: [value]
               properties:
                 value:
                   type: string
             Container:
               type: object
+              required: [nullable_field]
               properties:
                 nullable_field:
                   $ref: '#/components/schemas/Item'
@@ -607,7 +619,7 @@ fn test_reachable_from_nullable_includes_inner_types() {
         .unwrap();
 
     let nullable_view = match nullable_field.ty() {
-        IrTypeView::Nullable(view) => view,
+        IrTypeView::Optional(view) => view,
         other => panic!("expected nullable; got {other:?}"),
     };
 
@@ -620,7 +632,7 @@ fn test_reachable_from_nullable_includes_inner_types() {
     assert!(
         reachable_types
             .iter()
-            .any(|t| matches!(t, IrTypeView::Nullable(_)))
+            .any(|t| matches!(t, IrTypeView::Optional(_)))
     );
 
     // Verify the `Item` schema is reachable.
@@ -649,14 +661,17 @@ fn test_reachable_from_inline_includes_inner_types() {
           schemas:
             RefSchema:
               type: object
+              required: [value]
               properties:
                 value:
                   type: string
             Container:
               type: object
+              required: [inline_field]
               properties:
                 inline_field:
                   type: object
+                  required: [ref_field]
                   properties:
                     ref_field:
                       $ref: '#/components/schemas/RefSchema'
@@ -719,6 +734,7 @@ fn test_reachable_from_primitive_returns_itself() {
           schemas:
             Simple:
               type: object
+              required: [name]
               properties:
                 name:
                   type: string
@@ -764,6 +780,7 @@ fn test_reachable_from_any_returns_itself() {
           schemas:
             Container:
               type: object
+              required: [untyped]
               properties:
                 untyped:
                   additionalProperties: true
@@ -792,6 +809,156 @@ fn test_reachable_from_any_returns_itself() {
     // `Any` has no graph edges, so `reachable()` should only include itself.
     let reachable_types = any_view.reachable().collect_vec();
     assert_matches!(&*reachable_types, [IrTypeView::Any]);
+}
+
+#[test]
+fn test_reachable_filtered_skip_excludes_node_but_continues_traversal() {
+    // Graph: Root -> Middle -> Leaf. Skipping `Middle` should yield
+    // `[Root, Leaf]`, and only exclude `Middle`.
+    let doc = Document::from_yaml(indoc::indoc! {"
+        openapi: 3.0.0
+        info:
+          title: Test
+          version: 1.0.0
+        components:
+          schemas:
+            Leaf:
+              type: object
+              properties:
+                value:
+                  type: string
+            Middle:
+              type: object
+              properties:
+                leaf:
+                  $ref: '#/components/schemas/Leaf'
+            Root:
+              type: object
+              properties:
+                middle:
+                  $ref: '#/components/schemas/Middle'
+    "})
+    .unwrap();
+
+    let spec = IrSpec::from_doc(&doc).unwrap();
+    let graph = IrGraph::new(&spec);
+
+    let root = graph.schemas().find(|s| s.name() == "Root").unwrap();
+
+    // Skip `Middle`, but continue into its neighbors.
+    let reachable_names = root
+        .reachable_if(|view| match view {
+            IrTypeView::Schema(s) if s.name() == "Middle" => Traversal::Skip,
+            _ => Traversal::Visit,
+        })
+        .filter_map(|view| match view {
+            IrTypeView::Schema(s) => Some(s.name()),
+            _ => None,
+        })
+        .collect_vec();
+
+    // `Middle` is skipped, but `Leaf` is still reachable through it.
+    assert_eq!(reachable_names, vec!["Root", "Leaf"]);
+}
+
+#[test]
+fn test_reachable_filtered_stop_includes_node_but_stops_traversal() {
+    // Graph: Root -> Middle -> Leaf
+    // Stop at `Middle` -> should yield [Root, Middle] (Leaf excluded).
+    let doc = Document::from_yaml(indoc::indoc! {"
+        openapi: 3.0.0
+        info:
+          title: Test
+          version: 1.0.0
+        components:
+          schemas:
+            Leaf:
+              type: object
+              properties:
+                value:
+                  type: string
+            Middle:
+              type: object
+              properties:
+                leaf:
+                  $ref: '#/components/schemas/Leaf'
+            Root:
+              type: object
+              properties:
+                middle:
+                  $ref: '#/components/schemas/Middle'
+    "})
+    .unwrap();
+
+    let spec = IrSpec::from_doc(&doc).unwrap();
+    let graph = IrGraph::new(&spec);
+
+    let root = graph.schemas().find(|s| s.name() == "Root").unwrap();
+
+    // Stop at `Middle`; don't descend into its children.
+    let reachable_names = root
+        .reachable_if(|view| match view {
+            IrTypeView::Schema(s) if s.name() == "Middle" => Traversal::Stop,
+            _ => Traversal::Visit,
+        })
+        .filter_map(|view| match view {
+            IrTypeView::Schema(s) => Some(s.name()),
+            _ => None,
+        })
+        .collect_vec();
+
+    // `Middle` is included, but `Leaf` is not reachable because we stopped at `Middle`.
+    assert_eq!(reachable_names, vec!["Root", "Middle"]);
+}
+
+#[test]
+fn test_reachable_if_ignore_excludes_node_and_stops_traversal() {
+    // Graph: Root -> Middle -> Leaf. Ignoring `Middle` should
+    // yield just `[Root]`.
+    let doc = Document::from_yaml(indoc::indoc! {"
+        openapi: 3.0.0
+        info:
+          title: Test
+          version: 1.0.0
+        components:
+          schemas:
+            Leaf:
+              type: object
+              properties:
+                value:
+                  type: string
+            Middle:
+              type: object
+              properties:
+                leaf:
+                  $ref: '#/components/schemas/Leaf'
+            Root:
+              type: object
+              properties:
+                middle:
+                  $ref: '#/components/schemas/Middle'
+    "})
+    .unwrap();
+
+    let spec = IrSpec::from_doc(&doc).unwrap();
+    let graph = IrGraph::new(&spec);
+
+    let root = graph.schemas().find(|s| s.name() == "Root").unwrap();
+
+    // Ignore `Middle`: don't yield it, and don't visit its neighbors.
+    let reachable_names = root
+        .reachable_if(|view| match view {
+            IrTypeView::Schema(s) if s.name() == "Middle" => Traversal::Ignore,
+            _ => Traversal::Visit,
+        })
+        .filter_map(|view| match view {
+            IrTypeView::Schema(s) => Some(s.name()),
+            _ => None,
+        })
+        .collect_vec();
+
+    // `Middle` is ignored entirely, so `Leaf` is also unreachable.
+    assert_eq!(reachable_names, vec!["Root"]);
 }
 
 // MARK: `inlines()`
@@ -1073,6 +1240,7 @@ fn test_array_view_provides_access_to_item_type() {
           schemas:
             Container:
               type: object
+              required: [items]
               properties:
                 items:
                   type: array
@@ -1117,6 +1285,7 @@ fn test_map_view_provides_access_to_value_type() {
           schemas:
             Container:
               type: object
+              required: [map_field]
               properties:
                 map_field:
                   type: object
@@ -1189,7 +1358,7 @@ fn test_nullable_view_provides_access_to_inner_type() {
     // and is an inline struct.
     assert_matches!(
         nullable_field.ty(),
-        IrTypeView::Nullable(view) if matches!(
+        IrTypeView::Optional(view) if matches!(
             view.inner(),
             IrTypeView::Inline(InlineIrTypeView::Struct(_, _)),
         ),
@@ -1209,6 +1378,7 @@ fn test_inline_struct_view_construction_and_path_access() {
           schemas:
             Container:
               type: object
+              required: [inline_obj]
               properties:
                 inline_obj:
                   type: object
@@ -1257,6 +1427,7 @@ fn test_inline_enum_view_construction() {
           schemas:
             Container:
               type: object
+              required: [status]
               properties:
                 status:
                   type: string
@@ -1305,6 +1476,7 @@ fn test_inline_untagged_view_construction() {
           schemas:
             Container:
               type: object
+              required: [value]
               properties:
                 value:
                   oneOf:
@@ -1354,6 +1526,7 @@ fn test_inline_view_path_method() {
           schemas:
             Parent:
               type: object
+              required: [nested]
               properties:
                 nested:
                   type: object
@@ -1412,6 +1585,7 @@ fn test_inline_view_with_view_trait_methods() {
                   application/json:
                     schema:
                       type: object
+                      required: [status]
                       properties:
                         status:
                           type: string
@@ -2468,6 +2642,7 @@ fn test_inline_tagged_view_construction() {
                   type: string
             Container:
               type: object
+              required: [animal]
               properties:
                 animal:
                   oneOf:
@@ -2532,6 +2707,7 @@ fn test_inline_tagged_view_variant_types() {
                   type: string
             Container:
               type: object
+              required: [animal]
               properties:
                 animal:
                   oneOf:

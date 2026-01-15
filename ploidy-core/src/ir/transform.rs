@@ -128,10 +128,10 @@ impl<'a> IrTransformer<'a> {
             [IrUntaggedVariant::Null] => IrType::Any,
             [IrUntaggedVariant::Some(_, ty)] => ty.clone(),
             [IrUntaggedVariant::Some(_, ty), IrUntaggedVariant::Null] => {
-                IrType::Nullable(ty.clone().into())
+                IrType::Optional(ty.clone().into())
             }
             [IrUntaggedVariant::Null, IrUntaggedVariant::Some(_, ty)] => {
-                IrType::Nullable(ty.clone().into())
+                IrType::Optional(ty.clone().into())
             }
             _ => {
                 let untagged = IrUntagged {
@@ -194,6 +194,8 @@ impl<'a> IrTransformer<'a> {
                         (name, ty, desc)
                     }
                 };
+                // Flattened `anyOf` fields are always optional.
+                let ty = IrType::Optional(ty.into());
                 IrStructField {
                     name: field_name,
                     ty,
@@ -254,8 +256,11 @@ impl<'a> IrTransformer<'a> {
                 }
                 _ => false,
             };
-            let ty = if nullable {
-                IrType::Nullable(ty.into())
+            // Wrap the type in `Optional` if the field is either
+            // explicitly nullable, or implicitly optional. The `required`
+            // flag distinguishes between the two for codegen.
+            let ty = if nullable || !info.required {
+                IrType::Optional(ty.into())
             } else {
                 ty
             };
@@ -378,8 +383,11 @@ impl<'a> IrTransformer<'a> {
                     }
                     _ => false,
                 };
-                let ty = if nullable {
-                    IrType::Nullable(ty.into())
+                // Wrap the type in `Optional` if the field is either
+                // explicitly nullable, or implicitly optional. The `required`
+                // flag distinguishes between the two for codegen.
+                let ty = if nullable || !info.required {
+                    IrType::Optional(ty.into())
                 } else {
                     ty
                 };
@@ -480,10 +488,10 @@ impl<'a> IrTransformer<'a> {
             [IrUntaggedVariant::Null] => IrType::Any,
             [IrUntaggedVariant::Some(_, ty)] => ty.clone(),
             [IrUntaggedVariant::Some(_, ty), IrUntaggedVariant::Null] => {
-                IrType::Nullable(ty.clone().into())
+                IrType::Optional(ty.clone().into())
             }
             [IrUntaggedVariant::Null, IrUntaggedVariant::Some(_, ty)] => {
-                IrType::Nullable(ty.clone().into())
+                IrType::Optional(ty.clone().into())
             }
             _ => {
                 let untagged = IrUntagged {

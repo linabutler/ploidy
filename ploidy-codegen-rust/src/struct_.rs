@@ -3,7 +3,7 @@ use ploidy_core::{
     codegen::UniqueNames,
     ir::{
         InlineIrTypeView, IrStructFieldName, IrStructFieldView, IrStructView, IrTypeView,
-        PrimitiveIrType, SchemaIrTypeView, View,
+        PrimitiveIrType, SchemaIrTypeView, Traversal, View,
     },
 };
 use proc_macro2::TokenStream;
@@ -76,23 +76,35 @@ impl ToTokens for CodegenStruct<'_> {
             extra_derives.push(ExtraDerive::Eq);
             extra_derives.push(ExtraDerive::Hash);
         }
-        let is_defaultable = self.ty.reachable().all(|view| match view {
-            IrTypeView::Schema(SchemaIrTypeView::Struct(_, ref view))
-            | IrTypeView::Inline(InlineIrTypeView::Struct(_, ref view)) => {
-                // If all non-discriminator fields of all reachable structs are optional,
-                // then this struct can derive `Default`.
-                view.fields()
-                    .filter(|f| !f.discriminator())
-                    .all(|f| !f.required())
-            }
-            // Other schema and inline types don't derive `Default`,
-            // so structs that contain them can't, either.
-            IrTypeView::Schema(_) | IrTypeView::Inline(_) => false,
-            // All primitives implement `Default`, and wrappers
-            // implement it if their containing type does, which
-            // `reachable()` will also visit.
-            _ => true,
-        });
+        let is_defaultable = self
+            .ty
+            .reachable_if(|view| {
+                match view {
+                    IrTypeView::Optional(_) | IrTypeView::Array(_) | IrTypeView::Map(_) => {
+                        // Wrappers always implement `Default`, so filter them out:
+                        // optional fields become `AbsentOr<T>`, nullable fields become `Option<T>`,
+                        // and arrays and maps don't require `T: Default`.
+                        Traversal::Ignore
+                    }
+                    _ => Traversal::Visit,
+                }
+            })
+            .all(|view| match view {
+                IrTypeView::Schema(SchemaIrTypeView::Struct(_, ref view))
+                | IrTypeView::Inline(InlineIrTypeView::Struct(_, ref view)) => {
+                    // If all non-discriminator fields of all reachable structs are _optional_
+                    // (not just nullable; a field can be nullable and required), then
+                    // this struct can derive `Default`.
+                    view.fields()
+                        .filter(|f| !f.discriminator())
+                        .all(|f| !f.required())
+                }
+                IrTypeView::Schema(_) | IrTypeView::Inline(_) => false,
+                // We filtered wrappers out above, and other types
+                // (other schema and inline types, primitives, and `Any`)
+                // don't have meaningful `Default` values.
+                _ => false,
+            });
         if is_defaultable {
             extra_derives.push(ExtraDerive::Default);
         }
@@ -137,12 +149,12 @@ impl<'view, 'a> CodegenField<'view, 'a> {
 
 impl ToTokens for CodegenField<'_, '_> {
     fn to_tokens(&self, tokens: &mut TokenStream) {
-        // For a nullable `T`, we emit either `Option<T>` or `AbsentOr<T>`,
-        // depending on whether the field is required, while `CodegenRef`
+        // For `Optional(T)`, we emit either `Option<T>` or `AbsentOr<T>`,
+        // depending on whether the field is required; but `CodegenRef`
         // always emits `Option<T>`, so we extract the inner T to avoid
         // double-wrapping.
         let inner_view = match self.field.ty() {
-            IrTypeView::Nullable(nullable) => Either::Left(nullable.inner()),
+            IrTypeView::Optional(nullable) => Either::Left(nullable.inner()),
             other => Either::Right(other),
         };
 
@@ -356,6 +368,56 @@ mod tests {
         let actual: syn::ItemStruct = parse_quote!(#codegen);
         // Required nullable field uses `Option<T>`, not `AbsentOr<T>`,
         // and without `#[serde(...)]` attributes.
+        let expected: syn::ItemStruct = parse_quote! {
+            #[derive(Debug, Clone, PartialEq, Eq, Hash, ::serde::Serialize, ::serde::Deserialize)]
+            pub struct Record {
+                pub id: ::std::string::String,
+                pub deleted_at: ::std::option::Option<::ploidy_util::date_time::UnixMilliseconds>,
+            }
+        };
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn test_struct_required_nullable_field_openapi_31_syntax() {
+        let doc = Document::from_yaml(indoc::indoc! {"
+            openapi: 3.1.0
+            info:
+              title: Test API
+              version: 1.0.0
+            paths: {}
+            components:
+              schemas:
+                Record:
+                  type: object
+                  properties:
+                    id:
+                      type: string
+                    deleted_at:
+                      type: [string, 'null']
+                      format: date-time
+                  required:
+                    - id
+                    - deleted_at
+        "})
+        .unwrap();
+
+        let spec = IrSpec::from_doc(&doc).unwrap();
+        let ir = IrGraph::new(&spec);
+        let graph = CodegenGraph::new(ir);
+
+        let schema = graph.schemas().find(|s| s.name() == "Record");
+        let Some(schema @ SchemaIrTypeView::Struct(_, struct_view)) = &schema else {
+            panic!("expected struct `Record`; got `{schema:?}`");
+        };
+
+        let name = CodegenTypeName::Schema(schema);
+        let codegen = CodegenStruct::new(name, struct_view);
+
+        let actual: syn::ItemStruct = parse_quote!(#codegen);
+        // OpenAPI 3.1 `type: [T, 'null']` syntax should behave identically to
+        // OpenAPI 3.0 `nullable: true`: required nullable fields become `Option<T>`,
+        // and the struct should _not_ derive `Default`.
         let expected: syn::ItemStruct = parse_quote! {
             #[derive(Debug, Clone, PartialEq, Eq, Hash, ::serde::Serialize, ::serde::Deserialize)]
             pub struct Record {
@@ -607,7 +669,7 @@ mod tests {
     }
 
     #[test]
-    fn test_struct_omits_default_with_nested_required_field() {
+    fn test_struct_omits_default_with_required_nested_required_field() {
         let doc = Document::from_yaml(indoc::indoc! {"
             openapi: 3.0.0
             info:
@@ -625,6 +687,8 @@ mod tests {
                     - id
                 Outer:
                   type: object
+                  required:
+                    - inner
                   properties:
                     inner:
                       $ref: '#/components/schemas/Inner'
@@ -644,19 +708,19 @@ mod tests {
         let codegen = CodegenStruct::new(name, struct_view);
 
         let actual: syn::ItemStruct = parse_quote!(#codegen);
-        // `Inner` has a required field, so `Default` shouldn't be derived for `Outer`.
+        // `Outer.inner` is required, and `Inner` has a required field,
+        // so `Default` shouldn't be derived for `Outer`.
         let expected: syn::ItemStruct = parse_quote! {
             #[derive(Debug, Clone, PartialEq, Eq, Hash, ::serde::Serialize, ::serde::Deserialize)]
             pub struct Outer {
-                #[serde(default, skip_serializing_if = "::ploidy_util::absent::AbsentOr::is_absent",)]
-                pub inner: ::ploidy_util::absent::AbsentOr<crate::types::Inner>,
+                pub inner: crate::types::Inner,
             }
         };
         assert_eq!(actual, expected);
     }
 
     #[test]
-    fn test_struct_omits_default_with_nested_tagged_union() {
+    fn test_struct_derives_default_with_optional_tagged_union() {
         let doc = Document::from_yaml(indoc::indoc! {"
             openapi: 3.0.0
             info:
@@ -705,10 +769,10 @@ mod tests {
         let codegen = CodegenStruct::new(name, struct_view);
 
         let actual: syn::ItemStruct = parse_quote!(#codegen);
-        // `Pet` is a tagged union that doesn't implement `Default`,
-        // so neither should `Owner`.
+        // `Pet` is a tagged union, but `Owner.pet` is optional (`AbsentOr<Pet>`),
+        // which always implements `Default`.
         let expected: syn::ItemStruct = parse_quote! {
-            #[derive(Debug, Clone, PartialEq, Eq, Hash, ::serde::Serialize, ::serde::Deserialize)]
+            #[derive(Debug, Clone, PartialEq, Eq, Hash, Default, ::serde::Serialize, ::serde::Deserialize)]
             pub struct Owner {
                 #[serde(default, skip_serializing_if = "::ploidy_util::absent::AbsentOr::is_absent",)]
                 pub pet: ::ploidy_util::absent::AbsentOr<crate::types::Pet>,
@@ -718,7 +782,7 @@ mod tests {
     }
 
     #[test]
-    fn test_struct_omits_default_with_nested_untagged_union() {
+    fn test_struct_derives_default_with_optional_untagged_union() {
         let doc = Document::from_yaml(indoc::indoc! {"
             openapi: 3.0.0
             info:
@@ -753,13 +817,75 @@ mod tests {
         let codegen = CodegenStruct::new(name, struct_view);
 
         let actual: syn::ItemStruct = parse_quote!(#codegen);
-        // `StringOrInt` is an untagged union that doesn't implement `Default`,
-        // so neither should `Container`.
+        // `StringOrInt` is an untagged union, but `Container.value` is optional
+        // (`AbsentOr<StringOrInt>`), which always implements `Default`.
         let expected: syn::ItemStruct = parse_quote! {
-            #[derive(Debug, Clone, PartialEq, Eq, Hash, ::serde::Serialize, ::serde::Deserialize)]
+            #[derive(Debug, Clone, PartialEq, Eq, Hash, Default, ::serde::Serialize, ::serde::Deserialize)]
             pub struct Container {
                 #[serde(default, skip_serializing_if = "::ploidy_util::absent::AbsentOr::is_absent",)]
                 pub value: ::ploidy_util::absent::AbsentOr<crate::types::StringOrInt>,
+            }
+        };
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn test_struct_omits_default_with_required_tagged_union() {
+        let doc = Document::from_yaml(indoc::indoc! {"
+            openapi: 3.0.0
+            info:
+              title: Test API
+              version: 1.0.0
+            paths: {}
+            components:
+              schemas:
+                Dog:
+                  type: object
+                  properties:
+                    bark:
+                      type: string
+                Cat:
+                  type: object
+                  properties:
+                    meow:
+                      type: string
+                Pet:
+                  oneOf:
+                    - $ref: '#/components/schemas/Dog'
+                    - $ref: '#/components/schemas/Cat'
+                  discriminator:
+                    propertyName: type
+                    mapping:
+                      dog: '#/components/schemas/Dog'
+                      cat: '#/components/schemas/Cat'
+                Owner:
+                  type: object
+                  required:
+                    - pet
+                  properties:
+                    pet:
+                      $ref: '#/components/schemas/Pet'
+        "})
+        .unwrap();
+
+        let spec = IrSpec::from_doc(&doc).unwrap();
+        let ir = IrGraph::new(&spec);
+        let graph = CodegenGraph::new(ir);
+
+        let schema = graph.schemas().find(|s| s.name() == "Owner");
+        let Some(schema @ SchemaIrTypeView::Struct(_, struct_view)) = &schema else {
+            panic!("expected struct `Owner`; got `{schema:?}`");
+        };
+
+        let name = CodegenTypeName::Schema(schema);
+        let codegen = CodegenStruct::new(name, struct_view);
+
+        let actual: syn::ItemStruct = parse_quote!(#codegen);
+        // `Pet` is a required field, so `Owner` can't derive `Default`.
+        let expected: syn::ItemStruct = parse_quote! {
+            #[derive(Debug, Clone, PartialEq, Eq, Hash, ::serde::Serialize, ::serde::Deserialize)]
+            pub struct Owner {
+                pub pet: crate::types::Pet,
             }
         };
         assert_eq!(actual, expected);

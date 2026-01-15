@@ -65,7 +65,7 @@ impl ToTokens for CodegenRef<'_> {
                 let ty = CodegenRef::new(&inner);
                 quote! { ::std::collections::BTreeMap<::std::string::String, #ty> }
             }
-            IrTypeView::Nullable(ty) => {
+            IrTypeView::Optional(ty) => {
                 let inner = ty.inner();
                 let ty = CodegenRef::new(&inner);
                 quote! { ::std::option::Option<#ty> }
@@ -235,6 +235,8 @@ mod tests {
               schemas:
                 Container:
                   type: object
+                  required:
+                    - items
                   properties:
                     items:
                       type: array
@@ -256,8 +258,6 @@ mod tests {
             .find(|f| matches!(f.name(), IrStructFieldName::Name("items")))
             .unwrap();
         let ty = field.ty();
-        assert_matches!(ty, IrTypeView::Array(_));
-
         let ref_ = CodegenRef::new(&ty);
         let actual: syn::Type = parse_quote!(#ref_);
         let expected: syn::Type = parse_quote!(::std::vec::Vec<::std::string::String>);
@@ -276,6 +276,8 @@ mod tests {
               schemas:
                 Container:
                   type: object
+                  required:
+                    - numbers
                   properties:
                     numbers:
                       type: array
@@ -298,8 +300,6 @@ mod tests {
             .find(|f| matches!(f.name(), IrStructFieldName::Name("numbers")))
             .unwrap();
         let ty = field.ty();
-        assert_matches!(ty, IrTypeView::Array(_));
-
         let ref_ = CodegenRef::new(&ty);
         let actual: syn::Type = parse_quote!(#ref_);
         let expected: syn::Type = parse_quote!(::std::vec::Vec<i32>);
@@ -318,6 +318,8 @@ mod tests {
               schemas:
                 Container:
                   type: object
+                  required:
+                    - metadata
                   properties:
                     metadata:
                       type: object
@@ -339,8 +341,6 @@ mod tests {
             .find(|f| matches!(f.name(), IrStructFieldName::Name("metadata")))
             .unwrap();
         let ty = field.ty();
-        assert_matches!(ty, IrTypeView::Map(_));
-
         let ref_ = CodegenRef::new(&ty);
         let actual: syn::Type = parse_quote!(#ref_);
         let expected: syn::Type = parse_quote! {
@@ -361,6 +361,8 @@ mod tests {
               schemas:
                 Container:
                   type: object
+                  required:
+                    - counters
                   properties:
                     counters:
                       type: object
@@ -383,8 +385,6 @@ mod tests {
             .find(|f| matches!(f.name(), IrStructFieldName::Name("counters")))
             .unwrap();
         let ty = field.ty();
-        assert_matches!(ty, IrTypeView::Map(_));
-
         let ref_ = CodegenRef::new(&ty);
         let actual: syn::Type = parse_quote!(#ref_);
         let expected: syn::Type = parse_quote! {
@@ -425,7 +425,7 @@ mod tests {
             .find(|f| matches!(f.name(), IrStructFieldName::Name("value")))
             .unwrap();
         let ty = field.ty();
-        assert_matches!(ty, IrTypeView::Nullable(_));
+        assert_matches!(ty, IrTypeView::Optional(_));
 
         let ref_ = CodegenRef::new(&ty);
         let actual: syn::Type = parse_quote!(#ref_);
@@ -466,7 +466,7 @@ mod tests {
             .find(|f| matches!(f.name(), IrStructFieldName::Name("count")))
             .unwrap();
         let ty = field.ty();
-        assert_matches!(ty, IrTypeView::Nullable(_));
+        assert_matches!(ty, IrTypeView::Optional(_));
 
         let ref_ = CodegenRef::new(&ty);
         let actual: syn::Type = parse_quote!(#ref_);
@@ -488,6 +488,7 @@ mod tests {
               schemas:
                 Container:
                   type: object
+                  required: [matrix]
                   properties:
                     matrix:
                       type: array
@@ -512,7 +513,6 @@ mod tests {
             .find(|f| matches!(f.name(), IrStructFieldName::Name("matrix")))
             .unwrap();
         let ty = field.ty();
-        assert_matches!(ty, IrTypeView::Array(_));
 
         let ref_ = CodegenRef::new(&ty);
         let actual: syn::Type = parse_quote!(#ref_);
@@ -556,7 +556,7 @@ mod tests {
             .find(|f| matches!(f.name(), IrStructFieldName::Name("items")))
             .unwrap();
         let ty = field.ty();
-        assert_matches!(ty, IrTypeView::Nullable(_));
+        assert_matches!(ty, IrTypeView::Optional(_));
 
         let ref_ = CodegenRef::new(&ty);
         let actual: syn::Type = parse_quote!(#ref_);
@@ -578,6 +578,7 @@ mod tests {
               schemas:
                 Container:
                   type: object
+                  required: [data]
                   properties:
                     data:
                       type: object
@@ -601,7 +602,6 @@ mod tests {
             .find(|f| matches!(f.name(), IrStructFieldName::Name("data")))
             .unwrap();
         let ty = field.ty();
-        assert_matches!(ty, IrTypeView::Map(_));
 
         let ref_ = CodegenRef::new(&ty);
         let actual: syn::Type = parse_quote!(#ref_);
@@ -663,6 +663,7 @@ mod tests {
                       type: string
                 Container:
                   type: object
+                  required: [users]
                   properties:
                     users:
                       type: array
@@ -684,7 +685,6 @@ mod tests {
             .find(|f| matches!(f.name(), ploidy_core::ir::IrStructFieldName::Name("users")))
             .unwrap();
         let ty = field.ty();
-        assert_matches!(ty, IrTypeView::Array(_));
 
         let ref_ = CodegenRef::new(&ty);
         let actual: syn::Type = parse_quote!(#ref_);

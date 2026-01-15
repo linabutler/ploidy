@@ -4,12 +4,12 @@
 //! for code generation. Each view decorates an IR type with
 //! additional information from the type graph.
 
-use std::{any::TypeId, fmt::Debug};
+use std::{any::TypeId, collections::VecDeque, fmt::Debug};
 
 use atomic_refcell::{AtomicRef, AtomicRefMut};
 use petgraph::{
     graph::NodeIndex,
-    visit::{Bfs, EdgeFiltered, EdgeRef},
+    visit::{Bfs, EdgeFiltered, EdgeRef, VisitMap, Visitable},
 };
 use ref_cast::{RefCastCustom, ref_cast_custom};
 
@@ -39,6 +39,12 @@ pub trait View<'a> {
 
     /// Returns an iterator over all the types that are reachable from this type.
     fn reachable(&self) -> impl Iterator<Item = IrTypeView<'a>>;
+
+    /// Returns an iterator over all reachable types, with a `filter` function
+    /// to control the traversal.
+    fn reachable_if<F>(&self, filter: F) -> impl Iterator<Item = IrTypeView<'a>>
+    where
+        F: Fn(&IrTypeView<'a>) -> Traversal;
 
     /// Returns a reference to this type's extended data.
     fn extensions(&self) -> &IrViewExtensions<Self>
@@ -84,6 +90,43 @@ where
         let graph = self.graph();
         let mut bfs = Bfs::new(&graph.g, self.index());
         std::iter::from_fn(move || bfs.next(&graph.g)).map(|index| IrTypeView::new(graph, index))
+    }
+
+    #[inline]
+    fn reachable_if<F>(&self, filter: F) -> impl Iterator<Item = IrTypeView<'a>>
+    where
+        F: Fn(&IrTypeView<'a>) -> Traversal,
+    {
+        let graph = self.graph();
+        let mut stack = VecDeque::new();
+        let mut discovered = graph.g.visit_map();
+
+        stack.push_back(self.index());
+        discovered.visit(self.index());
+
+        std::iter::from_fn(move || {
+            while let Some(index) = stack.pop_front() {
+                let view = IrTypeView::new(graph, index);
+                let traversal = filter(&view);
+
+                if matches!(traversal, Traversal::Visit | Traversal::Skip) {
+                    // Add the neighbors to the stack of nodes to visit.
+                    for neighbor in graph.g.neighbors(index) {
+                        if discovered.visit(neighbor) {
+                            stack.push_back(neighbor);
+                        }
+                    }
+                }
+
+                if matches!(traversal, Traversal::Visit | Traversal::Stop) {
+                    // Yield this node.
+                    return Some(view);
+                }
+
+                // (`Skip` and `Ignore` continue the loop without yielding).
+            }
+            None
+        })
     }
 
     #[inline]
@@ -195,4 +238,17 @@ impl<X> Debug for IrViewExtensions<X> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_tuple("IrViewExtensions").finish_non_exhaustive()
     }
+}
+
+/// Controls how to continue traversing the graph when at a node.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum Traversal {
+    /// Yield this node, then continue into its neighbors.
+    Visit,
+    /// Yield this node, but don't continue into its neighbors.
+    Stop,
+    /// Don't yield this node, but continue into its neighbors.
+    Skip,
+    /// Don't yield this node, and don't continue into its neighbors.
+    Ignore,
 }

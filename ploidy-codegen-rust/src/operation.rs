@@ -159,7 +159,7 @@ impl ToTokens for CodegenOperation<'_> {
             .collect_vec();
         for (ident, param) in &queries {
             let view = param.ty();
-            let ty = if param.required() || matches!(view, IrTypeView::Nullable(_)) {
+            let ty = if param.required() || matches!(view, IrTypeView::Optional(_)) {
                 let path = CodegenRef::new(&view);
                 quote!(#path)
             } else {
