@@ -2,9 +2,9 @@ use std::path::Path;
 
 use miette::{Context, IntoDiagnostic};
 
-mod unique;
+pub mod unique;
 
-pub use unique::{UniqueNameSpace, WordSegments};
+pub use unique::{UniqueNames, WordSegments};
 
 pub fn write_to_disk(output: &Path, code: impl IntoCode) -> miette::Result<()> {
     let code = code.into_code();

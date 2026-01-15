@@ -1,11 +1,11 @@
 use std::ops::Deref;
 
 use ploidy_core::{
-    codegen::UniqueNameSpace,
+    codegen::UniqueNames,
     ir::{IrGraph, View},
 };
 
-use super::naming::SchemaIdent;
+use super::naming::CodegenIdentScope;
 
 /// Decorates an [`IrGraph`] with Rust-specific information.
 #[derive(Debug)]
@@ -13,11 +13,11 @@ pub struct CodegenGraph<'a>(IrGraph<'a>);
 
 impl<'a> CodegenGraph<'a> {
     pub fn new(graph: IrGraph<'a>) -> Self {
-        let mut space = UniqueNameSpace::new();
+        let unique = UniqueNames::new();
+        let mut scope = CodegenIdentScope::new(&unique);
         for mut view in graph.schemas() {
-            let name = view.name();
-            view.extensions_mut()
-                .insert(SchemaIdent(space.uniquify(name).into_owned()));
+            let ident = scope.uniquify(view.name());
+            view.extensions_mut().insert(ident);
         }
         Self(graph)
     }

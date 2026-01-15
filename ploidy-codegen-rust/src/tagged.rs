@@ -1,17 +1,18 @@
 use itertools::Itertools;
 use ploidy_core::{
-    codegen::UniqueNameSpace,
+    codegen::UniqueNames,
     ir::{IrTaggedView, IrTypeView, PrimitiveIrType, View},
 };
 use proc_macro2::TokenStream;
 use quote::{ToTokens, TokenStreamExt, quote};
 
-use super::{
-    derives::ExtraDerive, doc_attrs, naming::CodegenIdent, naming::CodegenTypeName,
-    ref_::CodegenRef,
-};
+use crate::{CodegenIdentScope, CodegenTypeName};
 
-#[derive(Clone, Copy, Debug)]
+use super::{derives::ExtraDerive, doc_attrs, naming::CodegenIdentUsage, ref_::CodegenRef};
+
+/// Generates a tagged union as a Rust enum, with `#[serde(tag = ...)]`
+/// and associated data for each variant.
+#[derive(Clone, Debug)]
 pub struct CodegenTagged<'a> {
     name: CodegenTypeName<'a>,
     ty: &'a IrTaggedView<'a>,
@@ -39,14 +40,15 @@ impl ToTokens for CodegenTagged<'_> {
             extra_derives.push(ExtraDerive::Hash);
         }
 
-        let mut space = UniqueNameSpace::new();
+        let unique = UniqueNames::new();
+        let mut scope = CodegenIdentScope::new(&unique);
         let variants = self
             .ty
             .variants()
             .map(|variant| {
                 // Look up the proper Rust type name.
                 let view = variant.ty();
-                let variant_name = CodegenIdent::Variant(&space.uniquify(variant.name()));
+                let variant_name = CodegenIdentUsage::Variant(&scope.uniquify(variant.name()));
                 let rust_type_name = CodegenRef::new(&view);
 
                 // Add `#[serde(alias = ...)]` attributes for multiple

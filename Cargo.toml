@@ -23,6 +23,7 @@ ploidy-codegen-rust = { path = "ploidy-codegen-rust", version = "0.5.0" }
 ploidy-core = { path = "ploidy-core", version = "0.5.0" }
 ploidy-pointer = { path = "ploidy-pointer", version = "0.5.0" }
 ploidy-pointer-derive = { path = "ploidy-pointer-derive", version = "0.5.0" }
+ref-cast = "1"
 
 [workspace.lints.rust]
 unsafe_code = "forbid"

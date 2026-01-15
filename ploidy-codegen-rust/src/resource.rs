@@ -47,18 +47,21 @@ impl ToTokens for CodegenResource<'_> {
                 // `CodegenSchemaType`.
                 matches!(ty.path().root, InlineIrTypePathRoot::Resource(r) if r == self.resource)
             })
-            .map(|view| match view {
-                InlineIrTypeView::Enum(path, view) => {
-                    CodegenEnum::new(CodegenTypeName::Inline(path), &view).into_token_stream()
-                }
-                InlineIrTypeView::Struct(path, view) => {
-                    CodegenStruct::new(CodegenTypeName::Inline(path), &view).into_token_stream()
-                }
-                InlineIrTypeView::Tagged(path, view) => {
-                    CodegenTagged::new(CodegenTypeName::Inline(path), &view).into_token_stream()
-                }
-                InlineIrTypeView::Untagged(path, view) => {
-                    CodegenUntagged::new(CodegenTypeName::Inline(path), &view).into_token_stream()
+            .map(|view| {
+                let name = CodegenTypeName::Inline(&view);
+                match &view {
+                    InlineIrTypeView::Enum(_, view) => {
+                        CodegenEnum::new(name, view).into_token_stream()
+                    }
+                    InlineIrTypeView::Struct(_, view) => {
+                        CodegenStruct::new(name, view).into_token_stream()
+                    }
+                    InlineIrTypeView::Tagged(_, view) => {
+                        CodegenTagged::new(name, view).into_token_stream()
+                    }
+                    InlineIrTypeView::Untagged(_, view) => {
+                        CodegenUntagged::new(name, view).into_token_stream()
+                    }
                 }
             });
         let fields_module = inlines.next().map(|head| {

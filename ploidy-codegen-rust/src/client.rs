@@ -3,7 +3,10 @@ use ploidy_core::codegen::IntoCode;
 use proc_macro2::TokenStream;
 use quote::{ToTokens, TokenStreamExt, quote};
 
-use super::{graph::CodegenGraph, naming::CodegenIdent};
+use super::{
+    graph::CodegenGraph,
+    naming::{CodegenIdent, CodegenIdentUsage},
+};
 
 /// Generates the `client/mod.rs` source file.
 #[derive(Clone, Copy, Debug)]
@@ -24,7 +27,8 @@ impl ToTokens for CodegenClientModule<'_> {
             .resources
             .iter()
             .map(|resource| {
-                let mod_name = CodegenIdent::Module(resource);
+                let ident = CodegenIdent::new(resource);
+                let mod_name = CodegenIdentUsage::Module(&ident);
                 quote! {
                     #[cfg(feature = #resource)]
                     pub mod #mod_name;

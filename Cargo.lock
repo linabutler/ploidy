@@ -661,6 +661,7 @@ dependencies = [
  "prettyplease",
  "proc-macro2",
  "quote",
+ "ref-cast",
  "serde",
  "syn",
  "textwrap",
@@ -674,6 +675,7 @@ name = "ploidy-core"
 version = "0.5.1"
 dependencies = [
  "atomic_refcell",
+ "bumpalo",
  "by_address",
  "cargo_toml",
  "either",

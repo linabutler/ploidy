@@ -1,6 +1,6 @@
 use either::Either;
 use ploidy_core::{
-    codegen::UniqueNameSpace,
+    codegen::UniqueNames,
     ir::{
         InlineIrTypeView, IrStructFieldName, IrStructFieldView, IrStructView, IrTypeView,
         PrimitiveIrType, SchemaIrTypeView, View,
@@ -13,12 +13,11 @@ use syn::{Ident, parse_quote};
 use super::{
     derives::ExtraDerive,
     doc_attrs,
-    naming::CodegenTypeName,
-    naming::{CodegenIdent, CodegenStructFieldName},
+    naming::{CodegenIdentScope, CodegenIdentUsage, CodegenStructFieldName, CodegenTypeName},
     ref_::CodegenRef,
 };
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Debug)]
 pub struct CodegenStruct<'a> {
     name: CodegenTypeName<'a>,
     ty: &'a IrStructView<'a>,
@@ -32,7 +31,8 @@ impl<'a> CodegenStruct<'a> {
 
 impl ToTokens for CodegenStruct<'_> {
     fn to_tokens(&self, tokens: &mut TokenStream) {
-        let mut space = UniqueNameSpace::new();
+        let unique = UniqueNames::new();
+        let mut scope = CodegenIdentScope::new(&unique);
         let fields = self
             .ty
             .fields()
@@ -40,7 +40,7 @@ impl ToTokens for CodegenStruct<'_> {
             .map(|field| {
                 let field_name: Ident = match field.name() {
                     IrStructFieldName::Name(n) => {
-                        let name = CodegenIdent::Field(&space.uniquify(n));
+                        let name = CodegenIdentUsage::Field(&scope.uniquify(n));
                         parse_quote!(#name)
                     }
                     IrStructFieldName::Hint(hint) => {

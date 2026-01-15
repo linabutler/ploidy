@@ -4,10 +4,7 @@ use itertools::Itertools;
 use proc_macro2::TokenStream;
 use quote::quote;
 
-use ploidy_core::{
-    codegen::{IntoCode, write_to_disk},
-    ir::View,
-};
+use ploidy_core::codegen::{IntoCode, write_to_disk};
 
 mod cargo;
 mod client;
@@ -37,10 +34,7 @@ pub use types::*;
 
 pub fn write_types_to_disk(output: &Path, graph: &CodegenGraph<'_>) -> miette::Result<()> {
     for view in graph.schemas() {
-        let ext = view.extensions();
-        let info = ext.get::<SchemaIdent>().unwrap();
-        let name = CodegenTypeName::Schema(view.name(), &info);
-        let code = CodegenSchemaType::new(name, &view).into_code();
+        let code = CodegenSchemaType::new(&view).into_code();
         write_to_disk(output, code)?;
     }
 

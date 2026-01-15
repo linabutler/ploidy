@@ -11,6 +11,7 @@ rust-version.workspace = true
 
 [dependencies]
 atomic_refcell = "0.1"
+bumpalo = { version = "3", features = ["collections"] }
 by_address = "1"
 cargo_toml = { version = "0.22", optional = true }
 either = { workspace = true }
@@ -27,7 +28,7 @@ ploidy-pointer = { workspace = true, features = ["full"] }
 prettyplease = { version = "0.2", optional = true }
 proc-macro2 = { version = "1", default-features = false, optional = true }
 quote = { version = "1", default-features = false, optional = true }
-ref-cast = "1"
+ref-cast = { workspace = true }
 rustc-hash = "2"
 syn = { version = "2", default-features = false, optional = true }
 thiserror = "2"

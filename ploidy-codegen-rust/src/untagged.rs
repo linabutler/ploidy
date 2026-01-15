@@ -9,7 +9,7 @@ use super::{
     ref_::CodegenRef,
 };
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Debug)]
 pub struct CodegenUntagged<'a> {
     name: CodegenTypeName<'a>,
     ty: &'a IrUntaggedView<'a>,

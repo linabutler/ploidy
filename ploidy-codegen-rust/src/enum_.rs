@@ -5,10 +5,10 @@ use syn::{Ident, parse_quote};
 
 use super::{
     doc_attrs,
-    naming::{CodegenIdent, CodegenTypeName},
+    naming::{CodegenIdent, CodegenIdentUsage, CodegenTypeName},
 };
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Debug)]
 pub struct CodegenEnum<'a> {
     name: CodegenTypeName<'a>,
     ty: &'a IrEnumView<'a>,
@@ -27,16 +27,14 @@ impl ToTokens for CodegenEnum<'_> {
         // Rust enum variants.
         let has_unrepresentable = self.ty.variants().iter().any(|variant| match variant {
             IrEnumVariant::Number(_) | IrEnumVariant::Bool(_) => true,
-            IrEnumVariant::String(s) => s
-                .chars()
-                .all(|c| !unicode_ident::is_xid_start(c) && !unicode_ident::is_xid_continue(c)),
+            IrEnumVariant::String(s) => s.chars().all(|c| !unicode_ident::is_xid_continue(c)),
         });
 
         if has_unrepresentable {
             // If any variant can't be represented as a Rust enum,
             // emit a type alias for the enum instead.
             let type_name: Ident = {
-                let name = self.name;
+                let name = &self.name;
                 parse_quote!(#name)
             };
             let doc_attrs = self.ty.description().map(doc_attrs);
@@ -52,11 +50,12 @@ impl ToTokens for CodegenEnum<'_> {
 
             for variant in self.ty.variants() {
                 match variant {
-                    IrEnumVariant::String(json_value) => {
-                        let variant_name = CodegenIdent::Variant(json_value);
+                    IrEnumVariant::String(name) => {
+                        let name_ident = CodegenIdent::new(name);
+                        let variant_name = CodegenIdentUsage::Variant(&name_ident);
                         variants.push(quote! { #variant_name });
-                        display_arms.push(quote! { Self::#variant_name => #json_value });
-                        from_str_arms.push(quote! { #json_value => Self::#variant_name });
+                        display_arms.push(quote! { Self::#variant_name => #name });
+                        from_str_arms.push(quote! { #name => Self::#variant_name });
                     }
                     IrEnumVariant::Number(_) | IrEnumVariant::Bool(_) => continue,
                 }
@@ -64,7 +63,7 @@ impl ToTokens for CodegenEnum<'_> {
 
             // The catch-all `Other` variant comes last.
             let type_name: Ident = {
-                let name = self.name;
+                let name = &self.name;
                 parse_quote!(#name)
             };
             let other_name = format_ident!("Other{}", type_name);

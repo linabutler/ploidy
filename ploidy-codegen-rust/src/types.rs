@@ -4,7 +4,10 @@ use ploidy_core::{codegen::IntoCode, ir::View};
 use proc_macro2::TokenStream;
 use quote::{ToTokens, TokenStreamExt, quote};
 
-use super::{graph::CodegenGraph, naming::SchemaIdent};
+use super::{
+    graph::CodegenGraph,
+    naming::{CodegenIdent, CodegenIdentUsage},
+};
 
 /// Generates the `types/mod.rs` module.
 pub struct CodegenTypesModule<'a> {
@@ -29,17 +32,17 @@ impl ToTokens for CodegenTypesModule<'_> {
             };
 
             let ext = view.extensions();
-            let info = ext.get::<SchemaIdent>().unwrap();
-            let module = info.module();
+            let ident = ext.get::<CodegenIdent>().unwrap();
+            let mod_name = CodegenIdentUsage::Module(&ident);
             mods.push(quote! {
                 #cfg_attr
-                pub mod #module;
+                pub mod #mod_name;
             });
 
-            let ty = info.ty();
+            let ty_name = CodegenIdentUsage::Type(&ident);
             uses.push(quote! {
                 #cfg_attr
-                pub use #module::#ty;
+                pub use #mod_name::#ty_name;
             });
         }
 

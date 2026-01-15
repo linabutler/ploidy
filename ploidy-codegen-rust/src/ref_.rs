@@ -1,12 +1,11 @@
-use heck::ToSnakeCase;
 use ploidy_core::ir::{InlineIrTypePathRoot, IrTypeView, PrimitiveIrType, View};
 use proc_macro2::TokenStream;
-use quote::{ToTokens, TokenStreamExt, format_ident, quote};
+use quote::{ToTokens, TokenStreamExt, quote};
 use syn::parse_quote;
 
 use super::{
     naming::CodegenTypeName,
-    naming::{CodegenIdent, SchemaIdent},
+    naming::{CodegenIdent, CodegenIdentUsage},
 };
 
 #[derive(Clone, Copy, Debug)]
@@ -75,23 +74,25 @@ impl ToTokens for CodegenRef<'_> {
             IrTypeView::Inline(ty) => {
                 let path = ty.path();
                 let root: syn::Path = match &path.root {
-                    InlineIrTypePathRoot::Resource(a) => {
-                        let name = format_ident!("{}", a.to_snake_case());
-                        parse_quote!(crate::client::#name::types)
+                    InlineIrTypePathRoot::Resource(name) => {
+                        let ident = CodegenIdent::new(name);
+                        let usage = CodegenIdentUsage::Module(&ident);
+                        parse_quote!(crate::client::#usage::types)
                     }
-                    InlineIrTypePathRoot::Type(a) => {
-                        let m = CodegenIdent::Module(a);
-                        parse_quote!(crate::types::#m::types)
+                    InlineIrTypePathRoot::Type(name) => {
+                        let ident = CodegenIdent::new(name);
+                        let usage = CodegenIdentUsage::Module(&ident);
+                        parse_quote!(crate::types::#usage::types)
                     }
                 };
-                let name = CodegenTypeName::Inline(path);
+                let name = CodegenTypeName::Inline(ty);
                 parse_quote!(#root::#name)
             }
             IrTypeView::Schema(view) => {
                 let ext = view.extensions();
-                let idents = ext.get::<SchemaIdent>().unwrap();
-                let name = idents.ty();
-                quote! { crate::types::#name }
+                let ident = ext.get::<CodegenIdent>().unwrap();
+                let usage = CodegenIdentUsage::Type(&ident);
+                quote! { crate::types::#usage }
             }
         })
     }

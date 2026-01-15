@@ -1,6 +1,6 @@
 use itertools::Itertools;
 use ploidy_core::{
-    codegen::UniqueNameSpace,
+    codegen::UniqueNames,
     ir::{
         IrOperationView, IrParameterStyle, IrParameterView, IrPathParameter, IrQueryParameter,
         IrRequestView, IrResponseView, IrTypeView,
@@ -11,7 +11,11 @@ use proc_macro2::{Span, TokenStream};
 use quote::{ToTokens, TokenStreamExt, quote};
 use syn::Ident;
 
-use super::{doc_attrs, naming::CodegenIdent, ref_::CodegenRef};
+use super::{
+    doc_attrs,
+    naming::{CodegenIdent, CodegenIdentScope, CodegenIdentUsage},
+    ref_::CodegenRef,
+};
 
 /// Generates a single client method for an API operation.
 pub struct CodegenOperation<'a> {
@@ -24,11 +28,7 @@ impl<'a> CodegenOperation<'a> {
     }
 
     /// Generates code to build the request URL, with path parameters substituted.
-    fn url(
-        &self,
-        url: CodegenIdent<'_>,
-        params: &[(CodegenIdent<'_>, &IrParameterView<'_, IrPathParameter>)],
-    ) -> TokenStream {
+    fn url(&self, params: &[(CodegenIdent, IrParameterView<'_, IrPathParameter>)]) -> TokenStream {
         let segments = self
             .op
             .path()
@@ -41,7 +41,8 @@ impl<'a> CodegenOperation<'a> {
                         .iter()
                         .find(|(_, param)| param.name() == *name)
                         .unwrap();
-                    quote!(#ident)
+                    let usage = CodegenIdentUsage::Param(ident);
+                    quote!(#usage)
                 }
                 fragments => {
                     // Build a format string, with placeholders for parameter fragments.
@@ -68,20 +69,20 @@ impl<'a> CodegenOperation<'a> {
                                 .iter()
                                 .find(|(_, param)| param.name() == *name)
                                 .unwrap();
-                            ident
+                            CodegenIdentUsage::Param(ident)
                         });
                     quote! { &format!(#format, #(#args),*) }
                 }
             });
         quote! {
-            let #url = {
-                let mut #url = self.base_url.clone();
-                #url
+            let url = {
+                let mut url = self.base_url.clone();
+                url
                     .path_segments_mut()
                     .map_err(|()| crate::error::Error::UrlCannotBeABase)?
                     .pop_if_empty()
                     #(.push(#segments))*;
-                #url
+                url
             };
         }
     }
@@ -89,8 +90,7 @@ impl<'a> CodegenOperation<'a> {
     /// Generates code to append query parameters.
     fn query(
         &self,
-        url: CodegenIdent<'_>,
-        params: &[(CodegenIdent<'_>, &IrParameterView<'_, IrQueryParameter>)],
+        params: &[(CodegenIdent, IrParameterView<'_, IrQueryParameter>)],
     ) -> TokenStream {
         let appends = params
             .iter()
@@ -111,20 +111,21 @@ impl<'a> CodegenOperation<'a> {
                     }
                     None => quote!(::ploidy_util::QueryStyle::default()),
                 };
+                let usage = CodegenIdentUsage::Param(ident);
                 Some(quote! {
                     .style(#style)
-                    .append(#name, &#ident)?
+                    .append(#name, &#usage)?
                 })
             })
             .collect_vec();
         match &*appends {
             [] => quote! {},
             appends => quote! {
-                let #url = {
-                    let mut #url = #url;
-                    let serializer = ::ploidy_util::QuerySerializer::new(&mut #url);
+                let url = {
+                    let mut url = url;
+                    let serializer = ::ploidy_util::QuerySerializer::new(&mut url);
                     serializer #(#appends)*;
-                    #url
+                    url
                 };
             },
         }
@@ -133,34 +134,28 @@ impl<'a> CodegenOperation<'a> {
 
 impl ToTokens for CodegenOperation<'_> {
     fn to_tokens(&self, tokens: &mut TokenStream) {
-        let operation_id = self.op.id();
-        let method_name = CodegenIdent::Method(operation_id);
+        let operation_id = CodegenIdent::new(self.op.id());
+        let method_name = CodegenIdentUsage::Method(&operation_id);
 
-        let mut space = UniqueNameSpace::new();
+        let unique = UniqueNames::new();
+        let mut scope = CodegenIdentScope::with_reserved(&unique, &["url", "request", "form"]);
         let mut params = vec![];
 
         let paths = self
             .op
             .path()
             .params()
-            .map(|param| (space.uniquify(param.name()), param))
-            .collect_vec();
-        let paths = paths
-            .iter()
-            .map(|(name, param)| (CodegenIdent::Param(name), param))
+            .map(|param| (scope.uniquify(param.name()), param))
             .collect_vec();
         for (ident, _) in &paths {
-            params.push(quote! { #ident: &str });
+            let usage = CodegenIdentUsage::Param(ident);
+            params.push(quote! { #usage: &str });
         }
 
         let queries = self
             .op
             .query()
-            .map(|param| (space.uniquify(param.name()), param))
-            .collect_vec();
-        let queries = queries
-            .iter()
-            .map(|(name, param)| (CodegenIdent::Param(name), param))
+            .map(|param| (scope.uniquify(param.name()), param))
             .collect_vec();
         for (ident, param) in &queries {
             let view = param.ty();
@@ -171,23 +166,18 @@ impl ToTokens for CodegenOperation<'_> {
                 let path = CodegenRef::new(&view);
                 quote! { ::std::option::Option<#path> }
             };
-            params.push(quote! { #ident: #ty });
+            let usage = CodegenIdentUsage::Param(ident);
+            params.push(quote! { #usage: #ty });
         }
-
-        // Local variables and parameters that might conflict
-        // with path and query parameter names.
-        let url_var = CodegenIdent::Var(&space.uniquify("url"));
-        let request_param = CodegenIdent::Param(&space.uniquify("request"));
-        let form_param = CodegenIdent::Param(&space.uniquify("form"));
 
         if let Some(request) = self.op.request() {
             match request {
                 IrRequestView::Json(view) => {
                     let param_type = CodegenRef::new(&view);
-                    params.push(quote! { #request_param: impl Into<#param_type> });
+                    params.push(quote! { request: impl Into<#param_type> });
                 }
                 IrRequestView::Multipart => {
-                    params.push(quote! { #form_param: reqwest::multipart::Form });
+                    params.push(quote! { form: reqwest::multipart::Form });
                 }
             }
         }
@@ -199,32 +189,32 @@ impl ToTokens for CodegenOperation<'_> {
             None => quote! { () },
         };
 
-        let build_url = self.url(url_var, &paths);
-        let build_query = self.query(url_var, &queries);
+        let build_url = self.url(&paths);
+        let build_query = self.query(&queries);
 
         let http_method = CodegenMethod(self.op.method());
         let build_request = match self.op.request() {
             Some(IrRequestView::Json(_)) => quote! {
                 let response = self.client
-                    .#http_method(#url_var)
+                    .#http_method(url)
                     .headers(self.headers.clone())
-                    .json(&#request_param.into())
+                    .json(&request.into())
                     .send()
                     .await?
                     .error_for_status()?;
             },
             Some(IrRequestView::Multipart) => quote! {
                 let response = self.client
-                    .#http_method(#url_var)
+                    .#http_method(url)
                     .headers(self.headers.clone())
-                    .multipart(#form_param)
+                    .multipart(form)
                     .send()
                     .await?
                     .error_for_status()?;
             },
             None => quote! {
                 let response = self.client
-                    .#http_method(#url_var)
+                    .#http_method(url)
                     .headers(self.headers.clone())
                     .send()
                     .await?

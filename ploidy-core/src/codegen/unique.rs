@@ -3,43 +3,118 @@ use std::collections::btree_map::Entry;
 use std::str::CharIndices;
 use std::{collections::BTreeMap, iter::Peekable};
 
+use bumpalo::{
+    Bump,
+    collections::{CollectIn, Vec as BumpVec},
+};
 use unicase::UniCase;
 
-/// Produces names that will never collide with other names in this space,
-/// even when converted to a different case.
-///
-/// [`UniqueNameSpace`] exists to disambiguate type and field names
-/// that are distinct in the source spec, but collide when transformed
-/// to a different case. (For example, both `HTTP_Response` and `HTTPResponse`
-/// become `http_response` in snake case).
+/// Deduplicates names across case conventions.
 #[derive(Debug, Default)]
-pub struct UniqueNameSpace<'a>(BTreeMap<Box<[UniCase<&'a str>]>, usize>);
+pub struct UniqueNames(Bump);
 
-impl<'a> UniqueNameSpace<'a> {
+impl UniqueNames {
+    /// Creates a new arena for deduplicating names.
     #[inline]
     pub fn new() -> Self {
         Self::default()
     }
 
-    /// Returns a unique name, ignoring case and case transformations.
-    /// The unique name preserves the case of the original name, but adds
-    /// a numeric suffix on collisions.
+    /// Creates a new, empty scope that's backed by this arena.
+    ///
+    /// A scope produces names that will never collide with other names
+    /// within the same scope, even when converted to a different case.
+    ///
+    /// This is useful for disambiguating type and property names that are
+    /// distinct in the source spec, but collide when transformed
+    /// to a different case. For example, `HTTP_Response` and `HTTPResponse`
+    /// are distinct, but both become `http_response` in snake case.
+    #[inline]
+    pub fn scope(&self) -> UniqueNamesScope<'_> {
+        UniqueNamesScope::new(&self.0)
+    }
+
+    /// Creates a new scope that's backed by this arena, and that
+    /// reserves the given names.
+    ///
+    /// This is useful for reserving variable names in generated code, or
+    /// reserving placeholder names that would be invalid identifiers
+    /// on their own.
     ///
     /// # Examples
     ///
     /// ```
-    /// # use ploidy_core::codegen::UniqueNameSpace;
-    /// # let mut space = UniqueNameSpace::new();
-    /// assert_eq!(space.uniquify("HTTPResponse"), "HTTPResponse");
-    /// assert_eq!(space.uniquify("HTTP_Response"), "HTTP_Response2");
-    /// assert_eq!(space.uniquify("httpResponse"), "httpResponse3");
+    /// # use ploidy_core::codegen::UniqueNames;
+    /// let unique = UniqueNames::new();
+    /// let mut scope = unique.scope_with_reserved(["_"]);
+    /// assert_eq!(scope.uniquify("_"), "_2");
+    /// assert_eq!(scope.uniquify("_"), "_3");
     /// ```
     #[inline]
-    pub fn uniquify(&mut self, name: &'a str) -> Cow<'a, str> {
-        match self
-            .0
-            .entry(WordSegments::new(name).map(UniCase::new).collect())
-        {
+    pub fn scope_with_reserved<S: AsRef<str>>(
+        &self,
+        reserved: impl IntoIterator<Item = S>,
+    ) -> UniqueNamesScope<'_> {
+        UniqueNamesScope::with_reserved(&self.0, reserved)
+    }
+}
+
+/// A scope for unique names.
+#[derive(Debug)]
+pub struct UniqueNamesScope<'a> {
+    arena: &'a Bump,
+    space: BTreeMap<&'a [UniCase<&'a str>], usize>,
+}
+
+impl<'a> UniqueNamesScope<'a> {
+    fn new(arena: &'a Bump) -> Self {
+        Self {
+            arena,
+            space: BTreeMap::new(),
+        }
+    }
+
+    fn with_reserved<S: AsRef<str>>(
+        arena: &'a Bump,
+        reserved: impl IntoIterator<Item = S>,
+    ) -> Self {
+        let space = reserved
+            .into_iter()
+            .map(|name| arena.alloc_str(name.as_ref()))
+            .map(|name| {
+                WordSegments::new(name)
+                    .map(UniCase::new)
+                    .collect_in::<BumpVec<_>>(arena)
+            })
+            .fold(BTreeMap::new(), |mut names, segments| {
+                // Setting the count to 1 automatically filters out duplicates.
+                names.insert(segments.into_bump_slice(), 1);
+                names
+            });
+        Self { arena, space }
+    }
+
+    /// Adds a name to this scope. If the name doesn't exist within this scope
+    /// yet, returns the name as-is; otherwise, returns the name with a
+    /// unique numeric suffix.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use ploidy_core::codegen::UniqueNames;
+    /// let unique = UniqueNames::new();
+    /// let mut scope = unique.scope();
+    /// assert_eq!(scope.uniquify("HTTPResponse"), "HTTPResponse");
+    /// assert_eq!(scope.uniquify("HTTP_Response"), "HTTP_Response2");
+    /// assert_eq!(scope.uniquify("httpResponse"), "httpResponse3");
+    /// ```
+    pub fn uniquify<'b>(&mut self, name: &'b str) -> Cow<'b, str> {
+        match self.space.entry(
+            WordSegments::new(name)
+                .map(|name| UniCase::new(&*self.arena.alloc_str(name)))
+                .collect_in::<BumpVec<_>>(self.arena)
+                .into_bump_slice(),
+        ) {
             Entry::Occupied(mut entry) => {
                 let count = entry.get_mut();
                 *count += 1;
@@ -53,7 +128,20 @@ impl<'a> UniqueNameSpace<'a> {
     }
 }
 
-/// Segments a string into words, following Heck's notion of word boundaries.
+/// Segments a string into words, detecting word boundaries for
+/// case transformation.
+///
+/// Word boundaries occur on:
+///
+/// * Non-alphanumeric characters: underscores, hyphens, etc.
+/// * Lowercase-to-uppercase transitions (`httpResponse`).
+/// * Uppercase-to-lowercase after an uppercase run (`XMLHttp`).
+/// * Digit-to-letter transitions (`1099KStatus`, `250g`).
+///
+/// The digit-to-letter rule is stricter than Heck's segmentation,
+/// to ensure that names like `1099KStatus` and `1099_K_Status` collide.
+/// Without this rule, these cases would produce similar-but-distinct names
+/// differing only in their internal capitalization.
 ///
 /// # Examples
 ///
@@ -64,6 +152,9 @@ impl<'a> UniqueNameSpace<'a> {
 /// assert_eq!(WordSegments::new("HTTP_Response").collect_vec(), vec!["HTTP", "Response"]);
 /// assert_eq!(WordSegments::new("httpResponse").collect_vec(), vec!["http", "Response"]);
 /// assert_eq!(WordSegments::new("XMLHttpRequest").collect_vec(), vec!["XML", "Http", "Request"]);
+/// assert_eq!(WordSegments::new("1099KStatus").collect_vec(), vec!["1099", "K", "Status"]);
+/// assert_eq!(WordSegments::new("250g").collect_vec(), vec!["250", "g"]);
+/// ```
 pub struct WordSegments<'a> {
     input: &'a str,
     chars: Peekable<CharIndices<'a>>,
@@ -92,8 +183,11 @@ impl<'a> Iterator for WordSegments<'a> {
                 match self.mode {
                     WordMode::Boundary => {
                         // Start a new word with this uppercase character.
-                        self.current_word_starts_at = Some(index);
+                        let start = self.current_word_starts_at.replace(index);
                         self.mode = WordMode::Uppercase;
+                        if let Some(start) = start {
+                            return Some(&self.input[start..index]);
+                        }
                     }
                     WordMode::Lowercase => {
                         // camelCased word (previous was lowercase;
@@ -120,12 +214,23 @@ impl<'a> Iterator for WordSegments<'a> {
                     }
                 }
             } else if c.is_lowercase() {
-                if self.current_word_starts_at.is_none() {
-                    // Start a new word with this lowercase character
-                    // (the "c" in "camelCase").
-                    self.current_word_starts_at = Some(index);
+                match self.mode {
+                    WordMode::Boundary => {
+                        // Start a new word with this lowercase character.
+                        let start = self.current_word_starts_at.replace(index);
+                        self.mode = WordMode::Lowercase;
+                        if let Some(start) = start {
+                            return Some(&self.input[start..index]);
+                        }
+                    }
+                    WordMode::Lowercase | WordMode::Uppercase => {
+                        if self.current_word_starts_at.is_none() {
+                            // Start or continue the current word.
+                            self.current_word_starts_at = Some(index);
+                        }
+                        self.mode = WordMode::Lowercase;
+                    }
                 }
-                self.mode = WordMode::Lowercase;
             } else if !c.is_alphanumeric() {
                 // Start a new word at this non-alphanumeric character.
                 let start = std::mem::take(&mut self.current_word_starts_at);
@@ -252,6 +357,18 @@ mod tests {
             WordSegments::new("HTTP2XML").collect_vec(),
             vec!["HTTP2XML"]
         );
+        assert_eq!(
+            WordSegments::new("1099KStatus").collect_vec(),
+            vec!["1099", "K", "Status"]
+        );
+        assert_eq!(
+            WordSegments::new("123abc").collect_vec(),
+            vec!["123", "abc"]
+        );
+        assert_eq!(
+            WordSegments::new("123ABC").collect_vec(),
+            vec!["123", "ABC"]
+        );
     }
 
     #[test]
@@ -276,47 +393,91 @@ mod tests {
 
     #[test]
     fn test_deduplication_http_response_collision() {
-        let mut space = UniqueNameSpace::new();
+        let unique = UniqueNames::new();
+        let mut scope = unique.scope();
 
-        assert_eq!(space.uniquify("HTTPResponse"), "HTTPResponse");
-        assert_eq!(space.uniquify("HTTP_Response"), "HTTP_Response2");
-        assert_eq!(space.uniquify("httpResponse"), "httpResponse3");
-        assert_eq!(space.uniquify("http_response"), "http_response4");
+        assert_eq!(scope.uniquify("HTTPResponse"), "HTTPResponse");
+        assert_eq!(scope.uniquify("HTTP_Response"), "HTTP_Response2");
+        assert_eq!(scope.uniquify("httpResponse"), "httpResponse3");
+        assert_eq!(scope.uniquify("http_response"), "http_response4");
         // `HTTPRESPONSE` isn't a collision; it's a single word.
-        assert_eq!(space.uniquify("HTTPRESPONSE"), "HTTPRESPONSE");
+        assert_eq!(scope.uniquify("HTTPRESPONSE"), "HTTPRESPONSE");
     }
 
     #[test]
     fn test_deduplication_xml_http_request() {
-        let mut space = UniqueNameSpace::new();
+        let unique = UniqueNames::new();
+        let mut scope = unique.scope();
 
-        assert_eq!(space.uniquify("XMLHttpRequest"), "XMLHttpRequest");
-        assert_eq!(space.uniquify("xml_http_request"), "xml_http_request2");
-        assert_eq!(space.uniquify("XmlHttpRequest"), "XmlHttpRequest3");
+        assert_eq!(scope.uniquify("XMLHttpRequest"), "XMLHttpRequest");
+        assert_eq!(scope.uniquify("xml_http_request"), "xml_http_request2");
+        assert_eq!(scope.uniquify("XmlHttpRequest"), "XmlHttpRequest3");
     }
 
     #[test]
     fn test_deduplication_preserves_original_casing() {
-        let mut space = UniqueNameSpace::new();
+        let unique = UniqueNames::new();
+        let mut scope = unique.scope();
 
-        assert_eq!(space.uniquify("HTTP_Response"), "HTTP_Response");
-        assert_eq!(space.uniquify("httpResponse"), "httpResponse2");
+        assert_eq!(scope.uniquify("HTTP_Response"), "HTTP_Response");
+        assert_eq!(scope.uniquify("httpResponse"), "httpResponse2");
     }
 
     #[test]
     fn test_deduplication_same_prefix() {
-        let mut dedup = UniqueNameSpace::new();
+        let unique = UniqueNames::new();
+        let mut scope = unique.scope();
 
-        assert_eq!(dedup.uniquify("HttpRequest"), "HttpRequest");
-        assert_eq!(dedup.uniquify("HttpResponse"), "HttpResponse");
-        assert_eq!(dedup.uniquify("HttpError"), "HttpError");
+        assert_eq!(scope.uniquify("HttpRequest"), "HttpRequest");
+        assert_eq!(scope.uniquify("HttpResponse"), "HttpResponse");
+        assert_eq!(scope.uniquify("HttpError"), "HttpError");
     }
 
     #[test]
     fn test_deduplication_with_numbers() {
-        let mut space = UniqueNameSpace::new();
+        let unique = UniqueNames::new();
+        let mut scope = unique.scope();
 
-        assert_eq!(space.uniquify("Response2"), "Response2");
-        assert_eq!(space.uniquify("response_2"), "response_2");
+        assert_eq!(scope.uniquify("Response2"), "Response2");
+        assert_eq!(scope.uniquify("response_2"), "response_2");
+
+        // Digit-to-uppercase collisions.
+        assert_eq!(scope.uniquify("1099KStatus"), "1099KStatus");
+        assert_eq!(scope.uniquify("1099K_Status"), "1099K_Status2");
+        assert_eq!(scope.uniquify("1099KStatus"), "1099KStatus3");
+        assert_eq!(scope.uniquify("1099_K_Status"), "1099_K_Status4");
+
+        // Digit-to-lowercase collisions.
+        assert_eq!(scope.uniquify("123abc"), "123abc");
+        assert_eq!(scope.uniquify("123_abc"), "123_abc2");
+    }
+
+    #[test]
+    fn test_with_reserved_underscore() {
+        let unique = UniqueNames::new();
+        let mut scope = unique.scope_with_reserved(["_"]);
+
+        // `_` is reserved, so the first use gets a suffix.
+        assert_eq!(scope.uniquify("_"), "_2");
+        assert_eq!(scope.uniquify("_"), "_3");
+    }
+
+    #[test]
+    fn test_with_reserved_multiple() {
+        let unique = UniqueNames::new();
+        let mut scope = unique.scope_with_reserved(["_", "reserved"]);
+
+        assert_eq!(scope.uniquify("_"), "_2");
+        assert_eq!(scope.uniquify("reserved"), "reserved2");
+        assert_eq!(scope.uniquify("other"), "other");
+    }
+
+    #[test]
+    fn test_with_reserved_empty() {
+        let unique = UniqueNames::new();
+        let mut scope = unique.scope_with_reserved([""]);
+
+        assert_eq!(scope.uniquify(""), "2");
+        assert_eq!(scope.uniquify(""), "3");
     }
 }
