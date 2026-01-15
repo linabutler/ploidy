@@ -1,4 +1,5 @@
 use heck::ToSnakeCase;
+use itertools::Itertools;
 use ploidy_core::{
     codegen::IntoCode,
     ir::{InlineIrTypePathRoot, InlineIrTypeView, IrOperationView},
@@ -47,23 +48,27 @@ impl ToTokens for CodegenResource<'_> {
                 // `CodegenSchemaType`.
                 matches!(ty.path().root, InlineIrTypePathRoot::Resource(r) if r == self.resource)
             })
-            .map(|view| {
-                let name = CodegenTypeName::Inline(&view);
-                match &view {
-                    InlineIrTypeView::Enum(_, view) => {
-                        CodegenEnum::new(name, view).into_token_stream()
-                    }
-                    InlineIrTypeView::Struct(_, view) => {
-                        CodegenStruct::new(name, view).into_token_stream()
-                    }
-                    InlineIrTypeView::Tagged(_, view) => {
-                        CodegenTagged::new(name, view).into_token_stream()
-                    }
-                    InlineIrTypeView::Untagged(_, view) => {
-                        CodegenUntagged::new(name, view).into_token_stream()
-                    }
+            .collect_vec();
+        inlines.sort_by(|a, b| {
+            CodegenTypeName::Inline(a)
+                .into_sort_key()
+                .cmp(&CodegenTypeName::Inline(b).into_sort_key())
+        });
+        let mut inlines = inlines.into_iter().map(|view| {
+            let name = CodegenTypeName::Inline(&view);
+            match &view {
+                InlineIrTypeView::Enum(_, view) => CodegenEnum::new(name, view).into_token_stream(),
+                InlineIrTypeView::Struct(_, view) => {
+                    CodegenStruct::new(name, view).into_token_stream()
                 }
-            });
+                InlineIrTypeView::Tagged(_, view) => {
+                    CodegenTagged::new(name, view).into_token_stream()
+                }
+                InlineIrTypeView::Untagged(_, view) => {
+                    CodegenUntagged::new(name, view).into_token_stream()
+                }
+            }
+        });
         let fields_module = inlines.next().map(|head| {
             quote! {
                 pub mod types {

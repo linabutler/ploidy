@@ -1,4 +1,4 @@
-use std::{borrow::Cow, fmt::Display, ops::Deref};
+use std::{borrow::Cow, cmp::Ordering, fmt::Display, ops::Deref};
 
 use heck::{AsPascalCase, AsSnekCase};
 use itertools::Itertools;
@@ -19,10 +19,17 @@ use ref_cast::{RefCastCustom, ref_cast_custom};
 // Keywords that can't be used as identifiers, even with `r#`.
 const KEYWORDS: &[&str] = &["crate", "self", "super", "Self"];
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Copy, Debug)]
 pub enum CodegenTypeName<'a> {
     Schema(&'a SchemaIrTypeView<'a>),
     Inline(&'a InlineIrTypeView<'a>),
+}
+
+impl<'a> CodegenTypeName<'a> {
+    #[inline]
+    pub fn into_sort_key(self) -> CodegenTypeNameSortKey<'a> {
+        CodegenTypeNameSortKey(self)
+    }
 }
 
 impl ToTokens for CodegenTypeName<'_> {
@@ -47,9 +54,45 @@ impl ToTokens for CodegenTypeName<'_> {
     }
 }
 
+/// A comparator that sorts type names lexicographically.
+#[derive(Debug)]
+pub struct CodegenTypeNameSortKey<'a>(CodegenTypeName<'a>);
+
+impl<'a> CodegenTypeNameSortKey<'a> {
+    #[inline]
+    pub fn into_name(self) -> CodegenTypeName<'a> {
+        self.0
+    }
+}
+
+impl Eq for CodegenTypeNameSortKey<'_> {}
+
+impl Ord for CodegenTypeNameSortKey<'_> {
+    fn cmp(&self, other: &Self) -> Ordering {
+        match (&self.0, &other.0) {
+            (CodegenTypeName::Schema(a), CodegenTypeName::Schema(b)) => a.name().cmp(b.name()),
+            (CodegenTypeName::Inline(a), CodegenTypeName::Inline(b)) => a.path().cmp(b.path()),
+            (CodegenTypeName::Schema(_), CodegenTypeName::Inline(_)) => Ordering::Less,
+            (CodegenTypeName::Inline(_), CodegenTypeName::Schema(_)) => Ordering::Greater,
+        }
+    }
+}
+
+impl PartialEq for CodegenTypeNameSortKey<'_> {
+    fn eq(&self, other: &Self) -> bool {
+        self.cmp(other).is_eq()
+    }
+}
+
+impl PartialOrd for CodegenTypeNameSortKey<'_> {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
 /// A string that's statically guaranteed to be valid for any
 /// [`CodegenIdentUsage`].
-#[derive(Debug, Eq, Ord, PartialEq, PartialOrd)]
+#[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
 pub struct CodegenIdent(String);
 
 impl CodegenIdent {

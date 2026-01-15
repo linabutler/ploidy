@@ -1,5 +1,6 @@
 use std::collections::BTreeSet;
 
+use itertools::Itertools;
 use ploidy_core::{codegen::IntoCode, ir::View};
 use proc_macro2::TokenStream;
 use quote::{ToTokens, TokenStreamExt, quote};
@@ -22,29 +23,32 @@ impl<'a> CodegenTypesModule<'a> {
 
 impl ToTokens for CodegenTypesModule<'_> {
     fn to_tokens(&self, tokens: &mut TokenStream) {
-        let mut mods = Vec::new();
-        let mut uses = Vec::new();
+        let mut tys = self
+            .graph
+            .schemas()
+            .filter_map(|view| {
+                let resources: BTreeSet<_> = view.used_by().map(|op| op.resource()).collect();
+                let cfg_attr = cfg_attr(&resources)?;
+                Some((view.extensions().get::<CodegenIdent>()?.clone(), cfg_attr))
+            })
+            .collect_vec();
+        tys.sort_by(|(a, _), (b, _)| a.cmp(b));
 
-        for view in self.graph.schemas() {
-            let resources: BTreeSet<_> = view.used_by().map(|op| op.resource()).collect();
-            let Some(cfg_attr) = cfg_attr(&resources) else {
-                continue;
-            };
-
-            let ext = view.extensions();
-            let ident = ext.get::<CodegenIdent>().unwrap();
-            let mod_name = CodegenIdentUsage::Module(&ident);
-            mods.push(quote! {
+        let mods = tys.iter().map(|(ident, cfg_attr)| {
+            let mod_name = CodegenIdentUsage::Module(ident);
+            quote! {
                 #cfg_attr
                 pub mod #mod_name;
-            });
-
-            let ty_name = CodegenIdentUsage::Type(&ident);
-            uses.push(quote! {
+            }
+        });
+        let uses = tys.iter().map(|(ident, cfg_attr)| {
+            let mod_name = CodegenIdentUsage::Module(ident);
+            let ty_name = CodegenIdentUsage::Type(ident);
+            quote! {
                 #cfg_attr
                 pub use #mod_name::#ty_name;
-            });
-        }
+            }
+        });
 
         tokens.append_all(quote! {
             #(#mods)*

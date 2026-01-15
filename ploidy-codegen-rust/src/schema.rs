@@ -1,3 +1,4 @@
+use itertools::Itertools;
 use ploidy_core::{
     codegen::IntoCode,
     ir::{InlineIrTypeView, SchemaIrTypeView, View},
@@ -36,7 +37,13 @@ impl ToTokens for CodegenSchemaType<'_> {
                 CodegenUntagged::new(name, view).into_token_stream()
             }
         };
-        let mut inlines = self.ty.inlines().map(|view| {
+        let mut inlines = self.ty.inlines().collect_vec();
+        inlines.sort_by(|a, b| {
+            CodegenTypeName::Inline(a)
+                .into_sort_key()
+                .cmp(&CodegenTypeName::Inline(b).into_sort_key())
+        });
+        let mut inlines = inlines.into_iter().map(|view| {
             let name = CodegenTypeName::Inline(&view);
             match &view {
                 InlineIrTypeView::Enum(_, view) => CodegenEnum::new(name, view).into_token_stream(),
