@@ -97,3 +97,600 @@ impl ToTokens for CodegenRef<'_> {
         })
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    use ploidy_core::{
+        ir::{IrGraph, IrSpec, IrStructFieldName, IrTypeView, SchemaIrTypeView},
+        parse::Document,
+    };
+    use pretty_assertions::assert_eq;
+    use syn::parse_quote;
+
+    use crate::{CodegenGraph, tests::assert_matches};
+
+    // MARK: Primitives
+
+    #[test]
+    fn test_codegen_ref_string() {
+        let ty = IrTypeView::Primitive(PrimitiveIrType::String);
+        let ref_ = CodegenRef::new(&ty);
+        let actual: syn::Type = parse_quote!(#ref_);
+        let expected: syn::Type = parse_quote!(::std::string::String);
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn test_codegen_ref_i32() {
+        let ty = IrTypeView::Primitive(PrimitiveIrType::I32);
+        let ref_ = CodegenRef::new(&ty);
+        let actual: syn::Type = parse_quote!(#ref_);
+        let expected: syn::Type = parse_quote!(i32);
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn test_codegen_ref_i64() {
+        let ty = IrTypeView::Primitive(PrimitiveIrType::I64);
+        let ref_ = CodegenRef::new(&ty);
+        let actual: syn::Type = parse_quote!(#ref_);
+        let expected: syn::Type = parse_quote!(i64);
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn test_codegen_ref_f32() {
+        let ty = IrTypeView::Primitive(PrimitiveIrType::F32);
+        let ref_ = CodegenRef::new(&ty);
+        let actual: syn::Type = parse_quote!(#ref_);
+        let expected: syn::Type = parse_quote!(f32);
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn test_codegen_ref_f64() {
+        let ty = IrTypeView::Primitive(PrimitiveIrType::F64);
+        let ref_ = CodegenRef::new(&ty);
+        let actual: syn::Type = parse_quote!(#ref_);
+        let expected: syn::Type = parse_quote!(f64);
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn test_codegen_ref_bool() {
+        let ty = IrTypeView::Primitive(PrimitiveIrType::Bool);
+        let ref_ = CodegenRef::new(&ty);
+        let actual: syn::Type = parse_quote!(#ref_);
+        let expected: syn::Type = parse_quote!(bool);
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn test_codegen_ref_datetime() {
+        let ty = IrTypeView::Primitive(PrimitiveIrType::DateTime);
+        let ref_ = CodegenRef::new(&ty);
+        let actual: syn::Type = parse_quote!(#ref_);
+        let expected: syn::Type = parse_quote!(::ploidy_util::date_time::UnixMilliseconds);
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn test_codegen_ref_date() {
+        let ty = IrTypeView::Primitive(PrimitiveIrType::Date);
+        let ref_ = CodegenRef::new(&ty);
+        let actual: syn::Type = parse_quote!(#ref_);
+        let expected: syn::Type = parse_quote!(::chrono::NaiveDate);
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn test_codegen_ref_url() {
+        let ty = IrTypeView::Primitive(PrimitiveIrType::Url);
+        let ref_ = CodegenRef::new(&ty);
+        let actual: syn::Type = parse_quote!(#ref_);
+        let expected: syn::Type = parse_quote!(::url::Url);
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn test_codegen_ref_uuid() {
+        let ty = IrTypeView::Primitive(PrimitiveIrType::Uuid);
+        let ref_ = CodegenRef::new(&ty);
+        let actual: syn::Type = parse_quote!(#ref_);
+        let expected: syn::Type = parse_quote!(::uuid::Uuid);
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn test_codegen_ref_bytes() {
+        let ty = IrTypeView::Primitive(PrimitiveIrType::Bytes);
+        let ref_ = CodegenRef::new(&ty);
+        let actual: syn::Type = parse_quote!(#ref_);
+        let expected: syn::Type = parse_quote!(::bytes::Bytes);
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn test_codegen_ref_any() {
+        let ty = IrTypeView::Any;
+        let ref_ = CodegenRef::new(&ty);
+        let actual: syn::Type = parse_quote!(#ref_);
+        let expected: syn::Type = parse_quote!(::serde_json::Value);
+        assert_eq!(actual, expected);
+    }
+
+    // MARK: Wrappers
+
+    #[test]
+    fn test_codegen_ref_array_of_strings() {
+        let doc = Document::from_yaml(indoc::indoc! {"
+            openapi: 3.0.0
+            info:
+              title: Test API
+              version: 1.0.0
+            paths: {}
+            components:
+              schemas:
+                Container:
+                  type: object
+                  properties:
+                    items:
+                      type: array
+                      items:
+                        type: string
+        "})
+        .unwrap();
+
+        let spec = IrSpec::from_doc(&doc).unwrap();
+        let ir = IrGraph::new(&spec);
+        let graph = CodegenGraph::new(ir);
+
+        let schema = graph.schemas().find(|s| s.name() == "Container");
+        let Some(SchemaIrTypeView::Struct(_, struct_view)) = &schema else {
+            panic!("expected struct `Container`; got `{schema:?}`");
+        };
+        let field = struct_view
+            .fields()
+            .find(|f| matches!(f.name(), IrStructFieldName::Name("items")))
+            .unwrap();
+        let ty = field.ty();
+        assert_matches!(ty, IrTypeView::Array(_));
+
+        let ref_ = CodegenRef::new(&ty);
+        let actual: syn::Type = parse_quote!(#ref_);
+        let expected: syn::Type = parse_quote!(::std::vec::Vec<::std::string::String>);
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn test_codegen_ref_array_of_i32() {
+        let doc = Document::from_yaml(indoc::indoc! {"
+            openapi: 3.0.0
+            info:
+              title: Test API
+              version: 1.0.0
+            paths: {}
+            components:
+              schemas:
+                Container:
+                  type: object
+                  properties:
+                    numbers:
+                      type: array
+                      items:
+                        type: integer
+                        format: int32
+        "})
+        .unwrap();
+
+        let spec = IrSpec::from_doc(&doc).unwrap();
+        let ir = IrGraph::new(&spec);
+        let graph = CodegenGraph::new(ir);
+
+        let schema = graph.schemas().find(|s| s.name() == "Container");
+        let Some(SchemaIrTypeView::Struct(_, struct_view)) = &schema else {
+            panic!("expected struct `Container`; got `{schema:?}`");
+        };
+        let field = struct_view
+            .fields()
+            .find(|f| matches!(f.name(), IrStructFieldName::Name("numbers")))
+            .unwrap();
+        let ty = field.ty();
+        assert_matches!(ty, IrTypeView::Array(_));
+
+        let ref_ = CodegenRef::new(&ty);
+        let actual: syn::Type = parse_quote!(#ref_);
+        let expected: syn::Type = parse_quote!(::std::vec::Vec<i32>);
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn test_codegen_ref_map_of_strings() {
+        let doc = Document::from_yaml(indoc::indoc! {"
+            openapi: 3.0.0
+            info:
+              title: Test API
+              version: 1.0.0
+            paths: {}
+            components:
+              schemas:
+                Container:
+                  type: object
+                  properties:
+                    metadata:
+                      type: object
+                      additionalProperties:
+                        type: string
+        "})
+        .unwrap();
+
+        let spec = IrSpec::from_doc(&doc).unwrap();
+        let ir = IrGraph::new(&spec);
+        let graph = CodegenGraph::new(ir);
+
+        let schema = graph.schemas().find(|s| s.name() == "Container");
+        let Some(SchemaIrTypeView::Struct(_, struct_view)) = &schema else {
+            panic!("expected struct `Container`; got `{schema:?}`");
+        };
+        let field = struct_view
+            .fields()
+            .find(|f| matches!(f.name(), IrStructFieldName::Name("metadata")))
+            .unwrap();
+        let ty = field.ty();
+        assert_matches!(ty, IrTypeView::Map(_));
+
+        let ref_ = CodegenRef::new(&ty);
+        let actual: syn::Type = parse_quote!(#ref_);
+        let expected: syn::Type = parse_quote! {
+            ::std::collections::BTreeMap<::std::string::String, ::std::string::String>
+        };
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn test_codegen_ref_map_of_i64() {
+        let doc = Document::from_yaml(indoc::indoc! {"
+            openapi: 3.0.0
+            info:
+              title: Test API
+              version: 1.0.0
+            paths: {}
+            components:
+              schemas:
+                Container:
+                  type: object
+                  properties:
+                    counters:
+                      type: object
+                      additionalProperties:
+                        type: integer
+                        format: int64
+        "})
+        .unwrap();
+
+        let spec = IrSpec::from_doc(&doc).unwrap();
+        let ir = IrGraph::new(&spec);
+        let graph = CodegenGraph::new(ir);
+
+        let schema = graph.schemas().find(|s| s.name() == "Container");
+        let Some(SchemaIrTypeView::Struct(_, struct_view)) = &schema else {
+            panic!("expected struct `Container`; got `{schema:?}`");
+        };
+        let field = struct_view
+            .fields()
+            .find(|f| matches!(f.name(), IrStructFieldName::Name("counters")))
+            .unwrap();
+        let ty = field.ty();
+        assert_matches!(ty, IrTypeView::Map(_));
+
+        let ref_ = CodegenRef::new(&ty);
+        let actual: syn::Type = parse_quote!(#ref_);
+        let expected: syn::Type = parse_quote! {
+            ::std::collections::BTreeMap<::std::string::String, i64>
+        };
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn test_codegen_ref_nullable_string() {
+        let doc = Document::from_yaml(indoc::indoc! {"
+            openapi: 3.0.0
+            info:
+              title: Test API
+              version: 1.0.0
+            paths: {}
+            components:
+              schemas:
+                Container:
+                  type: object
+                  properties:
+                    value:
+                      type: string
+                      nullable: true
+        "})
+        .unwrap();
+
+        let spec = IrSpec::from_doc(&doc).unwrap();
+        let ir = IrGraph::new(&spec);
+        let graph = CodegenGraph::new(ir);
+
+        let schema = graph.schemas().find(|s| s.name() == "Container");
+        let Some(SchemaIrTypeView::Struct(_, struct_view)) = &schema else {
+            panic!("expected struct `Container`; got `{schema:?}`");
+        };
+        let field = struct_view
+            .fields()
+            .find(|f| matches!(f.name(), IrStructFieldName::Name("value")))
+            .unwrap();
+        let ty = field.ty();
+        assert_matches!(ty, IrTypeView::Nullable(_));
+
+        let ref_ = CodegenRef::new(&ty);
+        let actual: syn::Type = parse_quote!(#ref_);
+        let expected: syn::Type = parse_quote!(::std::option::Option<::std::string::String>);
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn test_codegen_ref_nullable_i32() {
+        let doc = Document::from_yaml(indoc::indoc! {"
+            openapi: 3.0.0
+            info:
+              title: Test API
+              version: 1.0.0
+            paths: {}
+            components:
+              schemas:
+                Container:
+                  type: object
+                  properties:
+                    count:
+                      type: integer
+                      format: int32
+                      nullable: true
+        "})
+        .unwrap();
+
+        let spec = IrSpec::from_doc(&doc).unwrap();
+        let ir = IrGraph::new(&spec);
+        let graph = CodegenGraph::new(ir);
+
+        let schema = graph.schemas().find(|s| s.name() == "Container");
+        let Some(SchemaIrTypeView::Struct(_, struct_view)) = &schema else {
+            panic!("expected struct `Container`; got `{schema:?}`");
+        };
+        let field = struct_view
+            .fields()
+            .find(|f| matches!(f.name(), IrStructFieldName::Name("count")))
+            .unwrap();
+        let ty = field.ty();
+        assert_matches!(ty, IrTypeView::Nullable(_));
+
+        let ref_ = CodegenRef::new(&ty);
+        let actual: syn::Type = parse_quote!(#ref_);
+        let expected: syn::Type = parse_quote!(::std::option::Option<i32>);
+        assert_eq!(actual, expected);
+    }
+
+    // MARK: Nested wrappers
+
+    #[test]
+    fn test_codegen_ref_array_of_arrays() {
+        let doc = Document::from_yaml(indoc::indoc! {"
+            openapi: 3.0.0
+            info:
+              title: Test API
+              version: 1.0.0
+            paths: {}
+            components:
+              schemas:
+                Container:
+                  type: object
+                  properties:
+                    matrix:
+                      type: array
+                      items:
+                        type: array
+                        items:
+                          type: integer
+                          format: int32
+        "})
+        .unwrap();
+
+        let spec = IrSpec::from_doc(&doc).unwrap();
+        let ir = IrGraph::new(&spec);
+        let graph = CodegenGraph::new(ir);
+
+        let schema = graph.schemas().find(|s| s.name() == "Container");
+        let Some(SchemaIrTypeView::Struct(_, struct_view)) = &schema else {
+            panic!("expected struct `Container`; got `{schema:?}`");
+        };
+        let field = struct_view
+            .fields()
+            .find(|f| matches!(f.name(), IrStructFieldName::Name("matrix")))
+            .unwrap();
+        let ty = field.ty();
+        assert_matches!(ty, IrTypeView::Array(_));
+
+        let ref_ = CodegenRef::new(&ty);
+        let actual: syn::Type = parse_quote!(#ref_);
+        let expected: syn::Type = parse_quote! {
+            ::std::vec::Vec<::std::vec::Vec<i32>>
+        };
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn test_codegen_ref_nullable_array() {
+        let doc = Document::from_yaml(indoc::indoc! {"
+            openapi: 3.0.0
+            info:
+              title: Test API
+              version: 1.0.0
+            paths: {}
+            components:
+              schemas:
+                Container:
+                  type: object
+                  properties:
+                    items:
+                      type: array
+                      items:
+                        type: string
+                      nullable: true
+        "})
+        .unwrap();
+
+        let spec = IrSpec::from_doc(&doc).unwrap();
+        let ir = IrGraph::new(&spec);
+        let graph = CodegenGraph::new(ir);
+
+        let schema = graph.schemas().find(|s| s.name() == "Container");
+        let Some(SchemaIrTypeView::Struct(_, struct_view)) = &schema else {
+            panic!("expected struct `Container`; got `{schema:?}`");
+        };
+        let field = struct_view
+            .fields()
+            .find(|f| matches!(f.name(), IrStructFieldName::Name("items")))
+            .unwrap();
+        let ty = field.ty();
+        assert_matches!(ty, IrTypeView::Nullable(_));
+
+        let ref_ = CodegenRef::new(&ty);
+        let actual: syn::Type = parse_quote!(#ref_);
+        let expected: syn::Type = parse_quote! {
+            ::std::option::Option<::std::vec::Vec<::std::string::String>>
+        };
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn test_codegen_ref_map_of_arrays() {
+        let doc = Document::from_yaml(indoc::indoc! {"
+            openapi: 3.0.0
+            info:
+              title: Test API
+              version: 1.0.0
+            paths: {}
+            components:
+              schemas:
+                Container:
+                  type: object
+                  properties:
+                    data:
+                      type: object
+                      additionalProperties:
+                        type: array
+                        items:
+                          type: boolean
+        "})
+        .unwrap();
+
+        let spec = IrSpec::from_doc(&doc).unwrap();
+        let ir = IrGraph::new(&spec);
+        let graph = CodegenGraph::new(ir);
+
+        let schema = graph.schemas().find(|s| s.name() == "Container");
+        let Some(SchemaIrTypeView::Struct(_, struct_view)) = &schema else {
+            panic!("expected struct `Container`; got `{schema:?}`");
+        };
+        let field = struct_view
+            .fields()
+            .find(|f| matches!(f.name(), IrStructFieldName::Name("data")))
+            .unwrap();
+        let ty = field.ty();
+        assert_matches!(ty, IrTypeView::Map(_));
+
+        let ref_ = CodegenRef::new(&ty);
+        let actual: syn::Type = parse_quote!(#ref_);
+        let expected: syn::Type = parse_quote! {
+            ::std::collections::BTreeMap<::std::string::String, ::std::vec::Vec<bool>>
+        };
+        assert_eq!(actual, expected);
+    }
+
+    // MARK: Schema references
+
+    #[test]
+    fn test_codegen_ref_schema_reference() {
+        let doc = Document::from_yaml(indoc::indoc! {"
+            openapi: 3.0.0
+            info:
+              title: Test API
+              version: 1.0.0
+            paths: {}
+            components:
+              schemas:
+                Pet:
+                  type: object
+                  properties:
+                    name:
+                      type: string
+        "})
+        .unwrap();
+
+        let spec = IrSpec::from_doc(&doc).unwrap();
+        let ir = IrGraph::new(&spec);
+        let graph = CodegenGraph::new(ir);
+
+        let schema = graph
+            .schemas()
+            .find(|s| s.name() == "Pet")
+            .expect("expected schema `Pet`");
+        let ty = IrTypeView::Schema(schema);
+        let ref_ = CodegenRef::new(&ty);
+        let actual: syn::Type = parse_quote!(#ref_);
+        let expected: syn::Type = parse_quote!(crate::types::Pet);
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn test_codegen_ref_array_of_schema_references() {
+        let doc = Document::from_yaml(indoc::indoc! {"
+            openapi: 3.0.0
+            info:
+              title: Test API
+              version: 1.0.0
+            paths: {}
+            components:
+              schemas:
+                User:
+                  type: object
+                  properties:
+                    id:
+                      type: string
+                Container:
+                  type: object
+                  properties:
+                    users:
+                      type: array
+                      items:
+                        $ref: '#/components/schemas/User'
+        "})
+        .unwrap();
+
+        let spec = IrSpec::from_doc(&doc).unwrap();
+        let ir = IrGraph::new(&spec);
+        let graph = CodegenGraph::new(ir);
+
+        let schema = graph.schemas().find(|s| s.name() == "Container");
+        let Some(SchemaIrTypeView::Struct(_, struct_view)) = &schema else {
+            panic!("expected struct `Container`; got `{schema:?}`");
+        };
+        let field = struct_view
+            .fields()
+            .find(|f| matches!(f.name(), ploidy_core::ir::IrStructFieldName::Name("users")))
+            .unwrap();
+        let ty = field.ty();
+        assert_matches!(ty, IrTypeView::Array(_));
+
+        let ref_ = CodegenRef::new(&ty);
+        let actual: syn::Type = parse_quote!(#ref_);
+        let expected: syn::Type = parse_quote! {
+            ::std::vec::Vec<crate::types::User>
+        };
+        assert_eq!(actual, expected);
+    }
+}

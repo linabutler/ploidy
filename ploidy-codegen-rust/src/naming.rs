@@ -89,18 +89,13 @@ pub enum CodegenIdentUsage<'a> {
     Field(&'a CodegenIdentRef),
     Variant(&'a CodegenIdentRef),
     Param(&'a CodegenIdentRef),
-    Var(&'a CodegenIdentRef),
     Method(&'a CodegenIdentRef),
 }
 
 impl Display for CodegenIdentUsage<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::Module(name)
-            | Self::Field(name)
-            | Self::Param(name)
-            | Self::Method(name)
-            | Self::Var(name) => {
+            Self::Module(name) | Self::Field(name) | Self::Param(name) | Self::Method(name) => {
                 if name.0.starts_with(unicode_ident::is_xid_start) {
                     write!(f, "{}", AsSnekCase(&name.0))
                 } else {
@@ -237,4 +232,312 @@ fn clean(s: &str) -> String {
     WordSegments::new(s)
         .flat_map(|s| s.split(|c| !unicode_ident::is_xid_continue(c)))
         .join("_")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    use pretty_assertions::assert_eq;
+    use syn::parse_quote;
+
+    // MARK: Usages
+
+    #[test]
+    fn test_codegen_ident_type() {
+        let ident = CodegenIdent::new("pet_store");
+        let usage = CodegenIdentUsage::Type(&ident);
+        let actual: syn::Ident = parse_quote!(#usage);
+        let expected: syn::Ident = parse_quote!(PetStore);
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn test_codegen_ident_field() {
+        let ident = CodegenIdent::new("petStore");
+        let usage = CodegenIdentUsage::Field(&ident);
+        let actual: syn::Ident = parse_quote!(#usage);
+        let expected: syn::Ident = parse_quote!(pet_store);
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn test_codegen_ident_module() {
+        let ident = CodegenIdent::new("MyModule");
+        let usage = CodegenIdentUsage::Module(&ident);
+        let actual: syn::Ident = parse_quote!(#usage);
+        let expected: syn::Ident = parse_quote!(my_module);
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn test_codegen_ident_variant() {
+        let ident = CodegenIdent::new("http_error");
+        let usage = CodegenIdentUsage::Variant(&ident);
+        let actual: syn::Ident = parse_quote!(#usage);
+        let expected: syn::Ident = parse_quote!(HttpError);
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn test_codegen_ident_param() {
+        let ident = CodegenIdent::new("userId");
+        let usage = CodegenIdentUsage::Param(&ident);
+        let actual: syn::Ident = parse_quote!(#usage);
+        let expected: syn::Ident = parse_quote!(user_id);
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn test_codegen_ident_method() {
+        let ident = CodegenIdent::new("getUserById");
+        let usage = CodegenIdentUsage::Method(&ident);
+        let actual: syn::Ident = parse_quote!(#usage);
+        let expected: syn::Ident = parse_quote!(get_user_by_id);
+        assert_eq!(actual, expected);
+    }
+
+    // MARK: Special characters
+
+    #[test]
+    fn test_codegen_ident_handles_rust_keywords() {
+        let ident = CodegenIdent::new("type");
+        let usage = CodegenIdentUsage::Field(&ident);
+        let actual: syn::Ident = parse_quote!(#usage);
+        let expected: syn::Ident = parse_quote!(r#type);
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn test_codegen_ident_handles_invalid_start_chars() {
+        let ident = CodegenIdent::new("123foo");
+        let usage = CodegenIdentUsage::Field(&ident);
+        let actual: syn::Ident = parse_quote!(#usage);
+        let expected: syn::Ident = parse_quote!(_123_foo);
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn test_codegen_ident_handles_special_chars() {
+        let ident = CodegenIdent::new("foo-bar-baz");
+        let usage = CodegenIdentUsage::Field(&ident);
+        let actual: syn::Ident = parse_quote!(#usage);
+        let expected: syn::Ident = parse_quote!(foo_bar_baz);
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn test_codegen_ident_handles_number_prefix() {
+        let ident = CodegenIdent::new("1099KStatus");
+
+        let usage = CodegenIdentUsage::Field(&ident);
+        let actual: syn::Ident = parse_quote!(#usage);
+        let expected: syn::Ident = parse_quote!(_1099_k_status);
+        assert_eq!(actual, expected);
+
+        let usage = CodegenIdentUsage::Type(&ident);
+        let actual: syn::Ident = parse_quote!(#usage);
+        let expected: syn::Ident = parse_quote!(_1099KStatus);
+        assert_eq!(actual, expected);
+    }
+
+    // MARK: Untagged variant names
+
+    #[test]
+    fn test_untagged_variant_name_string() {
+        let variant_name = CodegenUntaggedVariantName(IrUntaggedVariantNameHint::Primitive(
+            PrimitiveIrType::String,
+        ));
+        let actual: syn::Ident = parse_quote!(#variant_name);
+        let expected: syn::Ident = parse_quote!(String);
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn test_untagged_variant_name_i32() {
+        let variant_name =
+            CodegenUntaggedVariantName(IrUntaggedVariantNameHint::Primitive(PrimitiveIrType::I32));
+        let actual: syn::Ident = parse_quote!(#variant_name);
+        let expected: syn::Ident = parse_quote!(I32);
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn test_untagged_variant_name_i64() {
+        let variant_name =
+            CodegenUntaggedVariantName(IrUntaggedVariantNameHint::Primitive(PrimitiveIrType::I64));
+        let actual: syn::Ident = parse_quote!(#variant_name);
+        let expected: syn::Ident = parse_quote!(I64);
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn test_untagged_variant_name_f32() {
+        let variant_name =
+            CodegenUntaggedVariantName(IrUntaggedVariantNameHint::Primitive(PrimitiveIrType::F32));
+        let actual: syn::Ident = parse_quote!(#variant_name);
+        let expected: syn::Ident = parse_quote!(F32);
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn test_untagged_variant_name_f64() {
+        let variant_name =
+            CodegenUntaggedVariantName(IrUntaggedVariantNameHint::Primitive(PrimitiveIrType::F64));
+        let actual: syn::Ident = parse_quote!(#variant_name);
+        let expected: syn::Ident = parse_quote!(F64);
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn test_untagged_variant_name_bool() {
+        let variant_name =
+            CodegenUntaggedVariantName(IrUntaggedVariantNameHint::Primitive(PrimitiveIrType::Bool));
+        let actual: syn::Ident = parse_quote!(#variant_name);
+        let expected: syn::Ident = parse_quote!(Bool);
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn test_untagged_variant_name_datetime() {
+        let variant_name = CodegenUntaggedVariantName(IrUntaggedVariantNameHint::Primitive(
+            PrimitiveIrType::DateTime,
+        ));
+        let actual: syn::Ident = parse_quote!(#variant_name);
+        let expected: syn::Ident = parse_quote!(DateTime);
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn test_untagged_variant_name_date() {
+        let variant_name =
+            CodegenUntaggedVariantName(IrUntaggedVariantNameHint::Primitive(PrimitiveIrType::Date));
+        let actual: syn::Ident = parse_quote!(#variant_name);
+        let expected: syn::Ident = parse_quote!(Date);
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn test_untagged_variant_name_url() {
+        let variant_name =
+            CodegenUntaggedVariantName(IrUntaggedVariantNameHint::Primitive(PrimitiveIrType::Url));
+        let actual: syn::Ident = parse_quote!(#variant_name);
+        let expected: syn::Ident = parse_quote!(Url);
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn test_untagged_variant_name_uuid() {
+        let variant_name =
+            CodegenUntaggedVariantName(IrUntaggedVariantNameHint::Primitive(PrimitiveIrType::Uuid));
+        let actual: syn::Ident = parse_quote!(#variant_name);
+        let expected: syn::Ident = parse_quote!(Uuid);
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn test_untagged_variant_name_bytes() {
+        let variant_name = CodegenUntaggedVariantName(IrUntaggedVariantNameHint::Primitive(
+            PrimitiveIrType::Bytes,
+        ));
+        let actual: syn::Ident = parse_quote!(#variant_name);
+        let expected: syn::Ident = parse_quote!(Bytes);
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn test_untagged_variant_name_index() {
+        let variant_name = CodegenUntaggedVariantName(IrUntaggedVariantNameHint::Index(0));
+        let actual: syn::Ident = parse_quote!(#variant_name);
+        let expected: syn::Ident = parse_quote!(V0);
+        assert_eq!(actual, expected);
+
+        let variant_name = CodegenUntaggedVariantName(IrUntaggedVariantNameHint::Index(42));
+        let actual: syn::Ident = parse_quote!(#variant_name);
+        let expected: syn::Ident = parse_quote!(V42);
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn test_untagged_variant_name_array() {
+        let variant_name = CodegenUntaggedVariantName(IrUntaggedVariantNameHint::Array);
+        let actual: syn::Ident = parse_quote!(#variant_name);
+        let expected: syn::Ident = parse_quote!(Array);
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn test_untagged_variant_name_map() {
+        let variant_name = CodegenUntaggedVariantName(IrUntaggedVariantNameHint::Map);
+        let actual: syn::Ident = parse_quote!(#variant_name);
+        let expected: syn::Ident = parse_quote!(Map);
+        assert_eq!(actual, expected);
+    }
+
+    // MARK: Struct field names
+
+    #[test]
+    fn test_struct_field_name_index() {
+        let field_name = CodegenStructFieldName(IrStructFieldNameHint::Index(0));
+        let actual: syn::Ident = parse_quote!(#field_name);
+        let expected: syn::Ident = parse_quote!(variant_0);
+        assert_eq!(actual, expected);
+
+        let field_name = CodegenStructFieldName(IrStructFieldNameHint::Index(5));
+        let actual: syn::Ident = parse_quote!(#field_name);
+        let expected: syn::Ident = parse_quote!(variant_5);
+        assert_eq!(actual, expected);
+    }
+
+    // MARK: `clean()`
+
+    #[test]
+    fn test_clean() {
+        assert_eq!(clean("foo-bar"), "foo_bar");
+        assert_eq!(clean("foo.bar"), "foo_bar");
+        assert_eq!(clean("foo bar"), "foo_bar");
+        assert_eq!(clean("foo@bar"), "foo_bar");
+        assert_eq!(clean("foo#bar"), "foo_bar");
+        assert_eq!(clean("foo!bar"), "foo_bar");
+
+        assert_eq!(clean("foo_bar"), "foo_bar");
+        assert_eq!(clean("FooBar"), "Foo_Bar");
+        assert_eq!(clean("foo123"), "foo123");
+        assert_eq!(clean("_foo"), "foo");
+
+        assert_eq!(clean("_foo"), "foo");
+        assert_eq!(clean("__foo"), "foo");
+
+        // Digits are in `XID_Continue`, so they should be preserved.
+        assert_eq!(clean("123foo"), "123_foo");
+        assert_eq!(clean("9bar"), "9_bar");
+
+        // Non-ASCII characters that are valid in identifiers should be preserved;
+        // characters that aren't should be replaced.
+        assert_eq!(clean("café"), "café");
+        assert_eq!(clean("foo™bar"), "foo_bar");
+
+        // Invalid characters should be collapsed.
+        assert_eq!(clean("foo---bar"), "foo_bar");
+        assert_eq!(clean("foo...bar"), "foo_bar");
+    }
+
+    // MARK: Scopes
+
+    #[test]
+    fn test_codegen_ident_scope_handles_empty() {
+        let unique = UniqueNames::new();
+        let mut scope = CodegenIdentScope::new(&unique);
+        let ident = scope.uniquify("");
+
+        let usage = CodegenIdentUsage::Field(&ident);
+        let actual: syn::Ident = parse_quote!(#usage);
+        let expected: syn::Ident = parse_quote!(_2);
+        assert_eq!(actual, expected);
+
+        let usage = CodegenIdentUsage::Type(&ident);
+        let actual: syn::Ident = parse_quote!(#usage);
+        let expected: syn::Ident = parse_quote!(_2);
+        assert_eq!(actual, expected);
+    }
 }

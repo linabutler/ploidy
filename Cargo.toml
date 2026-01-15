@@ -19,10 +19,12 @@ rust-version = "1.89"
 
 [workspace.dependencies]
 either = "1"
+indoc = "2"
 ploidy-codegen-rust = { path = "ploidy-codegen-rust", version = "0.5.0" }
 ploidy-core = { path = "ploidy-core", version = "0.5.0" }
 ploidy-pointer = { path = "ploidy-pointer", version = "0.5.0" }
 ploidy-pointer-derive = { path = "ploidy-pointer-derive", version = "0.5.0" }
+pretty_assertions = "1"
 ref-cast = "1"
 
 [workspace.lints.rust]

@@ -208,3 +208,560 @@ impl ToTokens for SerdeFieldAttr<'_, '_> {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    use ploidy_core::{
+        ir::{IrGraph, IrSpec, SchemaIrTypeView},
+        parse::Document,
+    };
+    use pretty_assertions::assert_eq;
+    use syn::parse_quote;
+
+    use crate::CodegenGraph;
+
+    #[test]
+    fn test_struct() {
+        let doc = Document::from_yaml(indoc::indoc! {"
+            openapi: 3.0.0
+            info:
+              title: Test API
+              version: 1.0.0
+            paths: {}
+            components:
+              schemas:
+                Pet:
+                  type: object
+                  properties:
+                    name:
+                      type: string
+                    age:
+                      type: integer
+                      format: int32
+                  required:
+                    - name
+        "})
+        .unwrap();
+
+        let spec = IrSpec::from_doc(&doc).unwrap();
+        let ir = IrGraph::new(&spec);
+        let graph = CodegenGraph::new(ir);
+
+        let schema = graph.schemas().find(|s| s.name() == "Pet");
+        let Some(schema @ SchemaIrTypeView::Struct(_, struct_view)) = &schema else {
+            panic!("expected struct `Pet`; got `{schema:?}`");
+        };
+
+        let name = CodegenTypeName::Schema(schema);
+        let codegen = CodegenStruct::new(name, struct_view);
+
+        let actual: syn::ItemStruct = parse_quote!(#codegen);
+        let expected: syn::ItemStruct = parse_quote! {
+            #[derive(Debug, Clone, PartialEq, Eq, Hash, ::serde::Serialize, ::serde::Deserialize)]
+            pub struct Pet {
+                pub name: ::std::string::String,
+                #[serde(default, skip_serializing_if = "::ploidy_util::absent::AbsentOr::is_absent",)]
+                pub age: ::ploidy_util::absent::AbsentOr<i32>,
+            }
+        };
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn test_struct_excludes_discriminator_fields() {
+        let doc = Document::from_yaml(indoc::indoc! {"
+            openapi: 3.0.0
+            info:
+              title: Test API
+              version: 1.0.0
+            paths: {}
+            components:
+              schemas:
+                Animal:
+                  type: object
+                  properties:
+                    type:
+                      type: string
+                    name:
+                      type: string
+                  required:
+                    - type
+                    - name
+                  discriminator:
+                    propertyName: type
+        "})
+        .unwrap();
+
+        let spec = IrSpec::from_doc(&doc).unwrap();
+        let ir = IrGraph::new(&spec);
+        let graph = CodegenGraph::new(ir);
+
+        let schema = graph.schemas().find(|s| s.name() == "Animal");
+        let Some(schema @ SchemaIrTypeView::Struct(_, struct_view)) = &schema else {
+            panic!("expected struct `Animal`; got `{schema:?}`");
+        };
+
+        let name = CodegenTypeName::Schema(schema);
+        let codegen = CodegenStruct::new(name, struct_view);
+
+        let actual: syn::ItemStruct = parse_quote!(#codegen);
+        let expected: syn::ItemStruct = parse_quote! {
+            #[derive(Debug, Clone, PartialEq, Eq, Hash, ::serde::Serialize, ::serde::Deserialize)]
+            pub struct Animal {
+                pub name: ::std::string::String,
+            }
+        };
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn test_struct_required_nullable_field_uses_option() {
+        let doc = Document::from_yaml(indoc::indoc! {"
+            openapi: 3.0.0
+            info:
+              title: Test API
+              version: 1.0.0
+            paths: {}
+            components:
+              schemas:
+                Record:
+                  type: object
+                  properties:
+                    id:
+                      type: string
+                    deleted_at:
+                      type: string
+                      format: date-time
+                      nullable: true
+                  required:
+                    - id
+                    - deleted_at
+        "})
+        .unwrap();
+
+        let spec = IrSpec::from_doc(&doc).unwrap();
+        let ir = IrGraph::new(&spec);
+        let graph = CodegenGraph::new(ir);
+
+        let schema = graph.schemas().find(|s| s.name() == "Record");
+        let Some(schema @ SchemaIrTypeView::Struct(_, struct_view)) = &schema else {
+            panic!("expected struct `Record`; got `{schema:?}`");
+        };
+
+        let name = CodegenTypeName::Schema(schema);
+        let codegen = CodegenStruct::new(name, struct_view);
+
+        let actual: syn::ItemStruct = parse_quote!(#codegen);
+        // Required nullable field uses `Option<T>`, not `AbsentOr<T>`,
+        // and without `#[serde(...)]` attributes.
+        let expected: syn::ItemStruct = parse_quote! {
+            #[derive(Debug, Clone, PartialEq, Eq, Hash, ::serde::Serialize, ::serde::Deserialize)]
+            pub struct Record {
+                pub id: ::std::string::String,
+                pub deleted_at: ::std::option::Option<::ploidy_util::date_time::UnixMilliseconds>,
+            }
+        };
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn test_struct_optional_nullable_field_uses_absent_or() {
+        let doc = Document::from_yaml(indoc::indoc! {"
+            openapi: 3.0.0
+            info:
+              title: Test API
+              version: 1.0.0
+            paths: {}
+            components:
+              schemas:
+                Record:
+                  type: object
+                  properties:
+                    id:
+                      type: string
+                    deleted_at:
+                      type: string
+                      format: date-time
+                      nullable: true
+                  required:
+                    - id
+        "})
+        .unwrap();
+
+        let spec = IrSpec::from_doc(&doc).unwrap();
+        let ir = IrGraph::new(&spec);
+        let graph = CodegenGraph::new(ir);
+
+        let schema = graph.schemas().find(|s| s.name() == "Record");
+        let Some(schema @ SchemaIrTypeView::Struct(_, struct_view)) = &schema else {
+            panic!("expected struct `Record`; got `{schema:?}`");
+        };
+
+        let name = CodegenTypeName::Schema(schema);
+        let codegen = CodegenStruct::new(name, struct_view);
+
+        let actual: syn::ItemStruct = parse_quote!(#codegen);
+        // Optional nullable field uses `AbsentOr<T>` with `#[serde(...)]` attributes.
+        let expected: syn::ItemStruct = parse_quote! {
+            #[derive(Debug, Clone, PartialEq, Eq, Hash, ::serde::Serialize, ::serde::Deserialize)]
+            pub struct Record {
+                pub id: ::std::string::String,
+                #[serde(default, skip_serializing_if = "::ploidy_util::absent::AbsentOr::is_absent",)]
+                pub deleted_at: ::ploidy_util::absent::AbsentOr<::ploidy_util::date_time::UnixMilliseconds>,
+            }
+        };
+        assert_eq!(actual, expected);
+    }
+
+    // MARK: `Hash` and `Eq`
+
+    #[test]
+    fn test_struct_derives_hash_eq_when_hashable() {
+        let doc = Document::from_yaml(indoc::indoc! {"
+            openapi: 3.0.0
+            info:
+              title: Test API
+              version: 1.0.0
+            paths: {}
+            components:
+              schemas:
+                User:
+                  type: object
+                  properties:
+                    id:
+                      type: string
+                    active:
+                      type: boolean
+                  required:
+                    - id
+        "})
+        .unwrap();
+
+        let spec = IrSpec::from_doc(&doc).unwrap();
+        let ir = IrGraph::new(&spec);
+        let graph = CodegenGraph::new(ir);
+
+        let schema = graph.schemas().find(|s| s.name() == "User");
+        let Some(schema @ SchemaIrTypeView::Struct(_, struct_view)) = &schema else {
+            panic!("expected struct `User`; got `{schema:?}`");
+        };
+
+        let name = CodegenTypeName::Schema(schema);
+        let codegen = CodegenStruct::new(name, struct_view);
+
+        let actual: syn::ItemStruct = parse_quote!(#codegen);
+        let expected: syn::ItemStruct = parse_quote! {
+            #[derive(Debug, Clone, PartialEq, Eq, Hash, ::serde::Serialize, ::serde::Deserialize)]
+            pub struct User {
+                pub id: ::std::string::String,
+                #[serde(default, skip_serializing_if = "::ploidy_util::absent::AbsentOr::is_absent",)]
+                pub active: ::ploidy_util::absent::AbsentOr<bool>,
+            }
+        };
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn test_struct_omits_hash_eq_with_floats() {
+        let doc = Document::from_yaml(indoc::indoc! {"
+            openapi: 3.0.0
+            info:
+              title: Test API
+              version: 1.0.0
+            paths: {}
+            components:
+              schemas:
+                Measurement:
+                  type: object
+                  properties:
+                    value:
+                      type: number
+                      format: double
+                    unit:
+                      type: string
+                  required:
+                    - value
+                    - unit
+        "})
+        .unwrap();
+
+        let spec = IrSpec::from_doc(&doc).unwrap();
+        let ir = IrGraph::new(&spec);
+        let graph = CodegenGraph::new(ir);
+
+        let schema = graph.schemas().find(|s| s.name() == "Measurement");
+        let Some(schema @ SchemaIrTypeView::Struct(_, struct_view)) = &schema else {
+            panic!("expected struct `Measurement`; got `{schema:?}`");
+        };
+
+        let name = CodegenTypeName::Schema(schema);
+        let codegen = CodegenStruct::new(name, struct_view);
+
+        let actual: syn::ItemStruct = parse_quote!(#codegen);
+        let expected: syn::ItemStruct = parse_quote! {
+            #[derive(Debug, Clone, PartialEq, ::serde::Serialize, ::serde::Deserialize)]
+            pub struct Measurement {
+                pub value: f64,
+                pub unit: ::std::string::String,
+            }
+        };
+        assert_eq!(actual, expected);
+    }
+
+    // MARK: `Default`
+
+    #[test]
+    fn test_struct_derives_default_when_all_optional() {
+        let doc = Document::from_yaml(indoc::indoc! {"
+            openapi: 3.0.0
+            info:
+              title: Test API
+              version: 1.0.0
+            paths: {}
+            components:
+              schemas:
+                Options:
+                  type: object
+                  properties:
+                    verbose:
+                      type: boolean
+                    count:
+                      type: integer
+                      format: int32
+        "})
+        .unwrap();
+
+        let spec = IrSpec::from_doc(&doc).unwrap();
+        let ir = IrGraph::new(&spec);
+        let graph = CodegenGraph::new(ir);
+
+        let schema = graph.schemas().find(|s| s.name() == "Options");
+        let Some(schema @ SchemaIrTypeView::Struct(_, struct_view)) = &schema else {
+            panic!("expected struct `Options`; got `{schema:?}`");
+        };
+
+        let name = CodegenTypeName::Schema(schema);
+        let codegen = CodegenStruct::new(name, struct_view);
+
+        let actual: syn::ItemStruct = parse_quote!(#codegen);
+        let expected: syn::ItemStruct = parse_quote! {
+            #[derive(Debug, Clone, PartialEq, Eq, Hash, Default, ::serde::Serialize, ::serde::Deserialize)]
+            pub struct Options {
+                #[serde(default, skip_serializing_if = "::ploidy_util::absent::AbsentOr::is_absent",)]
+                pub verbose: ::ploidy_util::absent::AbsentOr<bool>,
+                #[serde(default, skip_serializing_if = "::ploidy_util::absent::AbsentOr::is_absent",)]
+                pub count: ::ploidy_util::absent::AbsentOr<i32>,
+            }
+        };
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn test_struct_derives_default_with_nested_optional_struct() {
+        let doc = Document::from_yaml(indoc::indoc! {"
+            openapi: 3.0.0
+            info:
+              title: Test API
+              version: 1.0.0
+            paths: {}
+            components:
+              schemas:
+                Inner:
+                  type: object
+                  properties:
+                    value:
+                      type: string
+                Outer:
+                  type: object
+                  properties:
+                    inner:
+                      $ref: '#/components/schemas/Inner'
+        "})
+        .unwrap();
+
+        let spec = IrSpec::from_doc(&doc).unwrap();
+        let ir = IrGraph::new(&spec);
+        let graph = CodegenGraph::new(ir);
+
+        let schema = graph.schemas().find(|s| s.name() == "Outer");
+        let Some(schema @ SchemaIrTypeView::Struct(_, struct_view)) = &schema else {
+            panic!("expected struct `Outer`; got `{schema:?}`");
+        };
+
+        let name = CodegenTypeName::Schema(schema);
+        let codegen = CodegenStruct::new(name, struct_view);
+
+        let actual: syn::ItemStruct = parse_quote!(#codegen);
+        // Both `Outer` and `Inner` have all optional fields,
+        // so `Default` should be derived for both.
+        let expected: syn::ItemStruct = parse_quote! {
+            #[derive(Debug, Clone, PartialEq, Eq, Hash, Default, ::serde::Serialize, ::serde::Deserialize)]
+            pub struct Outer {
+                #[serde(default, skip_serializing_if = "::ploidy_util::absent::AbsentOr::is_absent",)]
+                pub inner: ::ploidy_util::absent::AbsentOr<crate::types::Inner>,
+            }
+        };
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn test_struct_omits_default_with_nested_required_field() {
+        let doc = Document::from_yaml(indoc::indoc! {"
+            openapi: 3.0.0
+            info:
+              title: Test API
+              version: 1.0.0
+            paths: {}
+            components:
+              schemas:
+                Inner:
+                  type: object
+                  properties:
+                    id:
+                      type: string
+                  required:
+                    - id
+                Outer:
+                  type: object
+                  properties:
+                    inner:
+                      $ref: '#/components/schemas/Inner'
+        "})
+        .unwrap();
+
+        let spec = IrSpec::from_doc(&doc).unwrap();
+        let ir = IrGraph::new(&spec);
+        let graph = CodegenGraph::new(ir);
+
+        let schema = graph.schemas().find(|s| s.name() == "Outer");
+        let Some(schema @ SchemaIrTypeView::Struct(_, struct_view)) = &schema else {
+            panic!("expected struct `Outer`; got `{schema:?}`");
+        };
+
+        let name = CodegenTypeName::Schema(schema);
+        let codegen = CodegenStruct::new(name, struct_view);
+
+        let actual: syn::ItemStruct = parse_quote!(#codegen);
+        // `Inner` has a required field, so `Default` shouldn't be derived for `Outer`.
+        let expected: syn::ItemStruct = parse_quote! {
+            #[derive(Debug, Clone, PartialEq, Eq, Hash, ::serde::Serialize, ::serde::Deserialize)]
+            pub struct Outer {
+                #[serde(default, skip_serializing_if = "::ploidy_util::absent::AbsentOr::is_absent",)]
+                pub inner: ::ploidy_util::absent::AbsentOr<crate::types::Inner>,
+            }
+        };
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn test_struct_omits_default_with_nested_tagged_union() {
+        let doc = Document::from_yaml(indoc::indoc! {"
+            openapi: 3.0.0
+            info:
+              title: Test API
+              version: 1.0.0
+            paths: {}
+            components:
+              schemas:
+                Dog:
+                  type: object
+                  properties:
+                    bark:
+                      type: string
+                Cat:
+                  type: object
+                  properties:
+                    meow:
+                      type: string
+                Pet:
+                  oneOf:
+                    - $ref: '#/components/schemas/Dog'
+                    - $ref: '#/components/schemas/Cat'
+                  discriminator:
+                    propertyName: type
+                    mapping:
+                      dog: '#/components/schemas/Dog'
+                      cat: '#/components/schemas/Cat'
+                Owner:
+                  type: object
+                  properties:
+                    pet:
+                      $ref: '#/components/schemas/Pet'
+        "})
+        .unwrap();
+
+        let spec = IrSpec::from_doc(&doc).unwrap();
+        let ir = IrGraph::new(&spec);
+        let graph = CodegenGraph::new(ir);
+
+        let schema = graph.schemas().find(|s| s.name() == "Owner");
+        let Some(schema @ SchemaIrTypeView::Struct(_, struct_view)) = &schema else {
+            panic!("expected struct `Owner`; got `{schema:?}`");
+        };
+
+        let name = CodegenTypeName::Schema(schema);
+        let codegen = CodegenStruct::new(name, struct_view);
+
+        let actual: syn::ItemStruct = parse_quote!(#codegen);
+        // `Pet` is a tagged union that doesn't implement `Default`,
+        // so neither should `Owner`.
+        let expected: syn::ItemStruct = parse_quote! {
+            #[derive(Debug, Clone, PartialEq, Eq, Hash, ::serde::Serialize, ::serde::Deserialize)]
+            pub struct Owner {
+                #[serde(default, skip_serializing_if = "::ploidy_util::absent::AbsentOr::is_absent",)]
+                pub pet: ::ploidy_util::absent::AbsentOr<crate::types::Pet>,
+            }
+        };
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn test_struct_omits_default_with_nested_untagged_union() {
+        let doc = Document::from_yaml(indoc::indoc! {"
+            openapi: 3.0.0
+            info:
+              title: Test API
+              version: 1.0.0
+            paths: {}
+            components:
+              schemas:
+                StringOrInt:
+                  oneOf:
+                    - type: string
+                    - type: integer
+                      format: int32
+                Container:
+                  type: object
+                  properties:
+                    value:
+                      $ref: '#/components/schemas/StringOrInt'
+        "})
+        .unwrap();
+
+        let spec = IrSpec::from_doc(&doc).unwrap();
+        let ir = IrGraph::new(&spec);
+        let graph = CodegenGraph::new(ir);
+
+        let schema = graph.schemas().find(|s| s.name() == "Container");
+        let Some(schema @ SchemaIrTypeView::Struct(_, struct_view)) = &schema else {
+            panic!("expected struct `Container`; got `{schema:?}`");
+        };
+
+        let name = CodegenTypeName::Schema(schema);
+        let codegen = CodegenStruct::new(name, struct_view);
+
+        let actual: syn::ItemStruct = parse_quote!(#codegen);
+        // `StringOrInt` is an untagged union that doesn't implement `Default`,
+        // so neither should `Container`.
+        let expected: syn::ItemStruct = parse_quote! {
+            #[derive(Debug, Clone, PartialEq, Eq, Hash, ::serde::Serialize, ::serde::Deserialize)]
+            pub struct Container {
+                #[serde(default, skip_serializing_if = "::ploidy_util::absent::AbsentOr::is_absent",)]
+                pub value: ::ploidy_util::absent::AbsentOr<crate::types::StringOrInt>,
+            }
+        };
+        assert_eq!(actual, expected);
+    }
+}

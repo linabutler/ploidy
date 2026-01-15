@@ -22,6 +22,9 @@ mod tagged;
 mod types;
 mod untagged;
 
+#[cfg(test)]
+mod tests;
+
 pub use cargo::*;
 pub use client::*;
 pub use graph::*;

@@ -37,5 +37,14 @@ toml = { version = "0.9", default-features = false, features = [
 ] }
 unicode-ident = "1"
 
+[dev-dependencies]
+indoc = { workspace = true }
+syn = { version = "2", default-features = false, features = [
+    "extra-traits",
+    "parsing",
+    "printing",
+] }
+pretty_assertions = { workspace = true }
+
 [lints]
 workspace = true

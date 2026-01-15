@@ -64,3 +64,238 @@ impl ToTokens for CodegenUntagged<'_> {
         })
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    use ploidy_core::{
+        ir::{IrGraph, IrSpec, SchemaIrTypeView},
+        parse::Document,
+    };
+    use pretty_assertions::assert_eq;
+    use syn::parse_quote;
+
+    use crate::CodegenGraph;
+
+    #[test]
+    fn test_untagged_union_serde_untagged_attr() {
+        let doc = Document::from_yaml(indoc::indoc! {"
+            openapi: 3.0.0
+            info:
+              title: Test API
+              version: 1.0.0
+            paths: {}
+            components:
+              schemas:
+                StringOrInt:
+                  oneOf:
+                    - type: string
+                    - type: integer
+                      format: int32
+        "})
+        .unwrap();
+
+        let spec = IrSpec::from_doc(&doc).unwrap();
+        let ir = IrGraph::new(&spec);
+        let graph = CodegenGraph::new(ir);
+
+        let schema = graph.schemas().find(|s| s.name() == "StringOrInt");
+        let Some(schema @ SchemaIrTypeView::Untagged(_, untagged_view)) = &schema else {
+            panic!("expected untagged union `StringOrInt`; got `{schema:?}`");
+        };
+
+        let name = CodegenTypeName::Schema(schema);
+        let untagged = CodegenUntagged::new(name, untagged_view);
+
+        let actual: syn::ItemEnum = parse_quote!(#untagged);
+        let expected: syn::ItemEnum = parse_quote! {
+            #[derive(Debug, Clone, PartialEq, Eq, Hash, ::serde::Serialize, ::serde::Deserialize)]
+            #[serde(untagged)]
+            pub enum StringOrInt {
+                String(::std::string::String),
+                I32(i32)
+            }
+        };
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn test_untagged_union_with_refs() {
+        let doc = Document::from_yaml(indoc::indoc! {"
+            openapi: 3.0.0
+            info:
+              title: Test API
+              version: 1.0.0
+            paths: {}
+            components:
+              schemas:
+                Dog:
+                  type: object
+                  properties:
+                    bark:
+                      type: string
+                Cat:
+                  type: object
+                  properties:
+                    meow:
+                      type: string
+                Animal:
+                  oneOf:
+                    - $ref: '#/components/schemas/Dog'
+                    - $ref: '#/components/schemas/Cat'
+        "})
+        .unwrap();
+
+        let spec = IrSpec::from_doc(&doc).unwrap();
+        let ir = IrGraph::new(&spec);
+        let graph = CodegenGraph::new(ir);
+
+        let schema = graph.schemas().find(|s| s.name() == "Animal");
+        let Some(schema @ SchemaIrTypeView::Untagged(_, untagged_view)) = &schema else {
+            panic!("expected untagged union `Animal`; got `{schema:?}`");
+        };
+
+        let name = CodegenTypeName::Schema(schema);
+        let untagged = CodegenUntagged::new(name, untagged_view);
+
+        let actual: syn::ItemEnum = parse_quote!(#untagged);
+        let expected: syn::ItemEnum = parse_quote! {
+            #[derive(Debug, Clone, PartialEq, Eq, Hash, ::serde::Serialize, ::serde::Deserialize)]
+            #[serde(untagged)]
+            pub enum Animal {
+                V1(crate::types::Dog),
+                V2(crate::types::Cat)
+            }
+        };
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn test_untagged_union_with_description() {
+        let doc = Document::from_yaml(indoc::indoc! {"
+            openapi: 3.0.0
+            info:
+              title: Test API
+              version: 1.0.0
+            paths: {}
+            components:
+              schemas:
+                StringOrInt:
+                  description: A union that can be either a string or an integer.
+                  oneOf:
+                    - type: string
+                    - type: integer
+                      format: int32
+        "})
+        .unwrap();
+
+        let spec = IrSpec::from_doc(&doc).unwrap();
+        let ir = IrGraph::new(&spec);
+        let graph = CodegenGraph::new(ir);
+
+        let schema = graph.schemas().find(|s| s.name() == "StringOrInt");
+        let Some(schema @ SchemaIrTypeView::Untagged(_, untagged_view)) = &schema else {
+            panic!("expected untagged union `StringOrInt`; got `{schema:?}`");
+        };
+
+        let name = CodegenTypeName::Schema(schema);
+        let untagged = CodegenUntagged::new(name, untagged_view);
+
+        let actual: syn::ItemEnum = parse_quote!(#untagged);
+        let expected: syn::ItemEnum = parse_quote! {
+            #[doc = "A union that can be either a string or an integer."]
+            #[derive(Debug, Clone, PartialEq, Eq, Hash, ::serde::Serialize, ::serde::Deserialize)]
+            #[serde(untagged)]
+            pub enum StringOrInt {
+                String(::std::string::String),
+                I32(i32)
+            }
+        };
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn test_untagged_union_not_hashable_with_f32() {
+        let doc = Document::from_yaml(indoc::indoc! {"
+            openapi: 3.0.0
+            info:
+              title: Test API
+              version: 1.0.0
+            paths: {}
+            components:
+              schemas:
+                StringOrFloat:
+                  oneOf:
+                    - type: string
+                    - type: number
+                      format: float
+        "})
+        .unwrap();
+
+        let spec = IrSpec::from_doc(&doc).unwrap();
+        let ir = IrGraph::new(&spec);
+        let graph = CodegenGraph::new(ir);
+
+        let schema = graph.schemas().find(|s| s.name() == "StringOrFloat");
+        let Some(schema @ SchemaIrTypeView::Untagged(_, untagged_view)) = &schema else {
+            panic!("expected untagged union `StringOrFloat`; got `{schema:?}`");
+        };
+
+        let name = CodegenTypeName::Schema(schema);
+        let untagged = CodegenUntagged::new(name, untagged_view);
+
+        let actual: syn::ItemEnum = parse_quote!(#untagged);
+        let expected: syn::ItemEnum = parse_quote! {
+            #[derive(Debug, Clone, PartialEq, ::serde::Serialize, ::serde::Deserialize)]
+            #[serde(untagged)]
+            pub enum StringOrFloat {
+                String(::std::string::String),
+                F32(f32)
+            }
+        };
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn test_untagged_union_not_hashable_with_f64() {
+        let doc = Document::from_yaml(indoc::indoc! {"
+            openapi: 3.0.0
+            info:
+              title: Test API
+              version: 1.0.0
+            paths: {}
+            components:
+              schemas:
+                StringOrDouble:
+                  oneOf:
+                    - type: string
+                    - type: number
+                      format: double
+        "})
+        .unwrap();
+
+        let spec = IrSpec::from_doc(&doc).unwrap();
+        let ir = IrGraph::new(&spec);
+        let graph = CodegenGraph::new(ir);
+
+        let schema = graph.schemas().find(|s| s.name() == "StringOrDouble");
+        let Some(schema @ SchemaIrTypeView::Untagged(_, untagged_view)) = &schema else {
+            panic!("expected untagged union `StringOrDouble`; got `{schema:?}`");
+        };
+
+        let name = CodegenTypeName::Schema(schema);
+        let untagged = CodegenUntagged::new(name, untagged_view);
+
+        let actual: syn::ItemEnum = parse_quote!(#untagged);
+        let expected: syn::ItemEnum = parse_quote! {
+            #[derive(Debug, Clone, PartialEq, ::serde::Serialize, ::serde::Deserialize)]
+            #[serde(untagged)]
+            pub enum StringOrDouble {
+                String(::std::string::String),
+                F64(f64)
+            }
+        };
+        assert_eq!(actual, expected);
+    }
+}

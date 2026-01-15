@@ -301,7 +301,7 @@ CLI entrypoint. Keep thin; business logic goes in **ploidy-core** or **ploidy-co
 
 - All types implement `ToTokens`
 - Use `quote!` for token generation; never string-format Rust code
-- Use `syn::parse2` in tests to verify generated code parses
+- Tests compare AST structures with `parse_quote!`, never strings
 
 | Path | Contents |
 |------|----------|

@@ -150,3 +150,173 @@ impl ToTokens for CodegenEnum<'_> {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    use ploidy_core::{
+        ir::{IrGraph, IrSpec, SchemaIrTypeView},
+        parse::Document,
+    };
+    use pretty_assertions::assert_eq;
+    use syn::parse_quote;
+
+    use crate::CodegenGraph;
+
+    // MARK: String variants
+
+    #[test]
+    fn test_enum_string_variants() {
+        let doc = Document::from_yaml(indoc::indoc! {"
+            openapi: 3.0.0
+            info:
+              title: Test API
+              version: 1.0.0
+            paths: {}
+            components:
+              schemas:
+                Status:
+                  type: string
+                  enum:
+                    - active
+                    - inactive
+                    - pending
+        "})
+        .unwrap();
+
+        let spec = IrSpec::from_doc(&doc).unwrap();
+        let ir = IrGraph::new(&spec);
+        let graph = CodegenGraph::new(ir);
+
+        let schema = graph.schemas().find(|s| s.name() == "Status");
+        let Some(schema @ SchemaIrTypeView::Enum(_, enum_view)) = &schema else {
+            panic!("expected enum `Status`; got `{schema:?}`");
+        };
+
+        let name = CodegenTypeName::Schema(schema);
+        let codegen = CodegenEnum::new(name, enum_view);
+
+        let actual: syn::File = parse_quote!(#codegen);
+        let expected: syn::File = parse_quote! {
+            #[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+            pub enum Status {
+                Active,
+                Inactive,
+                Pending,
+                #[default]
+                OtherStatus
+            }
+            impl Status {
+                pub fn is_other(&self) -> bool {
+                    matches!(self, Self::OtherStatus)
+                }
+            }
+            impl ::std::fmt::Display for Status {
+                fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+                    f.write_str(
+                        match self {
+                            Self::Active => "active",
+                            Self::Inactive => "inactive",
+                            Self::Pending => "pending",
+                            Self::OtherStatus => "(other)"
+                        }
+                    )
+                }
+            }
+            impl ::std::str::FromStr for Status {
+                type Err = ::std::convert::Infallible;
+                fn from_str(s: &str) -> ::std::result::Result<Self, Self::Err> {
+                    ::std::result::Result::Ok(
+                        match s {
+                            "active" => Self::Active,
+                            "inactive" => Self::Inactive,
+                            "pending" => Self::Pending,
+                            _ => Self::OtherStatus
+                        }
+                    )
+                }
+            }
+            impl<'de> ::serde::Deserialize<'de> for Status {
+                fn deserialize<D: ::serde::Deserializer<'de>>(
+                    deserializer: D,
+                ) -> ::std::result::Result<Self, D::Error> {
+                    struct Visitor;
+                    impl<'de> ::serde::de::Visitor<'de> for Visitor {
+                        type Value = Status;
+                        fn expecting(
+                            &self,
+                            f: &mut ::std::fmt::Formatter<'_>
+                        ) -> ::std::fmt::Result {
+                            f.write_str("a variant of `Status`")
+                        }
+                        fn visit_str<E: ::serde::de::Error>(
+                            self,
+                            s: &str,
+                        ) -> ::std::result::Result<Self::Value, E> {
+                            let ::std::result::Result::Ok(v) = ::std::str::FromStr::from_str(s);
+                            Ok(v)
+                        }
+                    }
+                    ::serde::Deserializer::deserialize_str(deserializer, Visitor)
+                }
+            }
+            impl ::serde::Serialize for Status {
+                fn serialize<S: ::serde::Serializer>(
+                    &self,
+                    serializer: S,
+                ) -> ::std::result::Result<S::Ok, S::Error> {
+                    match self {
+                        Self::OtherStatus => Err(
+                            ::serde::ser::Error::custom(
+                                "can't serialize variant `Status::OtherStatus`"
+                            )
+                        ),
+                        v => v.to_string().serialize(serializer),
+                    }
+                }
+            }
+        };
+        assert_eq!(actual, expected);
+    }
+
+    // MARK: Unrepresentable variants
+
+    #[test]
+    fn test_enum_unrepresentable_becomes_type_alias() {
+        let doc = Document::from_yaml(indoc::indoc! {"
+            openapi: 3.0.0
+            info:
+              title: Test API
+              version: 1.0.0
+            paths: {}
+            components:
+              schemas:
+                Priority:
+                  type: integer
+                  enum:
+                    - 1
+                    - 2
+                    - 3
+        "})
+        .unwrap();
+
+        let spec = IrSpec::from_doc(&doc).unwrap();
+        let ir = IrGraph::new(&spec);
+        let graph = CodegenGraph::new(ir);
+
+        let schema = graph.schemas().find(|s| s.name() == "Priority");
+        let Some(schema @ SchemaIrTypeView::Enum(_, view)) = &schema else {
+            panic!("expected enum `Priority`; got `{schema:?}`");
+        };
+
+        let name = CodegenTypeName::Schema(schema);
+        let codegen = CodegenEnum::new(name, view);
+
+        let actual: syn::Item = parse_quote!(#codegen);
+        let expected: syn::Item = parse_quote! {
+            pub type Priority = ::std::string::String;
+        };
+        assert_eq!(actual, expected);
+    }
+}

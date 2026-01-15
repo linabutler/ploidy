@@ -107,3 +107,275 @@ impl ToTokens for CodegenTagged<'_> {
         tokens.append_all(main);
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    use ploidy_core::{
+        ir::{IrGraph, IrSpec, SchemaIrTypeView},
+        parse::Document,
+    };
+    use pretty_assertions::assert_eq;
+    use syn::parse_quote;
+
+    use crate::{CodegenGraph, CodegenTypeName};
+
+    #[test]
+    fn test_tagged_union_serde_tag_attr() {
+        let doc = Document::from_yaml(indoc::indoc! {"
+            openapi: 3.0.0
+            info:
+              title: Test API
+              version: 1.0.0
+            components:
+              schemas:
+                Dog:
+                  type: object
+                  properties:
+                    bark:
+                      type: string
+                Cat:
+                  type: object
+                  properties:
+                    meow:
+                      type: string
+                Pet:
+                  oneOf:
+                    - $ref: '#/components/schemas/Dog'
+                    - $ref: '#/components/schemas/Cat'
+                  discriminator:
+                    propertyName: petType
+                    mapping:
+                      dog: '#/components/schemas/Dog'
+                      cat: '#/components/schemas/Cat'
+        "})
+        .unwrap();
+
+        let spec = IrSpec::from_doc(&doc).unwrap();
+        let ir = IrGraph::new(&spec);
+        let graph = CodegenGraph::new(ir);
+
+        let schema = graph.schemas().find(|s| s.name() == "Pet");
+        let Some(schema @ SchemaIrTypeView::Tagged(_, tagged)) = &schema else {
+            panic!("expected tagged union `Pet`; got `{schema:?}`");
+        };
+
+        let name = CodegenTypeName::Schema(schema);
+        let codegen = CodegenTagged::new(name, tagged);
+
+        let actual: syn::File = parse_quote!(#codegen);
+        let expected: syn::File = parse_quote! {
+            #[derive(Debug, Clone, PartialEq, Eq, Hash, ::serde::Serialize, ::serde::Deserialize)]
+            #[serde(tag = "petType")]
+            pub enum Pet {
+                #[serde(rename = "dog")]
+                Dog(crate::types::Dog),
+                #[serde(rename = "cat")]
+                Cat(crate::types::Cat),
+            }
+            impl ::std::convert::From<crate::types::Dog> for Pet {
+                fn from(value: crate::types::Dog) -> Self {
+                    Self::Dog(value)
+                }
+            }
+            impl ::std::convert::From<crate::types::Cat> for Pet {
+                fn from(value: crate::types::Cat) -> Self {
+                    Self::Cat(value)
+                }
+            }
+        };
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn test_tagged_union_variant_rename() {
+        let doc = Document::from_yaml(indoc::indoc! {"
+            openapi: 3.0.0
+            info:
+              title: Test API
+              version: 1.0.0
+            components:
+              schemas:
+                Dog:
+                  type: object
+                  properties:
+                    bark:
+                      type: string
+                Cat:
+                  type: object
+                  properties:
+                    meow:
+                      type: string
+                Pet:
+                  oneOf:
+                    - $ref: '#/components/schemas/Dog'
+                    - $ref: '#/components/schemas/Cat'
+                  discriminator:
+                    propertyName: type
+                    mapping:
+                      canine: '#/components/schemas/Dog'
+                      feline: '#/components/schemas/Cat'
+        "})
+        .unwrap();
+
+        let spec = IrSpec::from_doc(&doc).unwrap();
+        let ir = IrGraph::new(&spec);
+        let graph = CodegenGraph::new(ir);
+
+        let schema = graph.schemas().find(|s| s.name() == "Pet");
+        let Some(schema @ SchemaIrTypeView::Tagged(_, tagged)) = &schema else {
+            panic!("expected tagged union `Pet`; got `{schema:?}`");
+        };
+
+        let name = CodegenTypeName::Schema(schema);
+        let codegen = CodegenTagged::new(name, tagged);
+
+        let actual: syn::File = parse_quote!(#codegen);
+        let expected: syn::File = parse_quote! {
+            #[derive(Debug, Clone, PartialEq, Eq, Hash, ::serde::Serialize, ::serde::Deserialize)]
+            #[serde(tag = "type")]
+            pub enum Pet {
+                #[serde(rename = "canine")]
+                Dog(crate::types::Dog),
+                #[serde(rename = "feline")]
+                Cat(crate::types::Cat),
+            }
+            impl ::std::convert::From<crate::types::Dog> for Pet {
+                fn from(value: crate::types::Dog) -> Self {
+                    Self::Dog(value)
+                }
+            }
+            impl ::std::convert::From<crate::types::Cat> for Pet {
+                fn from(value: crate::types::Cat) -> Self {
+                    Self::Cat(value)
+                }
+            }
+        };
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn test_tagged_union_variant_with_alias() {
+        let doc = Document::from_yaml(indoc::indoc! {"
+            openapi: 3.0.0
+            info:
+              title: Test API
+              version: 1.0.0
+            components:
+              schemas:
+                Dog:
+                  type: object
+                  properties:
+                    bark:
+                      type: string
+                Pet:
+                  oneOf:
+                    - $ref: '#/components/schemas/Dog'
+                  discriminator:
+                    propertyName: type
+                    mapping:
+                      dog: '#/components/schemas/Dog'
+                      canine: '#/components/schemas/Dog'
+                      puppy: '#/components/schemas/Dog'
+        "})
+        .unwrap();
+
+        let spec = IrSpec::from_doc(&doc).unwrap();
+        let ir = IrGraph::new(&spec);
+        let graph = CodegenGraph::new(ir);
+
+        let schema = graph.schemas().find(|s| s.name() == "Pet");
+        let Some(schema @ SchemaIrTypeView::Tagged(_, tagged)) = &schema else {
+            panic!("expected tagged union `Pet`; got `{schema:?}`");
+        };
+
+        let name = CodegenTypeName::Schema(schema);
+        let codegen = CodegenTagged::new(name, tagged);
+
+        let actual: syn::File = parse_quote!(#codegen);
+        let expected: syn::File = parse_quote! {
+            #[derive(Debug, Clone, PartialEq, Eq, Hash, ::serde::Serialize, ::serde::Deserialize)]
+            #[serde(tag = "type")]
+            pub enum Pet {
+                #[serde(rename = "dog", alias = "canine", alias = "puppy",)]
+                Dog(crate::types::Dog),
+            }
+            impl ::std::convert::From<crate::types::Dog> for Pet {
+                fn from(value: crate::types::Dog) -> Self {
+                    Self::Dog(value)
+                }
+            }
+        };
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn test_tagged_union_with_description() {
+        let doc = Document::from_yaml(indoc::indoc! {"
+            openapi: 3.0.0
+            info:
+              title: Test API
+              version: 1.0.0
+            components:
+              schemas:
+                Dog:
+                  type: object
+                  properties:
+                    bark:
+                      type: string
+                Cat:
+                  type: object
+                  properties:
+                    meow:
+                      type: string
+                Pet:
+                  description: Represents different types of pets
+                  oneOf:
+                    - $ref: '#/components/schemas/Dog'
+                    - $ref: '#/components/schemas/Cat'
+                  discriminator:
+                    propertyName: type
+                    mapping:
+                      dog: '#/components/schemas/Dog'
+                      cat: '#/components/schemas/Cat'
+        "})
+        .unwrap();
+
+        let spec = IrSpec::from_doc(&doc).unwrap();
+        let ir = IrGraph::new(&spec);
+        let graph = CodegenGraph::new(ir);
+
+        let schema = graph.schemas().find(|s| s.name() == "Pet");
+        let Some(schema @ SchemaIrTypeView::Tagged(_, tagged)) = &schema else {
+            panic!("expected tagged union `Pet`; got `{schema:?}`");
+        };
+
+        let name = CodegenTypeName::Schema(schema);
+        let codegen = CodegenTagged::new(name, tagged);
+
+        let actual: syn::File = parse_quote!(#codegen);
+        let expected: syn::File = parse_quote! {
+            #[doc = "Represents different types of pets"]
+            #[derive(Debug, Clone, PartialEq, Eq, Hash, ::serde::Serialize, ::serde::Deserialize)]
+            #[serde(tag = "type")]
+            pub enum Pet {
+                #[serde(rename = "dog")]
+                Dog(crate::types::Dog),
+                #[serde(rename = "cat")]
+                Cat(crate::types::Cat),
+            }
+            impl ::std::convert::From<crate::types::Dog> for Pet {
+                fn from(value: crate::types::Dog) -> Self {
+                    Self::Dog(value)
+                }
+            }
+            impl ::std::convert::From<crate::types::Cat> for Pet {
+                fn from(value: crate::types::Cat) -> Self {
+                    Self::Cat(value)
+                }
+            }
+        };
+        assert_eq!(actual, expected);
+    }
+}
