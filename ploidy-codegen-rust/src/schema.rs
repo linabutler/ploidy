@@ -82,3 +82,96 @@ impl IntoCode for CodegenSchemaType<'_> {
         (format!("src/types/{usage}.rs"), self.into_token_stream())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    use ploidy_core::{
+        ir::{IrGraph, IrSpec, SchemaIrTypeView},
+        parse::Document,
+    };
+    use pretty_assertions::assert_eq;
+    use syn::parse_quote;
+
+    use crate::CodegenGraph;
+
+    #[test]
+    fn test_schema_inline_types_order() {
+        // Inline types are defined in reverse alphabetical order (Zebra, Mango, Apple),
+        // to verify that they're sorted in the output.
+        let doc = Document::from_yaml(indoc::indoc! {"
+            openapi: 3.0.0
+            info:
+              title: Test API
+              version: 1.0.0
+            paths: {}
+            components:
+              schemas:
+                Container:
+                  type: object
+                  properties:
+                    zebra:
+                      type: object
+                      properties:
+                        name:
+                          type: string
+                    mango:
+                      type: object
+                      properties:
+                        name:
+                          type: string
+                    apple:
+                      type: object
+                      properties:
+                        name:
+                          type: string
+        "})
+        .unwrap();
+
+        let spec = IrSpec::from_doc(&doc).unwrap();
+        let ir = IrGraph::new(&spec);
+        let graph = CodegenGraph::new(ir);
+
+        let schema = graph.schemas().find(|s| s.name() == "Container");
+        let Some(schema @ SchemaIrTypeView::Struct(_, _)) = &schema else {
+            panic!("expected struct `Container`; got `{schema:?}`");
+        };
+
+        let codegen = CodegenSchemaType::new(schema);
+
+        let actual: syn::File = parse_quote!(#codegen);
+        // The struct fields remain in their original order (`zebra`, `mango`, `apple`),
+        // but the inline types in `mod types` should be sorted alphabetically
+        // (`Apple`, `Mango`, `Zebra`).
+        let expected: syn::File = parse_quote! {
+            #[derive(Debug, Clone, PartialEq, Eq, Hash, Default, ::serde::Serialize, ::serde::Deserialize)]
+            pub struct Container {
+                #[serde(default, skip_serializing_if = "::ploidy_util::absent::AbsentOr::is_absent",)]
+                pub zebra: ::ploidy_util::absent::AbsentOr<crate::types::container::types::Zebra>,
+                #[serde(default, skip_serializing_if = "::ploidy_util::absent::AbsentOr::is_absent",)]
+                pub mango: ::ploidy_util::absent::AbsentOr<crate::types::container::types::Mango>,
+                #[serde(default, skip_serializing_if = "::ploidy_util::absent::AbsentOr::is_absent",)]
+                pub apple: ::ploidy_util::absent::AbsentOr<crate::types::container::types::Apple>,
+            }
+            pub mod types {
+                #[derive(Debug, Clone, PartialEq, Eq, Hash, Default, ::serde::Serialize, ::serde::Deserialize)]
+                pub struct Apple {
+                    #[serde(default, skip_serializing_if = "::ploidy_util::absent::AbsentOr::is_absent",)]
+                    pub name: ::ploidy_util::absent::AbsentOr<::std::string::String>,
+                }
+                #[derive(Debug, Clone, PartialEq, Eq, Hash, Default, ::serde::Serialize, ::serde::Deserialize)]
+                pub struct Mango {
+                    #[serde(default, skip_serializing_if = "::ploidy_util::absent::AbsentOr::is_absent",)]
+                    pub name: ::ploidy_util::absent::AbsentOr<::std::string::String>,
+                }
+                #[derive(Debug, Clone, PartialEq, Eq, Hash, Default, ::serde::Serialize, ::serde::Deserialize)]
+                pub struct Zebra {
+                    #[serde(default, skip_serializing_if = "::ploidy_util::absent::AbsentOr::is_absent",)]
+                    pub name: ::ploidy_util::absent::AbsentOr<::std::string::String>,
+                }
+            }
+        };
+        assert_eq!(actual, expected);
+    }
+}
