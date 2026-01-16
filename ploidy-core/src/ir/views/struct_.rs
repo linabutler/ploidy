@@ -200,7 +200,6 @@ impl<'view, 'a> IrStructFieldView<'view, 'a> {
         let graph = self.parent.graph;
         let node = IrGraphNode::from_ref(graph.spec, self.field.ty.as_ref());
         let target = graph.indices[&node];
-        graph.metadata.scc_indices[self.parent.index.index()]
-            == graph.metadata.scc_indices[target.index()]
+        self.parent.scc_id() == graph.metadata.scc_indices[target.index()]
     }
 }

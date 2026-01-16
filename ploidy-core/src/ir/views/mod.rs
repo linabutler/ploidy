@@ -14,7 +14,9 @@ use petgraph::{
 };
 use ref_cast::{RefCastCustom, ref_cast_custom};
 
-use super::graph::{EdgeKind, Extension, ExtensionMap, IrGraph, IrGraphNode, Traversal, Traverse};
+use super::graph::{
+    EdgeKind, Extension, ExtensionMap, IrGraph, IrGraphNode, SccId, Traversal, Traverse,
+};
 
 pub mod any;
 pub mod container;
@@ -187,6 +189,11 @@ where
 pub trait ViewNode<'a> {
     fn graph(&self) -> &'a IrGraph<'a>;
     fn index(&self) -> NodeIndex<usize>;
+
+    /// Returns the SCC that this node belongs to.
+    fn scc_id(&self) -> SccId {
+        self.graph().metadata.scc_indices[self.index().index()]
+    }
 }
 
 pub trait Extendable<'graph> {

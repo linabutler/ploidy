@@ -1,5 +1,6 @@
 use itertools::Itertools;
 use miette::{Context, IntoDiagnostic, Result};
+use ploidy_codegen_python::CodegenGraph as PythonCodegenGraph;
 use ploidy_codegen_rust::{CodegenCargoManifest, CodegenErrorModule, CodegenGraph, CodegenLibrary};
 use ploidy_core::{
     codegen::write_to_disk,
@@ -18,6 +19,31 @@ static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
 fn main() -> Result<()> {
     let Ok(main) = Main::parse().map_err(|err| err.exit());
     match main.command {
+        Command::Codegen(CodegenCommand {
+            input,
+            output,
+            language: CodegenCommandLanguage::Python,
+        }) => {
+            let source = std::fs::read_to_string(&input)
+                .into_diagnostic()
+                .with_context(|| format!("Failed to read `{}`", input.display()))?;
+
+            let doc = Document::from_yaml(&source)
+                .into_diagnostic()
+                .context("Failed to parse OpenAPI document")?;
+
+            println!("OpenAPI: {} (version {})", doc.info.title, doc.info.version);
+
+            let spec = IrSpec::from_doc(&doc).into_diagnostic()?;
+            let graph = PythonCodegenGraph::new(IrGraph::new(&spec));
+
+            println!("Writing generated code to `{}`...", output.display());
+
+            println!("Generating {} types...", graph.schemas().count());
+            ploidy_codegen_python::write_types_to_disk(&output, &graph)?;
+
+            println!("Generation complete");
+        }
         Command::Codegen(CodegenCommand {
             input,
             output,

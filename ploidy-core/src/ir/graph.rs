@@ -33,7 +33,8 @@ pub(super) type IrGraphG<'a> = DiGraph<IrGraphNode<'a>, EdgeKind, usize>;
 #[derive(Debug)]
 pub struct IrGraph<'a> {
     pub(super) spec: &'a IrSpec<'a>,
-    pub(super) g: IrGraphG<'a>,
+    /// The underlying directed graph of type references.
+    pub g: IrGraphG<'a>,
     /// An inverted index of nodes to graph indices.
     pub(super) indices: FxHashMap<IrGraphNode<'a>, NodeIndex<usize>>,
     /// Additional metadata for each node.
@@ -91,7 +92,7 @@ impl<'a> IrGraph<'a> {
                     let mut scc = TarjanScc::new();
                     scc.run(&refs, |_| ());
                     g.node_indices()
-                        .map(|node| scc.node_component_index(&refs, node))
+                        .map(|node| SccId(scc.node_component_index(&refs, node)))
                         .collect()
                 },
                 ..Default::default()
@@ -265,12 +266,20 @@ pub enum EdgeKind {
     Inherits,
 }
 
+/// Identifies a strongly connected component in the type graph.
+///
+/// Nodes with the same `SccId` form a cycle through reference edges
+/// and must be co-located to avoid circular imports. The inner value
+/// is opaque; only equality and ordering are meaningful.
+#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub struct SccId(usize);
+
 /// Precomputed metadata for schema types and operations in the graph.
 #[derive(Debug, Default)]
 pub struct IrGraphMetadata<'a> {
     /// Maps each node index to its strongly connected component index.
     /// Nodes in the same SCC form a cycle.
-    pub scc_indices: Vec<usize>,
+    pub scc_indices: Vec<SccId>,
     pub schemas: FxHashMap<NodeIndex<usize>, IrGraphNodeMeta<'a>>,
     pub operations: FxHashMap<ByAddress<&'a IrOperation<'a>>, IrGraphOperationMeta>,
 }

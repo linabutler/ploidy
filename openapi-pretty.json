@@ -1,0 +1,631 @@
+{
+    "openapi": "3.0.0",
+    "info": {
+        "title": "Claims Review API",
+        "version": "1.0.0",
+        "description": "API for managing claims review workflow with state machine transitions"
+    },
+    "paths": {
+        "/cases/{id}/available-transitions": {
+            "get": {
+                "summary": "Get available transitions for a case",
+                "description": "Returns the list of valid actions that can be performed on a case from its current state.",
+                "operationId": "get_available_transitions",
+                "parameters": [
+                    {
+                        "name": "id",
+                        "in": "path",
+                        "description": "The case UUID [example: 550e8400-e29b-41d4-a716-446655440000]",
+                        "required": true,
+                        "schema": {
+                            "type": "string",
+                            "format": "uuid"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Available transitions (AvailableTransitionsResponse)",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/AvailableTransitionsResponse"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Case not found (ErrorResponse)"
+                    },
+                    "500": {
+                        "description": "Internal server error (ErrorResponse)"
+                    }
+                }
+            }
+        },
+        "/cases/{id}/transition": {
+            "post": {
+                "summary": "Transition a case to a new state",
+                "description": "Applies a state transition to a case. The transition must be valid for the case's current state. See the TransitionRequest schema for available actions and their required data.",
+                "operationId": "transition_case",
+                "parameters": [
+                    {
+                        "name": "id",
+                        "in": "path",
+                        "description": "The case UUID [example: 550e8400-e29b-41d4-a716-446655440000]",
+                        "required": true,
+                        "schema": {
+                            "type": "string",
+                            "format": "uuid"
+                        }
+                    }
+                ],
+                "requestBody": {
+                    "description": "Request body",
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "$ref": "#/components/schemas/TransitionRequest"
+                            }
+                        }
+                    },
+                    "required": true
+                },
+                "responses": {
+                    "200": {
+                        "description": "Transition applied successfully (TransitionResponse)",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/TransitionResponse"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error (ErrorResponse)"
+                    },
+                    "400": {
+                        "description": "Invalid transition for current state (ErrorResponse)"
+                    },
+                    "404": {
+                        "description": "Case not found (ErrorResponse)"
+                    }
+                }
+            }
+        },
+        "/cases/{id}/history": {
+            "get": {
+                "summary": "Get transition history for a case",
+                "description": "Returns the complete audit trail of state transitions for a case in chronological order.",
+                "operationId": "get_case_history",
+                "parameters": [
+                    {
+                        "name": "id",
+                        "in": "path",
+                        "description": "The case UUID [example: 550e8400-e29b-41d4-a716-446655440000]",
+                        "required": true,
+                        "schema": {
+                            "type": "string",
+                            "format": "uuid"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Transition history (TransitionHistoryResponse)",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/TransitionHistoryResponse"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error (ErrorResponse)"
+                    },
+                    "404": {
+                        "description": "Case not found (ErrorResponse)"
+                    }
+                }
+            }
+        },
+        "/cases/{id}": {
+            "get": {
+                "summary": "Get a case by ID",
+                "description": "Retrieves detailed information about a specific case.",
+                "operationId": "get_case",
+                "parameters": [
+                    {
+                        "name": "id",
+                        "in": "path",
+                        "description": "The case UUID [example: 550e8400-e29b-41d4-a716-446655440000]",
+                        "required": true,
+                        "schema": {
+                            "type": "string",
+                            "format": "uuid"
+                        }
+                    }
+                ],
+                "responses": {
+                    "404": {
+                        "description": "Case not found (ErrorResponse)"
+                    },
+                    "500": {
+                        "description": "Internal server error (ErrorResponse)"
+                    },
+                    "200": {
+                        "description": "Successfully retrieved case (Case)",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/CaseData"
+                                }
+                            }
+                        }
+                    }
+                }
+            },
+            "delete": {
+                "summary": "Delete a case",
+                "description": "Permanently deletes a case and its transition history.",
+                "operationId": "delete_case",
+                "parameters": [
+                    {
+                        "name": "id",
+                        "in": "path",
+                        "description": "The case UUID [example: 550e8400-e29b-41d4-a716-446655440000]",
+                        "required": true,
+                        "schema": {
+                            "type": "string",
+                            "format": "uuid"
+                        }
+                    }
+                ],
+                "responses": {
+                    "204": {
+                        "description": "Case deleted successfully"
+                    },
+                    "404": {
+                        "description": "Case not found (ErrorResponse)"
+                    },
+                    "500": {
+                        "description": "Internal server error (ErrorResponse)"
+                    }
+                }
+            }
+        },
+        "/cases": {
+            "get": {
+                "summary": "List all cases",
+                "description": "Returns a paginated list of cases with optional filtering by state and assigned analyst.",
+                "operationId": "list_cases",
+                "parameters": [
+                    {
+                        "name": "state",
+                        "in": "query",
+                        "description": "Filter by case state",
+                        "required": false,
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    {
+                        "name": "assigned_to",
+                        "in": "query",
+                        "description": "Filter by assigned analyst ID",
+                        "required": false,
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    {
+                        "name": "limit",
+                        "in": "query",
+                        "description": "Maximum results to return [default: 50]",
+                        "required": false,
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    {
+                        "name": "offset",
+                        "in": "query",
+                        "description": "Pagination offset [default: 0]",
+                        "required": false,
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                ],
+                "responses": {
+                    "500": {
+                        "description": "Internal server error (ErrorResponse)"
+                    },
+                    "200": {
+                        "description": "Successfully retrieved case list (CaseListResponse)",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/CaseData"
+                                }
+                            }
+                        }
+                    }
+                }
+            },
+            "post": {
+                "summary": "Create a new case",
+                "description": "Creates a new review case with the specified claim amount. The case starts in the \"new\" state.",
+                "operationId": "create_case",
+                "requestBody": {
+                    "description": "Request body",
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "$ref": "#/components/schemas/CreateCaseRequest"
+                            }
+                        }
+                    },
+                    "required": true
+                },
+                "responses": {
+                    "400": {
+                        "description": "Validation error (ErrorResponse)"
+                    },
+                    "201": {
+                        "description": "Case created successfully (Case)",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/CaseData"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error (ErrorResponse)"
+                    }
+                }
+            }
+        }
+    },
+    "components": {
+        "schemas": {
+            "CaseData": {
+                "type": "object",
+                "properties": {
+                    "assigned_to": {
+                        "type": "string",
+                        "format": "uuid"
+                    },
+                    "created_at": {
+                        "type": "string",
+                        "format": "date-time"
+                    },
+                    "claim_amount": {
+                        "type": "string",
+                        "description": "Decimal number as string for precision",
+                        "example": 1500.0
+                    },
+                    "updated_at": {
+                        "type": "string",
+                        "format": "date-time"
+                    },
+                    "state": {
+                        "$ref": "#/components/schemas/CaseState"
+                    },
+                    "name": {
+                        "type": "string",
+                        "example": "Smith Medical Claim"
+                    },
+                    "id": {
+                        "type": "string",
+                        "format": "uuid"
+                    }
+                },
+                "required": [
+                    "id",
+                    "name",
+                    "state",
+                    "claim_amount",
+                    "created_at",
+                    "updated_at"
+                ]
+            },
+            "CloseData": {
+                "type": "object",
+                "properties": {
+                    "resolution_notes": {
+                        "type": "string"
+                    }
+                }
+            },
+            "TransitionRequest": {
+                "type": "object",
+                "oneOf": [
+                    {
+                        "$ref": "#/components/schemas/AssignData"
+                    },
+                    {
+                        "$ref": "#/components/schemas/RequestInfoData"
+                    },
+                    {
+                        "$ref": "#/components/schemas/InfoReceivedData"
+                    },
+                    {
+                        "$ref": "#/components/schemas/ApproveData"
+                    },
+                    {
+                        "$ref": "#/components/schemas/DenyData"
+                    },
+                    {
+                        "$ref": "#/components/schemas/UpdateAmountData"
+                    },
+                    {
+                        "$ref": "#/components/schemas/AppealData"
+                    },
+                    {
+                        "$ref": "#/components/schemas/CloseData"
+                    }
+                ],
+                "discriminator": {
+                    "propertyName": "action",
+                    "mapping": {
+                        "request_info": "#/components/schemas/RequestInfoData",
+                        "close": "#/components/schemas/CloseData",
+                        "appeal": "#/components/schemas/AppealData",
+                        "assign": "#/components/schemas/AssignData",
+                        "info_received": "#/components/schemas/InfoReceivedData",
+                        "deny": "#/components/schemas/DenyData",
+                        "approve": "#/components/schemas/ApproveData",
+                        "update_amount": "#/components/schemas/UpdateAmountData"
+                    }
+                }
+            },
+            "RequestInfoData": {
+                "type": "object",
+                "properties": {
+                    "due_date": {
+                        "type": "string",
+                        "example": "2025-03-01",
+                        "format": "date"
+                    },
+                    "info_needed": {
+                        "type": "string",
+                        "example": "Please provide itemized receipts"
+                    }
+                },
+                "required": [
+                    "info_needed",
+                    "due_date"
+                ]
+            },
+            "TransitionResponse": {
+                "type": "object",
+                "properties": {
+                    "from_state": {
+                        "$ref": "#/components/schemas/CaseState"
+                    },
+                    "to_state": {
+                        "$ref": "#/components/schemas/CaseState"
+                    },
+                    "case": {
+                        "$ref": "#/components/schemas/CaseData"
+                    }
+                },
+                "required": [
+                    "case",
+                    "from_state",
+                    "to_state"
+                ]
+            },
+            "UpdateAmountData": {
+                "type": "object",
+                "properties": {
+                    "justification": {
+                        "type": "string",
+                        "example": "Additional damage discovered"
+                    },
+                    "new_amount": {
+                        "type": "string",
+                        "description": "Decimal number as string for precision",
+                        "example": 1800.0
+                    }
+                },
+                "required": [
+                    "new_amount",
+                    "justification"
+                ]
+            },
+            "AppealData": {
+                "type": "object",
+                "properties": {
+                    "appeal_reason": {
+                        "type": "string",
+                        "example": "New evidence available"
+                    }
+                },
+                "required": [
+                    "appeal_reason"
+                ]
+            },
+            "AvailableTransitionsResponse": {
+                "type": "object",
+                "properties": {
+                    "current_state": {
+                        "$ref": "#/components/schemas/CaseState"
+                    },
+                    "available_actions": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    }
+                },
+                "required": [
+                    "current_state",
+                    "available_actions"
+                ]
+            },
+            "ApproveData": {
+                "type": "object",
+                "properties": {
+                    "approved_amount": {
+                        "type": "string",
+                        "description": "Decimal number as string for precision",
+                        "example": 1200.0
+                    },
+                    "notes": {
+                        "type": "string"
+                    }
+                },
+                "required": [
+                    "approved_amount"
+                ]
+            },
+            "InfoReceivedData": {
+                "type": "object",
+                "properties": {
+                    "notes": {
+                        "type": "string"
+                    }
+                }
+            },
+            "CaseState": {
+                "type": "string",
+                "enum": [
+                    "new",
+                    "under_review",
+                    "pending_information",
+                    "approved",
+                    "denied",
+                    "appealed",
+                    "closed"
+                ]
+            },
+            "AssignData": {
+                "type": "object",
+                "properties": {
+                    "analyst_id": {
+                        "type": "string",
+                        "example": "550e8400-e29b-41d4-a716-446655440000",
+                        "format": "uuid"
+                    }
+                },
+                "required": [
+                    "analyst_id"
+                ]
+            },
+            "DenyData": {
+                "type": "object",
+                "properties": {
+                    "reason": {
+                        "type": "string",
+                        "example": "Claim exceeds policy limits"
+                    }
+                },
+                "required": [
+                    "reason"
+                ]
+            },
+            "StateTransition": {
+                "type": "object",
+                "properties": {
+                    "from_state": {
+                        "$ref": "#/components/schemas/CaseState"
+                    },
+                    "case_id": {
+                        "type": "string",
+                        "format": "uuid"
+                    },
+                    "action": {
+                        "type": "string",
+                        "example": "approve"
+                    },
+                    "performed_at": {
+                        "type": "string",
+                        "format": "date-time"
+                    },
+                    "id": {
+                        "type": "string",
+                        "format": "uuid"
+                    },
+                    "to_state": {
+                        "$ref": "#/components/schemas/CaseState"
+                    },
+                    "metadata": {
+                        "type": "object",
+                        "description": "JSON object",
+                        "additionalProperties": true
+                    },
+                    "performed_by": {
+                        "type": "string",
+                        "format": "uuid"
+                    }
+                },
+                "required": [
+                    "id",
+                    "case_id",
+                    "from_state",
+                    "to_state",
+                    "action",
+                    "performed_by",
+                    "performed_at"
+                ]
+            },
+            "TransitionHistoryResponse": {
+                "type": "object",
+                "properties": {
+                    "case_id": {
+                        "type": "string",
+                        "format": "uuid"
+                    },
+                    "transitions": {
+                        "type": "array",
+                        "items": {
+                            "$ref": "#/components/schemas/StateTransition"
+                        }
+                    }
+                },
+                "required": [
+                    "case_id",
+                    "transitions"
+                ]
+            },
+            "CreateCaseRequest": {
+                "type": "object",
+                "properties": {
+                    "name": {
+                        "type": "string",
+                        "example": "Smith Medical Claim"
+                    },
+                    "claim_amount": {
+                        "type": "string",
+                        "description": "Decimal number as string for precision",
+                        "example": 1500.0
+                    }
+                },
+                "required": [
+                    "name",
+                    "claim_amount"
+                ]
+            }
+        }
+    },
+    "tags": [
+        {
+            "name": "cases",
+            "description": "Case management operations"
+        },
+        {
+            "name": "transitions",
+            "description": "State transition operations"
+        },
+        {
+            "name": "history",
+            "description": "Audit trail operations"
+        }
+    ]
+}
