@@ -55,7 +55,7 @@ impl ToTokens for CodegenTypeName<'_> {
 }
 
 /// A comparator that sorts type names lexicographically.
-#[derive(Debug)]
+#[derive(Clone, Copy, Debug)]
 pub struct CodegenTypeNameSortKey<'a>(CodegenTypeName<'a>);
 
 impl<'a> CodegenTypeNameSortKey<'a> {
