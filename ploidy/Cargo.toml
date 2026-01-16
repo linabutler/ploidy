@@ -1,6 +1,6 @@
 [package]
 name = "ploidy"
-description = "An OpenAPI code generator that supports polymorphic schemas"
+description = "A code generator for polymorphic OpenAPI specs"
 readme = "README.md"
 version.workspace = true
 license.workspace = true

@@ -109,7 +109,7 @@ Generated code looks like it was written by an experienced Rust developer:
 
 * **[Serde](https://serde.rs)-compatible type definitions**: Structs for `object` types and `anyOf` schemas, enums with data for `oneOf` schemas, unit-only enums for string `enum` types.
 * **Built-in trait implementations** for generated types: `From<T>` for polymorphic enum variants; `FromStr` and `Display` for string enums.
-* **Standard derives** for all types, plus `Hash` and `Eq` for hashable types, and `Default` for types with all optional fields.
+* **Standard derives** for all types, plus `Hash`, `Eq`, and `Default` for types that support them.
 * **Boxing** for recursive types.
 * **A RESTful client with async endpoints**, using [Reqwest](https://docs.rs/reqwest) with the [Tokio](https://tokio.rs) runtime.
 
@@ -131,7 +131,7 @@ Customer:
 Ploidy generates:
 
 ```rust
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Default, Serialize, Deserialize)]
 pub struct Customer {
     pub id: String,
     pub email: String,
@@ -184,7 +184,7 @@ Comment:
 Ploidy generates:
 
 ```rust
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Default, Serialize, Deserialize)]
 pub struct Comment {
     pub text: String,
     #[serde(default, skip_serializing_if = "AbsentOr::is_absent")]
@@ -240,7 +240,7 @@ impl Client {
     }
 }
 pub mod types {
-    #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+    #[derive(Debug, Clone, PartialEq, Eq, Hash, Default, Serialize, Deserialize)]
     pub struct GetUserResponse {
         pub id: String,
         pub email: String,
@@ -282,3 +282,5 @@ Ploidy is inspired by, learns from, and builds on the wonderful work of:
 * The OpenAPI ecosystem: **openapi-generator**, **Progenitor**, and other code generators.
 * The async Rust ecosystem: Tokio and Reqwest.
 * The Rust parsing ecosystem: `quote`, `serde`, `syn`, and `winnow`.
+
+And yes, the name is a biology pun! [Ploidy](https://en.wikipedia.org/wiki/Ploidy) refers to the number of chromosome sets in a cell, and _polyploidy_ is when cells have many chromosome sets...and polymorphic types have many forms through inheritance.

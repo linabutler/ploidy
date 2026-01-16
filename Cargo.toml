@@ -10,7 +10,7 @@ members = [
 resolver = "2"
 
 [workspace.package]
-version = "0.6.0"
+version = "0.7.0"
 license = "Apache-2.0"
 edition = "2024"
 repository = "https://github.com/linabutler/ploidy"
@@ -20,10 +20,10 @@ rust-version = "1.89"
 [workspace.dependencies]
 either = "1"
 indoc = "2"
-ploidy-codegen-rust = { path = "ploidy-codegen-rust", version = "0.6.0" }
-ploidy-core = { path = "ploidy-core", version = "0.6.0" }
-ploidy-pointer = { path = "ploidy-pointer", version = "0.6.0" }
-ploidy-pointer-derive = { path = "ploidy-pointer-derive", version = "0.6.0" }
+ploidy-codegen-rust = { path = "ploidy-codegen-rust", version = "0.7.0" }
+ploidy-core = { path = "ploidy-core", version = "0.7.0" }
+ploidy-pointer = { path = "ploidy-pointer", version = "0.7.0" }
+ploidy-pointer-derive = { path = "ploidy-pointer-derive", version = "0.7.0" }
 pretty_assertions = "1"
 ref-cast = "1"
 
