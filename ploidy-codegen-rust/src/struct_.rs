@@ -1,4 +1,5 @@
 use either::Either;
+use itertools::Itertools;
 use ploidy_core::{
     codegen::UniqueNames,
     ir::{
@@ -61,16 +62,19 @@ impl ToTokens for CodegenStruct<'_> {
                     pub #field_name: #final_type,
                 }
             })
-            .collect::<Vec<_>>();
+            .collect_vec();
 
         let mut extra_derives = vec![];
+        // Structs that don't contain any floating-point types
+        // can derive `Eq` and `Hash`.
         let is_hashable = self.ty.reachable().all(|view| {
-            // If this struct doesn't reach any floating-point types, then it can
-            // derive `Eq` and `Hash`. (Rust doesn't define equivalence for floats).
-            !matches!(
-                view,
-                IrTypeView::Primitive(PrimitiveIrType::F32 | PrimitiveIrType::F64)
-            )
+            if let IrTypeView::Primitive(p) = &view
+                && let PrimitiveIrType::F32 | PrimitiveIrType::F64 = p.ty()
+            {
+                false
+            } else {
+                true
+            }
         });
         if is_hashable {
             extra_derives.push(ExtraDerive::Eq);
@@ -110,7 +114,7 @@ impl ToTokens for CodegenStruct<'_> {
                     // `serde_json::Value` implements `Default`.
                     IrTypeView::Any => true,
                     // `Url` doesn't implement `Default`, but other primitives do.
-                    IrTypeView::Primitive(PrimitiveIrType::Url) => false,
+                    IrTypeView::Primitive(p) if p.ty() == PrimitiveIrType::Url => false,
                     IrTypeView::Primitive(_) => true,
                     // Other types aren't defaultable.
                     _ => false,
@@ -403,7 +407,7 @@ mod tests {
             #[derive(Debug, Clone, PartialEq, Eq, Hash, Default, ::serde::Serialize, ::serde::Deserialize)]
             pub struct Record {
                 pub id: ::std::string::String,
-                pub deleted_at: ::std::option::Option<::ploidy_util::date_time::UnixMilliseconds>,
+                pub deleted_at: ::std::option::Option<::chrono::DateTime<::chrono::Utc>>,
             }
         };
         assert_eq!(actual, expected);
@@ -454,7 +458,7 @@ mod tests {
             #[derive(Debug, Clone, PartialEq, Eq, Hash, Default, ::serde::Serialize, ::serde::Deserialize)]
             pub struct Record {
                 pub id: ::std::string::String,
-                pub deleted_at: ::std::option::Option<::ploidy_util::date_time::UnixMilliseconds>,
+                pub deleted_at: ::std::option::Option<::chrono::DateTime<::chrono::Utc>>,
             }
         };
         assert_eq!(actual, expected);
@@ -504,7 +508,7 @@ mod tests {
             pub struct Record {
                 pub id: ::std::string::String,
                 #[serde(default, skip_serializing_if = "::ploidy_util::absent::AbsentOr::is_absent",)]
-                pub deleted_at: ::ploidy_util::absent::AbsentOr<::ploidy_util::date_time::UnixMilliseconds>,
+                pub deleted_at: ::ploidy_util::absent::AbsentOr<::chrono::DateTime<::chrono::Utc>>,
             }
         };
         assert_eq!(actual, expected);

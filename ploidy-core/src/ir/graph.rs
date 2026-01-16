@@ -17,7 +17,7 @@ use super::{
         InlineIrType, IrOperation, IrType, IrTypeRef, IrUntaggedVariant, PrimitiveIrType,
         SchemaIrType,
     },
-    views::{operation::IrOperationView, schema::SchemaIrTypeView},
+    views::{operation::IrOperationView, schema::SchemaIrTypeView, wrappers::IrPrimitiveView},
 };
 
 /// The type graph.
@@ -146,6 +146,18 @@ impl<'a> IrGraph<'a> {
             .node_indices()
             .filter_map(|index| match self.g[index] {
                 IrGraphNode::Schema(ty) => Some(SchemaIrTypeView::new(self, index, ty)),
+                _ => None,
+            })
+    }
+
+    /// Returns an iterator over all the primitive types in this graph. Note that
+    /// a graph contains at most one instance of each primitive type.
+    #[inline]
+    pub fn primitives(&self) -> impl Iterator<Item = IrPrimitiveView<'_>> {
+        self.g
+            .node_indices()
+            .filter_map(|index| match self.g[index] {
+                IrGraphNode::Primitive(ty) => Some(IrPrimitiveView::new(self, index, ty)),
                 _ => None,
             })
     }

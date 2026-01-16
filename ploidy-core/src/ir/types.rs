@@ -80,6 +80,7 @@ pub enum PrimitiveIrType {
     F64,
     Bool,
     DateTime,
+    UnixTime,
     Date,
     Url,
     Uuid,

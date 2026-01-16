@@ -236,7 +236,7 @@ fn test_primitive_integer_formats() {
     "})
     .unwrap();
     let result = transform(&doc, IrTypeName::Schema("Timestamp"), &schema);
-    assert_matches!(result, IrType::Primitive(PrimitiveIrType::DateTime));
+    assert_matches!(result, IrType::Primitive(PrimitiveIrType::UnixTime));
 
     // `integer` without format defaults to `int32`.
     let schema: Schema = serde_yaml::from_str(indoc::indoc! {"
@@ -282,7 +282,7 @@ fn test_primitive_number_formats() {
     "})
     .unwrap();
     let result = transform(&doc, IrTypeName::Schema("FloatTime"), &schema);
-    assert_matches!(result, IrType::Primitive(PrimitiveIrType::DateTime));
+    assert_matches!(result, IrType::Primitive(PrimitiveIrType::UnixTime));
 
     // `number` without format defaults to `double`.
     let schema: Schema = serde_yaml::from_str(indoc::indoc! {"

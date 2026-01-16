@@ -484,10 +484,10 @@ impl<'context, 'a> IrTransformer<'context, 'a> {
                 }
                 (Ty::String, _) => PrimitiveIrType::String.into(),
                 (Ty::Integer, Some(Format::Int64)) => PrimitiveIrType::I64.into(),
-                (Ty::Integer, Some(Format::UnixTime)) => PrimitiveIrType::DateTime.into(),
+                (Ty::Integer, Some(Format::UnixTime)) => PrimitiveIrType::UnixTime.into(),
                 (Ty::Integer, Some(Format::Int32) | _) => PrimitiveIrType::I32.into(),
                 (Ty::Number, Some(Format::Float)) => PrimitiveIrType::F32.into(),
-                (Ty::Number, Some(Format::UnixTime)) => PrimitiveIrType::DateTime.into(),
+                (Ty::Number, Some(Format::UnixTime)) => PrimitiveIrType::UnixTime.into(),
                 (Ty::Number, Some(Format::Double) | _) => PrimitiveIrType::F64.into(),
                 (Ty::Boolean, _) => PrimitiveIrType::Bool.into(),
                 (Ty::Array, _) => {
