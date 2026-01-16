@@ -1,8 +1,7 @@
-use std::collections::BTreeSet;
-
 use indexmap::IndexMap;
 use itertools::Itertools;
 use ploidy_pointer::JsonPointee;
+use rustc_hash::FxHashSet;
 
 use crate::parse::{RefOrSchema, Schema};
 
@@ -23,7 +22,7 @@ pub fn all_fields<'a>(
     // Discriminators can be inherited, too, and can be duplicated
     // in both `properties` and `discriminator`.
 
-    let discriminators: BTreeSet<_> = std::iter::once(schema)
+    let discriminators: FxHashSet<_> = std::iter::once(schema)
         .chain(ancestors.iter().copied())
         .filter_map(|s| s.discriminator.as_ref())
         .map(|d| d.property_name.as_str())
@@ -103,23 +102,21 @@ fn collect_ancestors<'a>(
 ) -> (TransformContext<'a>, Vec<&'a Schema>) {
     let mut ancestors = Vec::new();
     let mut stack = schema.all_of.iter().flatten().rev().collect_vec();
-    let mut visited = BTreeSet::new();
-    let mut followed = BTreeSet::new();
+    let mut visited = FxHashSet::default();
 
     while let Some(item) = stack.pop() {
         let schema = match item {
             RefOrSchema::Ref(r) => {
-                if !visited.insert(&r.path) {
-                    // Reference already visited during this linearization;
-                    // skip to break the cycle.
-                    continue;
-                }
                 if context.skip_refs.contains(&r.path) {
                     // Reference is being processed by a transform up the stack;
                     // skip to break the cycle.
                     continue;
                 }
-                followed.insert(&r.path);
+                if !visited.insert(&r.path) {
+                    // Reference already visited during this linearization;
+                    // skip to break the cycle.
+                    continue;
+                }
                 let Some(schema) = context
                     .doc
                     .resolve(r.path.pointer().clone())
@@ -138,7 +135,7 @@ fn collect_ancestors<'a>(
         ancestors.push(schema);
     }
 
-    (context.with_followed(&followed), ancestors)
+    (context.with_followed(&visited), ancestors)
 }
 
 #[cfg(test)]

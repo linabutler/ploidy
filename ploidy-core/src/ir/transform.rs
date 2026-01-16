@@ -1,7 +1,6 @@
-use std::collections::{BTreeMap, BTreeSet};
-
 use itertools::Itertools;
 use ploidy_pointer::JsonPointee;
+use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::parse::{AdditionalProperties, ComponentRef, Document, Format, RefOrSchema, Schema, Ty};
 
@@ -34,7 +33,7 @@ pub struct TransformContext<'a> {
     /// The set of schema references to skip when traversing `allOf` references.
     /// These are already being processed by a transformation further up the stack,
     /// and should be skipped to avoid infinite recursion.
-    pub skip_refs: BTreeSet<&'a ComponentRef>,
+    pub skip_refs: FxHashSet<&'a ComponentRef>,
 }
 
 impl<'a> TransformContext<'a> {
@@ -42,13 +41,13 @@ impl<'a> TransformContext<'a> {
     pub fn new(doc: &'a Document) -> Self {
         Self {
             doc,
-            skip_refs: BTreeSet::new(),
+            skip_refs: FxHashSet::default(),
         }
     }
 
     /// Creates a new context with the same document, and
     /// additional schema references to skip.
-    pub fn with_followed(&self, followed: &BTreeSet<&'a ComponentRef>) -> Self {
+    pub fn with_followed(&self, followed: &FxHashSet<&'a ComponentRef>) -> Self {
         Self {
             doc: self.doc,
             skip_refs: self.skip_refs.union(followed).copied().collect(),
@@ -98,14 +97,13 @@ impl<'context, 'a> IrTransformer<'context, 'a> {
         else {
             return Err(self);
         };
-        let inverted: BTreeMap<_, Vec<_>> =
-            discriminator
-                .mapping
-                .iter()
-                .fold(BTreeMap::new(), |mut mapping, (tag, reference)| {
-                    mapping.entry(reference).or_default().push(tag.as_str());
-                    mapping
-                });
+        let inverted: FxHashMap<_, Vec<_>> = discriminator.mapping.iter().fold(
+            FxHashMap::default(),
+            |mut mapping, (tag, reference)| {
+                mapping.entry(reference).or_default().push(tag.as_str());
+                mapping
+            },
+        );
         let variants = one_of
             .iter()
             .filter_map(|schema| match schema {

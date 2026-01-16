@@ -1,12 +1,10 @@
-use std::borrow::Cow;
-use std::collections::btree_map::Entry;
-use std::str::CharIndices;
-use std::{collections::BTreeMap, iter::Peekable};
+use std::{borrow::Cow, collections::hash_map::Entry, iter::Peekable, str::CharIndices};
 
 use bumpalo::{
     Bump,
     collections::{CollectIn, Vec as BumpVec},
 };
+use rustc_hash::FxHashMap;
 use unicase::UniCase;
 
 /// Deduplicates names across case conventions.
@@ -63,14 +61,14 @@ impl UniqueNames {
 #[derive(Debug)]
 pub struct UniqueNamesScope<'a> {
     arena: &'a Bump,
-    space: BTreeMap<&'a [UniCase<&'a str>], usize>,
+    space: FxHashMap<&'a [UniCase<&'a str>], usize>,
 }
 
 impl<'a> UniqueNamesScope<'a> {
     fn new(arena: &'a Bump) -> Self {
         Self {
             arena,
-            space: BTreeMap::new(),
+            space: FxHashMap::default(),
         }
     }
 
@@ -86,7 +84,7 @@ impl<'a> UniqueNamesScope<'a> {
                     .map(UniCase::new)
                     .collect_in::<BumpVec<_>>(arena)
             })
-            .fold(BTreeMap::new(), |mut names, segments| {
+            .fold(FxHashMap::default(), |mut names, segments| {
                 // Setting the count to 1 automatically filters out duplicates.
                 names.insert(segments.into_bump_slice(), 1);
                 names
