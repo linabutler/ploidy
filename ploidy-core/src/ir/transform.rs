@@ -1,9 +1,9 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use itertools::Itertools;
 use ploidy_pointer::JsonPointee;
 
-use crate::parse::{AdditionalProperties, Document, Format, RefOrSchema, Schema, Ty};
+use crate::parse::{AdditionalProperties, ComponentRef, Document, Format, RefOrSchema, Schema, Ty};
 
 use super::{
     fields::{IrSchemaField, all_fields},
@@ -21,19 +21,67 @@ pub fn transform<'a>(
     name: impl Into<IrTypeName<'a>>,
     schema: &'a Schema,
 ) -> IrType<'a> {
-    IrTransformer::new(doc, name.into(), schema).transform()
+    let context = TransformContext::new(doc);
+    transform_with_context(&context, name, schema)
+}
+
+/// Context for the [`IrTransformer`].
+#[derive(Debug)]
+pub struct TransformContext<'a> {
+    /// The document being transformed.
+    pub doc: &'a Document,
+
+    /// The set of schema references to skip when traversing `allOf` references.
+    /// These are already being processed by a transformation further up the stack,
+    /// and should be skipped to avoid infinite recursion.
+    pub skip_refs: BTreeSet<&'a ComponentRef>,
+}
+
+impl<'a> TransformContext<'a> {
+    /// Creates a new context for the given document.
+    pub fn new(doc: &'a Document) -> Self {
+        Self {
+            doc,
+            skip_refs: BTreeSet::new(),
+        }
+    }
+
+    /// Creates a new context with the same document, and
+    /// additional schema references to skip.
+    pub fn with_followed(&self, followed: &BTreeSet<&'a ComponentRef>) -> Self {
+        Self {
+            doc: self.doc,
+            skip_refs: self.skip_refs.union(followed).copied().collect(),
+        }
+    }
+}
+
+fn transform_with_context<'context, 'a>(
+    context: &'context TransformContext<'a>,
+    name: impl Into<IrTypeName<'a>>,
+    schema: &'a Schema,
+) -> IrType<'a> {
+    IrTransformer::new(context, name.into(), schema).transform()
 }
 
 #[derive(Debug)]
-struct IrTransformer<'a> {
-    doc: &'a Document,
+struct IrTransformer<'context, 'a> {
+    context: &'context TransformContext<'a>,
     name: IrTypeName<'a>,
     schema: &'a Schema,
 }
 
-impl<'a> IrTransformer<'a> {
-    fn new(doc: &'a Document, name: IrTypeName<'a>, schema: &'a Schema) -> Self {
-        Self { doc, name, schema }
+impl<'context, 'a> IrTransformer<'context, 'a> {
+    fn new(
+        context: &'context TransformContext<'a>,
+        name: IrTypeName<'a>,
+        schema: &'a Schema,
+    ) -> Self {
+        Self {
+            context,
+            name,
+            schema,
+        }
     }
 
     fn transform(self) -> IrType<'a> {
@@ -108,7 +156,7 @@ impl<'a> IrTransformer<'a> {
                                 path
                             }
                         };
-                        Some(transform(self.doc, path, schema))
+                        Some(transform_with_context(self.context, path, schema))
                     }
                 };
                 ty.map(|ty| {
@@ -167,6 +215,7 @@ impl<'a> IrTransformer<'a> {
                         let name = IrStructFieldName::Name(r.path.name());
                         let ty = IrType::Ref(&r.path);
                         let desc = self
+                            .context
                             .doc
                             .resolve(r.path.pointer().clone())
                             .ok()
@@ -189,7 +238,7 @@ impl<'a> IrTransformer<'a> {
                                 path
                             }
                         };
-                        let ty = transform(self.doc, path, schema);
+                        let ty = transform_with_context(self.context, path, schema);
                         let desc = schema.description.as_deref();
                         (name, ty, desc)
                     }
@@ -210,70 +259,76 @@ impl<'a> IrTransformer<'a> {
 
         // Collect inherited and own fields from `allOf` and `properties`,
         // if present.
-        let regular_fields = all_fields(self.doc, self.schema).map(|(field_name, field)| {
-            let info = field.info();
-            let ty = match info.schema {
-                RefOrSchema::Ref(r) => IrType::Ref(&r.path),
-                RefOrSchema::Other(schema) => {
-                    let path = match &self.name {
-                        IrTypeName::Schema(name) => InlineIrTypePath {
-                            root: InlineIrTypePathRoot::Type(name),
-                            segments: vec![InlineIrTypePathSegment::Field(
-                                IrStructFieldName::Name(field_name),
-                            )],
-                        },
-                        IrTypeName::Inline(path) => {
-                            let mut path = path.clone();
-                            path.segments.push(InlineIrTypePathSegment::Field(
-                                IrStructFieldName::Name(field_name),
-                            ));
-                            path
-                        }
-                    };
-                    transform(self.doc, path, schema)
-                }
-            };
-            let description = match info.schema {
-                RefOrSchema::Other(schema) => schema.description.as_deref(),
-                RefOrSchema::Ref(r) => self
-                    .doc
-                    .resolve(r.path.pointer().clone())
-                    .ok()
-                    .and_then(|p| p.downcast_ref::<Schema>())
-                    .and_then(|schema| schema.description.as_deref()),
-            };
-            let nullable = match info.schema {
-                RefOrSchema::Other(schema) if schema.nullable => true,
-                RefOrSchema::Ref(r) => {
-                    if let Ok(resolved) = self.doc.resolve(r.path.pointer().clone())
-                        && let Some(schema) = resolved.downcast_ref::<Schema>()
-                        && schema.nullable
-                    {
-                        true
-                    } else {
-                        false
+        let (inner_context, field_infos) = all_fields(self.context, self.schema);
+
+        let regular_fields = field_infos
+            .into_iter()
+            .map(|(field_name, field)| {
+                let info = field.info();
+                let ty = match info.schema {
+                    RefOrSchema::Ref(r) => IrType::Ref(&r.path),
+                    RefOrSchema::Other(schema) => {
+                        let path = match &self.name {
+                            IrTypeName::Schema(name) => InlineIrTypePath {
+                                root: InlineIrTypePathRoot::Type(name),
+                                segments: vec![InlineIrTypePathSegment::Field(
+                                    IrStructFieldName::Name(field_name),
+                                )],
+                            },
+                            IrTypeName::Inline(path) => {
+                                let mut path = path.clone();
+                                path.segments.push(InlineIrTypePathSegment::Field(
+                                    IrStructFieldName::Name(field_name),
+                                ));
+                                path
+                            }
+                        };
+                        transform_with_context(&inner_context, path, schema)
                     }
+                };
+                let description = match info.schema {
+                    RefOrSchema::Other(schema) => schema.description.as_deref(),
+                    RefOrSchema::Ref(r) => self
+                        .context
+                        .doc
+                        .resolve(r.path.pointer().clone())
+                        .ok()
+                        .and_then(|p| p.downcast_ref::<Schema>())
+                        .and_then(|schema| schema.description.as_deref()),
+                };
+                let nullable = match info.schema {
+                    RefOrSchema::Other(schema) if schema.nullable => true,
+                    RefOrSchema::Ref(r) => {
+                        if let Ok(resolved) = self.context.doc.resolve(r.path.pointer().clone())
+                            && let Some(schema) = resolved.downcast_ref::<Schema>()
+                            && schema.nullable
+                        {
+                            true
+                        } else {
+                            false
+                        }
+                    }
+                    _ => false,
+                };
+                // Wrap the type in `Optional` if the field is either
+                // explicitly nullable, or implicitly optional. The `required`
+                // flag distinguishes between the two for codegen.
+                let ty = if nullable || !info.required {
+                    IrType::Optional(ty.into())
+                } else {
+                    ty
+                };
+                IrStructField {
+                    name: IrStructFieldName::Name(field_name),
+                    ty,
+                    required: info.required,
+                    description,
+                    inherited: matches!(field, IrSchemaField::Inherited(_)),
+                    discriminator: info.discriminator,
+                    flattened: info.flattened,
                 }
-                _ => false,
-            };
-            // Wrap the type in `Optional` if the field is either
-            // explicitly nullable, or implicitly optional. The `required`
-            // flag distinguishes between the two for codegen.
-            let ty = if nullable || !info.required {
-                IrType::Optional(ty.into())
-            } else {
-                ty
-            };
-            IrStructField {
-                name: IrStructFieldName::Name(field_name),
-                ty,
-                required: info.required,
-                description,
-                inherited: matches!(field, IrSchemaField::Inherited(_)),
-                discriminator: info.discriminator,
-                flattened: info.flattened,
-            }
-        });
+            })
+            .collect_vec();
 
         // Combine all the fields: regular properties first,
         // followed by the flattened `anyOf` fields. This ordering
@@ -335,8 +390,11 @@ impl<'a> IrTransformer<'a> {
         if self.schema.properties.is_none() && self.schema.all_of.is_none() {
             return Err(self);
         }
-        let all = all_fields(self.doc, self.schema);
-        let fields = all
+
+        let (inner_context, field_infos) = all_fields(self.context, self.schema);
+
+        let fields = field_infos
+            .into_iter()
             .map(|(field_name, field)| {
                 let info = field.info();
                 let ty = match info.schema {
@@ -357,12 +415,13 @@ impl<'a> IrTransformer<'a> {
                                 path
                             }
                         };
-                        transform(self.doc, path, schema)
+                        transform_with_context(&inner_context, path, schema)
                     }
                 };
                 let description = match info.schema {
                     RefOrSchema::Other(schema) => schema.description.as_deref(),
                     RefOrSchema::Ref(r) => self
+                        .context
                         .doc
                         .resolve(r.path.pointer().clone())
                         .ok()
@@ -372,7 +431,7 @@ impl<'a> IrTransformer<'a> {
                 let nullable = match info.schema {
                     RefOrSchema::Other(schema) if schema.nullable => true,
                     RefOrSchema::Ref(r) => {
-                        if let Ok(resolved) = self.doc.resolve(r.path.pointer().clone())
+                        if let Ok(resolved) = self.context.doc.resolve(r.path.pointer().clone())
                             && let Some(schema) = resolved.downcast_ref::<Schema>()
                             && schema.nullable
                         {
@@ -448,7 +507,7 @@ impl<'a> IrTransformer<'a> {
                                     path
                                 }
                             };
-                            transform(self.doc, path, schema)
+                            transform_with_context(self.context, path, schema)
                         }
                         None => IrType::Any,
                     };
@@ -472,7 +531,7 @@ impl<'a> IrTransformer<'a> {
                                     path
                                 }
                             };
-                            IrType::Map(transform(self.doc, path, schema).into())
+                            IrType::Map(transform_with_context(self.context, path, schema).into())
                         }
                         Some(AdditionalProperties::Bool(true)) => IrType::Map(IrType::Any.into()),
                         _ => IrType::Any,

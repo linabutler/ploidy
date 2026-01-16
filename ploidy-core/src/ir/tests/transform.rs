@@ -1389,7 +1389,7 @@ fn test_any_of_nullable_refs() {
 }
 
 #[test]
-fn test_any_of_with_allof() {
+fn test_any_of_with_all_of() {
     let doc = Document::from_yaml(indoc::indoc! {"
         openapi: 3.0.0
         info:
@@ -1991,4 +1991,168 @@ fn test_inline_tagged_union_in_struct_field() {
     };
     assert_eq!(&*cat_variant.aliases, ["cat"]);
     assert_eq!(&*dog_variant.aliases, ["dog"]);
+}
+
+// MARK: Recursive schemas
+
+#[test]
+fn test_recursive_all_of_ref_nullable() {
+    // Tests that a schema with `nullable: true` + `allOf` + `$ref`
+    // with a self-referential schema doesn't cause a stack overflow.
+    let doc = Document::from_yaml(indoc::indoc! {"
+        openapi: 3.0.0
+        info:
+          title: Test API
+          version: 1.0.0
+        paths: {}
+        components:
+          schemas:
+            Node:
+              type: object
+              properties:
+                value:
+                  type: string
+                next:
+                  nullable: true
+                  allOf:
+                    - $ref: '#/components/schemas/Node'
+              required:
+                - value
+                - next
+    "})
+    .unwrap();
+
+    let schema = &doc.components.as_ref().unwrap().schemas["Node"];
+    let result = transform(&doc, IrTypeName::Schema("Node"), schema);
+
+    // Should successfully produce a struct.
+    let struct_ = match result {
+        IrType::Schema(SchemaIrType::Struct("Node", struct_)) => struct_,
+        other => panic!("expected struct `Node`; got `{other:?}`"),
+    };
+
+    // Verify the struct has the expected fields.
+    assert_matches!(
+        &*struct_.fields,
+        [
+            IrStructField {
+                name: IrStructFieldName::Name("value"),
+                ty: IrType::Primitive(PrimitiveIrType::String),
+                required: true,
+                ..
+            },
+            IrStructField {
+                name: IrStructFieldName::Name("next"),
+                ty: IrType::Optional(_),
+                required: true,
+                ..
+            },
+        ],
+    );
+}
+
+#[test]
+fn test_recursive_all_of_ref() {
+    // Similar to the above, but without `nullable: true`.
+    let doc = Document::from_yaml(indoc::indoc! {"
+        openapi: 3.0.0
+        info:
+          title: Test API
+          version: 1.0.0
+        paths: {}
+        components:
+          schemas:
+            Node:
+              type: object
+              properties:
+                value:
+                  type: string
+                next:
+                  allOf:
+                    - $ref: '#/components/schemas/Node'
+    "})
+    .unwrap();
+
+    let schema = &doc.components.as_ref().unwrap().schemas["Node"];
+    let result = transform(&doc, IrTypeName::Schema("Node"), schema);
+
+    // Should successfully produce a struct.
+    let struct_ = match result {
+        IrType::Schema(SchemaIrType::Struct("Node", struct_)) => struct_,
+        other => panic!("expected struct `Node`; got `{other:?}`"),
+    };
+
+    // Verify the struct has the expected fields.
+    assert_matches!(
+        &*struct_.fields,
+        [
+            IrStructField {
+                name: IrStructFieldName::Name("value"),
+                ty: IrType::Optional(_),
+                required: false,
+                ..
+            },
+            IrStructField {
+                name: IrStructFieldName::Name("next"),
+                ty: IrType::Optional(_),
+                required: false,
+                ..
+            },
+        ],
+    );
+}
+
+#[test]
+fn test_recursive_multi_all_of_ref_no_stack_overflow() {
+    // Multiple elements in `allOf`, one of which is a self-reference.
+    let doc = Document::from_yaml(indoc::indoc! {"
+        openapi: 3.0.0
+        info:
+          title: Test API
+          version: 1.0.0
+        paths: {}
+        components:
+          schemas:
+            Mixin:
+              type: object
+              properties:
+                extra:
+                  type: string
+            Node:
+              type: object
+              properties:
+                value:
+                  type: string
+                next:
+                  allOf:
+                    - $ref: '#/components/schemas/Node'
+                    - $ref: '#/components/schemas/Mixin'
+    "})
+    .unwrap();
+
+    let schema = &doc.components.as_ref().unwrap().schemas["Node"];
+    let result = transform(&doc, IrTypeName::Schema("Node"), schema);
+
+    // Should successfully produce a struct.
+    let struct_ = match result {
+        IrType::Schema(SchemaIrType::Struct("Node", struct_)) => struct_,
+        other => panic!("expected struct `Node`; got `{other:?}`"),
+    };
+
+    // The struct should have `value` and `next` fields.
+    assert_eq!(struct_.fields.len(), 2);
+    assert_matches!(
+        &struct_.fields[0],
+        IrStructField {
+            name: IrStructFieldName::Name("value"),
+            ..
+        }
+    );
+    assert_matches!(
+        &struct_.fields[1],
+        IrStructField {
+            name: IrStructFieldName::Name("next"),
+            ..
+        }
+    );
 }

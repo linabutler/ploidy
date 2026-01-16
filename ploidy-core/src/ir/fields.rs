@@ -4,15 +4,24 @@ use indexmap::IndexMap;
 use itertools::Itertools;
 use ploidy_pointer::JsonPointee;
 
-use crate::parse::{ComponentRef, Document, RefOrSchema, Schema};
+use crate::parse::{RefOrSchema, Schema};
 
-/// Returns an iterator over all the fields of this schema,
-/// including inherited fields.
+use super::transform::TransformContext;
+
+/// Returns all the fields of this schema, including inherited fields.
+///
+/// The `skip_refs` parameter contains references to skip when traversing
+/// `allOf` chains. This is used to break cycles when a schema's field
+/// contains an inline schema that references back to an ancestor.
 pub fn all_fields<'a>(
-    doc: &'a Document,
+    context: &TransformContext<'a>,
     schema: &'a Schema,
-) -> impl Iterator<Item = (&'a str, IrSchemaField<'a>)> {
-    let ancestors = Ancestors::new(doc, schema).collect_vec();
+) -> (TransformContext<'a>, Vec<(&'a str, IrSchemaField<'a>)>) {
+    let (context, ancestors) = collect_ancestors(context, schema);
+
+    // Now, determine which fields are own, and which are inherited.
+    // Discriminators can be inherited, too, and can be duplicated
+    // in both `properties` and `discriminator`.
 
     let discriminators: BTreeSet<_> = std::iter::once(schema)
         .chain(ancestors.iter().copied())
@@ -57,7 +66,8 @@ pub fn all_fields<'a>(
         }
     }
 
-    itertools::chain!(inherited, own)
+    let fields = itertools::chain!(inherited, own).collect();
+    (context, fields)
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -82,69 +92,62 @@ pub struct IrSchemaFieldInfo<'a> {
     pub flattened: bool,
 }
 
-/// An iterator over all the ancestors of a schema, in linear order.
-pub struct Ancestors<'a> {
-    doc: &'a Document,
-    stack: Vec<&'a RefOrSchema>,
-    visited: BTreeSet<&'a ComponentRef>,
-}
+/// Collects all ancestors of a schema by traversing their `allOf` references.
+///
+/// Returns (new context, ancestors), where the new context has the
+/// updated set of references followed during traversal; and the list of ancestors
+/// contains reached schemas in linearized order.
+fn collect_ancestors<'a>(
+    context: &TransformContext<'a>,
+    schema: &'a Schema,
+) -> (TransformContext<'a>, Vec<&'a Schema>) {
+    let mut ancestors = Vec::new();
+    let mut stack = schema.all_of.iter().flatten().rev().collect_vec();
+    let mut visited = BTreeSet::new();
+    let mut followed = BTreeSet::new();
 
-impl<'a> Ancestors<'a> {
-    #[inline]
-    pub fn new(doc: &'a Document, schema: &'a Schema) -> Self {
-        let stack = match &schema.all_of {
-            // Push parents in reverse, so that the iterator will pop and
-            // visit them in left-to-right order.
-            Some(all_of) => all_of.iter().rev().collect(),
-            None => vec![],
-        };
-        Self {
-            doc,
-            stack,
-            visited: BTreeSet::new(),
-        }
-    }
-}
-
-impl<'a> Iterator for Ancestors<'a> {
-    type Item = &'a Schema;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        while let Some(item) = self.stack.pop() {
-            let schema = match item {
-                RefOrSchema::Ref(r) => {
-                    if !self.visited.insert(&r.path) {
-                        // Skip cycles.
-                        continue;
-                    }
-                    let Some(schema) = self
-                        .doc
-                        .resolve(r.path.pointer().clone())
-                        .ok()
-                        .and_then(|p| p.downcast_ref::<Schema>())
-                    else {
-                        continue;
-                    };
-                    schema
+    while let Some(item) = stack.pop() {
+        let schema = match item {
+            RefOrSchema::Ref(r) => {
+                if !visited.insert(&r.path) {
+                    // Reference already visited during this linearization;
+                    // skip to break the cycle.
+                    continue;
                 }
-                RefOrSchema::Other(schema) => schema.as_ref(),
-            };
-            if let Some(all_of) = &schema.all_of {
-                self.stack.extend(all_of.iter().rev());
+                if context.skip_refs.contains(&r.path) {
+                    // Reference is being processed by a transform up the stack;
+                    // skip to break the cycle.
+                    continue;
+                }
+                followed.insert(&r.path);
+                let Some(schema) = context
+                    .doc
+                    .resolve(r.path.pointer().clone())
+                    .ok()
+                    .and_then(|p| p.downcast_ref::<Schema>())
+                else {
+                    continue;
+                };
+                schema
             }
-            return Some(schema);
+            RefOrSchema::Other(schema) => schema.as_ref(),
+        };
+        if let Some(all_of) = &schema.all_of {
+            stack.extend(all_of.iter().rev());
         }
-        None
+        ancestors.push(schema);
     }
+
+    (context.with_followed(&followed), ancestors)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    use itertools::Itertools;
+    use crate::{parse::Document, tests::assert_matches};
 
-    use crate::tests::assert_matches;
+    // MARK: Inheritance
 
     #[test]
     fn test_multi_level_inheritance() {
@@ -175,11 +178,11 @@ mod tests {
         "})
         .unwrap();
 
-        let user_schema = &doc.components.as_ref().unwrap().schemas["User"];
-        let all_fields = all_fields(&doc, user_schema).collect_vec();
+        let schema = &doc.components.as_ref().unwrap().schemas["User"];
+        let (_, fields) = all_fields(&TransformContext::new(&doc), schema);
 
         assert_matches!(
-            &*all_fields,
+            &*fields,
             [
                 ("name", IrSchemaField::Inherited(_)),
                 ("id", IrSchemaField::Inherited(_)),
@@ -219,11 +222,11 @@ mod tests {
         "})
         .unwrap();
 
-        let product_schema = &doc.components.as_ref().unwrap().schemas["Product"];
-        let all_fields = all_fields(&doc, product_schema).collect_vec();
+        let schema = &doc.components.as_ref().unwrap().schemas["Product"];
+        let (_, fields) = all_fields(&TransformContext::new(&doc), schema);
 
         assert_matches!(
-            &*all_fields,
+            &*fields,
             [
                 ("name", IrSchemaField::Inherited(_)),
                 ("id", IrSchemaField::Inherited(_)),
@@ -255,11 +258,11 @@ mod tests {
         "})
         .unwrap();
 
-        let child_schema = &doc.components.as_ref().unwrap().schemas["Child"];
-        let all_fields = all_fields(&doc, child_schema).collect_vec();
+        let schema = &doc.components.as_ref().unwrap().schemas["Child"];
+        let (_, fields) = all_fields(&TransformContext::new(&doc), schema);
 
         assert_matches!(
-            &*all_fields,
+            &*fields,
             [
                 ("parent_field", IrSchemaField::Inherited(_)),
                 ("child_field", IrSchemaField::Own(_))
@@ -291,11 +294,73 @@ mod tests {
         "})
         .unwrap();
 
-        let child_schema = &doc.components.as_ref().unwrap().schemas["Child"];
-        let all_fields = all_fields(&doc, child_schema).collect_vec();
+        let schema = &doc.components.as_ref().unwrap().schemas["Child"];
+        let (_, fields) = all_fields(&TransformContext::new(&doc), schema);
 
-        assert_matches!(&*all_fields, [("name", IrSchemaField::Own(_))]);
+        assert_matches!(&*fields, [("name", IrSchemaField::Own(_))]);
     }
+
+    #[test]
+    fn test_empty_parent_schema_handling() {
+        // Inheriting from a parent with no properties should work correctly.
+        let doc = Document::from_yaml(indoc::indoc! {"
+            openapi: 3.0.0
+            info:
+              title: Test
+              version: 1.0.0
+            components:
+              schemas:
+                EmptyParent:
+                  type: object
+                Child:
+                  allOf:
+                    - $ref: '#/components/schemas/EmptyParent'
+                  properties:
+                    child_field:
+                      type: string
+        "})
+        .unwrap();
+
+        let schema = &doc.components.as_ref().unwrap().schemas["Child"];
+        let (_, fields) = all_fields(&TransformContext::new(&doc), schema);
+
+        assert_matches!(&*fields, [("child_field", IrSchemaField::Own(_))]);
+    }
+
+    #[test]
+    fn test_inline_all_of_handling() {
+        // `allOf` with inline schemas should be processed correctly.
+        let doc = Document::from_yaml(indoc::indoc! {"
+            openapi: 3.0.0
+            info:
+              title: Test
+              version: 1.0.0
+            components:
+              schemas:
+                Child:
+                  allOf:
+                    - properties:
+                        inline_field:
+                          type: string
+                  properties:
+                    child_field:
+                      type: integer
+        "})
+        .unwrap();
+
+        let schema = &doc.components.as_ref().unwrap().schemas["Child"];
+        let (_, fields) = all_fields(&TransformContext::new(&doc), schema);
+
+        assert_matches!(
+            &*fields,
+            [
+                ("inline_field", IrSchemaField::Inherited(_)),
+                ("child_field", IrSchemaField::Own(_))
+            ]
+        );
+    }
+
+    // MARK: Required fields
 
     #[test]
     fn test_required_field_inheritance() {
@@ -327,11 +392,11 @@ mod tests {
         "})
         .unwrap();
 
-        let child_schema = &doc.components.as_ref().unwrap().schemas["Child"];
-        let all_fields = all_fields(&doc, child_schema).collect_vec();
+        let schema = &doc.components.as_ref().unwrap().schemas["Child"];
+        let (_, fields) = all_fields(&TransformContext::new(&doc), schema);
 
         // Check inherited required field.
-        let id_field = all_fields
+        let id_field = fields
             .iter()
             .find(|(n, _)| *n == "id")
             .map(|(_, f)| f.info())
@@ -339,7 +404,7 @@ mod tests {
         assert!(id_field.required);
 
         // Check inherited optional field.
-        let optional_field = all_fields
+        let optional_field = fields
             .iter()
             .find(|(n, _)| *n == "optional_field")
             .map(|(_, f)| f.info())
@@ -347,72 +412,12 @@ mod tests {
         assert!(!optional_field.required);
 
         // Check own required field.
-        let child_required = all_fields
+        let child_required = fields
             .iter()
             .find(|(n, _)| *n == "child_required")
             .map(|(_, f)| f.info())
             .unwrap();
         assert!(child_required.required);
-    }
-
-    #[test]
-    fn test_empty_parent_schema_handling() {
-        // Inheriting from a parent with no properties should work correctly.
-        let doc = Document::from_yaml(indoc::indoc! {"
-            openapi: 3.0.0
-            info:
-              title: Test
-              version: 1.0.0
-            components:
-              schemas:
-                EmptyParent:
-                  type: object
-                Child:
-                  allOf:
-                    - $ref: '#/components/schemas/EmptyParent'
-                  properties:
-                    child_field:
-                      type: string
-        "})
-        .unwrap();
-
-        let child_schema = &doc.components.as_ref().unwrap().schemas["Child"];
-        let all_fields = all_fields(&doc, child_schema).collect_vec();
-
-        assert_matches!(&*all_fields, [("child_field", IrSchemaField::Own(_))]);
-    }
-
-    #[test]
-    fn test_inline_allof_handling() {
-        // `allOf` with inline schemas should be processed correctly.
-        let doc = Document::from_yaml(indoc::indoc! {"
-            openapi: 3.0.0
-            info:
-              title: Test
-              version: 1.0.0
-            components:
-              schemas:
-                Child:
-                  allOf:
-                    - properties:
-                        inline_field:
-                          type: string
-                  properties:
-                    child_field:
-                      type: integer
-        "})
-        .unwrap();
-
-        let child_schema = &doc.components.as_ref().unwrap().schemas["Child"];
-        let all_fields = all_fields(&doc, child_schema).collect_vec();
-
-        assert_matches!(
-            &*all_fields,
-            [
-                ("inline_field", IrSchemaField::Inherited(_)),
-                ("child_field", IrSchemaField::Own(_))
-            ]
-        );
     }
 
     #[test]
@@ -445,23 +450,25 @@ mod tests {
         "})
         .unwrap();
 
-        let child_schema = &doc.components.as_ref().unwrap().schemas["Child"];
-        let all_fields = all_fields(&doc, child_schema).collect_vec();
+        let schema = &doc.components.as_ref().unwrap().schemas["Child"];
+        let (_, fields) = all_fields(&TransformContext::new(&doc), schema);
 
-        let own_required = all_fields
+        let own_required = fields
             .iter()
             .find(|(n, _)| *n == "own_required")
             .map(|(_, f)| f.info())
             .unwrap();
         assert!(own_required.required);
 
-        let own_optional = all_fields
+        let own_optional = fields
             .iter()
             .find(|(n, _)| *n == "own_optional")
             .map(|(_, f)| f.info())
             .unwrap();
         assert!(!own_optional.required);
     }
+
+    // MARK: Discriminators
 
     #[test]
     fn test_discriminator_field_detection() {
@@ -489,11 +496,11 @@ mod tests {
         "})
         .unwrap();
 
-        let child_schema = &doc.components.as_ref().unwrap().schemas["Child"];
-        let all_fields = all_fields(&doc, child_schema).collect_vec();
+        let schema = &doc.components.as_ref().unwrap().schemas["Child"];
+        let (_, fields) = all_fields(&TransformContext::new(&doc), schema);
 
         // The `type` field should be marked as the discriminator.
-        let type_field = all_fields
+        let type_field = fields
             .iter()
             .find(|(n, _)| *n == "type")
             .map(|(_, f)| f.info())
@@ -501,7 +508,7 @@ mod tests {
         assert!(type_field.discriminator);
 
         // The `name` field should not be marked as a discriminator.
-        let name_field = all_fields
+        let name_field = fields
             .iter()
             .find(|(n, _)| *n == "name")
             .map(|(_, f)| f.info())
@@ -541,18 +548,18 @@ mod tests {
         "})
         .unwrap();
 
-        let child_schema = &doc.components.as_ref().unwrap().schemas["Child"];
-        let all_fields = all_fields(&doc, child_schema).collect_vec();
+        let schema = &doc.components.as_ref().unwrap().schemas["Child"];
+        let (_, fields) = all_fields(&TransformContext::new(&doc), schema);
 
         // Both discriminator fields should be marked.
-        let type1_field = all_fields
+        let type1_field = fields
             .iter()
             .find(|(n, _)| *n == "type1")
             .map(|(_, f)| f.info())
             .unwrap();
         assert!(type1_field.discriminator);
 
-        let type2_field = all_fields
+        let type2_field = fields
             .iter()
             .find(|(n, _)| *n == "type2")
             .map(|(_, f)| f.info())
@@ -560,11 +567,111 @@ mod tests {
         assert!(type2_field.discriminator);
 
         // The `name` field should not be marked as a discriminator.
-        let name_field = all_fields
+        let name_field = fields
             .iter()
             .find(|(n, _)| *n == "name")
             .map(|(_, f)| f.info())
             .unwrap();
         assert!(!name_field.discriminator);
+    }
+
+    #[test]
+    fn test_own_discriminator_field() {
+        // The schema's own discriminator should also be detected.
+        let doc = Document::from_yaml(indoc::indoc! {"
+            openapi: 3.0.0
+            info:
+              title: Test
+              version: 1.0.0
+            components:
+              schemas:
+                Schema:
+                  properties:
+                    kind:
+                      type: string
+                    name:
+                      type: string
+                  discriminator:
+                    propertyName: kind
+        "})
+        .unwrap();
+
+        let schema = &doc.components.as_ref().unwrap().schemas["Schema"];
+        let (_, fields) = all_fields(&TransformContext::new(&doc), schema);
+
+        // The `kind` field should be marked as the discriminator.
+        let kind_field = fields
+            .iter()
+            .find(|(n, _)| *n == "kind")
+            .map(|(_, f)| f.info())
+            .unwrap();
+        assert!(kind_field.discriminator);
+
+        // The `name` field should not be marked as a discriminator.
+        let name_field = fields
+            .iter()
+            .find(|(n, _)| *n == "name")
+            .map(|(_, f)| f.info())
+            .unwrap();
+        assert!(!name_field.discriminator);
+    }
+
+    // MARK: Cycle detection
+
+    #[test]
+    fn test_skip_refs_breaks_cycle() {
+        // When a reference is in `skip_refs`, it should be skipped
+        // to avoid infinite recursion.
+        let doc = Document::from_yaml(indoc::indoc! {"
+            openapi: 3.0.0
+            info:
+              title: Test
+              version: 1.0.0
+            components:
+              schemas:
+                Node:
+                  allOf:
+                    - $ref: '#/components/schemas/Node'
+                  properties:
+                    value:
+                      type: string
+        "})
+        .unwrap();
+
+        let schema = &doc.components.as_ref().unwrap().schemas["Node"];
+        let (_, fields) = all_fields(&TransformContext::new(&doc), schema);
+
+        // The self-reference should be skipped; only own fields remain.
+        assert_matches!(&*fields, [("value", IrSchemaField::Own(_))]);
+    }
+
+    #[test]
+    fn test_context_updated_with_followed_refs() {
+        // The returned context should include the references that were followed.
+        let doc = Document::from_yaml(indoc::indoc! {"
+            openapi: 3.0.0
+            info:
+              title: Test
+              version: 1.0.0
+            components:
+              schemas:
+                Parent:
+                  properties:
+                    parent_field:
+                      type: string
+                Child:
+                  allOf:
+                    - $ref: '#/components/schemas/Parent'
+                  properties:
+                    child_field:
+                      type: string
+        "})
+        .unwrap();
+
+        let schema = &doc.components.as_ref().unwrap().schemas["Child"];
+        let (new_context, _) = all_fields(&TransformContext::new(&doc), schema);
+
+        // The context should now include the `Parent` reference.
+        assert_eq!(new_context.skip_refs.len(), 1);
     }
 }
