@@ -46,10 +46,6 @@ This produces a ready-to-use crate that includes:
 * A `types` module, which contains Rust types for every schema defined in your spec.
 * A `client` module, with a RESTful HTTP client that provides async methods for every operation in your spec.
 
-#### Minimum Rust version for generated code
-
-The MSRV for the generated crate is **Rust 1.85.0**, the first stable release to support the [2024 edition](https://doc.rust-lang.org/edition-guide/rust-2024/index.html).
-
 #### Options
 
 | Flag | Description |
@@ -57,6 +53,31 @@ The MSRV for the generated crate is **Rust 1.85.0**, the first stable release to
 | `-c`, `--check` | Run `cargo check` on the generated code |
 | `--name <NAME>` | Set or override the generated package name. If not passed, and a `Cargo.toml` already exists in the output directory, preserves the existing `package.name`; otherwise, defaults to the name of the output directory |
 | `--version <bump-major, bump-minor, bump-patch>` | If a `Cargo.toml` already exists in the output directory, increments the major, minor, or patch component of `package.version`. If not passed, preserves the existing `package.version`. Ignored if the package doesn't exist yet |
+
+#### Advanced Options
+
+Ploidy reads additional options from `[package.metadata.ploidy]` in the generated crate's `Cargo.toml`:
+
+| Key | Values | Default | Description |
+|-----|--------|---------|-------------|
+| `date-time-format` | `rfc3339`, [`unix-seconds`](https://docs.rs/ploidy-util/latest/ploidy_util/date_time/struct.UnixSeconds.html), [`unix-milliseconds`](https://docs.rs/ploidy-util/latest/ploidy_util/date_time/struct.UnixMilliseconds.html), [`unix-microseconds`](https://docs.rs/ploidy-util/latest/ploidy_util/date_time/struct.UnixMicroseconds.html), [`unix-nanoseconds`](https://docs.rs/ploidy-util/latest/ploidy_util/date_time/struct.UnixNanoseconds.html) | `rfc3339` | How `date-time` types are represented |
+
+For example:
+
+```toml
+[package.metadata.ploidy]
+# Use `ploidy_util::UnixSeconds`, which parses `date-time` types as
+# strings containing Unix timestamps in seconds.
+date-time-format = "unix-seconds"
+# date-time-format = "unix-milliseconds"  # Use `ploidy_util::UnixMilliseconds`.
+# date-time-format = "unix-microseconds"  # Use `ploidy_util::UnixMicroseconds`.
+# date-time-format = "unix-nanoseconds"   # Use `ploidy_util::UnixNanoseconds`.
+# date-time-format = "rfc3339"            # Use `chrono::DateTime<Utc>` (RFC 3339 / ISO 8601 strings).
+```
+
+#### Minimum Rust version for generated code
+
+The MSRV for the generated crate is **Rust 1.85.0**, the first stable release to support the [2024 edition](https://doc.rust-lang.org/edition-guide/rust-2024/index.html).
 
 ## Why Ploidy?
 

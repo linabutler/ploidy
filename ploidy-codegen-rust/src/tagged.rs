@@ -29,10 +29,13 @@ impl ToTokens for CodegenTagged<'_> {
         let mut extra_derives = vec![];
         let is_hashable = self.ty.variants().all(|variant| {
             variant.reachable().all(|view| {
-                !matches!(
-                    view,
-                    IrTypeView::Primitive(PrimitiveIrType::F32 | PrimitiveIrType::F64)
-                )
+                if let IrTypeView::Primitive(p) = &view
+                    && let PrimitiveIrType::F32 | PrimitiveIrType::F64 = p.ty()
+                {
+                    false
+                } else {
+                    true
+                }
             })
         });
         if is_hashable {

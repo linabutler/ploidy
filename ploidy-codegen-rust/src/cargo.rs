@@ -4,11 +4,8 @@ use cargo_toml::{Edition, Manifest};
 use itertools::Itertools;
 use ploidy_core::codegen::IntoCode;
 use serde::{Deserialize, Serialize};
-use toml::Value as TomlValue;
 
-use super::graph::CodegenGraph;
-
-type TomlMap = toml::map::Map<String, TomlValue>;
+use super::{config::CodegenConfig, graph::CodegenGraph};
 
 const PLOIDY_VERSION: &str = env!("CARGO_PKG_VERSION");
 
@@ -84,13 +81,9 @@ impl IntoCode for CodegenCargoManifest<'_> {
     }
 }
 
-/// Cargo metadata of any type.
-#[derive(Clone, Debug, Deserialize, Serialize)]
-#[serde(transparent)]
-pub struct CargoMetadata(TomlValue);
-
-impl Default for CargoMetadata {
-    fn default() -> Self {
-        Self(TomlMap::default().into())
-    }
+/// Cargo metadata for the generated crate.
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+pub struct CargoMetadata {
+    #[serde(default)]
+    pub ploidy: Option<CodegenConfig>,
 }

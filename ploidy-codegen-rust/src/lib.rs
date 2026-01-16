@@ -8,11 +8,13 @@ use ploidy_core::codegen::{IntoCode, write_to_disk};
 
 mod cargo;
 mod client;
+mod config;
 mod derives;
 mod enum_;
 mod graph;
 mod naming;
 mod operation;
+mod primitive;
 mod ref_;
 mod resource;
 mod schema;
@@ -27,9 +29,11 @@ mod tests;
 
 pub use cargo::*;
 pub use client::*;
+pub use config::*;
 pub use graph::*;
 pub use naming::*;
 pub use operation::*;
+pub use primitive::*;
 pub use resource::*;
 pub use schema::*;
 pub use statics::*;

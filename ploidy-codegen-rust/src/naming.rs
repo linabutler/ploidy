@@ -208,6 +208,7 @@ impl ToTokens for CodegenUntaggedVariantName {
             Primitive(PrimitiveIrType::F64) => "F64".into(),
             Primitive(PrimitiveIrType::Bool) => "Bool".into(),
             Primitive(PrimitiveIrType::DateTime) => "DateTime".into(),
+            Primitive(PrimitiveIrType::UnixTime) => "UnixTime".into(),
             Primitive(PrimitiveIrType::Date) => "Date".into(),
             Primitive(PrimitiveIrType::Url) => "Url".into(),
             Primitive(PrimitiveIrType::Uuid) => "Uuid".into(),

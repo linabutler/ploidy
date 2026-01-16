@@ -2,7 +2,7 @@ use petgraph::graph::NodeIndex;
 
 use crate::ir::{
     graph::{IrGraph, IrGraphNode},
-    types::IrType,
+    types::{IrType, PrimitiveIrType},
 };
 
 use super::{IrTypeView, ViewNode};
@@ -122,6 +122,43 @@ impl<'a> IrOptionalView<'a> {
 }
 
 impl<'a> ViewNode<'a> for IrOptionalView<'a> {
+    #[inline]
+    fn graph(&self) -> &'a IrGraph<'a> {
+        self.graph
+    }
+
+    #[inline]
+    fn index(&self) -> NodeIndex {
+        self.index
+    }
+}
+
+/// A graph-aware view of a primitive type.
+#[derive(Debug)]
+pub struct IrPrimitiveView<'a> {
+    graph: &'a IrGraph<'a>,
+    index: NodeIndex,
+    ty: PrimitiveIrType,
+}
+
+impl<'a> IrPrimitiveView<'a> {
+    #[inline]
+    pub(in crate::ir) fn new(
+        graph: &'a IrGraph<'a>,
+        index: NodeIndex,
+        ty: PrimitiveIrType,
+    ) -> Self {
+        Self { graph, index, ty }
+    }
+
+    /// Returns the primitive type.
+    #[inline]
+    pub fn ty(&self) -> PrimitiveIrType {
+        self.ty
+    }
+}
+
+impl<'a> ViewNode<'a> for IrPrimitiveView<'a> {
     #[inline]
     fn graph(&self) -> &'a IrGraph<'a> {
         self.graph

@@ -503,7 +503,7 @@ fn test_reachable_from_array_includes_inner_types() {
     assert!(
         reachable_types
             .iter()
-            .any(|t| matches!(t, IrTypeView::Primitive(PrimitiveIrType::String)))
+            .any(|t| matches!(t, IrTypeView::Primitive(p) if p.ty() == PrimitiveIrType::String))
     );
 }
 
@@ -575,7 +575,7 @@ fn test_reachable_from_map_includes_inner_types() {
     assert!(
         reachable_types
             .iter()
-            .any(|t| matches!(t, IrTypeView::Primitive(PrimitiveIrType::String)))
+            .any(|t| matches!(t, IrTypeView::Primitive(p) if p.ty() == PrimitiveIrType::String))
     );
 }
 
@@ -646,7 +646,7 @@ fn test_reachable_from_nullable_includes_inner_types() {
     assert!(
         reachable_types
             .iter()
-            .any(|t| matches!(t, IrTypeView::Primitive(PrimitiveIrType::String)))
+            .any(|t| matches!(t, IrTypeView::Primitive(p) if p.ty() == PrimitiveIrType::String))
     );
 }
 
@@ -719,7 +719,7 @@ fn test_reachable_from_inline_includes_inner_types() {
     assert!(
         reachable_types
             .iter()
-            .any(|t| matches!(t, IrTypeView::Primitive(PrimitiveIrType::String)))
+            .any(|t| matches!(t, IrTypeView::Primitive(p) if p.ty() == PrimitiveIrType::String))
     );
 }
 
@@ -765,7 +765,7 @@ fn test_reachable_from_primitive_returns_itself() {
     let reachable_types = primitive_view.reachable().collect_vec();
     assert_matches!(
         &*reachable_types,
-        [IrTypeView::Primitive(PrimitiveIrType::String)]
+        [IrTypeView::Primitive(p)] if p.ty() == PrimitiveIrType::String
     );
 }
 
@@ -1269,7 +1269,7 @@ fn test_array_view_provides_access_to_item_type() {
         items_field.ty(),
         IrTypeView::Array(view) if matches!(
             view.inner(),
-            IrTypeView::Primitive(PrimitiveIrType::String),
+            IrTypeView::Primitive(p) if p.ty() == PrimitiveIrType::String,
         ),
     );
 }
@@ -1314,7 +1314,7 @@ fn test_map_view_provides_access_to_value_type() {
         map_field.ty(),
         IrTypeView::Map(view) if matches!(
             view.inner(),
-            IrTypeView::Primitive(PrimitiveIrType::String),
+            IrTypeView::Primitive(p) if p.ty() == PrimitiveIrType::String,
         ),
     );
 }
@@ -2138,7 +2138,7 @@ fn test_operation_parameter_ty() {
     let path_param = operation.path().params().next().unwrap();
     assert_matches!(
         path_param.ty(),
-        IrTypeView::Primitive(PrimitiveIrType::String),
+        IrTypeView::Primitive(p) if p.ty() == PrimitiveIrType::String,
     );
 
     // Array-of-strings query parameter.
@@ -2147,7 +2147,7 @@ fn test_operation_parameter_ty() {
         query_param.ty(),
         IrTypeView::Array(view) if matches!(
             view.inner(),
-            IrTypeView::Primitive(PrimitiveIrType::String),
+            IrTypeView::Primitive(p) if p.ty() == PrimitiveIrType::String,
         ),
     );
 }

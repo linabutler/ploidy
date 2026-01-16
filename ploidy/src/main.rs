@@ -22,7 +22,7 @@ fn main() -> Result<()> {
         Command::Codegen(CodegenCommand {
             input,
             output,
-            language: CodegenCommandLanguage::Rust(config),
+            language: CodegenCommandLanguage::Rust(command),
         }) => {
             let source = std::fs::read_to_string(&input)
                 .into_diagnostic()
@@ -35,12 +35,23 @@ fn main() -> Result<()> {
             println!("OpenAPI: {} (version {})", doc.info.title, doc.info.version);
 
             let spec = IrSpec::from_doc(&doc).into_diagnostic()?;
-            let graph = CodegenGraph::new(IrGraph::new(&spec));
+            let config = command
+                .manifest
+                .package
+                .as_ref()
+                .and_then(|p| p.metadata.as_ref()?.ploidy.as_ref());
+            let graph = match config {
+                Some(config) => CodegenGraph::with_config(IrGraph::new(&spec), config),
+                None => CodegenGraph::new(IrGraph::new(&spec)),
+            };
 
             println!("Writing generated code to `{}`...", output.display());
 
             println!("Generating `Cargo.toml`...");
-            write_to_disk(&output, CodegenCargoManifest::new(&graph, &config.manifest))?;
+            write_to_disk(
+                &output,
+                CodegenCargoManifest::new(&graph, &command.manifest),
+            )?;
 
             println!("Generating `lib.rs`...");
             write_to_disk(&output, CodegenLibrary)?;
@@ -67,7 +78,7 @@ fn main() -> Result<()> {
 
             println!("Generation complete");
 
-            if config.check {
+            if command.check {
                 println!("Running `cargo check`...");
                 let status = std::process::Command::new("cargo")
                     .arg("check")

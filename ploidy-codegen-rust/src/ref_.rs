@@ -1,4 +1,4 @@
-use ploidy_core::ir::{InlineIrTypePathRoot, IrTypeView, PrimitiveIrType, View};
+use ploidy_core::ir::{InlineIrTypePathRoot, IrTypeView, View};
 use proc_macro2::TokenStream;
 use quote::{ToTokens, TokenStreamExt, quote};
 use syn::parse_quote;
@@ -6,6 +6,7 @@ use syn::parse_quote;
 use super::{
     naming::CodegenTypeName,
     naming::{CodegenIdent, CodegenIdentUsage},
+    primitive::CodegenPrimitive,
 };
 
 #[derive(Clone, Copy, Debug)]
@@ -22,38 +23,9 @@ impl<'a> CodegenRef<'a> {
 impl ToTokens for CodegenRef<'_> {
     fn to_tokens(&self, tokens: &mut TokenStream) {
         tokens.append_all(match self.ty {
-            &IrTypeView::Primitive(PrimitiveIrType::String) => {
-                quote! { ::std::string::String }
-            }
-            &IrTypeView::Primitive(PrimitiveIrType::I32) => {
-                quote! { i32 }
-            }
-            &IrTypeView::Primitive(PrimitiveIrType::I64) => {
-                quote! { i64 }
-            }
-            &IrTypeView::Primitive(PrimitiveIrType::F32) => {
-                quote! { f32 }
-            }
-            &IrTypeView::Primitive(PrimitiveIrType::F64) => {
-                quote! { f64 }
-            }
-            &IrTypeView::Primitive(PrimitiveIrType::Bool) => {
-                quote! { bool }
-            }
-            &IrTypeView::Primitive(PrimitiveIrType::DateTime) => {
-                quote! { ::ploidy_util::date_time::UnixMilliseconds }
-            }
-            &IrTypeView::Primitive(PrimitiveIrType::Date) => {
-                quote! { ::chrono::NaiveDate }
-            }
-            &IrTypeView::Primitive(PrimitiveIrType::Url) => {
-                quote! { ::url::Url }
-            }
-            &IrTypeView::Primitive(PrimitiveIrType::Uuid) => {
-                quote! { ::uuid::Uuid }
-            }
-            &IrTypeView::Primitive(PrimitiveIrType::Bytes) => {
-                quote! { ::bytes::Bytes }
+            IrTypeView::Primitive(ty) => {
+                let ty = CodegenPrimitive::new(ty);
+                quote!(#ty)
             }
             IrTypeView::Array(ty) => {
                 let inner = ty.inner();
@@ -110,107 +82,6 @@ mod tests {
     use syn::parse_quote;
 
     use crate::{CodegenGraph, tests::assert_matches};
-
-    // MARK: Primitives
-
-    #[test]
-    fn test_codegen_ref_string() {
-        let ty = IrTypeView::Primitive(PrimitiveIrType::String);
-        let ref_ = CodegenRef::new(&ty);
-        let actual: syn::Type = parse_quote!(#ref_);
-        let expected: syn::Type = parse_quote!(::std::string::String);
-        assert_eq!(actual, expected);
-    }
-
-    #[test]
-    fn test_codegen_ref_i32() {
-        let ty = IrTypeView::Primitive(PrimitiveIrType::I32);
-        let ref_ = CodegenRef::new(&ty);
-        let actual: syn::Type = parse_quote!(#ref_);
-        let expected: syn::Type = parse_quote!(i32);
-        assert_eq!(actual, expected);
-    }
-
-    #[test]
-    fn test_codegen_ref_i64() {
-        let ty = IrTypeView::Primitive(PrimitiveIrType::I64);
-        let ref_ = CodegenRef::new(&ty);
-        let actual: syn::Type = parse_quote!(#ref_);
-        let expected: syn::Type = parse_quote!(i64);
-        assert_eq!(actual, expected);
-    }
-
-    #[test]
-    fn test_codegen_ref_f32() {
-        let ty = IrTypeView::Primitive(PrimitiveIrType::F32);
-        let ref_ = CodegenRef::new(&ty);
-        let actual: syn::Type = parse_quote!(#ref_);
-        let expected: syn::Type = parse_quote!(f32);
-        assert_eq!(actual, expected);
-    }
-
-    #[test]
-    fn test_codegen_ref_f64() {
-        let ty = IrTypeView::Primitive(PrimitiveIrType::F64);
-        let ref_ = CodegenRef::new(&ty);
-        let actual: syn::Type = parse_quote!(#ref_);
-        let expected: syn::Type = parse_quote!(f64);
-        assert_eq!(actual, expected);
-    }
-
-    #[test]
-    fn test_codegen_ref_bool() {
-        let ty = IrTypeView::Primitive(PrimitiveIrType::Bool);
-        let ref_ = CodegenRef::new(&ty);
-        let actual: syn::Type = parse_quote!(#ref_);
-        let expected: syn::Type = parse_quote!(bool);
-        assert_eq!(actual, expected);
-    }
-
-    #[test]
-    fn test_codegen_ref_datetime() {
-        let ty = IrTypeView::Primitive(PrimitiveIrType::DateTime);
-        let ref_ = CodegenRef::new(&ty);
-        let actual: syn::Type = parse_quote!(#ref_);
-        let expected: syn::Type = parse_quote!(::ploidy_util::date_time::UnixMilliseconds);
-        assert_eq!(actual, expected);
-    }
-
-    #[test]
-    fn test_codegen_ref_date() {
-        let ty = IrTypeView::Primitive(PrimitiveIrType::Date);
-        let ref_ = CodegenRef::new(&ty);
-        let actual: syn::Type = parse_quote!(#ref_);
-        let expected: syn::Type = parse_quote!(::chrono::NaiveDate);
-        assert_eq!(actual, expected);
-    }
-
-    #[test]
-    fn test_codegen_ref_url() {
-        let ty = IrTypeView::Primitive(PrimitiveIrType::Url);
-        let ref_ = CodegenRef::new(&ty);
-        let actual: syn::Type = parse_quote!(#ref_);
-        let expected: syn::Type = parse_quote!(::url::Url);
-        assert_eq!(actual, expected);
-    }
-
-    #[test]
-    fn test_codegen_ref_uuid() {
-        let ty = IrTypeView::Primitive(PrimitiveIrType::Uuid);
-        let ref_ = CodegenRef::new(&ty);
-        let actual: syn::Type = parse_quote!(#ref_);
-        let expected: syn::Type = parse_quote!(::uuid::Uuid);
-        assert_eq!(actual, expected);
-    }
-
-    #[test]
-    fn test_codegen_ref_bytes() {
-        let ty = IrTypeView::Primitive(PrimitiveIrType::Bytes);
-        let ref_ = CodegenRef::new(&ty);
-        let actual: syn::Type = parse_quote!(#ref_);
-        let expected: syn::Type = parse_quote!(::bytes::Bytes);
-        assert_eq!(actual, expected);
-    }
 
     #[test]
     fn test_codegen_ref_any() {
