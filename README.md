@@ -2,9 +2,12 @@
 
 **An OpenAPI code generator for polymorphic specs.**
 
-[![crates.io](https://img.shields.io/crates/v/ploidy?style=for-the-badge&logo=rust)](https://crates.io/crates/ploidy)
-[![Build status](https://img.shields.io/github/actions/workflow/status/linabutler/ploidy/test.yml?style=for-the-badge&logo=github)](https://github.com/linabutler/ploidy/actions?query=branch%3Amain)
-[![Documentation](https://img.shields.io/docsrs/ploidy-core/latest?style=for-the-badge&label=ploidy-core&logo=docs.rs)](https://docs.rs/ploidy-core)
+[<img src="https://img.shields.io/crates/v/ploidy?style=for-the-badge&logo=rust" alt="crates.io" height="22">](https://crates.io/crates/ploidy)
+[<img src="https://img.shields.io/github/actions/workflow/status/linabutler/ploidy/test.yml?style=for-the-badge&logo=github" alt="Build status" height="22">](https://github.com/linabutler/ploidy/actions?query=branch%3Amain)
+[<img src="https://img.shields.io/docsrs/ploidy-codegen-rust/latest?style=for-the-badge&label=codegen-rust&logo=docs.rs" alt="ploidy-codegen-rust Documentation" height="22">](https://docs.rs/ploidy-codegen-rust)
+[<img src="https://img.shields.io/docsrs/ploidy-core/latest?style=for-the-badge&label=core&logo=docs.rs" alt="ploidy-core Documentation" height="22">](https://docs.rs/ploidy-core)
+[<img src="https://img.shields.io/docsrs/ploidy-pointer/latest?style=for-the-badge&label=pointer&logo=docs.rs" alt="ploidy-pointer Documentation" height="22">](https://docs.rs/ploidy-pointer)
+[<img src="https://img.shields.io/docsrs/ploidy-util/latest?style=for-the-badge&label=util&logo=docs.rs" alt="ploidy-util Documentation" height="22">](https://docs.rs/ploidy-util)
 
 Many OpenAPI specs use `allOf` to model inheritance, and `oneOf`, `anyOf`, and discriminators to model [polymorphic or algebraic data types](https://swagger.io/docs/specification/v3_0/data-models/inheritance-and-polymorphism/). These patterns are powerful, but can be tricky to support correctly, and most code generators struggle with them. Ploidy was built specifically with inheritance and polymorphism in mind, and aims to generate clean, type-safe, and idiomatic Rust that looks like what you'd write by hand.
 
