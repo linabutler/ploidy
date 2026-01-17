@@ -10,9 +10,12 @@ repository.workspace = true
 keywords.workspace = true
 
 [dependencies]
-chrono = { version = "0.4", features = ["serde"] }
+chrono = "0.4"
 itertools = "0.14"
 percent-encoding = "2.3"
 serde = { version = "1", features = ["derive"] }
 thiserror = "2"
 url = "2"
+
+[dev-dependencies]
+serde_json = "1"
