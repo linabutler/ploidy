@@ -165,7 +165,6 @@ dependencies = [
  "iana-time-zone",
  "js-sys",
  "num-traits",
- "serde",
  "wasm-bindgen",
  "windows-link",
 ]
@@ -744,6 +743,7 @@ dependencies = [
  "itertools",
  "percent-encoding",
  "serde",
+ "serde_json",
  "thiserror",
  "url",
 ]
