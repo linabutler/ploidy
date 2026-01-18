@@ -11,6 +11,30 @@
 
 Many OpenAPI specs use `allOf` to model inheritance, and `oneOf`, `anyOf`, and discriminators to model [polymorphic or algebraic data types](https://swagger.io/docs/specification/v3_0/data-models/inheritance-and-polymorphism/). These patterns are powerful, but can be tricky to support correctly, and most code generators struggle with them. Ploidy was built specifically with inheritance and polymorphism in mind, and aims to generate clean, type-safe, and idiomatic Rust that looks like what you'd write by hand.
 
+## Table of Contents
+
+* [Getting Started](#getting-started)
+  - [Minimum supported Rust version](#minimum-supported-rust-version)
+* [Generating Code](#generating-code)
+  - [Rust](#rust)
+    * [Options](#options)
+    * [Advanced Options](#advanced-options)
+    * [Minimum Rust version for generated code](#minimum-rust-version-for-generated-code)
+* [Why Ploidy?](#why-ploidy)
+  - [Choosing the right tool](#choosing-the-right-tool)
+  - [Polymorphism first](#polymorphism-first)
+  - [Fast and correct](#fast-and-correct)
+  - [Strongly opinionated, zero configuration](#strongly-opinionated-zero-configuration)
+  - [Code like what you'd write by hand](#code-like-what-youd-write-by-hand)
+* [Under the Hood](#under-the-hood)
+  - [The generation pipeline](#the-generation-pipeline)
+  - [AST-based generation](#ast-based-generation)
+  - [Smart boxing](#smart-boxing)
+  - [Inline schemas](#inline-schemas)
+* [Contributing](#contributing)
+  - [New languages](#new-languages)
+* [Acknowledgments](#acknowledgments)
+
 ## Getting Started
 
 To get started, [download a pre-built binary of Ploidy for your platform](https://github.com/linabutler/ploidy/releases/latest), or install Ploidy via [**cargo-binstall**](https://github.com/cargo-bins/cargo-binstall):
@@ -100,7 +124,7 @@ The OpenAPI ecosystem has great options for different needs. Here's how to pick:
 |----------------|----------|
 | **Broad OpenAPI feature coverage** | [**openapi-generator**](https://openapi-generator.tech), [**Progenitor**](https://github.com/oxidecomputer/progenitor), or [**Schema Tools**](https://github.com/kstasik/schema-tools), especially if your spec is simpler and doesn't rely heavily on polymorphism |
 | **Custom templates or a different HTTP client** | A template-based generator like **openapi-generator**, which offers more control over output |
-| **Languages other than Rust** | **openapi-generator** or [**swagger-codegen**](https://github.com/swagger-api/swagger-codegen) (OpenAPI <= 3.0) |
+| **Languages other than Rust** | **openapi-generator** or [**swagger-codegen**](https://github.com/swagger-api/swagger-codegen) (OpenAPI < 3.1) |
 | **OpenAPI 2.0 (Swagger) support** | **openapi-generator** or **swagger-codegen** |
 | **Server stubs** | **openapi-generator** for Rust web frameworks, or [**Dropshot**](https://github.com/oxidecomputer/dropshot) for generating specs from Rust definitions |
 
@@ -306,5 +330,6 @@ Ploidy is inspired by, learns from, and builds on the wonderful work of:
 * The OpenAPI ecosystem: **openapi-generator**, **Progenitor**, and other code generators.
 * The async Rust ecosystem: Tokio and Reqwest.
 * The Rust parsing ecosystem: `quote`, `serde`, `syn`, and `winnow`.
+* [**Petgraph**](https://crates.io/crates/petgraph), a Rust graph data structure library that's Ploidy's secret sauce.
 
 And yes, the name is a biology pun! [Ploidy](https://en.wikipedia.org/wiki/Ploidy) refers to the number of chromosome sets in a cell, and _polyploidy_ is when cells have many chromosome sets...and polymorphic types have many forms through inheritance.
