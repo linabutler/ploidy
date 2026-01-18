@@ -12,29 +12,18 @@ on:
         required: false
         default: true
 
-concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: false
-
 jobs:
   release:
     name: Create release
     runs-on: ubuntu-latest
     permissions:
       contents: write
-    outputs:
-      asset_upload_url: ${{ steps.draft-release.outputs.upload_url }}
     steps:
       - name: Draft release
-        id: draft-release
-        uses: actions/create-release@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          tag_name: ${{ github.ref_name }}
-          release_name: ${{ github.ref_name }}
-          draft: true
-          prerelease: false
+        run: |
+          gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --draft --title "$GITHUB_REF_NAME"
 
   bins:
     name: Build and upload release binaries
@@ -85,11 +74,10 @@ jobs:
         env:
           TARGET: ${{ matrix.platform.target }}
         run: |
-          rustup target add $TARGET
+          rustup target add "$TARGET"
 
       - name: Restore Cargo packages and metadata
         uses: actions/cache/restore@v4
-        id: restore-cargo-home
         with:
           path: |
             ~/.cargo/registry/index/
@@ -100,8 +88,8 @@ jobs:
             cargo-${{ matrix.platform.os }}-${{ hashFiles('rust-toolchain.toml') }}-
 
       - name: Install musl libraries and compiler wrappers
-        shell: bash
         if: ${{ contains(matrix.platform.target, 'musl') }}
+        shell: bash
         run: |
           sudo apt-get -y install musl-dev musl-tools
 
@@ -112,7 +100,7 @@ jobs:
           TARGET: ${{ matrix.platform.target }}
           FEATURES: ${{ matrix.platform.features && format('--features {0}', join(matrix.platform.features, ',')) || '' }}
         run: |
-          cargo build --release --bin $BINARY --target $TARGET $FEATURES
+          cargo build --release --bin "$BINARY" --target "$TARGET" $FEATURES
 
       - name: Create Linux tar archive
         if: ${{ matrix.platform.os == 'ubuntu' }}
@@ -121,9 +109,9 @@ jobs:
           BINARY: ${{ matrix.binary }}
           TARGET: ${{ matrix.platform.target }}
         run: |
-          mkdir -p ./archive/$BINARY-$GITHUB_REF_NAME-$TARGET
-          mv ./target/$TARGET/release/$BINARY ./archive/$BINARY-$GITHUB_REF_NAME-$TARGET/$BINARY
-          tar -c --format pax -C ./archive . | gzip -n > ./archive.tar.gz
+          mkdir -p "./archive/$BINARY-$GITHUB_REF_NAME-$TARGET"
+          mv "./target/$TARGET/release/$BINARY" "./archive/$BINARY-$GITHUB_REF_NAME-$TARGET/$BINARY"
+          tar -c --format pax -C ./archive . | gzip -n > ./archive.tgz
 
       - name: Extract Mac app signing certificate
         if: ${{ matrix.platform.os == 'macos' }}
@@ -152,44 +140,46 @@ jobs:
           BINARY: ${{ matrix.binary }}
           TARGET: ${{ matrix.platform.target }}
         run: |
-          mkdir -p ./archive/$BINARY-$GITHUB_REF_NAME-$TARGET
-          mv ./target/$TARGET/release/$BINARY ./archive/$BINARY-$GITHUB_REF_NAME-$TARGET/$BINARY
+          mkdir -p "./archive/$BINARY-$GITHUB_REF_NAME-$TARGET"
+          mv "./target/$TARGET/release/$BINARY" "./archive/$BINARY-$GITHUB_REF_NAME-$TARGET/$BINARY"
           cd ./archive
           zip -r9 ../archive.zip .
 
       - name: Create Windows ZIP archive
         if: ${{ matrix.platform.os == 'windows' }}
+        # Git Bash transparently adds the `.exe` suffix, so we don't need to
+        # explicitly include it in the path names below.
         shell: bash
         env:
           BINARY: ${{ matrix.binary }}
           TARGET: ${{ matrix.platform.target }}
         run: |
-          mkdir -p ./archive/$BINARY-$GITHUB_REF_NAME-$TARGET
-          mv ./target/$TARGET/release/$BINARY ./archive/$BINARY-$GITHUB_REF_NAME-$TARGET/$BINARY
+          mkdir -p "./archive/$BINARY-$GITHUB_REF_NAME-$TARGET"
+          mv "./target/$TARGET/release/$BINARY" "./archive/$BINARY-$GITHUB_REF_NAME-$TARGET/$BINARY"
           cd ./archive
           "/c/Program Files/7-Zip/7z" a -tzip -mx9 -so . > ../archive.zip
 
       - name: Upload tar archive
         if: ${{ matrix.platform.os == 'ubuntu' }}
-        uses: actions/upload-release-asset@v1
+        shell: bash
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          upload_url: ${{ needs.release.outputs.asset_upload_url }}
-          asset_path: ./archive.tar.gz
-          asset_name: ${{ matrix.binary }}-${{ github.ref_name }}-${{ matrix.platform.target }}.tar.gz
-          asset_content_type: application/gzip
+          BINARY: ${{ matrix.binary }}
+          TARGET: ${{ matrix.platform.target }}
+        run: |
+          mv ./archive.tgz "./$BINARY-$GITHUB_REF_NAME-$TARGET.tgz"
+          gh release upload "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" "./$BINARY-$GITHUB_REF_NAME-$TARGET.tgz"
 
       - name: Upload ZIP archive
         if: ${{ matrix.platform.os == 'macos' || matrix.platform.os == 'windows' }}
-        uses: actions/upload-release-asset@v1
+        shell: bash
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          upload_url: ${{ needs.release.outputs.asset_upload_url }}
-          asset_path: ./archive.zip
-          asset_name: ${{ matrix.binary }}-${{ github.ref_name }}-${{ matrix.platform.target }}.zip
-          asset_content_type: application/zip
+          BINARY: ${{ matrix.binary }}
+          TARGET: ${{ matrix.platform.target }}
+        run: |
+          mv ./archive.zip "./$BINARY-$GITHUB_REF_NAME-$TARGET.zip"
+          gh release upload "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" "./$BINARY-$GITHUB_REF_NAME-$TARGET.zip"
 
   publish:
     name: Publish to crates.io
