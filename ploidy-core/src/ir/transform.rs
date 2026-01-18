@@ -482,13 +482,25 @@ impl<'context, 'a> IrTransformer<'context, 'a> {
                 (Ty::String, Some(Format::Byte)) => PrimitiveIrType::Bytes.into(),
                 (Ty::String, Some(Format::Binary)) => PrimitiveIrType::Binary.into(),
                 (Ty::String, _) => PrimitiveIrType::String.into(),
+
+                (Ty::Integer, Some(Format::Int8)) => PrimitiveIrType::I8.into(),
+                (Ty::Integer, Some(Format::UInt8)) => PrimitiveIrType::U8.into(),
+                (Ty::Integer, Some(Format::Int16)) => PrimitiveIrType::I16.into(),
+                (Ty::Integer, Some(Format::UInt16)) => PrimitiveIrType::U16.into(),
+                (Ty::Integer, Some(Format::Int32)) => PrimitiveIrType::I32.into(),
+                (Ty::Integer, Some(Format::UInt32)) => PrimitiveIrType::U32.into(),
                 (Ty::Integer, Some(Format::Int64)) => PrimitiveIrType::I64.into(),
+                (Ty::Integer, Some(Format::UInt64)) => PrimitiveIrType::U64.into(),
                 (Ty::Integer, Some(Format::UnixTime)) => PrimitiveIrType::UnixTime.into(),
-                (Ty::Integer, Some(Format::Int32) | _) => PrimitiveIrType::I32.into(),
+                (Ty::Integer, _) => PrimitiveIrType::I32.into(),
+
                 (Ty::Number, Some(Format::Float)) => PrimitiveIrType::F32.into(),
+                (Ty::Number, Some(Format::Double)) => PrimitiveIrType::F64.into(),
                 (Ty::Number, Some(Format::UnixTime)) => PrimitiveIrType::UnixTime.into(),
-                (Ty::Number, Some(Format::Double) | _) => PrimitiveIrType::F64.into(),
+                (Ty::Number, _) => PrimitiveIrType::F64.into(),
+
                 (Ty::Boolean, _) => PrimitiveIrType::Bool.into(),
+
                 (Ty::Array, _) => {
                     let items = match &self.schema.items {
                         Some(RefOrSchema::Ref(r)) => IrType::Ref(&r.path),
@@ -511,6 +523,7 @@ impl<'context, 'a> IrTransformer<'context, 'a> {
                     let ty = IrType::Array(items.into());
                     IrUntaggedVariant::Some(IrUntaggedVariantNameHint::Array, ty)
                 }
+
                 (Ty::Object, _) => {
                     let ty = match &self.schema.additional_properties {
                         Some(AdditionalProperties::RefOrSchema(RefOrSchema::Ref(r))) => {
@@ -535,6 +548,7 @@ impl<'context, 'a> IrTransformer<'context, 'a> {
                     };
                     IrUntaggedVariant::Some(IrUntaggedVariantNameHint::Map, ty)
                 }
+
                 (Ty::Null, _) => IrUntaggedVariant::Null,
             })
             .collect_vec();

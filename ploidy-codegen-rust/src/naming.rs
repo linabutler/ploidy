@@ -202,8 +202,14 @@ impl ToTokens for CodegenUntaggedVariantName {
         use IrUntaggedVariantNameHint::*;
         let s = match self.0 {
             Primitive(PrimitiveIrType::String) => "String".into(),
+            Primitive(PrimitiveIrType::I8) => "I8".into(),
+            Primitive(PrimitiveIrType::U8) => "U8".into(),
+            Primitive(PrimitiveIrType::I16) => "I16".into(),
+            Primitive(PrimitiveIrType::U16) => "U16".into(),
             Primitive(PrimitiveIrType::I32) => "I32".into(),
+            Primitive(PrimitiveIrType::U32) => "U32".into(),
             Primitive(PrimitiveIrType::I64) => "I64".into(),
+            Primitive(PrimitiveIrType::U64) => "U64".into(),
             Primitive(PrimitiveIrType::F32) => "F32".into(),
             Primitive(PrimitiveIrType::F64) => "F64".into(),
             Primitive(PrimitiveIrType::Bool) => "Bool".into(),

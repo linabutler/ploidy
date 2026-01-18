@@ -292,12 +292,18 @@ pub enum Format {
     Uuid,
     Byte,
     Binary,
+    Int8,
+    UInt8,
+    Int16,
+    UInt16,
     Int32,
+    UInt32,
     Int64,
+    UInt64,
     Float,
     Double,
-    Currency,
-    Decimal,
+    #[serde(other)]
+    Other,
 }
 
 #[derive(Clone, Debug, Deserialize, JsonPointee)]
