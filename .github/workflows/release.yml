@@ -14,7 +14,7 @@ on:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
   release:
@@ -23,10 +23,10 @@ jobs:
     permissions:
       contents: write
     outputs:
-      asset_upload_url: ${{ steps.draft_release.outputs.upload_url }}
+      asset_upload_url: ${{ steps.draft-release.outputs.upload_url }}
     steps:
       - name: Draft release
-        id: draft_release
+        id: draft-release
         uses: actions/create-release@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -41,6 +41,9 @@ jobs:
     needs: [release]
     permissions:
       contents: write
+    # GitHub Actions doesn't have a way to easily pass matrix job outputs
+    # to downstream jobs, so this job has several platform-specific steps
+    # gated with `if`.
     strategy:
       matrix:
         platform:
@@ -111,8 +114,8 @@ jobs:
         run: |
           cargo build --release --bin $BINARY --target $TARGET $FEATURES
 
-      - name: Create tar archive
-        if: ${{ matrix.platform.os != 'windows' }}
+      - name: Create Linux tar archive
+        if: ${{ matrix.platform.os == 'ubuntu' }}
         shell: bash
         env:
           BINARY: ${{ matrix.binary }}
@@ -122,13 +125,39 @@ jobs:
           mv ./target/$TARGET/release/$BINARY ./archive/$BINARY-$GITHUB_REF_NAME-$TARGET/$BINARY
           tar -c --format pax -C ./archive . | gzip -n > ./archive.tar.gz
 
-      - name: Add 7-Zip to PATH
-        if: ${{ matrix.platform.os == 'windows' }}
-        shell: pwsh
+      - name: Extract Mac app signing certificate
+        if: ${{ matrix.platform.os == 'macos' }}
+        shell: bash
+        env:
+          DEVELOPER_ID_APP_CERT: ${{ secrets.DEVELOPER_ID_APP_CERT }}
         run: |
-          "C:\Program Files\7-Zip" >> $Env:GITHUB_PATH
+          echo "$DEVELOPER_ID_APP_CERT" | base64 -d > ./cert.p12
 
-      - name: Create ZIP archive
+      - name: Sign macOS binary
+        if: ${{ matrix.platform.os == 'macos' }}
+        uses: indygreg/apple-code-sign-action@44d0985b7f4363198e80b6fea63ac3e9dd3e9957 # v1.1
+        with:
+          sign: true
+          input_path: ./target/${{ matrix.platform.target }}/release/${{ matrix.binary }}
+          p12_file: cert.p12
+          p12_password: ${{ secrets.DEVELOPER_ID_APP_CERT_PASSWORD }}
+          sign_args: |
+            --code-signature-flags
+            runtime
+
+      - name: Create macOS ZIP archive
+        if: ${{ matrix.platform.os == 'macos' }}
+        shell: bash
+        env:
+          BINARY: ${{ matrix.binary }}
+          TARGET: ${{ matrix.platform.target }}
+        run: |
+          mkdir -p ./archive/$BINARY-$GITHUB_REF_NAME-$TARGET
+          mv ./target/$TARGET/release/$BINARY ./archive/$BINARY-$GITHUB_REF_NAME-$TARGET/$BINARY
+          cd ./archive
+          zip -r9 ../archive.zip .
+
+      - name: Create Windows ZIP archive
         if: ${{ matrix.platform.os == 'windows' }}
         shell: bash
         env:
@@ -138,10 +167,10 @@ jobs:
           mkdir -p ./archive/$BINARY-$GITHUB_REF_NAME-$TARGET
           mv ./target/$TARGET/release/$BINARY ./archive/$BINARY-$GITHUB_REF_NAME-$TARGET/$BINARY
           cd ./archive
-          7z a -tzip -mx9 -so . > ../archive.zip
+          "/c/Program Files/7-Zip/7z" a -tzip -mx9 -so . > ../archive.zip
 
       - name: Upload tar archive
-        if: ${{ matrix.platform.os != 'windows' }}
+        if: ${{ matrix.platform.os == 'ubuntu' }}
         uses: actions/upload-release-asset@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -152,7 +181,7 @@ jobs:
           asset_content_type: application/gzip
 
       - name: Upload ZIP archive
-        if: ${{ matrix.platform.os == 'windows' }}
+        if: ${{ matrix.platform.os == 'macos' || matrix.platform.os == 'windows' }}
         uses: actions/upload-release-asset@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -186,3 +215,40 @@ jobs:
           CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token }}
         run: |
           cargo publish --workspace
+
+  notarize:
+    name: Notarize macOS binaries
+    needs: [bins]
+    runs-on: ubuntu-latest
+    permissions:
+      # Required to download assets from draft releases.
+      contents: write
+    strategy:
+      matrix:
+        target:
+          - aarch64-apple-darwin
+          - x86_64-apple-darwin
+    steps:
+      - name: Extract App Store API key bundle
+        shell: bash
+        env:
+          APP_STORE_CONNECT_API_KEY_JSON: ${{ secrets.APP_STORE_CONNECT_API_KEY_JSON }}
+        run: |
+          echo "$APP_STORE_CONNECT_API_KEY_JSON" > ./api_key.json
+
+      - name: Download ZIP archive
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PATTERN: "*-${{ matrix.target }}.zip"
+        run: |
+          gh release download "$GITHUB_REF_NAME" -R "$GITHUB_REPOSITORY" --pattern "$PATTERN" -O archive.zip
+
+      - name: Notarize
+        uses: indygreg/apple-code-sign-action@44d0985b7f4363198e80b6fea63ac3e9dd3e9957 # v1.1
+        with:
+          sign: false # Already signed.
+          notarize: true
+          staple: false # Can't staple notarization tickets to Mach-O binaries.
+          input_path: ./archive.zip
+          app_store_connect_api_key_json_file: ./api_key.json
