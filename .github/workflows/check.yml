@@ -61,7 +61,7 @@ jobs:
         env:
           RUSTC_WRAPPER: sccache
         run: |
-          cargo clippy --workspace --all-targets --no-deps
+          cargo clippy --workspace --all-targets --all-features --no-deps
 
       - name: Cache Cargo packages and metadata
         uses: actions/cache/save@v4
