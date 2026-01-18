@@ -19,8 +19,14 @@ impl<'a> ToTokens for CodegenPrimitive<'a> {
     fn to_tokens(&self, tokens: &mut TokenStream) {
         tokens.append_all(match self.ty.ty() {
             PrimitiveIrType::String => quote! { ::std::string::String },
+            PrimitiveIrType::I8 => quote! { i8 },
+            PrimitiveIrType::U8 => quote! { u8 },
+            PrimitiveIrType::I16 => quote! { i16 },
+            PrimitiveIrType::U16 => quote! { u16 },
             PrimitiveIrType::I32 => quote! { i32 },
+            PrimitiveIrType::U32 => quote! { u32 },
             PrimitiveIrType::I64 => quote! { i64 },
+            PrimitiveIrType::U64 => quote! { u64 },
             PrimitiveIrType::F32 => quote! { f32 },
             PrimitiveIrType::F64 => quote! { f64 },
             PrimitiveIrType::Bool => quote! { bool },
@@ -101,6 +107,130 @@ mod tests {
     }
 
     #[test]
+    fn test_codegen_primitive_i8() {
+        let doc = Document::from_yaml(indoc::indoc! {"
+            openapi: 3.0.0
+            info:
+              title: Test
+              version: 1.0.0
+            paths: {}
+            components:
+              schemas:
+                Test:
+                  type: object
+                  required: [value]
+                  properties:
+                    value:
+                      type: integer
+                      format: int8
+        "})
+        .unwrap();
+        let spec = IrSpec::from_doc(&doc).unwrap();
+        let graph = CodegenGraph::new(IrGraph::new(&spec));
+        let primitives = graph.primitives().collect_vec();
+        let [ty] = &*primitives else {
+            panic!("expected i8; got `{primitives:?}`");
+        };
+        let p = CodegenPrimitive::new(ty);
+        let actual: syn::Type = parse_quote!(#p);
+        let expected: syn::Type = parse_quote!(i8);
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn test_codegen_primitive_u8() {
+        let doc = Document::from_yaml(indoc::indoc! {"
+            openapi: 3.0.0
+            info:
+              title: Test
+              version: 1.0.0
+            paths: {}
+            components:
+              schemas:
+                Test:
+                  type: object
+                  required: [value]
+                  properties:
+                    value:
+                      type: integer
+                      format: uint8
+        "})
+        .unwrap();
+        let spec = IrSpec::from_doc(&doc).unwrap();
+        let graph = CodegenGraph::new(IrGraph::new(&spec));
+        let primitives = graph.primitives().collect_vec();
+        let [ty] = &*primitives else {
+            panic!("expected u8; got `{primitives:?}`");
+        };
+        let p = CodegenPrimitive::new(ty);
+        let actual: syn::Type = parse_quote!(#p);
+        let expected: syn::Type = parse_quote!(u8);
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn test_codegen_primitive_i16() {
+        let doc = Document::from_yaml(indoc::indoc! {"
+            openapi: 3.0.0
+            info:
+              title: Test
+              version: 1.0.0
+            paths: {}
+            components:
+              schemas:
+                Test:
+                  type: object
+                  required: [value]
+                  properties:
+                    value:
+                      type: integer
+                      format: int16
+        "})
+        .unwrap();
+        let spec = IrSpec::from_doc(&doc).unwrap();
+        let graph = CodegenGraph::new(IrGraph::new(&spec));
+        let primitives = graph.primitives().collect_vec();
+        let [ty] = &*primitives else {
+            panic!("expected i16; got `{primitives:?}`");
+        };
+        let p = CodegenPrimitive::new(ty);
+        let actual: syn::Type = parse_quote!(#p);
+        let expected: syn::Type = parse_quote!(i16);
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn test_codegen_primitive_u16() {
+        let doc = Document::from_yaml(indoc::indoc! {"
+            openapi: 3.0.0
+            info:
+              title: Test
+              version: 1.0.0
+            paths: {}
+            components:
+              schemas:
+                Test:
+                  type: object
+                  required: [value]
+                  properties:
+                    value:
+                      type: integer
+                      format: uint16
+        "})
+        .unwrap();
+        let spec = IrSpec::from_doc(&doc).unwrap();
+        let graph = CodegenGraph::new(IrGraph::new(&spec));
+        let primitives = graph.primitives().collect_vec();
+        let [ty] = &*primitives else {
+            panic!("expected u16; got `{primitives:?}`");
+        };
+        let p = CodegenPrimitive::new(ty);
+        let actual: syn::Type = parse_quote!(#p);
+        let expected: syn::Type = parse_quote!(u16);
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
     fn test_codegen_primitive_i32() {
         let doc = Document::from_yaml(indoc::indoc! {"
             openapi: 3.0.0
@@ -132,6 +262,37 @@ mod tests {
     }
 
     #[test]
+    fn test_codegen_primitive_u32() {
+        let doc = Document::from_yaml(indoc::indoc! {"
+            openapi: 3.0.0
+            info:
+              title: Test
+              version: 1.0.0
+            paths: {}
+            components:
+              schemas:
+                Test:
+                  type: object
+                  required: [value]
+                  properties:
+                    value:
+                      type: integer
+                      format: uint32
+        "})
+        .unwrap();
+        let spec = IrSpec::from_doc(&doc).unwrap();
+        let graph = CodegenGraph::new(IrGraph::new(&spec));
+        let primitives = graph.primitives().collect_vec();
+        let [ty] = &*primitives else {
+            panic!("expected u32; got `{primitives:?}`");
+        };
+        let p = CodegenPrimitive::new(ty);
+        let actual: syn::Type = parse_quote!(#p);
+        let expected: syn::Type = parse_quote!(u32);
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
     fn test_codegen_primitive_i64() {
         let doc = Document::from_yaml(indoc::indoc! {"
             openapi: 3.0.0
@@ -159,6 +320,37 @@ mod tests {
         let p = CodegenPrimitive::new(ty);
         let actual: syn::Type = parse_quote!(#p);
         let expected: syn::Type = parse_quote!(i64);
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn test_codegen_primitive_u64() {
+        let doc = Document::from_yaml(indoc::indoc! {"
+            openapi: 3.0.0
+            info:
+              title: Test
+              version: 1.0.0
+            paths: {}
+            components:
+              schemas:
+                Test:
+                  type: object
+                  required: [value]
+                  properties:
+                    value:
+                      type: integer
+                      format: uint64
+        "})
+        .unwrap();
+        let spec = IrSpec::from_doc(&doc).unwrap();
+        let graph = CodegenGraph::new(IrGraph::new(&spec));
+        let primitives = graph.primitives().collect_vec();
+        let [ty] = &*primitives else {
+            panic!("expected u64; got `{primitives:?}`");
+        };
+        let p = CodegenPrimitive::new(ty);
+        let actual: syn::Type = parse_quote!(#p);
+        let expected: syn::Type = parse_quote!(u64);
         assert_eq!(actual, expected);
     }
 
