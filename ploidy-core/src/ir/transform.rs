@@ -479,9 +479,8 @@ impl<'context, 'a> IrTransformer<'context, 'a> {
                 (Ty::String, Some(Format::Date)) => PrimitiveIrType::Date.into(),
                 (Ty::String, Some(Format::Uri)) => PrimitiveIrType::Url.into(),
                 (Ty::String, Some(Format::Uuid)) => PrimitiveIrType::Uuid.into(),
-                (Ty::String, Some(Format::Byte) | Some(Format::Binary)) => {
-                    PrimitiveIrType::Bytes.into()
-                }
+                (Ty::String, Some(Format::Byte)) => PrimitiveIrType::Bytes.into(),
+                (Ty::String, Some(Format::Binary)) => PrimitiveIrType::Binary.into(),
                 (Ty::String, _) => PrimitiveIrType::String.into(),
                 (Ty::Integer, Some(Format::Int64)) => PrimitiveIrType::I64.into(),
                 (Ty::Integer, Some(Format::UnixTime)) => PrimitiveIrType::UnixTime.into(),

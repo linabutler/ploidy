@@ -54,7 +54,8 @@ impl<'a> ToTokens for CodegenPrimitive<'a> {
             PrimitiveIrType::Date => quote! { ::chrono::NaiveDate },
             PrimitiveIrType::Url => quote! { ::url::Url },
             PrimitiveIrType::Uuid => quote! { ::uuid::Uuid },
-            PrimitiveIrType::Bytes => quote! { ::bytes::Bytes },
+            PrimitiveIrType::Bytes => quote! { ::ploidy_util::binary::Base64 },
+            PrimitiveIrType::Binary => quote! { ::serde_bytes::ByteBuf },
         });
     }
 }
@@ -549,7 +550,38 @@ mod tests {
         };
         let p = CodegenPrimitive::new(ty);
         let actual: syn::Type = parse_quote!(#p);
-        let expected: syn::Type = parse_quote!(::bytes::Bytes);
+        let expected: syn::Type = parse_quote!(::ploidy_util::binary::Base64);
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn test_codegen_primitive_binary() {
+        let doc = Document::from_yaml(indoc::indoc! {"
+            openapi: 3.0.0
+            info:
+              title: Test
+              version: 1.0.0
+            paths: {}
+            components:
+              schemas:
+                Test:
+                  type: object
+                  required: [value]
+                  properties:
+                    value:
+                      type: string
+                      format: binary
+        "})
+        .unwrap();
+        let spec = IrSpec::from_doc(&doc).unwrap();
+        let graph = CodegenGraph::new(IrGraph::new(&spec));
+        let primitives = graph.primitives().collect_vec();
+        let [ty] = &*primitives else {
+            panic!("expected binary; got `{primitives:?}`");
+        };
+        let p = CodegenPrimitive::new(ty);
+        let actual: syn::Type = parse_quote!(#p);
+        let expected: syn::Type = parse_quote!(::serde_bytes::ByteBuf);
         assert_eq!(actual, expected);
     }
 }

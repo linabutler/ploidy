@@ -52,12 +52,12 @@ impl<'a> CodegenCargoManifest<'a> {
         };
 
         let dependencies = toml::toml! {
-            bytes = { version = "1", features = ["serde"] }
             chrono = { version = "0.4", features = ["serde"] }
             http = "1"
             ploidy-util = PLOIDY_VERSION
             reqwest = { version = "0.12", default-features = false, features = ["http2", "json", "multipart", "rustls-tls"] }
             serde = { version = "1", features = ["derive"] }
+            serde_bytes = "0.11"
             serde_json = "1"
             serde_path_to_error = "0.1"
             thiserror = "2"

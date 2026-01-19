@@ -192,6 +192,15 @@ fn test_primitive_string_formats() {
     let result = transform(&doc, IrTypeName::Schema("Data"), &schema);
     assert_matches!(result, IrType::Primitive(PrimitiveIrType::Bytes));
 
+    // `string` with `binary` format.
+    let schema: Schema = serde_yaml::from_str(indoc::indoc! {"
+        type: string
+        format: binary
+    "})
+    .unwrap();
+    let result = transform(&doc, IrTypeName::Schema("RawData"), &schema);
+    assert_matches!(result, IrType::Primitive(PrimitiveIrType::Binary));
+
     // `string` without format.
     let schema: Schema = serde_yaml::from_str(indoc::indoc! {"
         type: string
@@ -1495,26 +1504,6 @@ fn test_unhandled_string_format_falls_back_to_string() {
     let result = transform(&doc, IrTypeName::Schema("CustomType"), &schema);
 
     assert_matches!(result, IrType::Primitive(PrimitiveIrType::String));
-}
-
-#[test]
-fn test_binary_format_maps_to_bytes() {
-    let doc = Document::from_yaml(indoc::indoc! {"
-        openapi: 3.0.0
-        info:
-          title: Test
-          version: 1.0.0
-    "})
-    .unwrap();
-    let schema: Schema = serde_yaml::from_str(indoc::indoc! {"
-        type: string
-        format: binary
-    "})
-    .unwrap();
-
-    let result = transform(&doc, IrTypeName::Schema("Data"), &schema);
-
-    assert_matches!(result, IrType::Primitive(PrimitiveIrType::Bytes));
 }
 
 #[test]
