@@ -213,6 +213,7 @@ impl ToTokens for CodegenUntaggedVariantName {
             Primitive(PrimitiveIrType::Url) => "Url".into(),
             Primitive(PrimitiveIrType::Uuid) => "Uuid".into(),
             Primitive(PrimitiveIrType::Bytes) => "Bytes".into(),
+            Primitive(PrimitiveIrType::Binary) => "Binary".into(),
             Array => "Array".into(),
             Map => "Map".into(),
             Index(index) => Cow::Owned(format!("V{index}")),

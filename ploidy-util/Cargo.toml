@@ -10,6 +10,7 @@ repository.workspace = true
 keywords.workspace = true
 
 [dependencies]
+base64 = "0.22"
 chrono = "0.4"
 itertools = "0.14"
 percent-encoding = "2.3"

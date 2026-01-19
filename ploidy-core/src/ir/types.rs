@@ -85,6 +85,7 @@ pub enum PrimitiveIrType {
     Url,
     Uuid,
     Bytes,
+    Binary,
 }
 
 /// A named schema type.
