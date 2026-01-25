@@ -19,7 +19,7 @@ pub enum InlineIrTypeView<'a> {
 impl<'a> InlineIrTypeView<'a> {
     pub(in crate::ir) fn new(
         graph: &'a IrGraph<'a>,
-        index: NodeIndex,
+        index: NodeIndex<usize>,
         ty: &'a InlineIrType<'a>,
     ) -> Self {
         match ty {
@@ -57,7 +57,7 @@ impl<'a> ViewNode<'a> for InlineIrTypeView<'a> {
         }
     }
 
-    fn index(&self) -> NodeIndex {
+    fn index(&self) -> NodeIndex<usize> {
         match self {
             Self::Enum(_, view) => view.index(),
             Self::Struct(_, view) => view.index(),

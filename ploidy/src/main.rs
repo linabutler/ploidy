@@ -1,5 +1,4 @@
-use std::collections::BTreeMap;
-
+use itertools::Itertools;
 use miette::{Context, IntoDiagnostic, Result};
 use ploidy_codegen_rust::{CodegenCargoManifest, CodegenErrorModule, CodegenGraph, CodegenLibrary};
 use ploidy_core::{
@@ -35,14 +34,18 @@ fn main() -> Result<()> {
             println!("OpenAPI: {} (version {})", doc.info.title, doc.info.version);
 
             let spec = IrSpec::from_doc(&doc).into_diagnostic()?;
+
             let config = command
                 .manifest
                 .package
                 .as_ref()
                 .and_then(|p| p.metadata.as_ref()?.ploidy.as_ref());
-            let graph = match config {
-                Some(config) => CodegenGraph::with_config(IrGraph::new(&spec), config),
-                None => CodegenGraph::new(IrGraph::new(&spec)),
+            let graph = {
+                let graph = IrGraph::new(&spec);
+                match config {
+                    Some(config) => CodegenGraph::with_config(graph, config),
+                    None => CodegenGraph::new(graph),
+                }
             };
 
             println!("Writing generated code to `{}`...", output.display());
@@ -62,17 +65,14 @@ fn main() -> Result<()> {
             println!("Generating {} types...", graph.schemas().count());
             ploidy_codegen_rust::write_types_to_disk(&output, &graph)?;
 
-            let counts =
-                graph
-                    .operations()
-                    .fold(BTreeMap::<&str, usize>::new(), |mut counts, view| {
-                        *counts.entry(view.resource()).or_default() += 1;
-                        counts
-                    });
+            let counts = graph
+                .operations()
+                .into_grouping_map_by(|op| op.resource())
+                .fold(0, |count, _, _| count + 1);
             println!(
-                "Generating {} client methods for {} resources...",
+                "Generating {} client methods across {} resources...",
                 counts.values().copied().sum::<usize>(),
-                counts.keys().count(),
+                counts.len(),
             );
             ploidy_codegen_rust::write_client_to_disk(&output, &graph)?;
 

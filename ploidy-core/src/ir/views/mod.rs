@@ -31,30 +31,43 @@ use self::{inline::InlineIrTypeView, ir::IrTypeView, operation::IrOperationView}
 pub trait View<'a> {
     /// Returns an iterator over all the inline types that are
     /// contained within this type.
-    fn inlines(&self) -> impl Iterator<Item = InlineIrTypeView<'a>>;
+    fn inlines(&self) -> impl Iterator<Item = InlineIrTypeView<'a>> + use<'a, Self>;
 
-    /// Returns an iterator over all the operations that directly or transitively
-    /// use this type.
-    fn used_by(&self) -> impl Iterator<Item = IrOperationView<'a>>;
+    /// Returns an iterator over the operations that use this type.
+    ///
+    /// This is backward propagation: each operation depends on this type.
+    fn used_by(&self) -> impl Iterator<Item = IrOperationView<'a>> + use<'a, Self>;
 
-    /// Returns an iterator over all the types that are reachable from this type.
-    fn reachable(&self) -> impl Iterator<Item = IrTypeView<'a>>;
+    /// Returns an iterator over all the types that are reachable from this type,
+    /// including this type and all its transitive dependencies. The first item
+    /// is always this type.
+    ///
+    /// This is forward propagation: this type depends on each reachable type.
+    ///
+    /// Complexity: O(n), where `n` is the number of reachable types.
+    fn reachable(&self) -> impl Iterator<Item = IrTypeView<'a>> + use<'a, Self>;
 
     /// Returns an iterator over all reachable types, with a `filter` function
-    /// to control the traversal.
-    fn reachable_if<F>(&self, filter: F) -> impl Iterator<Item = IrTypeView<'a>>
+    /// to control the traversal. This is useful for skipping nodes and subgraphs
+    /// based on runtime conditions.
+    ///
+    /// Complexity: O(V + E), where `V` is the number of nodes in
+    /// the reachable subgraph, and `E` is the number of edges.
+    fn reachable_if<F>(&self, filter: F) -> impl Iterator<Item = IrTypeView<'a>> + use<'a, Self, F>
     where
         F: Fn(&IrTypeView<'a>) -> Traversal;
+}
 
+pub trait ExtendableView<'a>: View<'a> {
     /// Returns a reference to this type's extended data.
     fn extensions(&self) -> &IrViewExtensions<Self>
     where
-        Self: Extendable<'a> + Sized;
+        Self: Sized;
 
     /// Returns a mutable reference to this type's extended data.
     fn extensions_mut(&mut self) -> &mut IrViewExtensions<Self>
     where
-        Self: Extendable<'a> + Sized;
+        Self: Sized;
 }
 
 impl<'a, T> View<'a> for T
@@ -62,7 +75,7 @@ where
     T: ViewNode<'a>,
 {
     #[inline]
-    fn inlines(&self) -> impl Iterator<Item = InlineIrTypeView<'a>> {
+    fn inlines(&self) -> impl Iterator<Item = InlineIrTypeView<'a>> + use<'a, T> {
         let graph = self.graph();
         // Exclude edges that reference other schemas.
         let filtered = EdgeFiltered::from_fn(&graph.g, |r| {
@@ -76,24 +89,37 @@ where
     }
 
     #[inline]
-    fn used_by(&self) -> impl Iterator<Item = IrOperationView<'a>> {
-        self.graph()
+    fn used_by(&self) -> impl Iterator<Item = IrOperationView<'a>> + use<'a, T> {
+        let graph = self.graph();
+        graph
             .metadata
+            .schemas
             .get(&self.index())
             .into_iter()
-            .flat_map(|meta| &meta.operations)
-            .map(|op| IrOperationView::new(self.graph(), op))
+            .flat_map(|meta| {
+                meta.used_by
+                    .iter()
+                    .map(|op| IrOperationView::new(graph, op.0))
+            })
     }
 
     #[inline]
-    fn reachable(&self) -> impl Iterator<Item = IrTypeView<'a>> {
+    fn reachable(&self) -> impl Iterator<Item = IrTypeView<'a>> + use<'a, T> {
         let graph = self.graph();
-        let mut bfs = Bfs::new(&graph.g, self.index());
-        std::iter::from_fn(move || bfs.next(&graph.g)).map(|index| IrTypeView::new(graph, index))
+        std::iter::once(IrTypeView::new(self.graph(), self.index())).chain(
+            graph
+                .metadata
+                .schemas
+                .get(&self.index())
+                .into_iter()
+                .flat_map(|meta| meta.depends_on.ones())
+                .map(NodeIndex::new)
+                .map(move |index| IrTypeView::new(graph, index)),
+        )
     }
 
     #[inline]
-    fn reachable_if<F>(&self, filter: F) -> impl Iterator<Item = IrTypeView<'a>>
+    fn reachable_if<F>(&self, filter: F) -> impl Iterator<Item = IrTypeView<'a>> + use<'a, T, F>
     where
         F: Fn(&IrTypeView<'a>) -> Traversal,
     {
@@ -128,7 +154,12 @@ where
             None
         })
     }
+}
 
+impl<'a, T> ExtendableView<'a> for T
+where
+    T: ViewNode<'a>,
+{
     #[inline]
     fn extensions(&self) -> &IrViewExtensions<Self> {
         IrViewExtensions::new(self)
@@ -142,7 +173,7 @@ where
 
 pub trait ViewNode<'a> {
     fn graph(&self) -> &'a IrGraph<'a>;
-    fn index(&self) -> NodeIndex;
+    fn index(&self) -> NodeIndex<usize>;
 }
 
 pub trait Extendable<'graph> {
@@ -176,7 +207,9 @@ where
     where
         'graph: 'view,
     {
-        self.graph().metadata[&self.index()].extensions.borrow()
+        self.graph().metadata.schemas[&self.index()]
+            .extensions
+            .borrow()
     }
 
     #[inline]
@@ -184,7 +217,9 @@ where
     where
         'graph: 'b,
     {
-        self.graph().metadata[&self.index()].extensions.borrow_mut()
+        self.graph().metadata.schemas[&self.index()]
+            .extensions
+            .borrow_mut()
     }
 }
 

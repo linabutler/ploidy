@@ -21,7 +21,7 @@ pub fn transform<'a>(
     schema: &'a Schema,
 ) -> IrType<'a> {
     let context = TransformContext::new(doc);
-    transform_with_context(&context, name, schema)
+    transform_with_context(&context, name.into(), schema)
 }
 
 /// Context for the [`IrTransformer`].
@@ -125,7 +125,7 @@ impl<'context, 'a> IrTransformer<'context, 'a> {
             variants,
         };
         Ok(match self.name {
-            IrTypeName::Schema(name) => SchemaIrType::Tagged(name, tagged).into(),
+            IrTypeName::Schema(info) => SchemaIrType::Tagged(info, tagged).into(),
             IrTypeName::Inline(path) => InlineIrType::Tagged(path, tagged).into(),
         })
     }
@@ -144,8 +144,8 @@ impl<'context, 'a> IrTransformer<'context, 'a> {
                     RefOrSchema::Other(s) if matches!(&*s.ty, [Ty::Null]) => None,
                     RefOrSchema::Other(schema) => {
                         let path = match &self.name {
-                            IrTypeName::Schema(name) => InlineIrTypePath {
-                                root: InlineIrTypePathRoot::Type(name),
+                            IrTypeName::Schema(info) => InlineIrTypePath {
+                                root: InlineIrTypePathRoot::Type(info.name),
                                 segments: vec![InlineIrTypePathSegment::Variant(index)],
                             },
                             IrTypeName::Inline(path) => {
@@ -185,7 +185,7 @@ impl<'context, 'a> IrTransformer<'context, 'a> {
                     variants,
                 };
                 match self.name {
-                    IrTypeName::Schema(name) => SchemaIrType::Untagged(name, untagged).into(),
+                    IrTypeName::Schema(info) => SchemaIrType::Untagged(info, untagged).into(),
                     IrTypeName::Inline(path) => InlineIrType::Untagged(path, untagged).into(),
                 }
             }
@@ -196,9 +196,22 @@ impl<'context, 'a> IrTransformer<'context, 'a> {
         let Some(any_of) = &self.schema.any_of else {
             return Err(self);
         };
-        if any_of.len() == 1 {
-            // A single-variant `anyOf` should unwrap to the variant type.
-            return Err(self);
+        if let [schema] = any_of.as_slice() {
+            // A single-variant `anyOf` should unwrap to the variant type. This
+            // preserves type references that would otherwise become `Any`.
+            return Ok(match schema {
+                RefOrSchema::Ref(r) => IrType::Ref(&r.path),
+                RefOrSchema::Other(schema) => {
+                    let path = match &self.name {
+                        IrTypeName::Schema(info) => InlineIrTypePath {
+                            root: InlineIrTypePathRoot::Type(info.name),
+                            segments: vec![],
+                        },
+                        IrTypeName::Inline(path) => path.clone(),
+                    };
+                    transform_with_context(self.context, path, schema)
+                }
+            });
         }
 
         let any_of_fields = any_of
@@ -226,8 +239,8 @@ impl<'context, 'a> IrTransformer<'context, 'a> {
                         // so use its index in `anyOf` as a naming hint.
                         let name = IrStructFieldName::Hint(IrStructFieldNameHint::Index(index + 1));
                         let path = match &self.name {
-                            IrTypeName::Schema(n) => InlineIrTypePath {
-                                root: InlineIrTypePathRoot::Type(n),
+                            IrTypeName::Schema(info) => InlineIrTypePath {
+                                root: InlineIrTypePathRoot::Type(info.name),
                                 segments: vec![InlineIrTypePathSegment::Field(name)],
                             },
                             IrTypeName::Inline(path) => {
@@ -267,8 +280,8 @@ impl<'context, 'a> IrTransformer<'context, 'a> {
                     RefOrSchema::Ref(r) => IrType::Ref(&r.path),
                     RefOrSchema::Other(schema) => {
                         let path = match &self.name {
-                            IrTypeName::Schema(name) => InlineIrTypePath {
-                                root: InlineIrTypePathRoot::Type(name),
+                            IrTypeName::Schema(info) => InlineIrTypePath {
+                                root: InlineIrTypePathRoot::Type(info.name),
                                 segments: vec![InlineIrTypePathSegment::Field(
                                     IrStructFieldName::Name(field_name),
                                 )],
@@ -340,7 +353,7 @@ impl<'context, 'a> IrTransformer<'context, 'a> {
         };
 
         Ok(match self.name {
-            IrTypeName::Schema(name) => SchemaIrType::Struct(name, ty).into(),
+            IrTypeName::Schema(info) => SchemaIrType::Struct(info, ty).into(),
             IrTypeName::Inline(path) => InlineIrType::Struct(path, ty).into(),
         })
     }
@@ -366,7 +379,7 @@ impl<'context, 'a> IrTransformer<'context, 'a> {
             variants,
         };
         Ok(match self.name {
-            IrTypeName::Schema(name) => SchemaIrType::Enum(name, ty).into(),
+            IrTypeName::Schema(info) => SchemaIrType::Enum(info, ty).into(),
             IrTypeName::Inline(path) => InlineIrType::Enum(path, ty).into(),
         })
     }
@@ -399,8 +412,8 @@ impl<'context, 'a> IrTransformer<'context, 'a> {
                     RefOrSchema::Ref(reference) => IrType::Ref(&reference.path),
                     RefOrSchema::Other(schema) => {
                         let path = match &self.name {
-                            IrTypeName::Schema(name) => InlineIrTypePath {
-                                root: InlineIrTypePathRoot::Type(name),
+                            IrTypeName::Schema(info) => InlineIrTypePath {
+                                root: InlineIrTypePathRoot::Type(info.name),
                                 segments: vec![InlineIrTypePathSegment::Field(
                                     IrStructFieldName::Name(field_name),
                                 )],
@@ -464,7 +477,7 @@ impl<'context, 'a> IrTransformer<'context, 'a> {
             fields,
         };
         Ok(match self.name {
-            IrTypeName::Schema(name) => SchemaIrType::Struct(name, ty).into(),
+            IrTypeName::Schema(info) => SchemaIrType::Struct(info, ty).into(),
             IrTypeName::Inline(path) => InlineIrType::Struct(path, ty).into(),
         })
     }
@@ -506,8 +519,8 @@ impl<'context, 'a> IrTransformer<'context, 'a> {
                         Some(RefOrSchema::Ref(r)) => IrType::Ref(&r.path),
                         Some(RefOrSchema::Other(schema)) => {
                             let path = match &self.name {
-                                IrTypeName::Schema(name) => InlineIrTypePath {
-                                    root: InlineIrTypePathRoot::Type(name),
+                                IrTypeName::Schema(info) => InlineIrTypePath {
+                                    root: InlineIrTypePathRoot::Type(info.name),
                                     segments: vec![InlineIrTypePathSegment::ArrayItem],
                                 },
                                 IrTypeName::Inline(path) => {
@@ -531,8 +544,8 @@ impl<'context, 'a> IrTransformer<'context, 'a> {
                         }
                         Some(AdditionalProperties::RefOrSchema(RefOrSchema::Other(schema))) => {
                             let path = match &self.name {
-                                IrTypeName::Schema(name) => InlineIrTypePath {
-                                    root: InlineIrTypePathRoot::Type(name),
+                                IrTypeName::Schema(info) => InlineIrTypePath {
+                                    root: InlineIrTypePathRoot::Type(info.name),
                                     segments: vec![InlineIrTypePathSegment::MapValue],
                                 },
                                 IrTypeName::Inline(path) => {
@@ -569,7 +582,7 @@ impl<'context, 'a> IrTransformer<'context, 'a> {
                     variants,
                 };
                 match self.name {
-                    IrTypeName::Schema(name) => SchemaIrType::Untagged(name, untagged).into(),
+                    IrTypeName::Schema(info) => SchemaIrType::Untagged(info, untagged).into(),
                     IrTypeName::Inline(path) => InlineIrType::Untagged(path, untagged).into(),
                 }
             }

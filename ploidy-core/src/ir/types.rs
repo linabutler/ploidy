@@ -94,27 +94,45 @@ pub enum PrimitiveIrType {
     Binary,
 }
 
+/// Metadata for a named schema type.
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+pub struct SchemaTypeInfo<'a> {
+    /// The name of the schema type.
+    pub name: &'a str,
+    /// The `x-resourceId` extension value, if present.
+    pub resource: Option<&'a str>,
+}
+
 /// A named schema type.
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub enum SchemaIrType<'a> {
     /// An enum with named variants.
-    Enum(&'a str, IrEnum<'a>),
+    Enum(SchemaTypeInfo<'a>, IrEnum<'a>),
     /// A struct with fields.
-    Struct(&'a str, IrStruct<'a>),
+    Struct(SchemaTypeInfo<'a>, IrStruct<'a>),
     /// A tagged union.
-    Tagged(&'a str, IrTagged<'a>),
+    Tagged(SchemaTypeInfo<'a>, IrTagged<'a>),
     /// An untagged union.
-    Untagged(&'a str, IrUntagged<'a>),
+    Untagged(SchemaTypeInfo<'a>, IrUntagged<'a>),
 }
 
 impl<'a> SchemaIrType<'a> {
     #[inline]
     pub fn name(&self) -> &'a str {
-        let (Self::Enum(name, _)
-        | Self::Struct(name, _)
-        | Self::Tagged(name, _)
-        | Self::Untagged(name, _)) = self;
-        name
+        let (Self::Enum(info, ..)
+        | Self::Struct(info, ..)
+        | Self::Tagged(info, ..)
+        | Self::Untagged(info, ..)) = self;
+        info.name
+    }
+
+    #[inline]
+    pub fn resource(&self) -> Option<&'a str> {
+        let (Self::Enum(info, ..)
+        | Self::Struct(info, ..)
+        | Self::Tagged(info, ..)
+        | Self::Untagged(info, ..)) = self;
+        info.resource
     }
 }
 
@@ -147,7 +165,7 @@ pub struct InlineIrTypePath<'a> {
 
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub enum InlineIrTypePathRoot<'a> {
-    Resource(&'a str),
+    Resource(Option<&'a str>),
     Type(&'a str),
 }
 
@@ -266,8 +284,23 @@ impl From<PrimitiveIrType> for IrUntaggedVariant<'_> {
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub enum IrTypeName<'a> {
-    Schema(&'a str),
+    Schema(SchemaTypeInfo<'a>),
     Inline(InlineIrTypePath<'a>),
+}
+
+impl<'a> From<&'a str> for IrTypeName<'a> {
+    fn from(name: &'a str) -> Self {
+        Self::Schema(SchemaTypeInfo {
+            name,
+            resource: None,
+        })
+    }
+}
+
+impl<'a> From<SchemaTypeInfo<'a>> for IrTypeName<'a> {
+    fn from(info: SchemaTypeInfo<'a>) -> Self {
+        Self::Schema(info)
+    }
 }
 
 impl<'a> From<InlineIrTypePath<'a>> for IrTypeName<'a> {
@@ -278,10 +311,10 @@ impl<'a> From<InlineIrTypePath<'a>> for IrTypeName<'a> {
 
 #[derive(Clone, Debug)]
 pub struct IrOperation<'a> {
-    pub resource: &'a str,
     pub id: &'a str,
     pub method: Method,
     pub path: Vec<PathSegment<'a>>,
+    pub resource: Option<&'a str>,
     pub description: Option<&'a str>,
     pub params: Vec<IrParameter<'a>>,
     pub request: Option<IrRequest<'a>>,

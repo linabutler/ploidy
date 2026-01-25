@@ -1,17 +1,10 @@
-use itertools::Itertools;
-use ploidy_core::{
-    codegen::IntoCode,
-    ir::{InlineIrTypeView, SchemaIrTypeView, View},
-};
+use ploidy_core::{codegen::IntoCode, ir::SchemaIrTypeView};
 use proc_macro2::TokenStream;
 use quote::{ToTokens, TokenStreamExt, quote};
 
 use super::{
-    enum_::CodegenEnum,
-    naming::{CodegenIdent, CodegenIdentUsage, CodegenTypeName},
-    struct_::CodegenStruct,
-    tagged::CodegenTagged,
-    untagged::CodegenUntagged,
+    enum_::CodegenEnum, inlines::CodegenInlines, naming::CodegenTypeName, struct_::CodegenStruct,
+    tagged::CodegenTagged, untagged::CodegenUntagged,
 };
 
 /// Generates a module for a named schema type.
@@ -29,7 +22,7 @@ impl<'a> CodegenSchemaType<'a> {
 impl ToTokens for CodegenSchemaType<'_> {
     fn to_tokens(&self, tokens: &mut TokenStream) {
         let name = CodegenTypeName::Schema(self.ty);
-        let code = match self.ty {
+        let ty = match self.ty {
             SchemaIrTypeView::Struct(_, view) => CodegenStruct::new(name, view).into_token_stream(),
             SchemaIrTypeView::Enum(_, view) => CodegenEnum::new(name, view).into_token_stream(),
             SchemaIrTypeView::Tagged(_, view) => CodegenTagged::new(name, view).into_token_stream(),
@@ -37,38 +30,10 @@ impl ToTokens for CodegenSchemaType<'_> {
                 CodegenUntagged::new(name, view).into_token_stream()
             }
         };
-        let mut inlines = self.ty.inlines().collect_vec();
-        inlines.sort_by(|a, b| {
-            CodegenTypeName::Inline(a)
-                .into_sort_key()
-                .cmp(&CodegenTypeName::Inline(b).into_sort_key())
-        });
-        let mut inlines = inlines.into_iter().map(|view| {
-            let name = CodegenTypeName::Inline(&view);
-            match &view {
-                InlineIrTypeView::Enum(_, view) => CodegenEnum::new(name, view).into_token_stream(),
-                InlineIrTypeView::Struct(_, view) => {
-                    CodegenStruct::new(name, view).into_token_stream()
-                }
-                InlineIrTypeView::Tagged(_, view) => {
-                    CodegenTagged::new(name, view).into_token_stream()
-                }
-                InlineIrTypeView::Untagged(_, view) => {
-                    CodegenUntagged::new(name, view).into_token_stream()
-                }
-            }
-        });
-        let fields_module = inlines.next().map(|head| {
-            quote! {
-                pub mod types {
-                    #head
-                    #(#inlines)*
-                }
-            }
-        });
+        let inlines = CodegenInlines::Schema(self.ty);
         tokens.append_all(quote! {
-            #code
-            #fields_module
+            #ty
+            #inlines
         });
     }
 }
@@ -77,9 +42,11 @@ impl IntoCode for CodegenSchemaType<'_> {
     type Code = (String, TokenStream);
 
     fn into_code(self) -> Self::Code {
-        let ident = self.ty.extensions().get::<CodegenIdent>().unwrap();
-        let usage = CodegenIdentUsage::Module(&ident);
-        (format!("src/types/{usage}.rs"), self.into_token_stream())
+        let name = CodegenTypeName::Schema(self.ty);
+        (
+            format!("src/types/{}.rs", name.into_module_name().display()),
+            self.into_token_stream(),
+        )
     }
 }
 

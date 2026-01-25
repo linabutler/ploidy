@@ -41,7 +41,7 @@ fn test_parses_single_operation_from_path() {
         [IrOperation {
             id: "listUsers",
             method: Method::Get,
-            resource: "full",
+            resource: None,
             ..
         }],
     );
@@ -1046,7 +1046,7 @@ fn test_parses_custom_resource_name_from_extension() {
     assert_matches!(
         &*ir.operations,
         [IrOperation {
-            resource: "user_management",
+            resource: Some("user_management"),
             ..
         }],
     );
@@ -1071,13 +1071,7 @@ fn test_defaults_to_full_when_no_resource_extension() {
 
     let ir = IrSpec::from_doc(&doc).unwrap();
 
-    assert_matches!(
-        &*ir.operations,
-        [IrOperation {
-            resource: "full",
-            ..
-        }],
-    );
+    assert_matches!(&*ir.operations, [IrOperation { resource: None, .. }],);
 }
 
 #[test]
@@ -1111,14 +1105,71 @@ fn test_different_operations_can_have_different_resources() {
         &*ir.operations,
         [
             IrOperation {
-                resource: "user_management",
+                resource: Some("user_management"),
                 ..
             },
             IrOperation {
-                resource: "content",
+                resource: Some("content"),
                 ..
             }
         ],
+    );
+}
+
+// MARK: `x-resourceId` extension
+
+#[test]
+fn test_schema_stores_x_resource_id() {
+    let doc = Document::from_yaml(indoc::indoc! {"
+        openapi: 3.0.0
+        info:
+          title: Test API
+          version: 1.0
+        paths: {}
+        components:
+          schemas:
+            User:
+              type: object
+              x-resourceId: users
+              properties:
+                name:
+                  type: string
+    "})
+    .unwrap();
+
+    let spec = IrSpec::from_doc(&doc).unwrap();
+    let schema = spec.schemas.get("User").unwrap();
+
+    assert_matches!(
+        schema,
+        IrType::Schema(schema_ty) if schema_ty.resource() == Some("users"),
+    );
+}
+
+#[test]
+fn test_schema_without_x_resource_id_has_none() {
+    let doc = Document::from_yaml(indoc::indoc! {"
+        openapi: 3.0.0
+        info:
+          title: Test API
+          version: 1.0
+        paths: {}
+        components:
+          schemas:
+            User:
+              type: object
+              properties:
+                name:
+                  type: string
+    "})
+    .unwrap();
+
+    let spec = IrSpec::from_doc(&doc).unwrap();
+    let schema = spec.schemas.get("User").unwrap();
+
+    assert_matches!(
+        schema,
+        IrType::Schema(schema_ty) if schema_ty.resource().is_none(),
     );
 }
 
@@ -1276,7 +1327,7 @@ fn test_operation_with_all_components() {
         [IrOperation {
             id: "updateUser",
             method: Method::Put,
-            resource: "users",
+            resource: Some("users"),
             description: Some("Update an existing user"),
             request: Some(_),
             response: Some(_),
@@ -1385,24 +1436,24 @@ fn test_complex_spec_with_multiple_operations_and_resources() {
             IrOperation {
                 id: "listUsers",
                 method: Method::Get,
-                resource: "users",
+                resource: Some("users"),
                 ..
             },
             IrOperation {
                 id: "createUser",
                 method: Method::Post,
-                resource: "users",
+                resource: Some("users"),
                 ..
             },
             IrOperation {
                 id: "listPosts",
                 method: Method::Get,
-                resource: "posts",
+                resource: Some("posts"),
                 ..
             },
             IrOperation {
                 id: "getPost",
-                resource: "posts",
+                resource: Some("posts"),
                 ..
             },
         ],

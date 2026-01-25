@@ -1,89 +1,57 @@
-use heck::ToSnakeCase;
-use itertools::Itertools;
-use ploidy_core::{
-    codegen::IntoCode,
-    ir::{InlineIrTypePathRoot, InlineIrTypeView, IrOperationView},
-};
+use ploidy_core::{codegen::IntoCode, ir::IrOperationView};
 use proc_macro2::TokenStream;
 use quote::{ToTokens, TokenStreamExt, quote};
 
 use super::{
-    enum_::CodegenEnum, naming::CodegenTypeName, operation::CodegenOperation,
-    struct_::CodegenStruct, tagged::CodegenTagged, untagged::CodegenUntagged,
+    cfg::CfgFeature,
+    graph::CodegenGraph,
+    inlines::CodegenInlines,
+    naming::{CargoFeature, CodegenIdentUsage},
+    operation::CodegenOperation,
 };
 
-/// Generates a feature-gated `impl Client` block for a resource,
-/// with all its operations.
+/// Generates an `impl Client` block for a feature-gated resource,
+/// with all its operations and inline types.
 pub struct CodegenResource<'a> {
-    resource: &'a str,
-    operations: &'a [IrOperationView<'a>],
+    graph: &'a CodegenGraph<'a>,
+    feature: &'a CargoFeature,
+    ops: &'a [IrOperationView<'a>],
 }
 
 impl<'a> CodegenResource<'a> {
-    pub fn new(resource: &'a str, operations: &'a [IrOperationView<'a>]) -> Self {
+    pub fn new(
+        graph: &'a CodegenGraph<'a>,
+        feature: &'a CargoFeature,
+        ops: &'a [IrOperationView<'a>],
+    ) -> Self {
         Self {
-            resource,
-            operations,
+            graph,
+            feature,
+            ops,
         }
     }
 }
 
 impl ToTokens for CodegenResource<'_> {
     fn to_tokens(&self, tokens: &mut TokenStream) {
-        let feature_name = self.resource;
-        let methods: Vec<TokenStream> = self
-            .operations
-            .iter()
-            .map(|view| CodegenOperation::new(view).into_token_stream())
-            .collect();
-
-        let mut inlines = self
-            .operations
-            .iter()
-            .flat_map(|op| op.inlines())
-            .filter(|ty| {
-                // Only emit Rust definitions for inline types contained
-                // within the operation. Inline types contained within schemas
-                // that the operation _references_ will be generated as part of
-                // `CodegenSchemaType`.
-                matches!(ty.path().root, InlineIrTypePathRoot::Resource(r) if r == self.resource)
-            })
-            .collect_vec();
-        inlines.sort_by(|a, b| {
-            CodegenTypeName::Inline(a)
-                .into_sort_key()
-                .cmp(&CodegenTypeName::Inline(b).into_sort_key())
-        });
-        let mut inlines = inlines.into_iter().map(|view| {
-            let name = CodegenTypeName::Inline(&view);
-            match &view {
-                InlineIrTypeView::Enum(_, view) => CodegenEnum::new(name, view).into_token_stream(),
-                InlineIrTypeView::Struct(_, view) => {
-                    CodegenStruct::new(name, view).into_token_stream()
-                }
-                InlineIrTypeView::Tagged(_, view) => {
-                    CodegenTagged::new(name, view).into_token_stream()
-                }
-                InlineIrTypeView::Untagged(_, view) => {
-                    CodegenUntagged::new(name, view).into_token_stream()
-                }
-            }
-        });
-        let fields_module = inlines.next().map(|head| {
+        // Each method gets its own `#[cfg(...)]` attribute.
+        let methods = self.ops.iter().map(|view| {
+            let cfg = CfgFeature::for_operation(self.graph, view);
+            let method = CodegenOperation::new(view).into_token_stream();
             quote! {
-                pub mod types {
-                    #head
-                    #(#inlines)*
-                }
+                #cfg
+                #method
             }
         });
-
+        let inlines = CodegenInlines::Resource {
+            graph: self.graph,
+            ops: self.ops,
+        };
         tokens.append_all(quote! {
-            #[cfg(feature = #feature_name)]
             impl crate::client::Client {
                 #(#methods)*
             }
-            #fields_module
+            #inlines
         });
     }
 }
@@ -93,8 +61,176 @@ impl IntoCode for CodegenResource<'_> {
 
     fn into_code(self) -> Self::Code {
         (
-            format!("src/client/{}.rs", self.resource.to_snake_case()),
+            format!(
+                "src/client/{}.rs",
+                CodegenIdentUsage::Module(self.feature.as_ident()).display()
+            ),
             self.into_token_stream(),
         )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    use itertools::Itertools;
+    use ploidy_core::{
+        ir::{IrGraph, IrSpec},
+        parse::Document,
+    };
+    use pretty_assertions::assert_eq;
+
+    use syn::parse_quote;
+
+    use crate::{graph::CodegenGraph, naming::CargoFeature};
+
+    #[test]
+    fn test_operation_method_with_only_unnamed_deps_has_no_cfg() {
+        let doc = Document::from_yaml(indoc::indoc! {"
+            openapi: 3.0.0
+            info:
+              title: Test
+              version: 1.0.0
+            paths:
+              /customers:
+                get:
+                  operationId: listCustomers
+                  x-resource-name: customer
+                  responses:
+                    '200':
+                      description: OK
+                      content:
+                        application/json:
+                          schema:
+                            type: array
+                            items:
+                              $ref: '#/components/schemas/Customer'
+            components:
+              schemas:
+                Customer:
+                  type: object
+                  properties:
+                    address:
+                      $ref: '#/components/schemas/Address'
+                Address:
+                  type: object
+                  properties:
+                    street:
+                      type: string
+        "})
+        .unwrap();
+
+        let spec = IrSpec::from_doc(&doc).unwrap();
+        let ir = IrGraph::new(&spec);
+        let graph = CodegenGraph::new(ir);
+
+        let ops = graph.operations().collect_vec();
+        let feature = CargoFeature::from_name("customer");
+        let resource = CodegenResource::new(&graph, &feature, &ops);
+
+        // Parse the generated tokens as a file, then
+        // extract the `impl` block containing the methods.
+        let actual: syn::File = parse_quote!(#resource);
+        let block = actual
+            .items
+            .iter()
+            .find_map(|item| match item {
+                syn::Item::Impl(block) => Some(block),
+                _ => None,
+            })
+            .unwrap();
+
+        // The method should not have a `#[cfg(...)]` attribute,
+        // since none of its dependencies have an `x-resourceId`.
+        let methods = block
+            .items
+            .iter()
+            .filter_map(|item| match item {
+                syn::ImplItem::Fn(method) => Some(method),
+                _ => None,
+            })
+            .collect_vec();
+        assert_eq!(methods.len(), 1);
+        assert!(
+            !methods[0]
+                .attrs
+                .iter()
+                .any(|attr| attr.path().is_ident("cfg"))
+        );
+    }
+
+    #[test]
+    fn test_operation_method_with_named_deps_has_cfg() {
+        let doc = Document::from_yaml(indoc::indoc! {"
+            openapi: 3.0.0
+            info:
+              title: Test
+              version: 1.0.0
+            paths:
+              /orders:
+                get:
+                  operationId: listOrders
+                  x-resource-name: orders
+                  responses:
+                    '200':
+                      description: OK
+                      content:
+                        application/json:
+                          schema:
+                            type: array
+                            items:
+                              $ref: '#/components/schemas/Order'
+            components:
+              schemas:
+                Order:
+                  type: object
+                  properties:
+                    customer:
+                      $ref: '#/components/schemas/Customer'
+                Customer:
+                  type: object
+                  x-resourceId: customer
+                  properties:
+                    id:
+                      type: string
+        "})
+        .unwrap();
+
+        let spec = IrSpec::from_doc(&doc).unwrap();
+        let ir = IrGraph::new(&spec);
+        let graph = CodegenGraph::new(ir);
+
+        let ops = graph.operations().collect_vec();
+        let feature = CargoFeature::from_name("orders");
+        let resource = CodegenResource::new(&graph, &feature, &ops);
+
+        let actual: syn::File = parse_quote!(#resource);
+        let block = actual
+            .items
+            .iter()
+            .find_map(|item| match item {
+                syn::Item::Impl(block) => Some(block),
+                _ => None,
+            })
+            .unwrap();
+
+        // The method should have a `#[cfg(feature = "customer")]` attribute,
+        // since `Order` (no resource) depends on `Customer` (has `x-resourceId`).
+        let methods = block
+            .items
+            .iter()
+            .filter_map(|item| match item {
+                syn::ImplItem::Fn(method) => Some(method),
+                _ => None,
+            })
+            .collect_vec();
+        assert_eq!(methods.len(), 1);
+        let cfg = methods[0]
+            .attrs
+            .iter()
+            .find(|attr| attr.path().is_ident("cfg"));
+        let expected: syn::Attribute = parse_quote!(#[cfg(feature = "customer")]);
+        assert_eq!(cfg, Some(&expected));
     }
 }

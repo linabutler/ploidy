@@ -11,7 +11,7 @@ use super::{IrTypeView, ViewNode};
 #[derive(Debug)]
 pub struct IrArrayView<'a> {
     graph: &'a IrGraph<'a>,
-    index: NodeIndex,
+    index: NodeIndex<usize>,
     inner: &'a IrType<'a>,
 }
 
@@ -19,7 +19,7 @@ impl<'a> IrArrayView<'a> {
     #[inline]
     pub(in crate::ir) fn new(
         graph: &'a IrGraph<'a>,
-        index: NodeIndex,
+        index: NodeIndex<usize>,
         inner: &'a IrType<'a>,
     ) -> Self {
         Self {
@@ -44,7 +44,7 @@ impl<'a> ViewNode<'a> for IrArrayView<'a> {
     }
 
     #[inline]
-    fn index(&self) -> NodeIndex {
+    fn index(&self) -> NodeIndex<usize> {
         self.index
     }
 }
@@ -53,7 +53,7 @@ impl<'a> ViewNode<'a> for IrArrayView<'a> {
 #[derive(Debug)]
 pub struct IrMapView<'a> {
     graph: &'a IrGraph<'a>,
-    index: NodeIndex,
+    index: NodeIndex<usize>,
     inner: &'a IrType<'a>,
 }
 
@@ -61,7 +61,7 @@ impl<'a> IrMapView<'a> {
     #[inline]
     pub(in crate::ir) fn new(
         graph: &'a IrGraph<'a>,
-        index: NodeIndex,
+        index: NodeIndex<usize>,
         inner: &'a IrType<'a>,
     ) -> Self {
         Self {
@@ -86,7 +86,7 @@ impl<'a> ViewNode<'a> for IrMapView<'a> {
     }
 
     #[inline]
-    fn index(&self) -> NodeIndex {
+    fn index(&self) -> NodeIndex<usize> {
         self.index
     }
 }
@@ -95,7 +95,7 @@ impl<'a> ViewNode<'a> for IrMapView<'a> {
 #[derive(Debug)]
 pub struct IrOptionalView<'a> {
     graph: &'a IrGraph<'a>,
-    index: NodeIndex,
+    index: NodeIndex<usize>,
     inner: &'a IrType<'a>,
 }
 
@@ -103,7 +103,7 @@ impl<'a> IrOptionalView<'a> {
     #[inline]
     pub(in crate::ir) fn new(
         graph: &'a IrGraph<'a>,
-        index: NodeIndex,
+        index: NodeIndex<usize>,
         inner: &'a IrType<'a>,
     ) -> Self {
         Self {
@@ -128,7 +128,7 @@ impl<'a> ViewNode<'a> for IrOptionalView<'a> {
     }
 
     #[inline]
-    fn index(&self) -> NodeIndex {
+    fn index(&self) -> NodeIndex<usize> {
         self.index
     }
 }
@@ -137,7 +137,7 @@ impl<'a> ViewNode<'a> for IrOptionalView<'a> {
 #[derive(Debug)]
 pub struct IrPrimitiveView<'a> {
     graph: &'a IrGraph<'a>,
-    index: NodeIndex,
+    index: NodeIndex<usize>,
     ty: PrimitiveIrType,
 }
 
@@ -145,7 +145,7 @@ impl<'a> IrPrimitiveView<'a> {
     #[inline]
     pub(in crate::ir) fn new(
         graph: &'a IrGraph<'a>,
-        index: NodeIndex,
+        index: NodeIndex<usize>,
         ty: PrimitiveIrType,
     ) -> Self {
         Self { graph, index, ty }
@@ -165,7 +165,7 @@ impl<'a> ViewNode<'a> for IrPrimitiveView<'a> {
     }
 
     #[inline]
-    fn index(&self) -> NodeIndex {
+    fn index(&self) -> NodeIndex<usize> {
         self.index
     }
 }
