@@ -11,14 +11,14 @@ use super::{ViewNode, ir::IrTypeView};
 #[derive(Debug)]
 pub struct IrTaggedView<'a> {
     graph: &'a IrGraph<'a>,
-    index: NodeIndex,
+    index: NodeIndex<usize>,
     ty: &'a IrTagged<'a>,
 }
 
 impl<'a> IrTaggedView<'a> {
     pub(in crate::ir) fn new(
         graph: &'a IrGraph<'a>,
-        index: NodeIndex,
+        index: NodeIndex<usize>,
         ty: &'a IrTagged<'a>,
     ) -> Self {
         Self { graph, index, ty }
@@ -50,7 +50,7 @@ impl<'a> ViewNode<'a> for IrTaggedView<'a> {
     }
 
     #[inline]
-    fn index(&self) -> NodeIndex {
+    fn index(&self) -> NodeIndex<usize> {
         self.index
     }
 }
@@ -59,12 +59,16 @@ impl<'a> ViewNode<'a> for IrTaggedView<'a> {
 #[derive(Debug)]
 pub struct IrTaggedVariantView<'a> {
     graph: &'a IrGraph<'a>,
-    index: NodeIndex,
+    index: NodeIndex<usize>,
     variant: &'a IrTaggedVariant<'a>,
 }
 
 impl<'a> IrTaggedVariantView<'a> {
-    fn new(graph: &'a IrGraph<'a>, index: NodeIndex, variant: &'a IrTaggedVariant<'a>) -> Self {
+    fn new(
+        graph: &'a IrGraph<'a>,
+        index: NodeIndex<usize>,
+        variant: &'a IrTaggedVariant<'a>,
+    ) -> Self {
         Self {
             graph,
             index,
@@ -96,7 +100,7 @@ impl<'a> ViewNode<'a> for IrTaggedVariantView<'a> {
     }
 
     #[inline]
-    fn index(&self) -> NodeIndex {
+    fn index(&self) -> NodeIndex<usize> {
         self.index
     }
 }

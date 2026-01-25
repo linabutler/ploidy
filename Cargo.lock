@@ -652,6 +652,7 @@ version = "0.8.1"
 dependencies = [
  "cargo_toml",
  "clap",
+ "itertools",
  "miette",
  "mimalloc",
  "ploidy-codegen-rust",
@@ -692,6 +693,7 @@ dependencies = [
  "by_address",
  "cargo_toml",
  "either",
+ "fixedbitset",
  "indexmap",
  "indoc",
  "itertools",

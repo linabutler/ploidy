@@ -7,11 +7,13 @@ use quote::quote;
 use ploidy_core::codegen::{IntoCode, write_to_disk};
 
 mod cargo;
+mod cfg;
 mod client;
 mod config;
 mod derives;
 mod enum_;
 mod graph;
+mod inlines;
 mod naming;
 mod operation;
 mod primitive;
@@ -28,9 +30,11 @@ mod untagged;
 mod tests;
 
 pub use cargo::*;
+pub use cfg::*;
 pub use client::*;
 pub use config::*;
 pub use graph::*;
+pub use inlines::*;
 pub use naming::*;
 pub use operation::*;
 pub use primitive::*;
@@ -51,21 +55,28 @@ pub fn write_types_to_disk(output: &Path, graph: &CodegenGraph<'_>) -> miette::R
 }
 
 pub fn write_client_to_disk(output: &Path, graph: &CodegenGraph<'_>) -> miette::Result<()> {
-    let by_resource = graph
+    // Group operations by feature. All operations belong to a feature,
+    // or `full` for operations without a named resource.
+    let ops_by_feature = graph
         .operations()
         .fold(BTreeMap::<_, Vec<_>>::new(), |mut map, view| {
-            let resource = view.resource();
-            map.entry(resource).or_default().push(view);
+            let feature = view
+                .resource()
+                .map(CargoFeature::from_name)
+                .unwrap_or_default();
+            map.entry(feature).or_default().push(view);
             map
         });
 
-    for (resource, operations) in &by_resource {
-        let code = CodegenResource::new(resource, operations);
+    // Write all operations for each feature into separate modules.
+    for (feature, ops) in &ops_by_feature {
+        let code = CodegenResource::new(graph, feature, ops);
         write_to_disk(output, code)?;
     }
 
-    let resources = by_resource.keys().copied().collect_vec();
-    let mod_code = CodegenClientModule::new(graph, &resources);
+    // Write the top-level client module.
+    let features = ops_by_feature.keys().collect_vec();
+    let mod_code = CodegenClientModule::new(graph, &features);
     write_to_disk(output, mod_code)?;
 
     Ok(())

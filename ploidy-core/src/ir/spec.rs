@@ -2,9 +2,12 @@ use indexmap::IndexMap;
 use itertools::Itertools;
 use ploidy_pointer::JsonPointee;
 
-use crate::parse::{
-    self, Document, Info, Parameter, ParameterLocation, ParameterStyle, RefOrParameter,
-    RefOrRequestBody, RefOrResponse, RefOrSchema, RequestBody, Response,
+use crate::{
+    ir::SchemaTypeInfo,
+    parse::{
+        self, Document, Info, Parameter, ParameterLocation, ParameterStyle, RefOrParameter,
+        RefOrRequestBody, RefOrResponse, RefOrSchema, RequestBody, Response,
+    },
 };
 
 use super::{
@@ -30,7 +33,14 @@ impl<'a> IrSpec<'a> {
                 .schemas
                 .iter()
                 .map(|(name, schema)| {
-                    let ty = transform(doc, IrTypeName::Schema(name), schema);
+                    let ty = transform(
+                        doc,
+                        IrTypeName::Schema(SchemaTypeInfo {
+                            name,
+                            resource: schema.extension("x-resourceId"),
+                        }),
+                        schema,
+                    );
                     (name.as_str(), ty)
                 })
                 .collect(),
@@ -48,7 +58,7 @@ impl<'a> IrSpec<'a> {
             })
             .flatten_ok()
             .map_ok(|(method, path, op)| -> Result<_, IrError> {
-                let resource = op.extension("x-resource-name").unwrap_or("full");
+                let resource = op.extension("x-resource-name");
                 let id = op.operation_id.as_deref().ok_or(IrError::NoOperationId)?;
                 let params = op
                     .parameters
