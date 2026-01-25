@@ -1,13 +1,15 @@
 use std::marker::PhantomData;
 
+use by_address::ByAddress;
+use fixedbitset::FixedBitSet;
 use petgraph::{
     graph::NodeIndex,
-    visit::{Bfs, EdgeFiltered, EdgeRef, VisitMap, Visitable},
+    visit::{Bfs, VisitMap, Visitable},
 };
 
 use crate::{
     ir::{
-        graph::{IrGraph, IrGraphG, IrGraphNode},
+        graph::{IrGraph, IrGraphNode},
         types::{
             IrOperation, IrParameter, IrParameterInfo, IrParameterStyle, IrRequest, IrResponse,
         },
@@ -15,7 +17,7 @@ use crate::{
     parse::{Method, path::PathSegment},
 };
 
-use super::{inline::InlineIrTypeView, ir::IrTypeView};
+use super::{Traversal, View, inline::InlineIrTypeView, ir::IrTypeView};
 
 /// A graph-aware view of an [`IrOperation`].
 #[derive(Debug)]
@@ -27,11 +29,6 @@ pub struct IrOperationView<'a> {
 impl<'a> IrOperationView<'a> {
     pub(in crate::ir) fn new(graph: &'a IrGraph<'a>, op: &'a IrOperation<'a>) -> Self {
         Self { graph, op }
-    }
-
-    #[inline]
-    pub fn resource(&self) -> &'a str {
-        self.op.resource
     }
 
     #[inline]
@@ -86,38 +83,104 @@ impl<'a> IrOperationView<'a> {
         })
     }
 
+    /// Returns the resource name that this operation declares
+    /// in its `x-resource-name` extension field.
+    #[inline]
+    pub fn resource(&self) -> Option<&'a str> {
+        self.op.resource
+    }
+
+    fn bfs(&self) -> Bfs<NodeIndex<usize>, FixedBitSet> {
+        // `Bfs::new()` starts with just one root on the stack,
+        // but operations aren't roots; they reference types that are roots,
+        // so we construct our own visitor with those types on the stack.
+        let meta = &self.graph.metadata.operations[&ByAddress(self.op)];
+        let mut discovered = self.graph.g.visit_map();
+        discovered.union_with(&meta.types);
+        let stack = discovered.ones().map(NodeIndex::new).collect();
+        Bfs { stack, discovered }
+    }
+}
+
+impl<'a> View<'a> for IrOperationView<'a> {
     /// Returns an iterator over all the inline types that are
     /// contained within this operation's referenced types.
     #[inline]
-    pub fn inlines(&self) -> impl Iterator<Item = InlineIrTypeView<'a>> {
-        // Exclude edges that reference other schemas.
-        let filtered = EdgeFiltered::from_fn(&self.graph.g, |r| {
-            !matches!(self.graph.g[r.target()], IrGraphNode::Schema(_))
-        });
-        let mut bfs = self.bfs();
-        std::iter::from_fn(move || bfs.next(&filtered)).filter_map(|index| {
-            match self.graph.g[index] {
-                IrGraphNode::Inline(ty) => Some(InlineIrTypeView::new(self.graph, index, ty)),
-                _ => None,
-            }
+    fn inlines(&self) -> impl Iterator<Item = InlineIrTypeView<'a>> + use<'a> {
+        self.reachable_if(|view| match view {
+            // Yield inline types and continue into their fields.
+            IrTypeView::Inline(_) => Traversal::Visit,
+
+            // Stop at schema references; their inlines are emitted
+            // by `CodegenSchemaType`.
+            IrTypeView::Schema(_) => Traversal::Ignore,
+
+            // Continue traversing into wrapper types without yielding.
+            _ => Traversal::Skip,
+        })
+        .filter_map(|ty| match ty {
+            IrTypeView::Inline(ty) => Some(ty),
+            _ => None,
         })
     }
 
-    fn bfs(&self) -> Bfs<NodeIndex, <IrGraphG<'a> as Visitable>::Map> {
-        // `Bfs::new()` starts with just one root on the stack,
-        // but operations aren't roots; they reference types that are roots,
-        // so we construct our own visitor with all those types on the stack.
-        let stack = self
-            .op
-            .types()
-            .map(|ty| IrGraphNode::from_ref(self.graph.spec, ty.as_ref()))
-            .map(|node| self.graph.indices[&node])
-            .collect();
-        let mut discovered = self.graph.g.visit_map();
-        for &index in &stack {
-            discovered.visit(index);
+    /// Returns an empty iterator. Operations aren't "used by" other operations;
+    /// they use types.
+    #[inline]
+    fn used_by(&self) -> impl Iterator<Item = IrOperationView<'a>> + use<'a> {
+        std::iter::empty()
+    }
+
+    #[inline]
+    fn reachable(&self) -> impl Iterator<Item = IrTypeView<'a>> + use<'a> {
+        let meta = &self.graph.metadata.operations[&ByAddress(self.op)];
+        let mut types = meta.types.clone();
+        // Collect the transitive dependencies of each of the operation's
+        // direct dependencies.
+        for node in meta.types.ones().map(NodeIndex::new) {
+            let meta = &self.graph.metadata.schemas[&node];
+            types.union_with(&meta.depends_on);
         }
-        Bfs { stack, discovered }
+        types
+            .into_ones()
+            .map(NodeIndex::new)
+            .map(|index| IrTypeView::new(self.graph, index))
+    }
+
+    #[inline]
+    fn reachable_if<F>(&self, filter: F) -> impl Iterator<Item = IrTypeView<'a>> + use<'a, F>
+    where
+        F: Fn(&IrTypeView<'a>) -> Traversal,
+    {
+        let graph = self.graph;
+        let Bfs {
+            mut stack,
+            mut discovered,
+        } = self.bfs();
+
+        std::iter::from_fn(move || {
+            while let Some(index) = stack.pop_front() {
+                let view = IrTypeView::new(graph, index);
+                let traversal = filter(&view);
+
+                if matches!(traversal, Traversal::Visit | Traversal::Skip) {
+                    // Add the neighbors to the stack of nodes to visit.
+                    for neighbor in graph.g.neighbors(index) {
+                        if discovered.visit(neighbor) {
+                            stack.push_back(neighbor);
+                        }
+                    }
+                }
+
+                if matches!(traversal, Traversal::Visit | Traversal::Stop) {
+                    // Yield this node.
+                    return Some(view);
+                }
+
+                // (`Skip` and `Ignore` continue the loop without yielding).
+            }
+            None
+        })
     }
 }
 

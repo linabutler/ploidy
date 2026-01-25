@@ -5,8 +5,8 @@ use serde_json::Number;
 use crate::{
     ir::{
         InlineIrType, InlineIrTypePathRoot, InlineIrTypePathSegment, IrEnumVariant, IrStructField,
-        IrStructFieldName, IrStructFieldNameHint, IrTaggedVariant, IrType, IrTypeName,
-        IrUntaggedVariant, IrUntaggedVariantNameHint, PrimitiveIrType, SchemaIrType,
+        IrStructFieldName, IrStructFieldNameHint, IrTaggedVariant, IrType, IrUntaggedVariant,
+        IrUntaggedVariantNameHint, PrimitiveIrType, SchemaIrType, SchemaTypeInfo,
         transform::transform,
     },
     parse::{Document, Schema},
@@ -30,10 +30,10 @@ fn test_enum_string_variants() {
     "})
     .unwrap();
 
-    let result = transform(&doc, IrTypeName::Schema("Status"), &schema);
+    let result = transform(&doc, "Status", &schema);
 
     let enum_ = match result {
-        IrType::Schema(SchemaIrType::Enum("Status", enum_)) => enum_,
+        IrType::Schema(SchemaIrType::Enum(SchemaTypeInfo { name: "Status", .. }, enum_)) => enum_,
         other => panic!("expected enum `Status`; got `{other:?}`"),
     };
     assert_matches!(
@@ -61,10 +61,15 @@ fn test_enum_number_variants() {
     "})
     .unwrap();
 
-    let result = transform(&doc, IrTypeName::Schema("Priority"), &schema);
+    let result = transform(&doc, "Priority", &schema);
 
     let enum_ = match result {
-        IrType::Schema(SchemaIrType::Enum("Priority", enum_)) => enum_,
+        IrType::Schema(SchemaIrType::Enum(
+            SchemaTypeInfo {
+                name: "Priority", ..
+            },
+            enum_,
+        )) => enum_,
         other => panic!("expected enum `Priority`; got `{other:?}`"),
     };
     assert_matches!(
@@ -92,10 +97,10 @@ fn test_enum_bool_variants() {
     "})
     .unwrap();
 
-    let result = transform(&doc, IrTypeName::Schema("Flag"), &schema);
+    let result = transform(&doc, "Flag", &schema);
 
     let enum_ = match result {
-        IrType::Schema(SchemaIrType::Enum("Flag", enum_)) => enum_,
+        IrType::Schema(SchemaIrType::Enum(SchemaTypeInfo { name: "Flag", .. }, enum_)) => enum_,
         other => panic!("expected enum `Flag`; got `{other:?}`"),
     };
     assert_matches!(
@@ -119,10 +124,10 @@ fn test_enum_mixed_types() {
     "})
     .unwrap();
 
-    let result = transform(&doc, IrTypeName::Schema("Mixed"), &schema);
+    let result = transform(&doc, "Mixed", &schema);
 
     let enum_ = match result {
-        IrType::Schema(SchemaIrType::Enum("Mixed", enum_)) => enum_,
+        IrType::Schema(SchemaIrType::Enum(SchemaTypeInfo { name: "Mixed", .. }, enum_)) => enum_,
         other => panic!("expected enum `Mixed`; got `{other:?}`"),
     };
     assert_matches!(
@@ -153,7 +158,7 @@ fn test_primitive_string_formats() {
         format: date-time
     "})
     .unwrap();
-    let result = transform(&doc, IrTypeName::Schema("Timestamp"), &schema);
+    let result = transform(&doc, "Timestamp", &schema);
     assert_matches!(result, IrType::Primitive(PrimitiveIrType::DateTime));
 
     // `string` with `date` format.
@@ -162,7 +167,7 @@ fn test_primitive_string_formats() {
         format: date
     "})
     .unwrap();
-    let result = transform(&doc, IrTypeName::Schema("Date"), &schema);
+    let result = transform(&doc, "Date", &schema);
     assert_matches!(result, IrType::Primitive(PrimitiveIrType::Date));
 
     // `string` with `uri` format.
@@ -171,7 +176,7 @@ fn test_primitive_string_formats() {
         format: uri
     "})
     .unwrap();
-    let result = transform(&doc, IrTypeName::Schema("Url"), &schema);
+    let result = transform(&doc, "Url", &schema);
     assert_matches!(result, IrType::Primitive(PrimitiveIrType::Url));
 
     // `string` with `uuid` format.
@@ -180,7 +185,7 @@ fn test_primitive_string_formats() {
         format: uuid
     "})
     .unwrap();
-    let result = transform(&doc, IrTypeName::Schema("Id"), &schema);
+    let result = transform(&doc, "Id", &schema);
     assert_matches!(result, IrType::Primitive(PrimitiveIrType::Uuid));
 
     // `string` with `byte` format.
@@ -189,7 +194,7 @@ fn test_primitive_string_formats() {
         format: byte
     "})
     .unwrap();
-    let result = transform(&doc, IrTypeName::Schema("Data"), &schema);
+    let result = transform(&doc, "Data", &schema);
     assert_matches!(result, IrType::Primitive(PrimitiveIrType::Bytes));
 
     // `string` with `binary` format.
@@ -198,7 +203,7 @@ fn test_primitive_string_formats() {
         format: binary
     "})
     .unwrap();
-    let result = transform(&doc, IrTypeName::Schema("RawData"), &schema);
+    let result = transform(&doc, "RawData", &schema);
     assert_matches!(result, IrType::Primitive(PrimitiveIrType::Binary));
 
     // `string` without format.
@@ -206,7 +211,7 @@ fn test_primitive_string_formats() {
         type: string
     "})
     .unwrap();
-    let result = transform(&doc, IrTypeName::Schema("Text"), &schema);
+    let result = transform(&doc, "Text", &schema);
     assert_matches!(result, IrType::Primitive(PrimitiveIrType::String));
 }
 
@@ -226,7 +231,7 @@ fn test_primitive_integer_formats() {
         format: int32
     "})
     .unwrap();
-    let result = transform(&doc, IrTypeName::Schema("Count"), &schema);
+    let result = transform(&doc, "Count", &schema);
     assert_matches!(result, IrType::Primitive(PrimitiveIrType::I32));
 
     // `integer` with `int64` format.
@@ -235,7 +240,7 @@ fn test_primitive_integer_formats() {
         format: int64
     "})
     .unwrap();
-    let result = transform(&doc, IrTypeName::Schema("BigCount"), &schema);
+    let result = transform(&doc, "BigCount", &schema);
     assert_matches!(result, IrType::Primitive(PrimitiveIrType::I64));
 
     // `integer` with `unix-time` format.
@@ -244,7 +249,7 @@ fn test_primitive_integer_formats() {
         format: unix-time
     "})
     .unwrap();
-    let result = transform(&doc, IrTypeName::Schema("Timestamp"), &schema);
+    let result = transform(&doc, "Timestamp", &schema);
     assert_matches!(result, IrType::Primitive(PrimitiveIrType::UnixTime));
 
     // `integer` without format defaults to `int32`.
@@ -252,7 +257,7 @@ fn test_primitive_integer_formats() {
         type: integer
     "})
     .unwrap();
-    let result = transform(&doc, IrTypeName::Schema("DefaultInt"), &schema);
+    let result = transform(&doc, "DefaultInt", &schema);
     assert_matches!(result, IrType::Primitive(PrimitiveIrType::I32));
 }
 
@@ -272,7 +277,7 @@ fn test_primitive_number_formats() {
         format: float
     "})
     .unwrap();
-    let result = transform(&doc, IrTypeName::Schema("Price"), &schema);
+    let result = transform(&doc, "Price", &schema);
     assert_matches!(result, IrType::Primitive(PrimitiveIrType::F32));
 
     // `number` with `double` format.
@@ -281,7 +286,7 @@ fn test_primitive_number_formats() {
         format: double
     "})
     .unwrap();
-    let result = transform(&doc, IrTypeName::Schema("BigPrice"), &schema);
+    let result = transform(&doc, "BigPrice", &schema);
     assert_matches!(result, IrType::Primitive(PrimitiveIrType::F64));
 
     // `number` with `unix-time` format.
@@ -290,7 +295,7 @@ fn test_primitive_number_formats() {
         format: unix-time
     "})
     .unwrap();
-    let result = transform(&doc, IrTypeName::Schema("FloatTime"), &schema);
+    let result = transform(&doc, "FloatTime", &schema);
     assert_matches!(result, IrType::Primitive(PrimitiveIrType::UnixTime));
 
     // `number` without format defaults to `double`.
@@ -298,7 +303,7 @@ fn test_primitive_number_formats() {
         type: number
     "})
     .unwrap();
-    let result = transform(&doc, IrTypeName::Schema("DefaultNumber"), &schema);
+    let result = transform(&doc, "DefaultNumber", &schema);
     assert_matches!(result, IrType::Primitive(PrimitiveIrType::F64));
 }
 
@@ -324,7 +329,7 @@ fn test_array_with_ref_items() {
     "})
     .unwrap();
 
-    let result = transform(&doc, IrTypeName::Schema("Items"), &schema);
+    let result = transform(&doc, "Items", &schema);
 
     let items = match result {
         IrType::Array(items) => items,
@@ -349,7 +354,7 @@ fn test_array_with_inline_items() {
     "})
     .unwrap();
 
-    let result = transform(&doc, IrTypeName::Schema("Strings"), &schema);
+    let result = transform(&doc, "Strings", &schema);
 
     let items = match result {
         IrType::Array(items) => items,
@@ -380,7 +385,7 @@ fn test_map_with_additional_properties_ref() {
     "})
     .unwrap();
 
-    let result = transform(&doc, IrTypeName::Schema("StringMap"), &schema);
+    let result = transform(&doc, "StringMap", &schema);
 
     let value = match result {
         IrType::Map(value) => value,
@@ -405,7 +410,7 @@ fn test_map_with_additional_properties_inline() {
     "})
     .unwrap();
 
-    let result = transform(&doc, IrTypeName::Schema("IntMap"), &schema);
+    let result = transform(&doc, "IntMap", &schema);
 
     let value = match result {
         IrType::Map(value) => value,
@@ -430,7 +435,7 @@ fn test_map_with_additional_properties_true() {
     "})
     .unwrap();
 
-    let result = transform(&doc, IrTypeName::Schema("DynamicMap"), &schema);
+    let result = transform(&doc, "DynamicMap", &schema);
 
     let value = match result {
         IrType::Map(value) => value,
@@ -461,10 +466,12 @@ fn test_struct_with_own_properties() {
     "})
     .unwrap();
 
-    let result = transform(&doc, IrTypeName::Schema("Person"), &schema);
+    let result = transform(&doc, "Person", &schema);
 
     let struct_ = match result {
-        IrType::Schema(SchemaIrType::Struct("Person", struct_)) => struct_,
+        IrType::Schema(SchemaIrType::Struct(SchemaTypeInfo { name: "Person", .. }, struct_)) => {
+            struct_
+        }
         other => panic!("expected struct `Person`; got `{other:?}`"),
     };
     assert_matches!(
@@ -503,7 +510,7 @@ fn test_struct_with_additional_properties() {
     "})
     .unwrap();
 
-    let result = transform(&doc, IrTypeName::Schema("DynamicObj"), &schema);
+    let result = transform(&doc, "DynamicObj", &schema);
 
     // When `additionalProperties` is present, it should fall through
     // to `other()`, which creates a `Map`.
@@ -531,10 +538,12 @@ fn test_struct_with_required_fields() {
     "})
     .unwrap();
 
-    let result = transform(&doc, IrTypeName::Schema("User"), &schema);
+    let result = transform(&doc, "User", &schema);
 
     let struct_ = match result {
-        IrType::Schema(SchemaIrType::Struct("User", struct_)) => struct_,
+        IrType::Schema(SchemaIrType::Struct(SchemaTypeInfo { name: "User", .. }, struct_)) => {
+            struct_
+        }
         other => panic!("expected struct `User`; got `{other:?}`"),
     };
     assert_matches!(
@@ -576,10 +585,15 @@ fn test_struct_with_nullable_field_ref() {
     "})
     .unwrap();
 
-    let result = transform(&doc, IrTypeName::Schema("Container"), &schema);
+    let result = transform(&doc, "Container", &schema);
 
     let struct_ = match result {
-        IrType::Schema(SchemaIrType::Struct("Container", struct_)) => struct_,
+        IrType::Schema(SchemaIrType::Struct(
+            SchemaTypeInfo {
+                name: "Container", ..
+            },
+            struct_,
+        )) => struct_,
         other => panic!("expected struct `Container`; got `{other:?}`"),
     };
     let [
@@ -613,10 +627,15 @@ fn test_struct_with_nullable_field_inline() {
     "})
     .unwrap();
 
-    let result = transform(&doc, IrTypeName::Schema("Container"), &schema);
+    let result = transform(&doc, "Container", &schema);
 
     let struct_ = match result {
-        IrType::Schema(SchemaIrType::Struct("Container", struct_)) => struct_,
+        IrType::Schema(SchemaIrType::Struct(
+            SchemaTypeInfo {
+                name: "Container", ..
+            },
+            struct_,
+        )) => struct_,
         other => panic!("expected struct `Container`; got `{other:?}`"),
     };
     let [
@@ -651,12 +670,17 @@ fn test_struct_with_nullable_field_openapi_31_syntax() {
     "})
     .unwrap();
 
-    let result = transform(&doc, IrTypeName::Schema("Container"), &schema);
+    let result = transform(&doc, "Container", &schema);
 
     // OpenAPI 3.1 `type: [T, 'null']` syntax should produce an `Optional(T)` field,
     // identical to OpenAPI 3.0 `nullable: true`.
     let struct_ = match result {
-        IrType::Schema(SchemaIrType::Struct("Container", struct_)) => struct_,
+        IrType::Schema(SchemaIrType::Struct(
+            SchemaTypeInfo {
+                name: "Container", ..
+            },
+            struct_,
+        )) => struct_,
         other => panic!("expected struct `Container`; got `{other:?}`"),
     };
     let [
@@ -698,10 +722,12 @@ fn test_struct_ref_field_description() {
     "})
     .unwrap();
 
-    let result = transform(&doc, IrTypeName::Schema("Entity"), &schema);
+    let result = transform(&doc, "Entity", &schema);
 
     let struct_ = match result {
-        IrType::Schema(SchemaIrType::Struct("Entity", struct_)) => struct_,
+        IrType::Schema(SchemaIrType::Struct(SchemaTypeInfo { name: "Entity", .. }, struct_)) => {
+            struct_
+        }
         other => panic!("expected struct `Entity`; got `{other:?}`"),
     };
     assert_matches!(
@@ -732,10 +758,12 @@ fn test_struct_inline_field_description() {
     "})
     .unwrap();
 
-    let result = transform(&doc, IrTypeName::Schema("User"), &schema);
+    let result = transform(&doc, "User", &schema);
 
     let struct_ = match result {
-        IrType::Schema(SchemaIrType::Struct("User", struct_)) => struct_,
+        IrType::Schema(SchemaIrType::Struct(SchemaTypeInfo { name: "User", .. }, struct_)) => {
+            struct_
+        }
         other => panic!("expected struct `User`; got `{other:?}`"),
     };
     assert_matches!(
@@ -783,10 +811,12 @@ fn test_tagged_with_mapping() {
     "})
     .unwrap();
 
-    let result = transform(&doc, IrTypeName::Schema("Animal"), &schema);
+    let result = transform(&doc, "Animal", &schema);
 
     let tagged = match result {
-        IrType::Schema(SchemaIrType::Tagged("Animal", tagged)) => tagged,
+        IrType::Schema(SchemaIrType::Tagged(SchemaTypeInfo { name: "Animal", .. }, tagged)) => {
+            tagged
+        }
         other => panic!("expected tagged union `Animal`; got `{other:?}`"),
     };
     assert_eq!(tagged.tag, "type");
@@ -835,11 +865,13 @@ fn test_tagged_filters_non_refs() {
     "})
     .unwrap();
 
-    let result = transform(&doc, IrTypeName::Schema("Animal"), &schema);
+    let result = transform(&doc, "Animal", &schema);
 
     // Should only have the `Dog` variant; inline schema is filtered out.
     let tagged = match result {
-        IrType::Schema(SchemaIrType::Tagged("Animal", tagged)) => tagged,
+        IrType::Schema(SchemaIrType::Tagged(SchemaTypeInfo { name: "Animal", .. }, tagged)) => {
+            tagged
+        }
         other => panic!("expected tagged union `Animal`; got `{other:?}`"),
     };
     assert_matches!(&*tagged.variants, [IrTaggedVariant { name: "Dog", .. }]);
@@ -873,10 +905,12 @@ fn test_tagged_multiple_aliases() {
     "})
     .unwrap();
 
-    let result = transform(&doc, IrTypeName::Schema("Result"), &schema);
+    let result = transform(&doc, "Result", &schema);
 
     let tagged = match result {
-        IrType::Schema(SchemaIrType::Tagged("Result", tagged)) => tagged,
+        IrType::Schema(SchemaIrType::Tagged(SchemaTypeInfo { name: "Result", .. }, tagged)) => {
+            tagged
+        }
         other => panic!("expected tagged union `Result`; got `{other:?}`"),
     };
     let [
@@ -925,11 +959,13 @@ fn test_tagged_missing_variant() {
     "})
     .unwrap();
 
-    let result = transform(&doc, IrTypeName::Schema("Animal"), &schema);
+    let result = transform(&doc, "Animal", &schema);
 
     // Only `Dog` should be included, since `Cat` isn't in the mapping.
     let tagged = match result {
-        IrType::Schema(SchemaIrType::Tagged("Animal", tagged)) => tagged,
+        IrType::Schema(SchemaIrType::Tagged(SchemaTypeInfo { name: "Animal", .. }, tagged)) => {
+            tagged
+        }
         other => panic!("expected tagged union `Animal`; got `{other:?}`"),
     };
     assert_matches!(&*tagged.variants, [IrTaggedVariant { name: "Dog", .. }]);
@@ -962,10 +998,12 @@ fn test_tagged_description() {
     "})
     .unwrap();
 
-    let result = transform(&doc, IrTypeName::Schema("Animal"), &schema);
+    let result = transform(&doc, "Animal", &schema);
 
     let tagged = match result {
-        IrType::Schema(SchemaIrType::Tagged("Animal", tagged)) => tagged,
+        IrType::Schema(SchemaIrType::Tagged(SchemaTypeInfo { name: "Animal", .. }, tagged)) => {
+            tagged
+        }
         other => panic!("expected tagged union `Animal`; got `{other:?}`"),
     };
     assert_eq!(tagged.description, Some("A tagged union of animals"));
@@ -999,10 +1037,16 @@ fn test_untagged_basic() {
     "})
     .unwrap();
 
-    let result = transform(&doc, IrTypeName::Schema("StringOrNumber"), &schema);
+    let result = transform(&doc, "StringOrNumber", &schema);
 
     let untagged = match result {
-        IrType::Schema(SchemaIrType::Untagged("StringOrNumber", untagged)) => untagged,
+        IrType::Schema(SchemaIrType::Untagged(
+            SchemaTypeInfo {
+                name: "StringOrNumber",
+                ..
+            },
+            untagged,
+        )) => untagged,
         other => panic!("expected untagged union `StringOrNumber`; got `{other:?}`"),
     };
     assert_matches!(
@@ -1028,7 +1072,7 @@ fn test_untagged_empty_simplifies() {
     "})
     .unwrap();
 
-    let result = transform(&doc, IrTypeName::Schema("Empty"), &schema);
+    let result = transform(&doc, "Empty", &schema);
 
     assert_matches!(result, IrType::Any);
 }
@@ -1048,7 +1092,7 @@ fn test_untagged_single_null_simplifies() {
     "})
     .unwrap();
 
-    let result = transform(&doc, IrTypeName::Schema("JustNull"), &schema);
+    let result = transform(&doc, "JustNull", &schema);
 
     assert_matches!(result, IrType::Any);
 }
@@ -1072,7 +1116,7 @@ fn test_untagged_single_variant_unwraps() {
     "})
     .unwrap();
 
-    let result = transform(&doc, IrTypeName::Schema("JustString"), &schema);
+    let result = transform(&doc, "JustString", &schema);
 
     assert_matches!(result, IrType::Ref(_));
 }
@@ -1102,11 +1146,13 @@ fn test_untagged_variant_numbering() {
     "})
     .unwrap();
 
-    let result = transform(&doc, IrTypeName::Schema("ABC"), &schema);
+    let result = transform(&doc, "ABC", &schema);
 
     // Variants should have 1-based indices in their name hints.
     let untagged = match result {
-        IrType::Schema(SchemaIrType::Untagged("ABC", untagged)) => untagged,
+        IrType::Schema(SchemaIrType::Untagged(SchemaTypeInfo { name: "ABC", .. }, untagged)) => {
+            untagged
+        }
         other => panic!("expected untagged union `ABC`; got `{other:?}`"),
     };
     assert_matches!(
@@ -1135,7 +1181,7 @@ fn test_untagged_null_detection() {
     "})
     .unwrap();
 
-    let result = transform(&doc, IrTypeName::Schema("StringOrNull"), &schema);
+    let result = transform(&doc, "StringOrNull", &schema);
 
     assert_matches!(result, IrType::Optional(_));
 }
@@ -1170,11 +1216,16 @@ fn test_any_of_fields_marked_flattened_not_required() {
     "})
     .unwrap();
 
-    let result = transform(&doc, IrTypeName::Schema("Contact"), &schema);
+    let result = transform(&doc, "Contact", &schema);
 
     // Both fields should be flattened.
     let struct_ = match result {
-        IrType::Schema(SchemaIrType::Struct("Contact", struct_)) => struct_,
+        IrType::Schema(SchemaIrType::Struct(
+            SchemaTypeInfo {
+                name: "Contact", ..
+            },
+            struct_,
+        )) => struct_,
         other => panic!("expected struct `Contact`; got `{other:?}`"),
     };
     assert_matches!(
@@ -1219,12 +1270,17 @@ fn test_any_of_ref_uses_type_name() {
     "})
     .unwrap();
 
-    let result = transform(&doc, IrTypeName::Schema("Contact"), &schema);
+    let result = transform(&doc, "Contact", &schema);
 
     // Both fields should be named `Address`, since they reference the same
     // type.
     let struct_ = match result {
-        IrType::Schema(SchemaIrType::Struct("Contact", struct_)) => struct_,
+        IrType::Schema(SchemaIrType::Struct(
+            SchemaTypeInfo {
+                name: "Contact", ..
+            },
+            struct_,
+        )) => struct_,
         other => panic!("expected struct `Contact`; got `{other:?}`"),
     };
     assert_matches!(
@@ -1264,11 +1320,13 @@ fn test_any_of_inline_uses_index_hint() {
     "})
     .unwrap();
 
-    let result = transform(&doc, IrTypeName::Schema("Mixed"), &schema);
+    let result = transform(&doc, "Mixed", &schema);
 
     // Both inline schemas should have index hints.
     let struct_ = match result {
-        IrType::Schema(SchemaIrType::Struct("Mixed", struct_)) => struct_,
+        IrType::Schema(SchemaIrType::Struct(SchemaTypeInfo { name: "Mixed", .. }, struct_)) => {
+            struct_
+        }
         other => panic!("expected struct `Mixed`; got `{other:?}`"),
     };
     assert_matches!(
@@ -1319,12 +1377,17 @@ fn test_any_of_with_properties() {
     "})
     .unwrap();
 
-    let result = transform(&doc, IrTypeName::Schema("Combined"), &schema);
+    let result = transform(&doc, "Combined", &schema);
 
     // `Extra2` is an own field; `Extra1` and `Extra3` are flattened.
     // Own fields should precede the flattened fields.
     let struct_ = match result {
-        IrType::Schema(SchemaIrType::Struct("Combined", struct_)) => struct_,
+        IrType::Schema(SchemaIrType::Struct(
+            SchemaTypeInfo {
+                name: "Combined", ..
+            },
+            struct_,
+        )) => struct_,
         other => panic!("expected struct `Combined`; got `{other:?}`"),
     };
     assert_matches!(
@@ -1373,11 +1436,16 @@ fn test_any_of_nullable_refs() {
     "})
     .unwrap();
 
-    let result = transform(&doc, IrTypeName::Schema("Container"), &schema);
+    let result = transform(&doc, "Container", &schema);
 
     // Both nullable schemas should be flattened.
     let struct_ = match result {
-        IrType::Schema(SchemaIrType::Struct("Container", struct_)) => struct_,
+        IrType::Schema(SchemaIrType::Struct(
+            SchemaTypeInfo {
+                name: "Container", ..
+            },
+            struct_,
+        )) => struct_,
         other => panic!("expected struct `Container`; got `{other:?}`"),
     };
     assert_matches!(
@@ -1432,11 +1500,16 @@ fn test_any_of_with_all_of() {
     "})
     .unwrap();
 
-    let result = transform(&doc, IrTypeName::Schema("Combined"), &schema);
+    let result = transform(&doc, "Combined", &schema);
 
     // Should have both inherited and flattened fields.
     let struct_ = match result {
-        IrType::Schema(SchemaIrType::Struct("Combined", struct_)) => struct_,
+        IrType::Schema(SchemaIrType::Struct(
+            SchemaTypeInfo {
+                name: "Combined", ..
+            },
+            struct_,
+        )) => struct_,
         other => panic!("expected struct `Combined`; got `{other:?}`"),
     };
     assert_matches!(
@@ -1480,7 +1553,7 @@ fn test_boolean_primitive_transformation() {
     "})
     .unwrap();
 
-    let result = transform(&doc, IrTypeName::Schema("Flag"), &schema);
+    let result = transform(&doc, "Flag", &schema);
 
     assert_matches!(result, IrType::Primitive(PrimitiveIrType::Bool));
 }
@@ -1501,7 +1574,7 @@ fn test_unhandled_string_format_falls_back_to_string() {
     "})
     .unwrap();
 
-    let result = transform(&doc, IrTypeName::Schema("CustomType"), &schema);
+    let result = transform(&doc, "CustomType", &schema);
 
     assert_matches!(result, IrType::Primitive(PrimitiveIrType::String));
 }
@@ -1520,7 +1593,7 @@ fn test_empty_type_array_produces_any() {
     "})
     .unwrap();
 
-    let result = transform(&doc, IrTypeName::Schema("NoType"), &schema);
+    let result = transform(&doc, "NoType", &schema);
 
     assert_matches!(result, IrType::Any);
 }
@@ -1539,7 +1612,7 @@ fn test_array_without_items_produces_array_of_any() {
     "})
     .unwrap();
 
-    let result = transform(&doc, IrTypeName::Schema("ArrayAny"), &schema);
+    let result = transform(&doc, "ArrayAny", &schema);
 
     let items = match result {
         IrType::Array(items) => items,
@@ -1563,11 +1636,17 @@ fn test_object_with_empty_properties_produces_struct() {
     "})
     .unwrap();
 
-    let result = transform(&doc, IrTypeName::Schema("EmptyObject"), &schema);
+    let result = transform(&doc, "EmptyObject", &schema);
 
     // An `object` schema without properties should become an empty struct.
     let struct_ = match result {
-        IrType::Schema(SchemaIrType::Struct("EmptyObject", struct_)) => struct_,
+        IrType::Schema(SchemaIrType::Struct(
+            SchemaTypeInfo {
+                name: "EmptyObject",
+                ..
+            },
+            struct_,
+        )) => struct_,
         other => panic!("expected struct `EmptyObject`; got `{other:?}`"),
     };
     assert_matches!(&*struct_.fields, []);
@@ -1587,7 +1666,7 @@ fn test_schema_without_type_or_properties_produces_any() {
     "})
     .unwrap();
 
-    let result = transform(&doc, IrTypeName::Schema("Empty"), &schema);
+    let result = transform(&doc, "Empty", &schema);
 
     // A schema with no `type` and no `properties` should become `Any`.
     assert_matches!(result, IrType::Any);
@@ -1607,7 +1686,7 @@ fn test_type_and_null_in_type_array_creates_nullable() {
     "})
     .unwrap();
 
-    let result = transform(&doc, IrTypeName::Schema("StringOrNull"), &schema);
+    let result = transform(&doc, "StringOrNull", &schema);
 
     // As a special case, any type + `null` should produce `Optional(T)`,
     // not an untagged union.
@@ -1632,10 +1711,16 @@ fn test_multiple_types_string_and_integer_untagged() {
     "})
     .unwrap();
 
-    let result = transform(&doc, IrTypeName::Schema("StringOrInt"), &schema);
+    let result = transform(&doc, "StringOrInt", &schema);
 
     let untagged = match result {
-        IrType::Schema(SchemaIrType::Untagged("StringOrInt", untagged)) => untagged,
+        IrType::Schema(SchemaIrType::Untagged(
+            SchemaTypeInfo {
+                name: "StringOrInt",
+                ..
+            },
+            untagged,
+        )) => untagged,
         other => panic!("expected untagged union `StringOrInt`; got `{other:?}`"),
     };
     assert_matches!(
@@ -1677,10 +1762,12 @@ fn test_deeply_nested_inline_types() {
     "})
     .unwrap();
 
-    let result = transform(&doc, IrTypeName::Schema("Outer"), &schema);
+    let result = transform(&doc, "Outer", &schema);
 
     let struct_ = match result {
-        IrType::Schema(SchemaIrType::Struct("Outer", struct_)) => struct_,
+        IrType::Schema(SchemaIrType::Struct(SchemaTypeInfo { name: "Outer", .. }, struct_)) => {
+            struct_
+        }
         other => panic!("expected struct `Outer`; got `{other:?}`"),
     };
     let [
@@ -1732,12 +1819,17 @@ fn test_enum_with_only_null_json_values_produces_empty_enum() {
     "})
     .unwrap();
 
-    let result = transform(&doc, IrTypeName::Schema("NullEnum"), &schema);
+    let result = transform(&doc, "NullEnum", &schema);
 
     // `null` values are filtered out from enum variants, producing an enum
     // with zero variants.
     let enum_ = match result {
-        IrType::Schema(SchemaIrType::Enum("NullEnum", enum_)) => enum_,
+        IrType::Schema(SchemaIrType::Enum(
+            SchemaTypeInfo {
+                name: "NullEnum", ..
+            },
+            enum_,
+        )) => enum_,
         other => panic!("expected enum `NullEnum`; got `{other:?}`"),
     };
     assert_matches!(&*enum_.variants, []);
@@ -1762,10 +1854,16 @@ fn test_additional_properties_false_creates_struct() {
     "})
     .unwrap();
 
-    let result = transform(&doc, IrTypeName::Schema("StrictObject"), &schema);
+    let result = transform(&doc, "StrictObject", &schema);
 
     let struct_ = match result {
-        IrType::Schema(SchemaIrType::Struct("StrictObject", struct_)) => struct_,
+        IrType::Schema(SchemaIrType::Struct(
+            SchemaTypeInfo {
+                name: "StrictObject",
+                ..
+            },
+            struct_,
+        )) => struct_,
         other => panic!("expected struct `StrictObject`; got `{other:?}`"),
     };
     assert_matches!(
@@ -1799,7 +1897,7 @@ fn test_array_inline_path_construction() {
     "})
     .unwrap();
 
-    let result = transform(&doc, IrTypeName::Schema("Container"), &schema);
+    let result = transform(&doc, "Container", &schema);
 
     let items = match result {
         IrType::Array(items) => items,
@@ -1832,7 +1930,7 @@ fn test_map_inline_path_construction() {
     "})
     .unwrap();
 
-    let result = transform(&doc, IrTypeName::Schema("Dictionary"), &schema);
+    let result = transform(&doc, "Dictionary", &schema);
 
     let value = match result {
         IrType::Map(value) => value,
@@ -1867,10 +1965,12 @@ fn test_struct_inline_path_construction() {
     "})
     .unwrap();
 
-    let result = transform(&doc, IrTypeName::Schema("Outer"), &schema);
+    let result = transform(&doc, "Outer", &schema);
 
     let struct_ = match result {
-        IrType::Schema(SchemaIrType::Struct("Outer", struct_)) => struct_,
+        IrType::Schema(SchemaIrType::Struct(SchemaTypeInfo { name: "Outer", .. }, struct_)) => {
+            struct_
+        }
         other => panic!("expected struct `Outer`; got `{other:?}`"),
     };
     let [
@@ -1934,10 +2034,15 @@ fn test_inline_tagged_union_in_struct_field() {
     "})
     .unwrap();
 
-    let result = transform(&doc, IrTypeName::Schema("Container"), &schema);
+    let result = transform(&doc, "Container", &schema);
 
     let struct_ = match result {
-        IrType::Schema(SchemaIrType::Struct("Container", struct_)) => struct_,
+        IrType::Schema(SchemaIrType::Struct(
+            SchemaTypeInfo {
+                name: "Container", ..
+            },
+            struct_,
+        )) => struct_,
         other => panic!("expected struct `Container`; got `{other:?}`"),
     };
 
@@ -2012,11 +2117,13 @@ fn test_recursive_all_of_ref_nullable() {
     .unwrap();
 
     let schema = &doc.components.as_ref().unwrap().schemas["Node"];
-    let result = transform(&doc, IrTypeName::Schema("Node"), schema);
+    let result = transform(&doc, "Node", schema);
 
     // Should successfully produce a struct.
     let struct_ = match result {
-        IrType::Schema(SchemaIrType::Struct("Node", struct_)) => struct_,
+        IrType::Schema(SchemaIrType::Struct(SchemaTypeInfo { name: "Node", .. }, struct_)) => {
+            struct_
+        }
         other => panic!("expected struct `Node`; got `{other:?}`"),
     };
 
@@ -2063,11 +2170,13 @@ fn test_recursive_all_of_ref() {
     .unwrap();
 
     let schema = &doc.components.as_ref().unwrap().schemas["Node"];
-    let result = transform(&doc, IrTypeName::Schema("Node"), schema);
+    let result = transform(&doc, "Node", schema);
 
     // Should successfully produce a struct.
     let struct_ = match result {
-        IrType::Schema(SchemaIrType::Struct("Node", struct_)) => struct_,
+        IrType::Schema(SchemaIrType::Struct(SchemaTypeInfo { name: "Node", .. }, struct_)) => {
+            struct_
+        }
         other => panic!("expected struct `Node`; got `{other:?}`"),
     };
 
@@ -2120,11 +2229,13 @@ fn test_recursive_multi_all_of_ref_no_stack_overflow() {
     .unwrap();
 
     let schema = &doc.components.as_ref().unwrap().schemas["Node"];
-    let result = transform(&doc, IrTypeName::Schema("Node"), schema);
+    let result = transform(&doc, "Node", schema);
 
     // Should successfully produce a struct.
     let struct_ = match result {
-        IrType::Schema(SchemaIrType::Struct("Node", struct_)) => struct_,
+        IrType::Schema(SchemaIrType::Struct(SchemaTypeInfo { name: "Node", .. }, struct_)) => {
+            struct_
+        }
         other => panic!("expected struct `Node`; got `{other:?}`"),
     };
 

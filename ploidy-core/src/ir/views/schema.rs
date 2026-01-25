@@ -1,6 +1,6 @@
 use petgraph::graph::NodeIndex;
 
-use crate::ir::{graph::IrGraph, types::SchemaIrType};
+use crate::ir::{SchemaTypeInfo, graph::IrGraph, types::SchemaIrType};
 
 use super::{
     ViewNode, enum_::IrEnumView, struct_::IrStructView, tagged::IrTaggedView,
@@ -10,39 +10,50 @@ use super::{
 /// A graph-aware view of a [`SchemaIrType`].
 #[derive(Debug)]
 pub enum SchemaIrTypeView<'a> {
-    Enum(&'a str, IrEnumView<'a>),
-    Struct(&'a str, IrStructView<'a>),
-    Tagged(&'a str, IrTaggedView<'a>),
-    Untagged(&'a str, IrUntaggedView<'a>),
+    Enum(SchemaTypeInfo<'a>, IrEnumView<'a>),
+    Struct(SchemaTypeInfo<'a>, IrStructView<'a>),
+    Tagged(SchemaTypeInfo<'a>, IrTaggedView<'a>),
+    Untagged(SchemaTypeInfo<'a>, IrUntaggedView<'a>),
 }
 
 impl<'a> SchemaIrTypeView<'a> {
     pub(in crate::ir) fn new(
         graph: &'a IrGraph<'a>,
-        index: NodeIndex,
+        index: NodeIndex<usize>,
         ty: &'a SchemaIrType<'a>,
     ) -> Self {
         match ty {
-            SchemaIrType::Enum(name, ty) => Self::Enum(name, IrEnumView::new(graph, index, ty)),
-            SchemaIrType::Struct(name, ty) => {
-                Self::Struct(name, IrStructView::new(graph, index, ty))
+            SchemaIrType::Enum(info, ty) => Self::Enum(*info, IrEnumView::new(graph, index, ty)),
+            SchemaIrType::Struct(info, ty) => {
+                Self::Struct(*info, IrStructView::new(graph, index, ty))
             }
-            SchemaIrType::Tagged(name, ty) => {
-                Self::Tagged(name, IrTaggedView::new(graph, index, ty))
+            SchemaIrType::Tagged(info, ty) => {
+                Self::Tagged(*info, IrTaggedView::new(graph, index, ty))
             }
-            SchemaIrType::Untagged(name, ty) => {
-                Self::Untagged(name, IrUntaggedView::new(graph, index, ty))
+            SchemaIrType::Untagged(info, ty) => {
+                Self::Untagged(*info, IrUntaggedView::new(graph, index, ty))
             }
         }
     }
 
     #[inline]
     pub fn name(&self) -> &'a str {
-        let (Self::Enum(name, _)
-        | Self::Struct(name, _)
-        | Self::Tagged(name, _)
-        | Self::Untagged(name, _)) = self;
+        let (Self::Enum(SchemaTypeInfo { name, .. }, ..)
+        | Self::Struct(SchemaTypeInfo { name, .. }, ..)
+        | Self::Tagged(SchemaTypeInfo { name, .. }, ..)
+        | Self::Untagged(SchemaTypeInfo { name, .. }, ..)) = self;
         name
+    }
+
+    /// Returns the resource name that this schema type declares
+    /// in its `x-resourceId` extension field.
+    #[inline]
+    pub fn resource(&self) -> Option<&'a str> {
+        let (&Self::Enum(SchemaTypeInfo { resource, .. }, ..)
+        | &Self::Struct(SchemaTypeInfo { resource, .. }, ..)
+        | &Self::Tagged(SchemaTypeInfo { resource, .. }, ..)
+        | &Self::Untagged(SchemaTypeInfo { resource, .. }, ..)) = self;
+        resource
     }
 }
 
@@ -58,7 +69,7 @@ impl<'a> ViewNode<'a> for SchemaIrTypeView<'a> {
     }
 
     #[inline]
-    fn index(&self) -> NodeIndex {
+    fn index(&self) -> NodeIndex<usize> {
         match self {
             Self::Enum(_, view) => view.index(),
             Self::Struct(_, view) => view.index(),

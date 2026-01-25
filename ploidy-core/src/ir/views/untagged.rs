@@ -12,14 +12,14 @@ use super::{ViewNode, ir::IrTypeView};
 #[derive(Debug)]
 pub struct IrUntaggedView<'a> {
     graph: &'a IrGraph<'a>,
-    index: NodeIndex,
+    index: NodeIndex<usize>,
     ty: &'a IrUntagged<'a>,
 }
 
 impl<'a> IrUntaggedView<'a> {
     pub(in crate::ir) fn new(
         graph: &'a IrGraph<'a>,
-        index: NodeIndex,
+        index: NodeIndex<usize>,
         ty: &'a IrUntagged<'a>,
     ) -> Self {
         Self { graph, index, ty }
@@ -49,7 +49,7 @@ impl<'a> ViewNode<'a> for IrUntaggedView<'a> {
     }
 
     #[inline]
-    fn index(&self) -> NodeIndex {
+    fn index(&self) -> NodeIndex<usize> {
         self.index
     }
 }

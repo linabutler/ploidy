@@ -11,12 +11,16 @@ use super::ViewNode;
 #[derive(Debug)]
 pub struct IrEnumView<'a> {
     graph: &'a IrGraph<'a>,
-    index: NodeIndex,
+    index: NodeIndex<usize>,
     ty: &'a IrEnum<'a>,
 }
 
 impl<'a> IrEnumView<'a> {
-    pub(in crate::ir) fn new(graph: &'a IrGraph<'a>, index: NodeIndex, ty: &'a IrEnum<'a>) -> Self {
+    pub(in crate::ir) fn new(
+        graph: &'a IrGraph<'a>,
+        index: NodeIndex<usize>,
+        ty: &'a IrEnum<'a>,
+    ) -> Self {
         Self { graph, index, ty }
     }
 
@@ -38,7 +42,7 @@ impl<'a> ViewNode<'a> for IrEnumView<'a> {
     }
 
     #[inline]
-    fn index(&self) -> NodeIndex {
+    fn index(&self) -> NodeIndex<usize> {
         self.index
     }
 }

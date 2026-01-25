@@ -5,10 +5,16 @@ use std::{
 
 use atomic_refcell::AtomicRefCell;
 use by_address::ByAddress;
+use fixedbitset::FixedBitSet;
 use itertools::Itertools;
-use petgraph::algo::tarjan_scc;
-use petgraph::graph::{DiGraph, NodeIndex};
-use petgraph::visit::{Bfs, VisitMap, Visitable};
+use petgraph::{
+    Direction,
+    adj::UnweightedList,
+    algo::{TarjanScc, tred},
+    data::Build,
+    graph::{DiGraph, NodeIndex},
+    visit::{IntoNeighbors, NodeCount},
+};
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use super::{
@@ -21,7 +27,7 @@ use super::{
 };
 
 /// The type graph.
-pub type IrGraphG<'a> = DiGraph<IrGraphNode<'a>, ()>;
+pub(super) type IrGraphG<'a> = DiGraph<IrGraphNode<'a>, (), usize>;
 
 /// A graph of all the types in an [`IrSpec`], where each edge
 /// is a reference from one type to another.
@@ -30,16 +36,16 @@ pub struct IrGraph<'a> {
     pub(super) spec: &'a IrSpec<'a>,
     pub(super) g: IrGraphG<'a>,
     /// An inverted index of nodes to graph indices.
-    pub(super) indices: FxHashMap<IrGraphNode<'a>, NodeIndex>,
+    pub(super) indices: FxHashMap<IrGraphNode<'a>, NodeIndex<usize>>,
     /// Edges that are part of a cycle.
-    pub(super) circular_refs: FxHashSet<(NodeIndex, NodeIndex)>,
+    pub(super) circular_refs: FxHashSet<(NodeIndex<usize>, NodeIndex<usize>)>,
     /// Additional metadata for each node.
-    pub(super) metadata: FxHashMap<NodeIndex, IrGraphNodeMeta<'a>>,
+    pub(super) metadata: IrGraphMetadata<'a>,
 }
 
 impl<'a> IrGraph<'a> {
     pub fn new(spec: &'a IrSpec<'a>) -> Self {
-        let mut g = DiGraph::new();
+        let mut g = IrGraphG::default();
         let mut indices = FxHashMap::default();
 
         // All roots (named schemas, parameters, request and response bodies),
@@ -76,19 +82,17 @@ impl<'a> IrGraph<'a> {
             }
         }
 
-        // Precompute all circular reference edges, where each edge forms a cycle
-        // that requires indirection to break. This speeds up `needs_indirection_to()`:
-        // Tarjan's algorithm runs in O(V + E) time over the entire graph; a naive DFS
-        // in `needs_indirection_to()` would run in O(N * (V + E)) time, where N is
-        // the total number of fields in all structs.
+        let sccs = TopoSccs::new(&g);
+
+        // Precompute all circular reference edges, where both endpoints
+        // are in the same SCC, to speed up `needs_indirection()`.
         let circular_refs = {
             let mut edges = FxHashSet::default();
-            for scc in tarjan_scc(&g) {
-                let scc = FxHashSet::from_iter(scc);
-                for &node in &scc {
+            for members in sccs.iter() {
+                for node in members.ones().map(NodeIndex::new) {
                     edges.extend(
                         g.neighbors(node)
-                            .filter(|neighbor| scc.contains(neighbor))
+                            .filter(|neighbor| members.contains(neighbor.index()))
                             .map(|neighbor| (node, neighbor)),
                     );
                 }
@@ -96,33 +100,89 @@ impl<'a> IrGraph<'a> {
             edges
         };
 
-        // Create empty metadata slots for all types.
-        let mut metadata = g
-            .node_indices()
-            .map(|index| (index, IrGraphNodeMeta::default()))
-            .collect::<FxHashMap<_, _>>();
+        let metadata = {
+            let mut metadata = IrGraphMetadata::default();
 
-        // Precompute a mapping of types to all the operations that use them.
-        // This speeds up `used_by()`: precomputing runs in O(P * (V + E)) time,
-        // where P is the number of operations; a BFS in `used_by()` would
-        // run in O(C * P * (V + E)) time, where C is the number of calls to
-        // `used_by()`.
-        for op in spec.operations.iter() {
-            let stack = op
-                .types()
-                .map(|ty| IrGraphNode::from_ref(spec, ty.as_ref()))
-                .map(|node| indices[&node])
-                .collect();
-            let mut discovered = g.visit_map();
-            for &index in &stack {
-                discovered.visit(index);
+            // Precompute the set of type indices that each operation
+            // references directly.
+            for op in &spec.operations {
+                metadata.operations.entry(ByAddress(op)).or_default().types = op
+                    .types()
+                    .filter_map(|ty| {
+                        indices
+                            .get(&IrGraphNode::from_ref(spec, ty.as_ref()))
+                            .map(|node| node.index())
+                    })
+                    .collect();
             }
-            let mut bfs = Bfs { stack, discovered };
-            while let Some(index) = bfs.next(&g) {
-                let meta = metadata.get_mut(&index).unwrap();
-                meta.operations.insert(ByAddress(op));
+
+            // Forward propagation: for each type, compute all the types
+            // that it depends on, directly and transitively.
+            {
+                // Condense each of the original graph's strongly connected components
+                // into a single node, forming a DAG.
+                let condensation = sccs.condensation();
+
+                // Compute the transitive closure; discard the reduction.
+                let (_, closure) = tred::dag_transitive_reduction_closure(&condensation);
+
+                // For each SCC, collect the topological indices of the SCCs it depends on.
+                // Nodes in the same SCC share transitive dependencies, so precomputing at
+                // the SCC level avoids redundant work during expansion.
+                let scc_deps: Vec<FixedBitSet> = condensation
+                    .node_indices()
+                    .map(|index| closure.neighbors(index).collect())
+                    .collect();
+
+                // Expand SCC-level dependencies to node-level: for each SCC,
+                // form a union of all nodes from all the SCCs it depends on.
+                let mut deps_by_scc =
+                    vec![FixedBitSet::with_capacity(g.node_count()); condensation.node_count()];
+                for scc_index in condensation.node_indices() {
+                    for dep_scc_index in scc_deps[scc_index].ones() {
+                        deps_by_scc[scc_index].union_with(sccs.members(dep_scc_index));
+                    }
+                    // Include the other members of this SCC; these depend on
+                    // each other because they're in a cycle.
+                    deps_by_scc[scc_index].union_with(sccs.members(scc_index));
+                }
+
+                for node in g.node_indices() {
+                    let topo_index = sccs.topo_index(node);
+                    let mut deps = deps_by_scc[topo_index].clone();
+                    // Exclude the node itself.
+                    deps.remove(node.index());
+                    metadata.schemas.entry(node).or_default().depends_on = deps;
+                }
             }
-        }
+
+            // Backward propagation: propagate each operation to all the types
+            // that it uses, directly and transitively.
+            for op in &spec.operations {
+                let meta = &metadata.operations[&ByAddress(op)];
+
+                // Collect all the types that this operation depends on.
+                let mut transitive_deps = FixedBitSet::with_capacity(g.node_count());
+                for node in meta.types.ones().map(NodeIndex::new) {
+                    transitive_deps.insert(node.index());
+                    if let Some(meta) = metadata.schemas.get(&node) {
+                        transitive_deps.union_with(&meta.depends_on);
+                    }
+                }
+
+                // Mark each type as being used by this operation.
+                for index in transitive_deps.ones().map(NodeIndex::new) {
+                    metadata
+                        .schemas
+                        .entry(index)
+                        .or_default()
+                        .used_by
+                        .insert(ByAddress(op));
+                }
+            }
+
+            metadata
+        };
 
         Self {
             spec,
@@ -206,10 +266,29 @@ impl<'a> IrGraphNode<'a> {
     }
 }
 
+/// Precomputed metadata for schema types and operations in the graph.
+#[derive(Debug, Default)]
+pub struct IrGraphMetadata<'a> {
+    pub schemas: FxHashMap<NodeIndex<usize>, IrGraphNodeMeta<'a>>,
+    pub operations: FxHashMap<ByAddress<&'a IrOperation<'a>>, IrGraphOperationMeta>,
+}
+
+/// Precomputed metadata for an operation that references
+/// types in the graph.
+#[derive(Debug, Default)]
+pub struct IrGraphOperationMeta {
+    /// Indices of all the types that this operation directly depends on:
+    /// parameters, request body, and response body.
+    pub types: FixedBitSet,
+}
+
+/// Precomputed metadata for a schema type in the graph.
 #[derive(Default)]
 pub(super) struct IrGraphNodeMeta<'a> {
-    /// The set of operations that transitively use this type.
-    pub operations: FxHashSet<ByAddress<&'a IrOperation<'a>>>,
+    /// Operations that use this type.
+    pub used_by: FxHashSet<ByAddress<&'a IrOperation<'a>>>,
+    /// Indices of other types that this type transitively depends on.
+    pub depends_on: FixedBitSet,
     /// Opaque extended data for this type.
     pub extensions: AtomicRefCell<ExtensionMap>,
 }
@@ -217,7 +296,8 @@ pub(super) struct IrGraphNodeMeta<'a> {
 impl Debug for IrGraphNodeMeta<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("IrGraphNodeMeta")
-            .field("operations", &self.operations)
+            .field("used_by", &self.used_by)
+            .field("depends_on", &self.depends_on)
             .finish_non_exhaustive()
     }
 }
@@ -329,5 +409,213 @@ impl<T: Send + Sync + 'static> Extension for T {
     #[inline]
     fn into_inner(self: Box<Self>) -> Box<dyn Any> {
         self
+    }
+}
+
+/// Strongly connected components (SCCs) in topological order.
+///
+/// [`TopoSccs`] uses Tarjan's single-pass algorithm to find all SCCs,
+/// and provides topological ordering, efficient membership testing, and
+/// condensation for computing the transitive closure. These are
+/// building blocks for cycle detection and dependency propagation.
+struct TopoSccs<'a, N, E> {
+    graph: &'a DiGraph<N, E, usize>,
+    tarjan: TarjanScc<NodeIndex<usize>>,
+    sccs: Vec<FixedBitSet>,
+}
+
+impl<'a, N, E> TopoSccs<'a, N, E> {
+    fn new(graph: &'a DiGraph<N, E, usize>) -> Self {
+        let mut sccs = Vec::new();
+        let mut tarjan = TarjanScc::new();
+        tarjan.run(graph, |scc_nodes| {
+            sccs.push(scc_nodes.iter().map(|node| node.index()).collect());
+        });
+        // Tarjan's algorithm returns SCCs in reverse topological order;
+        // reverse them to get the topological order.
+        sccs.reverse();
+        Self {
+            graph,
+            tarjan,
+            sccs,
+        }
+    }
+
+    /// Returns the topological index of the SCC that contains the given node.
+    #[inline]
+    fn topo_index(&self, node: NodeIndex<usize>) -> usize {
+        // Tarjan's algorithm returns indices in reverse topological order;
+        // inverting the component index gets us the topological index.
+        self.sccs.len() - 1 - self.tarjan.node_component_index(self.graph, node)
+    }
+
+    /// Returns the members of the SCC at the given topological index.
+    #[inline]
+    fn members(&self, index: usize) -> &FixedBitSet {
+        &self.sccs[index]
+    }
+
+    /// Iterates over the SCCs in topological order.
+    #[inline]
+    fn iter(&self) -> std::slice::Iter<'_, FixedBitSet> {
+        self.sccs.iter()
+    }
+
+    /// Builds a condensed DAG of SCCs.
+    ///
+    /// The condensed graph is represented as an adjacency list, where both
+    /// the node indices and the neighbors of each node are stored in
+    /// topological order. This specific ordering is required by
+    /// [`tred::dag_transitive_reduction_closure`].
+    fn condensation(&self) -> UnweightedList<usize> {
+        let scc_count = self.sccs.len();
+        let mut dag = UnweightedList::with_capacity(scc_count);
+        for to in 0..scc_count {
+            dag.add_node();
+            for index in self.sccs[to].ones().map(NodeIndex::new) {
+                for neighbor in self.graph.neighbors_directed(index, Direction::Incoming) {
+                    let from = self.topo_index(neighbor);
+                    if from != to {
+                        dag.update_edge(from, to, ());
+                    }
+                }
+            }
+        }
+        dag
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    use crate::tests::assert_matches;
+
+    /// Creates a simple graph: `A -> B -> C`.
+    fn linear_graph() -> DiGraph<(), (), usize> {
+        let mut g = DiGraph::default();
+        let a = g.add_node(());
+        let b = g.add_node(());
+        let c = g.add_node(());
+        g.extend_with_edges([(a, b), (b, c)]);
+        g
+    }
+
+    /// Creates a cyclic graph: `A -> B -> C -> A`, with `D -> A`.
+    fn cyclic_graph() -> DiGraph<(), (), usize> {
+        let mut g = DiGraph::default();
+        let a = g.add_node(());
+        let b = g.add_node(());
+        let c = g.add_node(());
+        let d = g.add_node(());
+        g.extend_with_edges([(a, b), (b, c), (c, a), (d, a)]);
+        g
+    }
+
+    // MARK: SCC detection
+
+    #[test]
+    fn test_linear_graph_has_singleton_sccs() {
+        let g = linear_graph();
+        let sccs = TopoSccs::new(&g);
+        let sizes = sccs.iter().map(|scc| scc.count_ones(..)).collect_vec();
+        assert_matches!(&*sizes, [1, 1, 1]);
+    }
+
+    #[test]
+    fn test_cyclic_graph_has_one_multi_node_scc() {
+        let g = cyclic_graph();
+        let sccs = TopoSccs::new(&g);
+
+        // A-B-C form one SCC; D is its own SCC. Since D has an edge to
+        // the cycle, D must precede the cycle in topological order.
+        let sizes = sccs.iter().map(|scc| scc.count_ones(..)).collect_vec();
+        assert_matches!(&*sizes, [1, 3]);
+    }
+
+    // MARK: Topological ordering
+
+    #[test]
+    fn test_sccs_are_in_topological_order() {
+        let g = cyclic_graph();
+        let sccs = TopoSccs::new(&g);
+
+        let d_topo = sccs.topo_index(3.into());
+        let a_topo = sccs.topo_index(0.into());
+        assert!(
+            d_topo < a_topo,
+            "D should precede A-B-C in topological order"
+        );
+    }
+
+    #[test]
+    fn test_topo_index_consistent_within_scc() {
+        let g = cyclic_graph();
+        let sccs = TopoSccs::new(&g);
+
+        // A, B, C are in the same SCC, so they should have
+        // the same topological index.
+        let a_topo = sccs.topo_index(0.into());
+        let b_topo = sccs.topo_index(1.into());
+        let c_topo = sccs.topo_index(2.into());
+
+        assert_eq!(a_topo, b_topo);
+        assert_eq!(b_topo, c_topo);
+    }
+
+    // MARK: Condensation
+
+    #[test]
+    fn test_condensation_has_correct_node_count() {
+        let g = cyclic_graph();
+        let sccs = TopoSccs::new(&g);
+        let dag = sccs.condensation();
+
+        assert_eq!(dag.node_count(), 2);
+    }
+
+    #[test]
+    fn test_condensation_has_correct_edges() {
+        let g = cyclic_graph();
+        let sccs = TopoSccs::new(&g);
+        let dag = sccs.condensation();
+
+        // D should have an edge to the A-B-C SCC, and
+        // A-B-C shouldn't create a self-loop.
+        let d_topo = sccs.topo_index(3.into());
+        let abc_topo = sccs.topo_index(0.into());
+
+        let d_neighbors = dag.neighbors(d_topo).collect_vec();
+        assert_eq!(&*d_neighbors, [abc_topo]);
+
+        let abc_neighbors = dag.neighbors(abc_topo).collect_vec();
+        assert!(abc_neighbors.is_empty());
+    }
+
+    #[test]
+    fn test_condensation_neighbors_in_topological_order() {
+        // Matches Petgraph's `dag_to_toposorted_adjacency_list` example:
+        // edges added as `(top, second), (top, first)`, but neighbors should be
+        // `[first, second]` in topological order.
+        let mut g = DiGraph::<(), (), usize>::default();
+        let second = g.add_node(());
+        let top = g.add_node(());
+        let first = g.add_node(());
+        g.extend_with_edges([(top, second), (top, first), (first, second)]);
+
+        let sccs = TopoSccs::new(&g);
+        let dag = sccs.condensation();
+
+        let top_topo = sccs.topo_index(top);
+        assert_eq!(top_topo, 0);
+
+        let first_topo = sccs.topo_index(first);
+        assert_eq!(first_topo, 1);
+
+        let second_topo = sccs.topo_index(second);
+        assert_eq!(second_topo, 2);
+
+        let neighbors = dag.neighbors(top_topo).collect_vec();
+        assert_eq!(&*neighbors, [first_topo, second_topo]);
     }
 }

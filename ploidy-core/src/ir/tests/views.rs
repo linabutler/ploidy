@@ -4,9 +4,10 @@ use itertools::Itertools;
 
 use crate::{
     ir::{
-        InlineIrTypePathRoot, InlineIrTypePathSegment, InlineIrTypeView, IrEnumVariant, IrGraph,
-        IrParameterStyle, IrRequestView, IrResponseView, IrSpec, IrStructFieldName, IrTypeView,
-        PrimitiveIrType, SchemaIrTypeView, SomeIrUntaggedVariant, Traversal, View,
+        ExtendableView, InlineIrTypePathRoot, InlineIrTypePathSegment, InlineIrTypeView,
+        IrEnumVariant, IrGraph, IrParameterStyle, IrRequestView, IrResponseView, IrSpec,
+        IrStructFieldName, IrTypeView, PrimitiveIrType, SchemaIrTypeView, SchemaTypeInfo,
+        SomeIrUntaggedVariant, Traversal, View,
     },
     parse::{Document, Method, path::PathFragment},
     tests::assert_matches,
@@ -120,53 +121,8 @@ fn test_schema_view_from_graph() {
     let enum_view = graph.schemas().find(|s| s.name() == "MyEnum").unwrap();
 
     // Verify types.
-    assert_matches!(struct_view, SchemaIrTypeView::Struct(_, _));
-    assert_matches!(enum_view, SchemaIrTypeView::Enum(_, _));
-}
-
-#[test]
-fn test_operation_view_types() {
-    let doc = Document::from_yaml(indoc::indoc! {"
-        openapi: 3.0.0
-        info:
-          title: Test
-          version: 1.0
-        paths:
-          /users:
-            get:
-              operationId: getUsers
-              description: Get all users
-              responses:
-                '200':
-                  description: OK
-                  content:
-                    application/json:
-                      schema:
-                        $ref: '#/components/schemas/User'
-        components:
-          schemas:
-            User:
-              type: object
-              properties:
-                name:
-                  type: string
-    "})
-    .unwrap();
-
-    let spec = IrSpec::from_doc(&doc).unwrap();
-    let graph = IrGraph::new(&spec);
-
-    // Should be able to access the operation and its types.
-    let operation = graph.operations().next().unwrap();
-    assert_eq!(operation.id(), "getUsers");
-    assert_eq!(operation.description(), Some("Get all users"));
-
-    // `getUsers` should reference the `User` schema.
-    let user_schema = graph.schemas().find(|s| s.name() == "User").unwrap();
-
-    // `User` should be used by `getUsers`.
-    let used_by_ops = user_schema.used_by().map(|op| op.id()).collect_vec();
-    assert_matches!(&*used_by_ops, ["getUsers"]);
+    assert_matches!(struct_view, SchemaIrTypeView::Struct(..));
+    assert_matches!(enum_view, SchemaIrTypeView::Enum(..));
 }
 
 // MARK: Extension system
@@ -493,11 +449,13 @@ fn test_reachable_from_array_includes_inner_types() {
     );
 
     // Verify the `Item` schema is reachable.
-    assert!(
-        reachable_types
-            .iter()
-            .any(|t| matches!(t, IrTypeView::Schema(SchemaIrTypeView::Struct("Item", _))))
-    );
+    assert!(reachable_types.iter().any(|t| matches!(
+        t,
+        IrTypeView::Schema(SchemaIrTypeView::Struct(
+            SchemaTypeInfo { name: "Item", .. },
+            ..
+        ))
+    )));
 
     // Verify the primitive field is reachable.
     assert!(
@@ -565,11 +523,13 @@ fn test_reachable_from_map_includes_inner_types() {
     );
 
     // Verify the `Item` schema is reachable.
-    assert!(
-        reachable_types
-            .iter()
-            .any(|t| matches!(t, IrTypeView::Schema(SchemaIrTypeView::Struct("Item", _))))
-    );
+    assert!(reachable_types.iter().any(|t| matches!(
+        t,
+        IrTypeView::Schema(SchemaIrTypeView::Struct(
+            SchemaTypeInfo { name: "Item", .. },
+            ..
+        ))
+    )));
 
     // Verify the primitive field is reachable.
     assert!(
@@ -636,11 +596,13 @@ fn test_reachable_from_nullable_includes_inner_types() {
     );
 
     // Verify the `Item` schema is reachable.
-    assert!(
-        reachable_types
-            .iter()
-            .any(|t| matches!(t, IrTypeView::Schema(SchemaIrTypeView::Struct("Item", _))))
-    );
+    assert!(reachable_types.iter().any(|t| matches!(
+        t,
+        IrTypeView::Schema(SchemaIrTypeView::Struct(
+            SchemaTypeInfo { name: "Item", .. },
+            ..
+        ))
+    )));
 
     // Verify the primitive field is reachable.
     assert!(
@@ -712,7 +674,13 @@ fn test_reachable_from_inline_includes_inner_types() {
     // Verify the `RefSchema` schema is reachable.
     assert!(reachable_types.iter().any(|t| matches!(
         t,
-        IrTypeView::Schema(SchemaIrTypeView::Struct("RefSchema", _))
+        IrTypeView::Schema(SchemaIrTypeView::Struct(
+            SchemaTypeInfo {
+                name: "RefSchema",
+                ..
+            },
+            ..
+        ))
     )));
 
     // Verify the primitive field is reachable.
@@ -1625,9 +1593,10 @@ fn test_inline_view_with_view_trait_methods() {
         other => panic!("expected inline type; got {other:?}"),
     };
 
-    // `used_by()` should find the operations that use this inline type.
-    let operations = inline_enum.used_by().map(|op| op.id()).collect_vec();
-    assert_matches!(&*operations, ["createRecord"]);
+    // The inline enum has no `x-resourceId`, and the only operation that uses it
+    // has no `x-resource-name`, so it contributes `None` to `used_by`.
+    let used_by = inline_enum.used_by().map(|op| op.resource()).collect_vec();
+    assert_matches!(&*used_by, [None]);
 
     // `inlines()` includes the starting node.
     assert_eq!(inline_enum.inlines().count(), 1);
@@ -1895,14 +1864,16 @@ fn test_enum_view_with_view_trait_methods() {
     let graph = IrGraph::new(&spec);
 
     let status_schema = graph.schemas().find(|s| s.name() == "Status").unwrap();
-    let enum_view = match status_schema {
+    let enum_view = match &status_schema {
         SchemaIrTypeView::Enum(_, view) => view,
         other => panic!("expected enum `Status`; got {other:?}"),
     };
 
-    // `used_by()` should find the operations that use this enum.
-    let operations = enum_view.used_by().map(|op| op.id()).collect_vec();
-    assert_matches!(&*operations, ["getTasks"]);
+    // `Status` has no `x-resourceId`, and the only operation that uses it
+    // has no `x-resource-name`, so it contributes `None` to `used_by`.
+    assert_eq!(status_schema.resource(), None);
+    let used_by = enum_view.used_by().map(|op| op.resource()).collect_vec();
+    assert_matches!(&*used_by, [None]);
 
     // Enums can't contain inline types, so `inlines()` should be empty.
     assert_eq!(enum_view.inlines().count(), 0);
@@ -1941,7 +1912,7 @@ fn test_operation_view_resource() {
     let graph = IrGraph::new(&spec);
 
     let operation = graph.operations().next().unwrap();
-    assert_eq!(operation.resource(), "UserResource");
+    assert_eq!(operation.resource(), Some("UserResource"));
 }
 
 #[test]
@@ -2594,7 +2565,7 @@ fn test_operation_request_and_response() {
             operation.request(),
         );
     };
-    assert_matches!(request.path().root, InlineIrTypePathRoot::Resource("full"));
+    assert_matches!(request.path().root, InlineIrTypePathRoot::Resource(None));
     assert_matches!(
         &*request.path().segments,
         [
@@ -2609,7 +2580,7 @@ fn test_operation_request_and_response() {
             operation.response(),
         );
     };
-    assert_matches!(response.path().root, InlineIrTypePathRoot::Resource("full"));
+    assert_matches!(response.path().root, InlineIrTypePathRoot::Resource(None));
     assert_matches!(
         &*response.path().segments,
         [

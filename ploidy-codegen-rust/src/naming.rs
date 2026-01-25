@@ -1,6 +1,6 @@
 use std::{borrow::Cow, cmp::Ordering, fmt::Display, ops::Deref};
 
-use heck::{AsPascalCase, AsSnekCase};
+use heck::{AsKebabCase, AsPascalCase, AsSnekCase};
 use itertools::Itertools;
 use ploidy_core::{
     codegen::{
@@ -8,17 +8,27 @@ use ploidy_core::{
         unique::{UniqueNamesScope, WordSegments},
     },
     ir::{
-        InlineIrTypePathSegment, InlineIrTypeView, IrStructFieldName, IrStructFieldNameHint,
-        IrUntaggedVariantNameHint, PrimitiveIrType, SchemaIrTypeView, View,
+        ExtendableView, InlineIrTypePathSegment, InlineIrTypeView, IrStructFieldName,
+        IrStructFieldNameHint, IrUntaggedVariantNameHint, PrimitiveIrType, SchemaIrTypeView,
     },
 };
 use proc_macro2::{Ident, Span, TokenStream};
-use quote::{IdentFragment, ToTokens, TokenStreamExt, format_ident};
+use quote::{ToTokens, TokenStreamExt};
 use ref_cast::{RefCastCustom, ref_cast_custom};
 
 // Keywords that can't be used as identifiers, even with `r#`.
 const KEYWORDS: &[&str] = &["crate", "self", "super", "Self"];
 
+/// A name for a schema or an inline type, used in generated Rust code.
+///
+/// [`CodegenTypeName`] is the high-level representation of a type name.
+/// For emitting arbitrary identifiers, like fields, parameters, and methods,
+/// use [`CodegenIdent`] and [`CodegenIdentUsage`] instead.
+///
+/// [`CodegenTypeName`] implements [`ToTokens`] to produce PascalCase identifiers
+/// (e.g., `Pet`, `GetItemsFilter`) in [`quote`] macros.
+/// Use [`into_module_name`](Self::into_module_name) for the corresponding module name,
+/// and [`into_sort_key`](Self::into_sort_key) for deterministic sorting.
 #[derive(Clone, Copy, Debug)]
 pub enum CodegenTypeName<'a> {
     Schema(&'a SchemaIrTypeView<'a>),
@@ -26,6 +36,11 @@ pub enum CodegenTypeName<'a> {
 }
 
 impl<'a> CodegenTypeName<'a> {
+    #[inline]
+    pub fn into_module_name(self) -> CodegenModuleName<'a> {
+        CodegenModuleName(self)
+    }
+
     #[inline]
     pub fn into_sort_key(self) -> CodegenTypeNameSortKey<'a> {
         CodegenTypeNameSortKey(self)
@@ -37,28 +52,89 @@ impl ToTokens for CodegenTypeName<'_> {
         match self {
             Self::Schema(view) => {
                 let ident = view.extensions().get::<CodegenIdent>().unwrap();
-                tokens.append_all(CodegenIdentUsage::Type(&ident).to_token_stream())
+                CodegenIdentUsage::Type(&ident).to_tokens(tokens);
             }
             Self::Inline(view) => {
-                let ident = view
-                    .path()
-                    .segments
-                    .iter()
-                    .map(CodegenTypePathSegment)
-                    .map(|segment| format_ident!("{}", segment))
-                    .reduce(|a, b| format_ident!("{}{}", a, b))
-                    .unwrap();
-                tokens.append(ident);
+                let ident = CodegenIdent::from_segments(&view.path().segments);
+                CodegenIdentUsage::Type(&ident).to_tokens(tokens);
             }
         }
     }
 }
 
-/// A comparator that sorts type names lexicographically.
+/// A module name derived from a [`CodegenTypeName`].
+///
+/// Implements [`ToTokens`] to produce a snake_case identifier. For
+/// string interpolation (e.g., file paths), use [`display`](Self::display),
+/// which returns an `impl Display` that can be used with `format!`.
+#[derive(Clone, Copy, Debug)]
+pub struct CodegenModuleName<'a>(CodegenTypeName<'a>);
+
+impl<'a> CodegenModuleName<'a> {
+    #[inline]
+    pub fn into_type_name(self) -> CodegenTypeName<'a> {
+        self.0
+    }
+
+    /// Returns a formattable representation of this module name.
+    ///
+    /// [`CodegenModuleName`] doesn't implement [`Display`] directly, to help catch
+    /// context mismatches: using `.display()` in a [`quote`] macro, or
+    /// `.to_token_stream()` in a [`format`] string, stands out during review.
+    pub fn display(&self) -> impl Display {
+        struct DisplayModuleName<'a>(CodegenTypeName<'a>);
+        impl Display for DisplayModuleName<'_> {
+            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                match self.0 {
+                    CodegenTypeName::Schema(view) => {
+                        let ident = view.extensions().get::<CodegenIdent>().unwrap();
+                        write!(f, "{}", CodegenIdentUsage::Module(&ident).display())
+                    }
+                    CodegenTypeName::Inline(view) => {
+                        let ident = CodegenIdent::from_segments(&view.path().segments);
+                        write!(f, "{}", CodegenIdentUsage::Module(&ident).display())
+                    }
+                }
+            }
+        }
+        DisplayModuleName(self.0)
+    }
+}
+
+impl ToTokens for CodegenModuleName<'_> {
+    fn to_tokens(&self, tokens: &mut TokenStream) {
+        match self.0 {
+            CodegenTypeName::Schema(view) => {
+                let ident = view.extensions().get::<CodegenIdent>().unwrap();
+                CodegenIdentUsage::Module(&ident).to_tokens(tokens);
+            }
+            CodegenTypeName::Inline(view) => {
+                let ident = CodegenIdent::from_segments(&view.path().segments);
+                CodegenIdentUsage::Module(&ident).to_tokens(tokens);
+            }
+        }
+    }
+}
+
+/// A sort key for deterministic ordering of [`CodegenTypeName`]s.
+///
+/// Sorts schema types before inline types, then lexicographically by name.
+/// This ensures that code generation produces stable output regardless of
+/// declaration order.
 #[derive(Clone, Copy, Debug)]
 pub struct CodegenTypeNameSortKey<'a>(CodegenTypeName<'a>);
 
 impl<'a> CodegenTypeNameSortKey<'a> {
+    #[inline]
+    pub fn for_schema(view: &'a SchemaIrTypeView<'a>) -> Self {
+        Self(CodegenTypeName::Schema(view))
+    }
+
+    #[inline]
+    pub fn for_inline(view: &'a InlineIrTypeView<'a>) -> Self {
+        Self(CodegenTypeName::Inline(view))
+    }
+
     #[inline]
     pub fn into_name(self) -> CodegenTypeName<'a> {
         self.0
@@ -92,7 +168,7 @@ impl PartialOrd for CodegenTypeNameSortKey<'_> {
 
 /// A string that's statically guaranteed to be valid for any
 /// [`CodegenIdentUsage`].
-#[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
+#[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub struct CodegenIdent(String);
 
 impl CodegenIdent {
@@ -104,6 +180,23 @@ impl CodegenIdent {
         } else {
             Self(s)
         }
+    }
+
+    /// Creates an identifier from an inline type path.
+    pub fn from_segments(segments: &[InlineIrTypePathSegment<'_>]) -> Self {
+        Self(format!(
+            "{}",
+            segments
+                .iter()
+                .map(CodegenTypePathSegment)
+                .format_with("", |segment, f| f(&segment.display()))
+        ))
+    }
+}
+
+impl AsRef<CodegenIdentRef> for CodegenIdent {
+    fn as_ref(&self) -> &CodegenIdentRef {
+        self
     }
 }
 
@@ -125,6 +218,68 @@ impl CodegenIdentRef {
     fn new(s: &str) -> &Self;
 }
 
+/// A Cargo feature for conditionally compiling generated code.
+///
+/// Feature names appear in the `Cargo.toml` `[features]` table,
+/// and in `#[cfg(feature = "...")]` attributes. The special `full` feature
+/// enables all other features.
+///
+/// # Reserved names
+///
+/// `full` and `default` are reserved names, and the empty string isn't a valid name.
+/// All three map to [`CargoFeature::Full`]; this avoids conflicts, at the cost of
+/// compiling more items than would be necessary with a different name.
+#[derive(Clone, Debug, Default, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub enum CargoFeature {
+    #[default]
+    Full,
+    Named(CodegenIdent),
+}
+
+impl CargoFeature {
+    #[inline]
+    pub fn from_name(name: &str) -> Self {
+        match name {
+            // `full` and `default` are special features, and the empty string
+            // can't be used as a name. If an operation or schema belongs to
+            // a resource with any of these names, use the catch-all `full` feature.
+            "full" | "default" | "" => Self::Full,
+
+            // Cargo and crates.io limit which characters can appear in feature names;
+            // further, we use feature names as module names for operations, so
+            // the feature name needs to be usable as a Rust identifier.
+            name => Self::Named(CodegenIdent::new(name)),
+        }
+    }
+
+    #[inline]
+    pub fn as_ident(&self) -> &CodegenIdentRef {
+        match self {
+            Self::Named(name) => name,
+            Self::Full => CodegenIdentRef::new("full"),
+        }
+    }
+
+    #[inline]
+    pub fn display(&self) -> impl Display {
+        match self {
+            Self::Named(name) => AsKebabCase(name.0.as_str()),
+            Self::Full => AsKebabCase("full"),
+        }
+    }
+}
+
+/// A context-aware wrapper for emitting a [`CodegenIdentRef`] as a Rust identifier.
+///
+/// [`CodegenIdentUsage`] is a lower-level building block for generating
+/// identifiers. For schema and inline types, prefer [`CodegenTypeName`] instead.
+///
+/// Each [`CodegenIdentUsage`] variant determines the case transformation
+/// applied to the identifier: module, field, parameter, and method names
+/// become snake_case; type and enum variant names become PascalCase.
+///
+/// Implements [`ToTokens`] for use in [`quote`] macros. For string interpolation,
+/// use [`display`](Self::display).
 #[derive(Clone, Copy, Debug)]
 pub enum CodegenIdentUsage<'a> {
     Module(&'a CodegenIdentRef),
@@ -135,33 +290,45 @@ pub enum CodegenIdentUsage<'a> {
     Method(&'a CodegenIdentRef),
 }
 
-impl Display for CodegenIdentUsage<'_> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Module(name) | Self::Field(name) | Self::Param(name) | Self::Method(name) => {
-                if name.0.starts_with(unicode_ident::is_xid_start) {
-                    write!(f, "{}", AsSnekCase(&name.0))
-                } else {
-                    // `name` doesn't start with `XID_Start` (e.g., "1099KStatus"),
-                    // so prefix it with `_`; everything after is known to be
-                    // `XID_Continue`.
-                    write!(f, "_{}", AsSnekCase(&name.0))
-                }
-            }
-            Self::Type(name) | Self::Variant(name) => {
-                if name.0.starts_with(unicode_ident::is_xid_start) {
-                    write!(f, "{}", AsPascalCase(&name.0))
-                } else {
-                    write!(f, "_{}", AsPascalCase(&name.0))
+impl CodegenIdentUsage<'_> {
+    /// Returns a formattable representation of this identifier.
+    ///
+    /// [`CodegenIdentUsage`] doesn't implement [`Display`] directly, to help catch
+    /// context mismatches: using `.display()` in a [`quote`] macro, or
+    /// `.to_token_stream()` in a [`format`] string, stands out during review.
+    pub fn display(self) -> impl Display {
+        struct DisplayUsage<'a>(CodegenIdentUsage<'a>);
+        impl Display for DisplayUsage<'_> {
+            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                use CodegenIdentUsage::*;
+                match self.0 {
+                    Module(name) | Field(name) | Param(name) | Method(name) => {
+                        if name.0.starts_with(unicode_ident::is_xid_start) {
+                            write!(f, "{}", AsSnekCase(&name.0))
+                        } else {
+                            // `name` doesn't start with `XID_Start` (e.g., "1099KStatus"),
+                            // so prefix it with `_`; everything after is known to be
+                            // `XID_Continue`.
+                            write!(f, "_{}", AsSnekCase(&name.0))
+                        }
+                    }
+                    Type(name) | Variant(name) => {
+                        if name.0.starts_with(unicode_ident::is_xid_start) {
+                            write!(f, "{}", AsPascalCase(&name.0))
+                        } else {
+                            write!(f, "_{}", AsPascalCase(&name.0))
+                        }
+                    }
                 }
             }
         }
+        DisplayUsage(self)
     }
 }
 
 impl ToTokens for CodegenIdentUsage<'_> {
     fn to_tokens(&self, tokens: &mut TokenStream) {
-        let s = self.to_string();
+        let s = self.display().to_string();
         let ident = syn::parse_str(&s).unwrap_or_else(|_| Ident::new_raw(&s, Span::call_site()));
         tokens.append(ident);
     }
@@ -245,26 +412,32 @@ impl ToTokens for CodegenStructFieldName {
 #[derive(Clone, Copy, Debug)]
 pub struct CodegenTypePathSegment<'a>(&'a InlineIrTypePathSegment<'a>);
 
-impl IdentFragment for CodegenTypePathSegment<'_> {
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        use InlineIrTypePathSegment::*;
-        match self.0 {
-            // Segments are part of an inline type path that always has a root prefix,
-            // so we don't need to check for `XID_Start`.
-            Operation(name) => write!(f, "{}", AsPascalCase(clean(name))),
-            Parameter(name) => write!(f, "{}", AsPascalCase(clean(name))),
-            Request => f.write_str("Request"),
-            Response => f.write_str("Response"),
-            Field(IrStructFieldName::Name(name)) => {
-                write!(f, "{}", AsPascalCase(clean(name)))
+impl<'a> CodegenTypePathSegment<'a> {
+    pub fn display(&self) -> impl Display {
+        struct DisplaySegment<'a>(&'a InlineIrTypePathSegment<'a>);
+        impl Display for DisplaySegment<'_> {
+            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                use InlineIrTypePathSegment::*;
+                match self.0 {
+                    // Segments are always part of an identifier, never emitted directly;
+                    // so we don't need to check for `XID_Start`.
+                    Operation(name) => write!(f, "{}", AsPascalCase(clean(name))),
+                    Parameter(name) => write!(f, "{}", AsPascalCase(clean(name))),
+                    Request => f.write_str("Request"),
+                    Response => f.write_str("Response"),
+                    Field(IrStructFieldName::Name(name)) => {
+                        write!(f, "{}", AsPascalCase(clean(name)))
+                    }
+                    Field(IrStructFieldName::Hint(IrStructFieldNameHint::Index(index))) => {
+                        write!(f, "Variant{index}")
+                    }
+                    MapValue => f.write_str("Value"),
+                    ArrayItem => f.write_str("Item"),
+                    Variant(index) => write!(f, "V{index}"),
+                }
             }
-            Field(IrStructFieldName::Hint(IrStructFieldNameHint::Index(index))) => {
-                write!(f, "Variant{index}")
-            }
-            MapValue => f.write_str("Value"),
-            ArrayItem => f.write_str("Item"),
-            Variant(index) => write!(f, "V{index}"),
         }
+        DisplaySegment(self.0)
     }
 }
 
@@ -291,6 +464,48 @@ mod tests {
 
     use pretty_assertions::assert_eq;
     use syn::parse_quote;
+
+    // MARK: Cargo features
+
+    #[test]
+    fn test_feature_from_name() {
+        let feature = CargoFeature::from_name("customers");
+        assert_eq!(feature.display().to_string(), "customers");
+    }
+
+    #[test]
+    fn test_feature_full() {
+        let feature = CargoFeature::Full;
+        assert_eq!(feature.display().to_string(), "full");
+    }
+
+    #[test]
+    fn test_features_from_reserved_names() {
+        // Reserved names map to `full`.
+        let feature = CargoFeature::from_name("full");
+        assert_eq!(feature.display().to_string(), "full");
+
+        let feature = CargoFeature::from_name("default");
+        assert_eq!(feature.display().to_string(), "full");
+
+        let feature = CargoFeature::from_name("");
+        assert_eq!(feature.display().to_string(), "full");
+    }
+
+    #[test]
+    fn test_features_from_multiple_words() {
+        let feature = CargoFeature::from_name("foo_bar");
+        assert_eq!(feature.display().to_string(), "foo-bar");
+
+        let feature = CargoFeature::from_name("foo.bar");
+        assert_eq!(feature.display().to_string(), "foo-bar");
+
+        let feature = CargoFeature::from_name("fooBar");
+        assert_eq!(feature.display().to_string(), "foo-bar");
+
+        let feature = CargoFeature::from_name("FooBar");
+        assert_eq!(feature.display().to_string(), "foo-bar");
+    }
 
     // MARK: Usages
 
