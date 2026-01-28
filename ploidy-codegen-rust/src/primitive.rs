@@ -1,4 +1,4 @@
-use ploidy_core::ir::{IrPrimitiveView, PrimitiveIrType, View};
+use ploidy_core::ir::{ExtendableView, IrPrimitiveView, PrimitiveIrType};
 use proc_macro2::TokenStream;
 use quote::{ToTokens, TokenStreamExt, quote};
 

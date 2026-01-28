@@ -1,40 +1,36 @@
-use itertools::Itertools;
 use ploidy_core::codegen::IntoCode;
 use proc_macro2::TokenStream;
 use quote::{ToTokens, TokenStreamExt, quote};
 
 use super::{
+    cfg::CfgFeature,
     graph::CodegenGraph,
-    naming::{CodegenIdent, CodegenIdentUsage},
+    naming::{CargoFeature, CodegenIdentUsage},
 };
 
 /// Generates the `client/mod.rs` source file.
 #[derive(Clone, Copy, Debug)]
 pub struct CodegenClientModule<'a> {
     graph: &'a CodegenGraph<'a>,
-    resources: &'a [&'a str],
+    features: &'a [&'a CargoFeature],
 }
 
 impl<'a> CodegenClientModule<'a> {
-    pub fn new(graph: &'a CodegenGraph<'a>, resources: &'a [&'a str]) -> Self {
-        Self { graph, resources }
+    pub fn new(graph: &'a CodegenGraph<'a>, features: &'a [&'a CargoFeature]) -> Self {
+        Self { graph, features }
     }
 }
 
 impl ToTokens for CodegenClientModule<'_> {
     fn to_tokens(&self, tokens: &mut TokenStream) {
-        let mods = self
-            .resources
-            .iter()
-            .map(|resource| {
-                let ident = CodegenIdent::new(resource);
-                let mod_name = CodegenIdentUsage::Module(&ident);
-                quote! {
-                    #[cfg(feature = #resource)]
-                    pub mod #mod_name;
-                }
-            })
-            .collect_vec();
+        let mods = self.features.iter().map(|feature| {
+            let cfg = CfgFeature::for_resource_module(self.graph, feature);
+            let mod_name = CodegenIdentUsage::Module(feature.as_ident());
+            quote! {
+                #cfg
+                pub mod #mod_name;
+            }
+        });
 
         let client_doc = {
             let info = self.graph.spec().info;

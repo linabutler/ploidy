@@ -1,13 +1,12 @@
-use std::collections::BTreeSet;
-
 use itertools::Itertools;
-use ploidy_core::{codegen::IntoCode, ir::View};
+use ploidy_core::codegen::IntoCode;
 use proc_macro2::TokenStream;
 use quote::{ToTokens, TokenStreamExt, quote};
 
 use super::{
+    cfg::CfgFeature,
     graph::CodegenGraph,
-    naming::{CodegenIdent, CodegenIdentUsage},
+    naming::{CodegenTypeName, CodegenTypeNameSortKey},
 };
 
 /// Generates the `types/mod.rs` module.
@@ -23,36 +22,31 @@ impl<'a> CodegenTypesModule<'a> {
 
 impl ToTokens for CodegenTypesModule<'_> {
     fn to_tokens(&self, tokens: &mut TokenStream) {
-        let mut tys = self
-            .graph
-            .schemas()
-            .filter_map(|view| {
-                let resources: BTreeSet<_> = view.used_by().map(|op| op.resource()).collect();
-                let cfg_attr = cfg_attr(&resources)?;
-                Some((view.extensions().get::<CodegenIdent>()?.clone(), cfg_attr))
-            })
-            .collect_vec();
-        tys.sort_by(|(a, _), (b, _)| a.cmp(b));
+        let mut tys = self.graph.schemas().collect_vec();
+        tys.sort_by(|a, b| {
+            CodegenTypeNameSortKey::for_schema(a).cmp(&CodegenTypeNameSortKey::for_schema(b))
+        });
 
-        let mods = tys.iter().map(|(ident, cfg_attr)| {
-            let mod_name = CodegenIdentUsage::Module(ident);
+        let mods = tys.iter().map(|ty| {
+            let cfg = CfgFeature::for_schema_type(self.graph, ty);
+            let mod_name = CodegenTypeName::Schema(ty).into_module_name();
             quote! {
-                #cfg_attr
+                #cfg
                 pub mod #mod_name;
             }
         });
-        let uses = tys.iter().map(|(ident, cfg_attr)| {
-            let mod_name = CodegenIdentUsage::Module(ident);
-            let ty_name = CodegenIdentUsage::Type(ident);
+        let uses = tys.iter().map(|ty| {
+            let cfg = CfgFeature::for_schema_type(self.graph, ty);
+            let ty_name = CodegenTypeName::Schema(ty);
+            let mod_name = ty_name.into_module_name();
             quote! {
-                #cfg_attr
+                #cfg
                 pub use #mod_name::#ty_name;
             }
         });
 
         tokens.append_all(quote! {
             #(#mods)*
-
             #(#uses)*
         });
     }
@@ -64,18 +58,4 @@ impl IntoCode for CodegenTypesModule<'_> {
     fn into_code(self) -> Self::Code {
         ("src/types/mod.rs", self.into_token_stream())
     }
-}
-
-/// Generates a `#[cfg(feature = "...")]` or `#[cfg(any(feature = "...", ...))]`
-/// attribute for the given resources.
-fn cfg_attr(resources: &BTreeSet<&str>) -> Option<TokenStream> {
-    let mut features = resources.iter().peekable();
-    let first = features.next()?;
-    Some(match features.next() {
-        Some(next) => {
-            let rest = features.map(|f| quote! { feature = #f });
-            quote! { #[cfg(any(feature = #first, feature = #next, #(#rest),*))] }
-        }
-        None => quote! { #[cfg(feature = #first)] },
-    })
 }

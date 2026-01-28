@@ -3,7 +3,7 @@
 use itertools::Itertools;
 
 use crate::{
-    ir::{IrGraph, IrSpec, IrStructFieldName, SchemaIrTypeView, View},
+    ir::{IrGraph, IrSpec, IrStructFieldName, IrTypeView, SchemaIrTypeView, View},
     parse::Document,
     tests::assert_matches,
 };
@@ -840,44 +840,6 @@ fn test_indirect_and_direct_siblings() {
 // MARK: Operation metadata
 
 #[test]
-fn test_operations_metadata_basic() {
-    let doc = Document::from_yaml(indoc::indoc! {"
-        openapi: 3.0.0
-        info:
-          title: Test API
-          version: 1.0.0
-        paths:
-          /users:
-            get:
-              operationId: getUsers
-              responses:
-                '200':
-                  description: Success
-                  content:
-                    application/json:
-                      schema:
-                        $ref: '#/components/schemas/User'
-        components:
-          schemas:
-            User:
-              type: object
-              properties:
-                name:
-                  type: string
-    "})
-    .unwrap();
-
-    let spec = IrSpec::from_doc(&doc).unwrap();
-    let graph = IrGraph::new(&spec);
-
-    // The `User` schema should be marked as used by the `getUsers` operation.
-    let user_schema = graph.schemas().find(|s| s.name() == "User").unwrap();
-    let used_by_ops = user_schema.used_by().map(|op| op.id()).collect_vec();
-
-    assert_matches!(&*used_by_ops, ["getUsers"]);
-}
-
-#[test]
 fn test_operations_transitive() {
     let doc = Document::from_yaml(indoc::indoc! {"
         openapi: 3.0.0
@@ -915,16 +877,18 @@ fn test_operations_transitive() {
     let spec = IrSpec::from_doc(&doc).unwrap();
     let graph = IrGraph::new(&spec);
 
-    // Both `UserList` and `User` should be marked as used by the operation,
-    // even though only `UserList` is directly referenced.
+    // Both `UserList` and `User` have no `x-resourceId`, and
+    // the operation has no `x-resource-name`. The operation should
+    // contribute `None` to `used_by`.
     let user_list = graph.schemas().find(|s| s.name() == "UserList").unwrap();
     let user = graph.schemas().find(|s| s.name() == "User").unwrap();
 
-    let user_list_ops = user_list.used_by().map(|op| op.id()).collect_vec();
-    let user_ops = user.used_by().map(|op| op.id()).collect_vec();
-
-    assert_matches!(&*user_list_ops, ["getUsers"]);
-    assert_matches!(&*user_ops, ["getUsers"]);
+    assert_eq!(user_list.resource(), None);
+    let user_list_used_by = user_list.used_by().map(|op| op.resource()).collect_vec();
+    assert_matches!(&*user_list_used_by, [None]);
+    assert_eq!(user.resource(), None);
+    let user_used_by = user.used_by().map(|op| op.resource()).collect_vec();
+    assert_matches!(&*user_used_by, [None]);
 }
 
 #[test]
@@ -972,9 +936,247 @@ fn test_operations_multiple() {
     let spec = IrSpec::from_doc(&doc).unwrap();
     let graph = IrGraph::new(&spec);
 
-    // `User` should be used by both operations.
+    // `User` has no `x-resourceId`, and neither operation has `x-resource-name`.
+    // Each operation without a resource contributes `None` to `used_by`.
     let user = graph.schemas().find(|s| s.name() == "User").unwrap();
-    let mut used_by_ops = user.used_by().map(|op| op.id()).collect_vec();
-    used_by_ops.sort();
-    assert_matches!(&*used_by_ops, ["createUser", "getUsers"]);
+    assert_eq!(user.resource(), None);
+    // Two operations, so two `None` entries.
+    let user_used_by = user.used_by().map(|op| op.resource()).collect_vec();
+    assert_matches!(&*user_used_by, [None, None]);
+}
+
+// MARK: Forward propagation
+
+#[test]
+fn test_reachable_propagation() {
+    let doc = Document::from_yaml(indoc::indoc! {"
+        openapi: 3.0.0
+        info:
+          title: Test API
+          version: 1.0
+        paths:
+          /data:
+            get:
+              operationId: getData
+              responses:
+                '200':
+                  description: Success
+                  content:
+                    application/json:
+                      schema:
+                        $ref: '#/components/schemas/Response'
+          /users/{id}:
+            get:
+              operationId: getUser
+              parameters:
+                - name: id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+              responses:
+                '200':
+                  description: Success
+                  content:
+                    application/json:
+                      schema:
+                        $ref: '#/components/schemas/User'
+        components:
+          schemas:
+            Response:
+              type: object
+              properties:
+                user:
+                  $ref: '#/components/schemas/User'
+                items:
+                  type: array
+                  items:
+                    $ref: '#/components/schemas/Item'
+                metadata:
+                  type: object
+                  additionalProperties:
+                    $ref: '#/components/schemas/Meta'
+            User:
+              type: object
+              x-resourceId: users
+              properties:
+                name:
+                  type: string
+            Item:
+              type: object
+              properties:
+                id:
+                  type: string
+            Meta:
+              type: object
+              properties:
+                key:
+                  type: string
+    "})
+    .unwrap();
+
+    let spec = IrSpec::from_doc(&doc).unwrap();
+    let graph = IrGraph::new(&spec);
+
+    // Reachable types are computed transitively through different edge types:
+    // direct references, array items, and map values.
+    let get_data = graph.operations().find(|o| o.id() == "getData").unwrap();
+    let mut get_data_reachable = get_data
+        .reachable()
+        .filter_map(IrTypeView::as_schema)
+        .map(|s| s.name())
+        .collect_vec();
+    get_data_reachable.sort();
+    assert_matches!(&*get_data_reachable, ["Item", "Meta", "Response", "User"]);
+
+    let get_user = graph.operations().find(|o| o.id() == "getUser").unwrap();
+    let get_user_reachable = get_user
+        .reachable()
+        .filter_map(IrTypeView::as_schema)
+        .map(|s| s.name())
+        .collect_vec();
+    assert_matches!(&*get_user_reachable, ["User"]);
+
+    // `x-resourceId` is a per-schema property; it doesn't propagate to
+    // containing schemas.
+    let user = graph.schemas().find(|s| s.name() == "User").unwrap();
+    assert_eq!(user.resource(), Some("users"));
+
+    let response = graph.schemas().find(|s| s.name() == "Response").unwrap();
+    assert_eq!(response.resource(), None);
+
+    // Each schema knows which operations use it. `User` is used by both
+    // operations; the others are only used by `getData`.
+    let mut user_used_by = user.used_by().map(|op| op.id()).collect_vec();
+    user_used_by.sort();
+    assert_matches!(&*user_used_by, ["getData", "getUser"]);
+
+    let mut other_used_by = graph
+        .schemas()
+        .filter(|s| ["Response", "Item", "Meta"].contains(&s.name()))
+        .flat_map(|schema| schema.used_by())
+        .map(|op| op.id())
+        .collect_vec();
+    other_used_by.dedup();
+    assert_matches!(&*other_used_by, ["getData"]);
+}
+
+// MARK: Backward propagation
+
+#[test]
+fn test_used_by_propagation() {
+    let doc = Document::from_yaml(indoc::indoc! {"
+        openapi: 3.0.0
+        info:
+          title: Test
+          version: 1.0.0
+        paths:
+          /cats:
+            get:
+              operationId: getCat
+              x-resource-name: cats
+              parameters:
+                - name: options
+                  in: query
+                  schema:
+                    $ref: '#/components/schemas/CreateOptions'
+              responses:
+                '200':
+                  description: Success
+                  content:
+                    application/json:
+                      schema:
+                        $ref: '#/components/schemas/Cat'
+          /items:
+            post:
+              operationId: createItem
+              x-resource-name: items
+              parameters:
+                - name: options
+                  in: query
+                  schema:
+                    $ref: '#/components/schemas/CreateOptions'
+              responses:
+                '200':
+                  description: Success
+                  content:
+                    application/json:
+                      schema:
+                        $ref: '#/components/schemas/Parent'
+        components:
+          schemas:
+            Cat:
+              type: object
+              properties:
+                pet:
+                  $ref: '#/components/schemas/Pet'
+            Pet:
+              type: object
+              properties:
+                cat:
+                  $ref: '#/components/schemas/Cat'
+            Parent:
+              type: object
+              properties:
+                child:
+                  $ref: '#/components/schemas/Child'
+            Child:
+              type: object
+              x-resourceId: children
+              properties:
+                name:
+                  type: string
+            CreateOptions:
+              type: object
+              x-resourceId: options
+              properties:
+                verbose:
+                  type: boolean
+    "})
+    .unwrap();
+
+    let spec = IrSpec::from_doc(&doc).unwrap();
+    let graph = IrGraph::new(&spec);
+
+    // Propagation through cycles: `Cat` and `Pet` are in a cycle.
+    // The operation directly uses `Cat`, but `Pet` should also be
+    // marked as used by the operation.
+    let cat = graph.schemas().find(|s| s.name() == "Cat").unwrap();
+    let pet = graph.schemas().find(|s| s.name() == "Pet").unwrap();
+
+    let cat_used_by = cat.used_by().map(|op| op.resource()).collect_vec();
+    assert_matches!(&*cat_used_by, [Some("cats")]);
+
+    let pet_used_by = pet.used_by().map(|op| op.resource()).collect_vec();
+    assert_matches!(&*pet_used_by, [Some("cats")]);
+
+    // Propagation through nested references: `Child` is nested under `Parent`.
+    // The operation uses `Parent`, so `Child` should also be used.
+    let child = graph.schemas().find(|s| s.name() == "Child").unwrap();
+    assert_eq!(child.resource(), Some("children"));
+
+    let child_used_by = child.used_by().map(|op| op.resource()).collect_vec();
+    assert_matches!(&*child_used_by, [Some("items")]);
+
+    // A schema can be used by multiple operations with different resources:
+    // `CreateOptions` is a parameter for both `getCat` and `createItem`.
+    let options = graph
+        .schemas()
+        .find(|s| s.name() == "CreateOptions")
+        .unwrap();
+    assert_eq!(options.resource(), Some("options"));
+
+    let mut options_used_by = options.used_by().map(|op| op.resource()).collect_vec();
+    options_used_by.sort();
+    assert_matches!(&*options_used_by, [Some("cats"), Some("items")]);
+
+    // The operation's reachable types include both parameter and response schemas.
+    let op = graph.operations().find(|o| o.id() == "createItem").unwrap();
+    let mut op_resources = op
+        .reachable()
+        .filter_map(IrTypeView::as_schema)
+        .map(|s| s.resource())
+        .collect_vec();
+    op_resources.sort();
+    assert_matches!(&*op_resources, [None, Some("children"), Some("options")]);
 }

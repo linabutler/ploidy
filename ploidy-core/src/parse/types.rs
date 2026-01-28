@@ -92,8 +92,8 @@ pub struct Operation {
 }
 
 impl Operation {
-    pub fn extension(&self, name: &str) -> Option<&str> {
-        self.extensions.get(name)?.as_str()
+    pub fn extension<'a, X: FromExtension<'a>>(&'a self, name: &str) -> Option<X> {
+        X::from_extension(self.extensions.get(name)?)
     }
 }
 
@@ -354,6 +354,17 @@ pub struct Schema {
     pub any_of: Option<Vec<RefOrSchema>>,
     #[serde(default)]
     pub discriminator: Option<Discriminator>,
+
+    // Extensions.
+    #[serde(flatten)]
+    pub extensions: IndexMap<String, serde_json::Value>,
+}
+
+impl Schema {
+    /// Returns the value of an extension field as a string.
+    pub fn extension<'a, X: FromExtension<'a>>(&'a self, name: &str) -> Option<X> {
+        X::from_extension(self.extensions.get(name)?)
+    }
 }
 
 /// A discriminator for a polymorphic type.
@@ -445,8 +456,18 @@ pub enum BadComponentRef {
     Syntax(#[from] ploidy_pointer::BadJsonPointerSyntax),
 }
 
+pub trait FromExtension<'a>: Sized {
+    fn from_extension(value: &'a serde_json::Value) -> Option<Self>;
+}
+
+impl<'a> FromExtension<'a> for &'a str {
+    fn from_extension(value: &'a serde_json::Value) -> Option<&'a str> {
+        value.as_str()
+    }
+}
+
 #[cfg(test)]
-mod component_ref_tests {
+mod tests {
     use super::*;
 
     #[test]

@@ -14,6 +14,6 @@ pub use spec::IrSpec;
 pub use types::*;
 
 pub use views::{
-    Traversal, View, enum_::*, inline::*, ir::*, operation::*, schema::*, struct_::*, tagged::*,
-    untagged::*, wrappers::*,
+    ExtendableView, Traversal, View, enum_::*, inline::*, ir::*, operation::*, schema::*,
+    struct_::*, tagged::*, untagged::*, wrappers::*,
 };

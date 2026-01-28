@@ -1,11 +1,10 @@
-use ploidy_core::ir::{InlineIrTypePathRoot, IrTypeView, View};
+use ploidy_core::ir::{ExtendableView, InlineIrTypePathRoot, IrTypeView};
 use proc_macro2::TokenStream;
 use quote::{ToTokens, TokenStreamExt, quote};
 use syn::parse_quote;
 
 use super::{
-    naming::CodegenTypeName,
-    naming::{CodegenIdent, CodegenIdentUsage},
+    naming::{CargoFeature, CodegenIdent, CodegenIdentUsage, CodegenTypeName},
     primitive::CodegenPrimitive,
 };
 
@@ -45,16 +44,16 @@ impl ToTokens for CodegenRef<'_> {
             IrTypeView::Any => quote! { ::serde_json::Value },
             IrTypeView::Inline(ty) => {
                 let path = ty.path();
-                let root: syn::Path = match &path.root {
-                    InlineIrTypePathRoot::Resource(name) => {
-                        let ident = CodegenIdent::new(name);
-                        let usage = CodegenIdentUsage::Module(&ident);
-                        parse_quote!(crate::client::#usage::types)
+                let root: syn::Path = match path.root {
+                    InlineIrTypePathRoot::Resource(resource) => {
+                        let feature = resource.map(CargoFeature::from_name).unwrap_or_default();
+                        let module = CodegenIdentUsage::Module(feature.as_ident());
+                        parse_quote!(crate::client::#module::types)
                     }
                     InlineIrTypePathRoot::Type(name) => {
                         let ident = CodegenIdent::new(name);
-                        let usage = CodegenIdentUsage::Module(&ident);
-                        parse_quote!(crate::types::#usage::types)
+                        let module = CodegenIdentUsage::Module(&ident);
+                        parse_quote!(crate::types::#module::types)
                     }
                 };
                 let name = CodegenTypeName::Inline(ty);
@@ -562,6 +561,150 @@ mod tests {
         let expected: syn::Type = parse_quote! {
             ::std::vec::Vec<crate::types::User>
         };
+        assert_eq!(actual, expected);
+    }
+
+    // MARK: Inline references
+
+    #[test]
+    fn test_codegen_ref_inline_type_from_schema() {
+        let doc = Document::from_yaml(indoc::indoc! {"
+            openapi: 3.0.0
+            info:
+              title: Test API
+              version: 1.0.0
+            paths: {}
+            components:
+              schemas:
+                Container:
+                  type: object
+                  required:
+                    - nested
+                  properties:
+                    nested:
+                      type: object
+                      properties:
+                        value:
+                          type: string
+        "})
+        .unwrap();
+
+        let spec = IrSpec::from_doc(&doc).unwrap();
+        let ir = IrGraph::new(&spec);
+        let graph = CodegenGraph::new(ir);
+
+        let schema = graph.schemas().find(|s| s.name() == "Container");
+        let Some(SchemaIrTypeView::Struct(_, struct_view)) = &schema else {
+            panic!("expected struct `Container`; got `{schema:?}`");
+        };
+        let field = struct_view
+            .fields()
+            .find(|f| matches!(f.name(), IrStructFieldName::Name("nested")))
+            .unwrap();
+        let ty = field.ty();
+
+        let ref_ = CodegenRef::new(&ty);
+        let actual: syn::Type = parse_quote!(#ref_);
+        let expected: syn::Type = parse_quote!(crate::types::container::types::Nested);
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn test_codegen_ref_inline_type_from_resource_operation() {
+        use ploidy_core::ir::IrRequestView;
+
+        let doc = Document::from_yaml(indoc::indoc! {"
+            openapi: 3.0.0
+            info:
+              title: Test API
+              version: 1.0.0
+            paths:
+              /pets:
+                post:
+                  operationId: createPet
+                  x-resource-name: pets
+                  requestBody:
+                    content:
+                      application/json:
+                        schema:
+                          type: object
+                          properties:
+                            name:
+                              type: string
+                  responses:
+                    '200':
+                      description: OK
+        "})
+        .unwrap();
+
+        let spec = IrSpec::from_doc(&doc).unwrap();
+        let ir = IrGraph::new(&spec);
+        let graph = CodegenGraph::new(ir);
+
+        let op = graph
+            .operations()
+            .find(|op| op.id() == "createPet")
+            .unwrap();
+        let Some(IrRequestView::Json(ty)) = op.request() else {
+            panic!(
+                "expected JSON request body for operation `createPet`; got {:?}",
+                op.request()
+            );
+        };
+
+        let ref_ = CodegenRef::new(&ty);
+        let actual: syn::Type = parse_quote!(#ref_);
+        let expected: syn::Type = parse_quote!(crate::client::pets::types::CreatePetRequest);
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn test_codegen_ref_inline_type_from_operation_without_resource() {
+        use ploidy_core::ir::IrRequestView;
+
+        let doc = Document::from_yaml(indoc::indoc! {"
+            openapi: 3.0.0
+            info:
+              title: Test API
+              version: 1.0.0
+            paths:
+              /misc:
+                post:
+                  operationId: doSomething
+                  requestBody:
+                    content:
+                      application/json:
+                        schema:
+                          type: object
+                          properties:
+                            data:
+                              type: string
+                  responses:
+                    '200':
+                      description: OK
+        "})
+        .unwrap();
+
+        let spec = IrSpec::from_doc(&doc).unwrap();
+        let ir = IrGraph::new(&spec);
+        let graph = CodegenGraph::new(ir);
+
+        let op = graph
+            .operations()
+            .find(|op| op.id() == "doSomething")
+            .unwrap();
+        let Some(IrRequestView::Json(ty)) = op.request() else {
+            panic!(
+                "expected JSON request body for operation `doSomething`; got {:?}",
+                op.request()
+            );
+        };
+
+        // Operations without a declared resource name
+        // should use `full`.
+        let ref_ = CodegenRef::new(&ty);
+        let actual: syn::Type = parse_quote!(#ref_);
+        let expected: syn::Type = parse_quote!(crate::client::full::types::DoSomethingRequest);
         assert_eq!(actual, expected);
     }
 }
