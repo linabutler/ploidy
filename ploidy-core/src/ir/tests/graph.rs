@@ -948,7 +948,7 @@ fn test_operations_multiple() {
 // MARK: Forward propagation
 
 #[test]
-fn test_reachable_propagation() {
+fn test_dependencies_propagation() {
     let doc = Document::from_yaml(indoc::indoc! {"
         openapi: 3.0.0
         info:
@@ -1018,24 +1018,24 @@ fn test_reachable_propagation() {
     let spec = IrSpec::from_doc(&doc).unwrap();
     let graph = IrGraph::new(&spec);
 
-    // Reachable types are computed transitively through different edge types:
+    // Dependencies are computed transitively through different edge types:
     // direct references, array items, and map values.
     let get_data = graph.operations().find(|o| o.id() == "getData").unwrap();
-    let mut get_data_reachable = get_data
-        .reachable()
+    let mut get_data_deps = get_data
+        .dependencies()
         .filter_map(IrTypeView::as_schema)
         .map(|s| s.name())
         .collect_vec();
-    get_data_reachable.sort();
-    assert_matches!(&*get_data_reachable, ["Item", "Meta", "Response", "User"]);
+    get_data_deps.sort();
+    assert_matches!(&*get_data_deps, ["Item", "Meta", "Response", "User"]);
 
     let get_user = graph.operations().find(|o| o.id() == "getUser").unwrap();
-    let get_user_reachable = get_user
-        .reachable()
+    let get_user_deps = get_user
+        .dependencies()
         .filter_map(IrTypeView::as_schema)
         .map(|s| s.name())
         .collect_vec();
-    assert_matches!(&*get_user_reachable, ["User"]);
+    assert_matches!(&*get_user_deps, ["User"]);
 
     // `x-resourceId` is a per-schema property; it doesn't propagate to
     // containing schemas.
@@ -1170,13 +1170,349 @@ fn test_used_by_propagation() {
     options_used_by.sort();
     assert_matches!(&*options_used_by, [Some("cats"), Some("items")]);
 
-    // The operation's reachable types include both parameter and response schemas.
+    // The operation's dependencies include both parameter and response schemas.
     let op = graph.operations().find(|o| o.id() == "createItem").unwrap();
     let mut op_resources = op
-        .reachable()
+        .dependencies()
         .filter_map(IrTypeView::as_schema)
         .map(|s| s.resource())
         .collect_vec();
     op_resources.sort();
     assert_matches!(&*op_resources, [None, Some("children"), Some("options")]);
+}
+
+// MARK: Dependencies
+
+#[test]
+fn test_depends_on_simple_chain() {
+    // A -> B -> C. A depends on B and C; B depends on C; C depends on neither.
+    let doc = Document::from_yaml(indoc::indoc! {"
+        openapi: 3.0.0
+        info:
+          title: Test
+          version: 1.0.0
+        components:
+          schemas:
+            A:
+              type: object
+              properties:
+                b:
+                  $ref: '#/components/schemas/B'
+            B:
+              type: object
+              properties:
+                c:
+                  $ref: '#/components/schemas/C'
+            C:
+              type: object
+              properties:
+                value:
+                  type: string
+    "})
+    .unwrap();
+
+    let spec = IrSpec::from_doc(&doc).unwrap();
+    let graph = IrGraph::new(&spec);
+
+    let a = graph.schemas().find(|s| s.name() == "A").unwrap();
+    let b = graph.schemas().find(|s| s.name() == "B").unwrap();
+    let c = graph.schemas().find(|s| s.name() == "C").unwrap();
+
+    assert!(a.depends_on(&b));
+    assert!(a.depends_on(&c));
+    assert!(b.depends_on(&c));
+    assert!(!b.depends_on(&a));
+    assert!(!c.depends_on(&a));
+    assert!(!c.depends_on(&b));
+}
+
+#[test]
+fn test_depends_on_cycle() {
+    // A -> B -> C -> A. All depend on each other.
+    let doc = Document::from_yaml(indoc::indoc! {"
+        openapi: 3.0.0
+        info:
+          title: Test
+          version: 1.0.0
+        components:
+          schemas:
+            A:
+              type: object
+              properties:
+                b:
+                  $ref: '#/components/schemas/B'
+            B:
+              type: object
+              properties:
+                c:
+                  $ref: '#/components/schemas/C'
+            C:
+              type: object
+              properties:
+                a:
+                  $ref: '#/components/schemas/A'
+    "})
+    .unwrap();
+
+    let spec = IrSpec::from_doc(&doc).unwrap();
+    let graph = IrGraph::new(&spec);
+
+    let a = graph.schemas().find(|s| s.name() == "A").unwrap();
+    let b = graph.schemas().find(|s| s.name() == "B").unwrap();
+    let c = graph.schemas().find(|s| s.name() == "C").unwrap();
+
+    // All nodes in a cycle depend on each other.
+    assert!(a.depends_on(&b));
+    assert!(a.depends_on(&c));
+    assert!(b.depends_on(&a));
+    assert!(b.depends_on(&c));
+    assert!(c.depends_on(&a));
+    assert!(c.depends_on(&b));
+}
+
+#[test]
+fn test_depends_on_independent() {
+    // A and B are unrelated.
+    let doc = Document::from_yaml(indoc::indoc! {"
+        openapi: 3.0.0
+        info:
+          title: Test
+          version: 1.0.0
+        components:
+          schemas:
+            A:
+              type: object
+              properties:
+                value:
+                  type: string
+            B:
+              type: object
+              properties:
+                value:
+                  type: string
+    "})
+    .unwrap();
+
+    let spec = IrSpec::from_doc(&doc).unwrap();
+    let graph = IrGraph::new(&spec);
+
+    let a = graph.schemas().find(|s| s.name() == "A").unwrap();
+    let b = graph.schemas().find(|s| s.name() == "B").unwrap();
+
+    assert!(!a.depends_on(&b));
+    assert!(!b.depends_on(&a));
+}
+
+// MARK: Dependents
+
+#[test]
+fn test_dependents_simple_chain() {
+    // A depends on B, B depends on C.
+    // C's dependents should include B and A.
+    let doc = Document::from_yaml(indoc::indoc! {"
+        openapi: 3.0.0
+        info:
+          title: Test
+          version: 1.0.0
+        components:
+          schemas:
+            A:
+              type: object
+              properties:
+                b:
+                  $ref: '#/components/schemas/B'
+            B:
+              type: object
+              properties:
+                c:
+                  $ref: '#/components/schemas/C'
+            C:
+              type: object
+              properties:
+                value:
+                  type: string
+    "})
+    .unwrap();
+
+    let spec = IrSpec::from_doc(&doc).unwrap();
+    let graph = IrGraph::new(&spec);
+
+    let c = graph.schemas().find(|s| s.name() == "C").unwrap();
+    let mut c_dependents = c
+        .dependents()
+        .filter_map(IrTypeView::as_schema)
+        .map(|s| s.name())
+        .collect_vec();
+    c_dependents.sort();
+    // C's dependents are A and B (and shouldn't include C itself).
+    assert_matches!(&*c_dependents, ["A", "B"]);
+
+    // B's dependents should include A only.
+    let b = graph.schemas().find(|s| s.name() == "B").unwrap();
+    let mut b_dependents = b
+        .dependents()
+        .filter_map(IrTypeView::as_schema)
+        .map(|s| s.name())
+        .collect_vec();
+    b_dependents.sort();
+    assert_matches!(&*b_dependents, ["A"]);
+
+    // A has no dependents.
+    let a = graph.schemas().find(|s| s.name() == "A").unwrap();
+    let a_dependents = a
+        .dependents()
+        .filter_map(IrTypeView::as_schema)
+        .map(|s| s.name())
+        .collect_vec();
+    assert!(a_dependents.is_empty());
+}
+
+#[test]
+fn test_dependents_multiple_dependents() {
+    // Both A and B depend on C.
+    let doc = Document::from_yaml(indoc::indoc! {"
+        openapi: 3.0.0
+        info:
+          title: Test
+          version: 1.0.0
+        components:
+          schemas:
+            A:
+              type: object
+              properties:
+                c:
+                  $ref: '#/components/schemas/C'
+            B:
+              type: object
+              properties:
+                c:
+                  $ref: '#/components/schemas/C'
+            C:
+              type: object
+              properties:
+                value:
+                  type: string
+    "})
+    .unwrap();
+
+    let spec = IrSpec::from_doc(&doc).unwrap();
+    let graph = IrGraph::new(&spec);
+
+    let c = graph.schemas().find(|s| s.name() == "C").unwrap();
+    let mut c_dependents = c
+        .dependents()
+        .filter_map(IrTypeView::as_schema)
+        .map(|s| s.name())
+        .collect_vec();
+    c_dependents.sort();
+    // C's dependents are A and B (and shouldn't include C itself).
+    assert_matches!(&*c_dependents, ["A", "B"]);
+}
+
+#[test]
+fn test_dependents_cycle() {
+    // A -> B -> C -> A. All nodes are dependents of each other.
+    let doc = Document::from_yaml(indoc::indoc! {"
+        openapi: 3.0.0
+        info:
+          title: Test
+          version: 1.0.0
+        components:
+          schemas:
+            A:
+              type: object
+              properties:
+                b:
+                  $ref: '#/components/schemas/B'
+            B:
+              type: object
+              properties:
+                c:
+                  $ref: '#/components/schemas/C'
+            C:
+              type: object
+              properties:
+                a:
+                  $ref: '#/components/schemas/A'
+    "})
+    .unwrap();
+
+    let spec = IrSpec::from_doc(&doc).unwrap();
+    let graph = IrGraph::new(&spec);
+
+    // In a cycle, all nodes transitively depend on each other,
+    // but a type's dependents shouldn't include itself.
+    let a = graph.schemas().find(|s| s.name() == "A").unwrap();
+    let mut a_dependents = a
+        .dependents()
+        .filter_map(IrTypeView::as_schema)
+        .map(|s| s.name())
+        .collect_vec();
+    a_dependents.sort();
+    assert_matches!(&*a_dependents, ["B", "C"]);
+
+    let b = graph.schemas().find(|s| s.name() == "B").unwrap();
+    let mut b_dependents = b
+        .dependents()
+        .filter_map(IrTypeView::as_schema)
+        .map(|s| s.name())
+        .collect_vec();
+    b_dependents.sort();
+    assert_matches!(&*b_dependents, ["A", "C"]);
+
+    let c = graph.schemas().find(|s| s.name() == "C").unwrap();
+    let mut c_dependents = c
+        .dependents()
+        .filter_map(IrTypeView::as_schema)
+        .map(|s| s.name())
+        .collect_vec();
+    c_dependents.sort();
+    assert_matches!(&*c_dependents, ["A", "B"]);
+}
+
+#[test]
+fn test_dependents_is_inverse_of_dependencies() {
+    // If A depends on B, then B's dependents should include A.
+    let doc = Document::from_yaml(indoc::indoc! {"
+        openapi: 3.0.0
+        info:
+          title: Test
+          version: 1.0.0
+        components:
+          schemas:
+            Container:
+              type: object
+              properties:
+                item:
+                  $ref: '#/components/schemas/Item'
+            Item:
+              type: object
+              properties:
+                value:
+                  type: string
+    "})
+    .unwrap();
+
+    let spec = IrSpec::from_doc(&doc).unwrap();
+    let graph = IrGraph::new(&spec);
+
+    let container = graph.schemas().find(|s| s.name() == "Container").unwrap();
+    let item = graph.schemas().find(|s| s.name() == "Item").unwrap();
+
+    // `Container` depends on `Item`.
+    let container_deps = container
+        .dependencies()
+        .filter_map(IrTypeView::as_schema)
+        .map(|s| s.name())
+        .collect_vec();
+    assert_matches!(&*container_deps, ["Item"]);
+
+    // `Item`'s dependents include `Container`.
+    let mut item_dependents = item
+        .dependents()
+        .filter_map(IrTypeView::as_schema)
+        .map(|s| s.name())
+        .collect_vec();
+    item_dependents.sort();
+    assert_matches!(&*item_dependents, ["Container"]);
 }

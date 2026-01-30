@@ -41,15 +41,18 @@ impl ToTokens for CodegenUntagged<'_> {
 
         let mut extra_derives = vec![];
         let is_hashable = self.ty.variants().all(|variant| match variant.ty() {
-            Some(SomeIrUntaggedVariant { view, .. }) => view.reachable().all(|view| {
-                if let IrTypeView::Primitive(p) = &view
-                    && let PrimitiveIrType::F32 | PrimitiveIrType::F64 = p.ty()
-                {
-                    false
-                } else {
-                    true
-                }
-            }),
+            Some(SomeIrUntaggedVariant { view, .. }) => view
+                .dependencies()
+                .chain(std::iter::once(view))
+                .all(|view| {
+                    if let IrTypeView::Primitive(p) = &view
+                        && let PrimitiveIrType::F32 | PrimitiveIrType::F64 = p.ty()
+                    {
+                        false
+                    } else {
+                        true
+                    }
+                }),
             None => true,
         });
         if is_hashable {

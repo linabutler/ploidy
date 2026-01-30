@@ -45,6 +45,16 @@ impl<'a> SchemaIrTypeView<'a> {
         name
     }
 
+    /// Returns whether this type transitively depends on `other`.
+    #[inline]
+    pub fn depends_on(&self, other: &SchemaIrTypeView<'a>) -> bool {
+        self.graph()
+            .metadata
+            .schemas
+            .get(&self.index())
+            .is_some_and(|meta| meta.dependencies.contains(other.index().index()))
+    }
+
     /// Returns the resource name that this schema type declares
     /// in its `x-resourceId` extension field.
     #[inline]

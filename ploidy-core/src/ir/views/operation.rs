@@ -1,8 +1,10 @@
 use std::marker::PhantomData;
 
 use by_address::ByAddress;
+use either::Either;
 use fixedbitset::FixedBitSet;
 use petgraph::{
+    Direction,
     graph::NodeIndex,
     visit::{Bfs, VisitMap, Visitable},
 };
@@ -17,7 +19,7 @@ use crate::{
     parse::{Method, path::PathSegment},
 };
 
-use super::{Traversal, View, inline::InlineIrTypeView, ir::IrTypeView};
+use super::{Reach, Traversal, View, inline::InlineIrTypeView, ir::IrTypeView};
 
 /// A graph-aware view of an [`IrOperation`].
 #[derive(Debug)]
@@ -107,7 +109,7 @@ impl<'a> View<'a> for IrOperationView<'a> {
     /// contained within this operation's referenced types.
     #[inline]
     fn inlines(&self) -> impl Iterator<Item = InlineIrTypeView<'a>> + use<'a> {
-        self.reachable_if(|view| match view {
+        self.traverse(Reach::Dependencies, |view| match view {
             // Yield inline types and continue into their fields.
             IrTypeView::Inline(_) => Traversal::Visit,
 
@@ -132,14 +134,14 @@ impl<'a> View<'a> for IrOperationView<'a> {
     }
 
     #[inline]
-    fn reachable(&self) -> impl Iterator<Item = IrTypeView<'a>> + use<'a> {
+    fn dependencies(&self) -> impl Iterator<Item = IrTypeView<'a>> + use<'a> {
         let meta = &self.graph.metadata.operations[&ByAddress(self.op)];
         let mut types = meta.types.clone();
         // Collect the transitive dependencies of each of the operation's
         // direct dependencies.
         for node in meta.types.ones().map(NodeIndex::new) {
             let meta = &self.graph.metadata.schemas[&node];
-            types.union_with(&meta.depends_on);
+            types.union_with(&meta.dependencies);
         }
         types
             .into_ones()
@@ -147,40 +149,55 @@ impl<'a> View<'a> for IrOperationView<'a> {
             .map(|index| IrTypeView::new(self.graph, index))
     }
 
+    /// Returns an empty iterator. Operations don't have dependents.
     #[inline]
-    fn reachable_if<F>(&self, filter: F) -> impl Iterator<Item = IrTypeView<'a>> + use<'a, F>
+    fn dependents(&self) -> impl Iterator<Item = IrTypeView<'a>> + use<'a> {
+        std::iter::empty()
+    }
+
+    #[inline]
+    fn traverse<F>(
+        &self,
+        reach: Reach,
+        filter: F,
+    ) -> impl Iterator<Item = IrTypeView<'a>> + use<'a, F>
     where
         F: Fn(&IrTypeView<'a>) -> Traversal,
     {
-        let graph = self.graph;
-        let Bfs {
-            mut stack,
-            mut discovered,
-        } = self.bfs();
+        match reach {
+            Reach::Dependents => Either::Left(std::iter::empty()),
+            Reach::Dependencies => {
+                let graph = self.graph;
+                let Bfs {
+                    mut stack,
+                    mut discovered,
+                } = self.bfs();
 
-        std::iter::from_fn(move || {
-            while let Some(index) = stack.pop_front() {
-                let view = IrTypeView::new(graph, index);
-                let traversal = filter(&view);
+                Either::Right(std::iter::from_fn(move || {
+                    while let Some(index) = stack.pop_front() {
+                        let view = IrTypeView::new(graph, index);
+                        let traversal = filter(&view);
 
-                if matches!(traversal, Traversal::Visit | Traversal::Skip) {
-                    // Add the neighbors to the stack of nodes to visit.
-                    for neighbor in graph.g.neighbors(index) {
-                        if discovered.visit(neighbor) {
-                            stack.push_back(neighbor);
+                        if matches!(traversal, Traversal::Visit | Traversal::Skip) {
+                            // Add the neighbors to the stack of nodes to visit.
+                            for neighbor in graph.g.neighbors_directed(index, Direction::Outgoing) {
+                                if discovered.visit(neighbor) {
+                                    stack.push_back(neighbor);
+                                }
+                            }
                         }
+
+                        if matches!(traversal, Traversal::Visit | Traversal::Stop) {
+                            // Yield this node.
+                            return Some(view);
+                        }
+
+                        // (`Skip` and `Ignore` continue the loop without yielding).
                     }
-                }
-
-                if matches!(traversal, Traversal::Visit | Traversal::Stop) {
-                    // Yield this node.
-                    return Some(view);
-                }
-
-                // (`Skip` and `Ignore` continue the loop without yielding).
+                    None
+                }))
             }
-            None
-        })
+        }
     }
 }
 

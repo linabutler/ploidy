@@ -46,16 +46,12 @@ impl<'a> CodegenCargoManifest<'a> {
                     _ => continue,
                 };
                 let entry: &mut BTreeSet<_> = deps_by_feature.entry(feature).or_default();
-                for dep in schema
-                    .reachable()
-                    .skip(1) // Ignore ourselves.
-                    .filter_map(
-                        |ty| match CargoFeature::from_name(ty.as_schema()?.resource()?) {
-                            CargoFeature::Named(name) => Some(CargoFeature::Named(name)),
-                            CargoFeature::Full => None,
-                        },
-                    )
-                {
+                for dep in schema.dependencies().filter_map(|ty| {
+                    match CargoFeature::from_name(ty.as_schema()?.resource()?) {
+                        CargoFeature::Named(name) => Some(CargoFeature::Named(name)),
+                        CargoFeature::Full => None,
+                    }
+                }) {
                     entry.insert(dep);
                 }
             }
@@ -69,7 +65,7 @@ impl<'a> CodegenCargoManifest<'a> {
                     _ => continue,
                 };
                 let entry = deps_by_feature.entry(feature).or_default();
-                for dep in op.reachable().filter_map(|ty| {
+                for dep in op.dependencies().filter_map(|ty| {
                     match CargoFeature::from_name(ty.as_schema()?.resource()?) {
                         CargoFeature::Named(name) => Some(CargoFeature::Named(name)),
                         CargoFeature::Full => None,

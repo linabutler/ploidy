@@ -8,6 +8,7 @@ use std::{any::TypeId, collections::VecDeque, fmt::Debug};
 
 use atomic_refcell::{AtomicRef, AtomicRefMut};
 use petgraph::{
+    Direction,
     graph::NodeIndex,
     visit::{Bfs, EdgeFiltered, EdgeRef, VisitMap, Visitable},
 };
@@ -38,22 +39,28 @@ pub trait View<'a> {
     /// This is backward propagation: each operation depends on this type.
     fn used_by(&self) -> impl Iterator<Item = IrOperationView<'a>> + use<'a, Self>;
 
-    /// Returns an iterator over all the types that are reachable from this type,
-    /// including this type and all its transitive dependencies. The first item
-    /// is always this type.
-    ///
+    /// Returns an iterator over all the types that this type transitively depends on.
     /// This is forward propagation: this type depends on each reachable type.
     ///
-    /// Complexity: O(n), where `n` is the number of reachable types.
-    fn reachable(&self) -> impl Iterator<Item = IrTypeView<'a>> + use<'a, Self>;
+    /// Complexity: O(n), where `n` is the number of dependency types.
+    fn dependencies(&self) -> impl Iterator<Item = IrTypeView<'a>> + use<'a, Self>;
 
-    /// Returns an iterator over all reachable types, with a `filter` function
-    /// to control the traversal. This is useful for skipping nodes and subgraphs
-    /// based on runtime conditions.
+    /// Returns an iterator over all the types that transitively depend on this type.
+    /// This is backward propagation: each returned type depends on this type.
     ///
-    /// Complexity: O(V + E), where `V` is the number of nodes in
-    /// the reachable subgraph, and `E` is the number of edges.
-    fn reachable_if<F>(&self, filter: F) -> impl Iterator<Item = IrTypeView<'a>> + use<'a, Self, F>
+    /// Complexity: O(n), where `n` is the number of dependent types.
+    fn dependents(&self) -> impl Iterator<Item = IrTypeView<'a>> + use<'a, Self>;
+
+    /// Walks the type graph toward dependencies or dependents, using a
+    /// `filter` function to control the traversal.
+    ///
+    /// Complexity: O(V + E), where `V` and `E` are the number of
+    /// nodes and edges in the visited subgraph.
+    fn traverse<F>(
+        &self,
+        reach: Reach,
+        filter: F,
+    ) -> impl Iterator<Item = IrTypeView<'a>> + use<'a, Self, F>
     where
         F: Fn(&IrTypeView<'a>) -> Traversal;
 }
@@ -104,31 +111,56 @@ where
     }
 
     #[inline]
-    fn reachable(&self) -> impl Iterator<Item = IrTypeView<'a>> + use<'a, T> {
+    fn dependencies(&self) -> impl Iterator<Item = IrTypeView<'a>> + use<'a, T> {
         let graph = self.graph();
-        std::iter::once(IrTypeView::new(self.graph(), self.index())).chain(
-            graph
-                .metadata
-                .schemas
-                .get(&self.index())
-                .into_iter()
-                .flat_map(|meta| meta.depends_on.ones())
-                .map(NodeIndex::new)
-                .map(move |index| IrTypeView::new(graph, index)),
-        )
+        graph
+            .metadata
+            .schemas
+            .get(&self.index())
+            .into_iter()
+            .flat_map(|meta| meta.dependencies.ones())
+            .map(NodeIndex::new)
+            .map(|index| IrTypeView::new(graph, index))
     }
 
     #[inline]
-    fn reachable_if<F>(&self, filter: F) -> impl Iterator<Item = IrTypeView<'a>> + use<'a, T, F>
+    fn dependents(&self) -> impl Iterator<Item = IrTypeView<'a>> + use<'a, T> {
+        let graph = self.graph();
+        graph
+            .metadata
+            .schemas
+            .get(&self.index())
+            .into_iter()
+            .flat_map(|meta| meta.dependents.ones())
+            .map(NodeIndex::new)
+            .map(move |index| IrTypeView::new(graph, index))
+    }
+
+    #[inline]
+    fn traverse<F>(
+        &self,
+        reach: Reach,
+        filter: F,
+    ) -> impl Iterator<Item = IrTypeView<'a>> + use<'a, T, F>
     where
         F: Fn(&IrTypeView<'a>) -> Traversal,
     {
         let graph = self.graph();
         let mut stack = VecDeque::new();
         let mut discovered = graph.g.visit_map();
+        let direction = match reach {
+            Reach::Dependencies => Direction::Outgoing,
+            Reach::Dependents => Direction::Incoming,
+        };
 
-        stack.push_back(self.index());
+        // Mark ourselves as discovered, but don't add ourselves to the queue,
+        // since our dependencies and dependents shouldn't include ourselves.
         discovered.visit(self.index());
+        for neighbor in graph.g.neighbors_directed(self.index(), direction) {
+            if discovered.visit(neighbor) {
+                stack.push_back(neighbor);
+            }
+        }
 
         std::iter::from_fn(move || {
             while let Some(index) = stack.pop_front() {
@@ -137,7 +169,7 @@ where
 
                 if matches!(traversal, Traversal::Visit | Traversal::Skip) {
                     // Add the neighbors to the stack of nodes to visit.
-                    for neighbor in graph.g.neighbors(index) {
+                    for neighbor in graph.g.neighbors_directed(index, direction) {
                         if discovered.visit(neighbor) {
                             stack.push_back(neighbor);
                         }
@@ -273,6 +305,15 @@ impl<X> Debug for IrViewExtensions<X> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_tuple("IrViewExtensions").finish_non_exhaustive()
     }
+}
+
+/// Selects which edge direction to follow during traversal.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum Reach {
+    /// Traverse out toward types that this node depends on.
+    Dependencies,
+    /// Traverse in toward types that depend on this node.
+    Dependents,
 }
 
 /// Controls how to continue traversing the graph when at a node.
