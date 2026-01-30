@@ -4,7 +4,7 @@ use ploidy_core::{
     codegen::UniqueNames,
     ir::{
         InlineIrTypeView, IrStructFieldName, IrStructFieldView, IrStructView, IrTypeView,
-        PrimitiveIrType, SchemaIrTypeView, Traversal, View,
+        PrimitiveIrType, Reach, SchemaIrTypeView, Traversal, View,
     },
 };
 use proc_macro2::TokenStream;
@@ -67,7 +67,7 @@ impl ToTokens for CodegenStruct<'_> {
         let mut extra_derives = vec![];
         // Structs that don't contain any floating-point types
         // can derive `Eq` and `Hash`.
-        let is_hashable = self.ty.reachable().all(|view| {
+        let is_hashable = self.ty.dependencies().all(|view| {
             if let IrTypeView::Primitive(p) = &view
                 && let PrimitiveIrType::F32 | PrimitiveIrType::F64 = p.ty()
             {
@@ -82,7 +82,7 @@ impl ToTokens for CodegenStruct<'_> {
         }
         let is_defaultable = self
             .ty
-            .reachable_if(|view| {
+            .traverse(Reach::Dependencies, |view| {
                 match view {
                     IrTypeView::Optional(_) | IrTypeView::Array(_) | IrTypeView::Map(_) => {
                         // All wrappers implement `Default`: optional fields become `AbsentOr<T>`,

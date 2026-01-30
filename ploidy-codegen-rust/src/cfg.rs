@@ -25,6 +25,7 @@
 
 use std::collections::BTreeSet;
 
+use itertools::Itertools;
 use ploidy_core::ir::{InlineIrTypeView, IrOperationView, IrTypeView, SchemaIrTypeView, View};
 use proc_macro2::TokenStream;
 use quote::{ToTokens, quote};
@@ -58,45 +59,39 @@ impl CfgFeature {
             return None;
         }
 
+        // Compute all the operations with resources that use this type.
         let used_by_features: BTreeSet<_> = view
             .used_by()
-            .filter_map(|op| op.resource().map(CargoFeature::from_name))
+            .filter_map(|op| op.resource())
+            .map(CargoFeature::from_name)
             .collect();
+
+        // If this type has any transitive ungated root dependents,
+        // it can't have a feature gate. An "ungated root" type
+        // has no `x-resourceId`, _and_ isn't used by any operation with
+        // `x-resource-name`. Because it's ungated, none of its
+        // transitive dependencies can be gated, either.
+        let has_ungated_root_dependent = view
+            .dependents()
+            .filter_map(IrTypeView::as_schema)
+            .any(|s| s.resource().is_none() && s.used_by().all(|op| op.resource().is_none()));
+        if has_ungated_root_dependent {
+            return None;
+        }
 
         match (view.resource(), used_by_features.is_empty()) {
             // Type has own resource, _and_ is used by operations.
-            (Some(name), false) => {
-                let needs_full = view
-                    .reachable()
-                    .skip(1) // Ignore ourselves.
-                    .filter_map(IrTypeView::as_schema)
-                    .any(|ty| ty.resource().is_none());
-                let cfg = if needs_full {
-                    Self::Single(CargoFeature::Full)
-                } else {
-                    Self::own_and_used_by(CargoFeature::from_name(name), used_by_features)
-                };
-                Some(cfg)
-            }
+            (Some(name), false) => Some(Self::own_and_used_by(
+                CargoFeature::from_name(name),
+                used_by_features,
+            )),
             // Type has own resource only (Stripe-style; no resources on operations).
-            (Some(name), true) => {
-                let needs_full = view
-                    .reachable()
-                    .skip(1) // Ignore ourselves.
-                    .filter_map(IrTypeView::as_schema)
-                    .any(|ty| ty.resource().is_none());
-                let feature = if needs_full {
-                    CargoFeature::Full
-                } else {
-                    CargoFeature::from_name(name)
-                };
-                Some(Self::Single(feature))
-            }
+            (Some(name), true) => Some(Self::Single(CargoFeature::from_name(name))),
             // Type has no own resource, but is used by operations
             // (Swagger `@Tag` annotation style; no resources on types).
             (None, false) => Self::any_of(used_by_features),
             // No resource name; not used by any operation.
-            (None, true) => Some(Self::Single(CargoFeature::Full)),
+            (None, true) => None,
         }
     }
 
@@ -107,28 +102,34 @@ impl CfgFeature {
             return None;
         }
 
+        // Inline types depended on by ungated root types can't be gated, either.
+        // See `for_schema_type` for the definition of an "ungated root".
+        let has_ungated_root_dependent = view
+            .dependents()
+            .filter_map(IrTypeView::as_schema)
+            .any(|s| s.resource().is_none() && s.used_by().all(|op| op.resource().is_none()));
+        if has_ungated_root_dependent {
+            return None;
+        }
+
         let used_by_features: BTreeSet<_> = view
             .used_by()
-            .filter_map(|op| op.resource().map(CargoFeature::from_name))
+            .filter_map(|op| op.resource())
+            .map(CargoFeature::from_name)
             .collect();
 
         if used_by_features.is_empty() {
-            // No operations use this inline type directly;
-            // use its transitive schema types for feature-gating.
-            let reachable_features: BTreeSet<_> = view
-                .reachable()
-                .skip(1) // Ignore ourselves.
+            // No operations use this inline type directly, so use its
+            // transitive dependencies for gating. Filter out dependencies
+            // without a resource name, because these aren't gated.
+            let pairs = view
+                .dependencies()
                 .filter_map(IrTypeView::as_schema)
-                .map(|ty| {
-                    ty.resource()
-                        .map(CargoFeature::from_name)
-                        .unwrap_or_default()
-                })
-                .collect();
-            Self::all_of(reachable_features)
+                .filter_map(|ty| ty.resource().map(|r| (CargoFeature::from_name(r), ty)))
+                .collect_vec();
+            Self::all_of(reduce_transitive_features(&pairs))
         } else {
-            // Some operations use this inline type;
-            // use those operations for feature-gating.
+            // Some operations use this inline type; use those operations for gating.
             Self::any_of(used_by_features)
         }
     }
@@ -140,17 +141,15 @@ impl CfgFeature {
             return None;
         }
 
-        // Collect features from transitive dependencies. Filter out unnamed
-        // resources; "full" is handled via the feature itself.
-        let features: BTreeSet<_> = view
-            .reachable()
-            .skip(1) // Ignore ourselves.
+        // Collect all features from transitive dependencies, then
+        // reduce redundant features.
+        let pairs = view
+            .dependencies()
             .filter_map(IrTypeView::as_schema)
-            .filter_map(|ty| ty.resource())
-            .map(CargoFeature::from_name)
-            .collect();
+            .filter_map(|ty| ty.resource().map(|r| (CargoFeature::from_name(r), ty)))
+            .collect_vec();
 
-        Self::all_of(features)
+        Self::all_of(reduce_transitive_features(&pairs))
     }
 
     /// Builds a `#[cfg(...)]` attribute for a resource `mod` declaration in a
@@ -245,6 +244,38 @@ impl ToTokens for CfgFeature {
         };
         tokens.extend(quote! { #[cfg(#predicate)] });
     }
+}
+
+/// Reduces a set of (feature, type) pairs by removing all the features
+/// that are transitively implied by other features. If feature A's type
+/// depends on feature B's type, then enabling A in `Cargo.toml` already
+/// enables B, so B is redundant.
+fn reduce_transitive_features(
+    pairs: &[(CargoFeature, SchemaIrTypeView<'_>)],
+) -> BTreeSet<CargoFeature> {
+    pairs
+        .iter()
+        .enumerate()
+        .filter(|&(i, (feature, ty))| {
+            // Keep this `feature` unless some `other_ty` depends on it,
+            // meaning that `other_feature` already enables this `feature`.
+            let mut others = pairs.iter().enumerate().filter(|&(j, _)| i != j);
+            !others.any(|(_, (other_feature, other_ty))| {
+                // Does the other type depend on this type?
+                if !other_ty.depends_on(ty) {
+                    return false;
+                }
+                // Do the types form a cycle, and depend on each other?
+                // If so, the lexicographically lower feature name
+                // breaks the tie.
+                if ty.depends_on(other_ty) {
+                    return other_feature < feature;
+                }
+                true
+            })
+        })
+        .map(|(_, (feature, _))| feature.clone())
+        .collect()
 }
 
 #[cfg(test)]
@@ -463,6 +494,8 @@ mod tests {
 
     #[test]
     fn test_for_schema_type_with_own_resource_and_unnamed_deps() {
+        // `Customer` (with `x-resourceId`) depends on `Address` (no `x-resourceId`).
+        // `Customer` keeps its own feature gate; `Address` is ungated.
         let doc = Document::from_yaml(indoc::indoc! {"
             openapi: 3.0.0
             info:
@@ -488,12 +521,17 @@ mod tests {
         let ir_graph = IrGraph::new(&spec);
         let graph = CodegenGraph::new(ir_graph);
 
+        // `Customer` should be gated.
         let customer = graph.schemas().find(|s| s.name() == "Customer").unwrap();
         let cfg = CfgFeature::for_schema_type(&graph, &customer);
-
         let actual: syn::Attribute = parse_quote!(#cfg);
-        let expected: syn::Attribute = parse_quote!(#[cfg(feature = "full")]);
+        let expected: syn::Attribute = parse_quote!(#[cfg(feature = "customer")]);
         assert_eq!(actual, expected);
+
+        // `Address` should be ungated.
+        let address = graph.schemas().find(|s| s.name() == "Address").unwrap();
+        let cfg = CfgFeature::for_schema_type(&graph, &address);
+        assert_eq!(cfg, None);
     }
 
     // MARK: Swagger `@Tag` style
@@ -700,6 +738,9 @@ mod tests {
 
     #[test]
     fn test_for_schema_type_with_own_used_by_and_unnamed_deps() {
+        // `Customer` (with `x-resourceId`) is used by `getBilling`, and depends on `Address`
+        // (no `x-resourceId`). `Address` is transitively used by the operation, so it inherits
+        // the operation's feature gate. `Customer` keeps its compound feature gate.
         let doc = Document::from_yaml(indoc::indoc! {"
             openapi: 3.0.0
             info:
@@ -737,11 +778,20 @@ mod tests {
         let ir_graph = IrGraph::new(&spec);
         let graph = CodegenGraph::new(ir_graph);
 
+        // `Customer` keeps its compound feature gate (own + used by).
         let customer = graph.schemas().find(|s| s.name() == "Customer").unwrap();
         let cfg = CfgFeature::for_schema_type(&graph, &customer);
-
         let actual: syn::Attribute = parse_quote!(#cfg);
-        let expected: syn::Attribute = parse_quote!(#[cfg(feature = "full")]);
+        let expected: syn::Attribute =
+            parse_quote!(#[cfg(all(feature = "billing", feature = "customer"))]);
+        assert_eq!(actual, expected);
+
+        // `Address` has no `x-resourceId`, but is used by the operation transitively,
+        // so it inherits the operation's feature gate.
+        let address = graph.schemas().find(|s| s.name() == "Address").unwrap();
+        let cfg = CfgFeature::for_schema_type(&graph, &address);
+        let actual: syn::Attribute = parse_quote!(#cfg);
+        let expected: syn::Attribute = parse_quote!(#[cfg(feature = "billing")]);
         assert_eq!(actual, expected);
     }
 
@@ -750,7 +800,7 @@ mod tests {
     #[test]
     fn test_for_schema_type_unnamed_no_operations() {
         // Spec has a named resource (`Customer`), but `Simple` has
-        // no `x-resourceId` and isn't used.
+        // no `x-resourceId` and isn't used, so it shouldn't be gated.
         let doc = Document::from_yaml(indoc::indoc! {"
             openapi: 3.0.0
             info:
@@ -779,9 +829,9 @@ mod tests {
         let simple = graph.schemas().find(|s| s.name() == "Simple").unwrap();
         let cfg = CfgFeature::for_schema_type(&graph, &simple);
 
-        let actual: syn::Attribute = parse_quote!(#cfg);
-        let expected: syn::Attribute = parse_quote!(#[cfg(feature = "full")]);
-        assert_eq!(actual, expected);
+        // Types without a resource, and without operations that use them,
+        // should be ungated.
+        assert_eq!(cfg, None);
     }
 
     #[test]
@@ -849,7 +899,8 @@ mod tests {
     #[test]
     fn test_for_schema_type_cycle_with_mixed_resources() {
         // Type A (resource `a`) -> Type B (no resource) -> Type C (resource `c`) -> Type A.
-        // All types should get `full` because B has no resource.
+        // Since B is ungated (no `x-resourceId`), and transitively depends on A and C,
+        // A and C should also be ungated.
         let doc = Document::from_yaml(indoc::indoc! {"
             openapi: 3.0.0
             info:
@@ -881,19 +932,19 @@ mod tests {
         let ir_graph = IrGraph::new(&spec);
         let graph = CodegenGraph::new(ir_graph);
 
-        // A depends on B (unnamed), so A needs `full`.
+        // In a cycle involving B, all types become ungated, because
+        // B depends on C, which depends on A, which depends on B.
         let a = graph.schemas().find(|s| s.name() == "A").unwrap();
         let cfg = CfgFeature::for_schema_type(&graph, &a);
-        let actual: syn::Attribute = parse_quote!(#cfg);
-        let expected: syn::Attribute = parse_quote!(#[cfg(feature = "full")]);
-        assert_eq!(actual, expected);
+        assert_eq!(cfg, None);
 
-        // C depends on A, which depends on B (unnamed), so C also needs `full`.
+        let b = graph.schemas().find(|s| s.name() == "B").unwrap();
+        let cfg = CfgFeature::for_schema_type(&graph, &b);
+        assert_eq!(cfg, None);
+
         let c = graph.schemas().find(|s| s.name() == "C").unwrap();
         let cfg = CfgFeature::for_schema_type(&graph, &c);
-        let actual: syn::Attribute = parse_quote!(#cfg);
-        let expected: syn::Attribute = parse_quote!(#[cfg(feature = "full")]);
-        assert_eq!(actual, expected);
+        assert_eq!(cfg, None);
     }
 
     #[test]
@@ -1049,6 +1100,295 @@ mod tests {
 
         let actual: syn::Attribute = parse_quote!(#cfg);
         let expected: syn::Attribute = parse_quote!(#[cfg(feature = "pets")]);
+        assert_eq!(actual, expected);
+    }
+
+    // MARK: Reduction
+
+    #[test]
+    fn test_for_operation_reduces_transitive_chain() {
+        // A -> B -> C, each with a resource. The operation uses A.
+        // Since A depends on B and C, only `feature = "a"` is needed.
+        let doc = Document::from_yaml(indoc::indoc! {"
+            openapi: 3.0.0
+            info:
+              title: Test
+              version: 1.0.0
+            paths:
+              /things:
+                get:
+                  operationId: getThings
+                  responses:
+                    '200':
+                      description: OK
+                      content:
+                        application/json:
+                          schema:
+                            $ref: '#/components/schemas/A'
+            components:
+              schemas:
+                A:
+                  type: object
+                  x-resourceId: a
+                  properties:
+                    b:
+                      $ref: '#/components/schemas/B'
+                B:
+                  type: object
+                  x-resourceId: b
+                  properties:
+                    c:
+                      $ref: '#/components/schemas/C'
+                C:
+                  type: object
+                  x-resourceId: c
+                  properties:
+                    value:
+                      type: string
+        "})
+        .unwrap();
+
+        let spec = IrSpec::from_doc(&doc).unwrap();
+        let ir_graph = IrGraph::new(&spec);
+        let graph = CodegenGraph::new(ir_graph);
+
+        let op = graph.operations().find(|o| o.id() == "getThings").unwrap();
+        let cfg = CfgFeature::for_operation(&graph, &op);
+
+        let actual: syn::Attribute = parse_quote!(#cfg);
+        let expected: syn::Attribute = parse_quote!(#[cfg(feature = "a")]);
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn test_for_operation_reduces_cycle() {
+        // A -> B -> C -> A, all with resources. The operation uses A.
+        // Since they're all part of the same cycle, only the
+        // lexicographically lowest feature should be present.
+        let doc = Document::from_yaml(indoc::indoc! {"
+            openapi: 3.0.0
+            info:
+              title: Test
+              version: 1.0.0
+            paths:
+              /things:
+                get:
+                  operationId: getThings
+                  responses:
+                    '200':
+                      description: OK
+                      content:
+                        application/json:
+                          schema:
+                            $ref: '#/components/schemas/A'
+            components:
+              schemas:
+                A:
+                  type: object
+                  x-resourceId: a
+                  properties:
+                    b:
+                      $ref: '#/components/schemas/B'
+                B:
+                  type: object
+                  x-resourceId: b
+                  properties:
+                    c:
+                      $ref: '#/components/schemas/C'
+                C:
+                  type: object
+                  x-resourceId: c
+                  properties:
+                    a:
+                      $ref: '#/components/schemas/A'
+        "})
+        .unwrap();
+
+        let spec = IrSpec::from_doc(&doc).unwrap();
+        let ir_graph = IrGraph::new(&spec);
+        let graph = CodegenGraph::new(ir_graph);
+
+        let op = graph.operations().find(|o| o.id() == "getThings").unwrap();
+        let cfg = CfgFeature::for_operation(&graph, &op);
+
+        // All three are in a cycle; the lowest feature name wins.
+        let actual: syn::Attribute = parse_quote!(#cfg);
+        let expected: syn::Attribute = parse_quote!(#[cfg(feature = "a")]);
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn test_for_operation_keeps_independent_features() {
+        // A and B are independent (no dependency between them), so
+        // both features should be present.
+        let doc = Document::from_yaml(indoc::indoc! {"
+            openapi: 3.0.0
+            info:
+              title: Test
+              version: 1.0.0
+            paths:
+              /things:
+                get:
+                  operationId: getThings
+                  responses:
+                    '200':
+                      description: OK
+                      content:
+                        application/json:
+                          schema:
+                            type: object
+                            properties:
+                              a:
+                                $ref: '#/components/schemas/A'
+                              b:
+                                $ref: '#/components/schemas/B'
+            components:
+              schemas:
+                A:
+                  type: object
+                  x-resourceId: a
+                  properties:
+                    value:
+                      type: string
+                B:
+                  type: object
+                  x-resourceId: b
+                  properties:
+                    value:
+                      type: string
+        "})
+        .unwrap();
+
+        let spec = IrSpec::from_doc(&doc).unwrap();
+        let ir_graph = IrGraph::new(&spec);
+        let graph = CodegenGraph::new(ir_graph);
+
+        let op = graph.operations().find(|o| o.id() == "getThings").unwrap();
+        let cfg = CfgFeature::for_operation(&graph, &op);
+
+        let actual: syn::Attribute = parse_quote!(#cfg);
+        let expected: syn::Attribute = parse_quote!(#[cfg(all(feature = "a", feature = "b"))]);
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn test_for_operation_reduces_partial_deps() {
+        // A -> B, C independent; all three have resources. A depends on B, so
+        // feature `b` is redundant, but `c` must be present.
+        let doc = Document::from_yaml(indoc::indoc! {"
+            openapi: 3.0.0
+            info:
+              title: Test
+              version: 1.0.0
+            paths:
+              /things:
+                get:
+                  operationId: getThings
+                  responses:
+                    '200':
+                      description: OK
+                      content:
+                        application/json:
+                          schema:
+                            type: object
+                            properties:
+                              a:
+                                $ref: '#/components/schemas/A'
+                              c:
+                                $ref: '#/components/schemas/C'
+            components:
+              schemas:
+                A:
+                  type: object
+                  x-resourceId: a
+                  properties:
+                    b:
+                      $ref: '#/components/schemas/B'
+                B:
+                  type: object
+                  x-resourceId: b
+                  properties:
+                    value:
+                      type: string
+                C:
+                  type: object
+                  x-resourceId: c
+                  properties:
+                    value:
+                      type: string
+        "})
+        .unwrap();
+
+        let spec = IrSpec::from_doc(&doc).unwrap();
+        let ir_graph = IrGraph::new(&spec);
+        let graph = CodegenGraph::new(ir_graph);
+
+        let op = graph.operations().find(|o| o.id() == "getThings").unwrap();
+        let cfg = CfgFeature::for_operation(&graph, &op);
+
+        let actual: syn::Attribute = parse_quote!(#cfg);
+        let expected: syn::Attribute = parse_quote!(#[cfg(all(feature = "a", feature = "c"))]);
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn test_for_inline_type_reduces_transitive_features() {
+        // Inline type inside a response, with A -> B -> C chain.
+        // Only `a` should remain after reduction.
+        let doc = Document::from_yaml(indoc::indoc! {"
+            openapi: 3.0.0
+            info:
+              title: Test
+              version: 1.0.0
+            paths:
+              /things:
+                get:
+                  operationId: getThings
+                  responses:
+                    '200':
+                      description: OK
+                      content:
+                        application/json:
+                          schema:
+                            type: object
+                            properties:
+                              a:
+                                $ref: '#/components/schemas/A'
+            components:
+              schemas:
+                A:
+                  type: object
+                  x-resourceId: a
+                  properties:
+                    b:
+                      $ref: '#/components/schemas/B'
+                B:
+                  type: object
+                  x-resourceId: b
+                  properties:
+                    c:
+                      $ref: '#/components/schemas/C'
+                C:
+                  type: object
+                  x-resourceId: c
+                  properties:
+                    value:
+                      type: string
+        "})
+        .unwrap();
+
+        let spec = IrSpec::from_doc(&doc).unwrap();
+        let ir_graph = IrGraph::new(&spec);
+        let graph = CodegenGraph::new(ir_graph);
+
+        let ops = graph.operations().collect_vec();
+        let inlines = ops.iter().flat_map(|op| op.inlines()).collect_vec();
+        assert!(!inlines.is_empty());
+
+        let cfg = CfgFeature::for_inline_type(&graph, &inlines[0]);
+
+        let actual: syn::Attribute = parse_quote!(#cfg);
+        let expected: syn::Attribute = parse_quote!(#[cfg(feature = "a")]);
         assert_eq!(actual, expected);
     }
 }

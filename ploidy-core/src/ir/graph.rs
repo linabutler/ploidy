@@ -126,20 +126,12 @@ impl<'a> IrGraph<'a> {
                 // Compute the transitive closure; discard the reduction.
                 let (_, closure) = tred::dag_transitive_reduction_closure(&condensation);
 
-                // For each SCC, collect the topological indices of the SCCs it depends on.
-                // Nodes in the same SCC share transitive dependencies, so precomputing at
-                // the SCC level avoids redundant work during expansion.
-                let scc_deps: Vec<FixedBitSet> = condensation
-                    .node_indices()
-                    .map(|index| closure.neighbors(index).collect())
-                    .collect();
-
                 // Expand SCC-level dependencies to node-level: for each SCC,
                 // form a union of all nodes from all the SCCs it depends on.
                 let mut deps_by_scc =
                     vec![FixedBitSet::with_capacity(g.node_count()); condensation.node_count()];
                 for scc_index in condensation.node_indices() {
-                    for dep_scc_index in scc_deps[scc_index].ones() {
+                    for dep_scc_index in closure.neighbors(scc_index) {
                         deps_by_scc[scc_index].union_with(sccs.members(dep_scc_index));
                     }
                     // Include the other members of this SCC; these depend on
@@ -150,9 +142,27 @@ impl<'a> IrGraph<'a> {
                 for node in g.node_indices() {
                     let topo_index = sccs.topo_index(node);
                     let mut deps = deps_by_scc[topo_index].clone();
-                    // Exclude the node itself.
+
+                    // Exclude ourselves from our dependencies and dependents.
                     deps.remove(node.index());
-                    metadata.schemas.entry(node).or_default().depends_on = deps;
+
+                    metadata
+                        .schemas
+                        .entry(node)
+                        .or_default()
+                        .dependencies
+                        .union_with(&deps);
+
+                    // Add ourselves to the dependents of all the types
+                    // that we depend on.
+                    for index in deps.into_ones().map(NodeIndex::new) {
+                        metadata
+                            .schemas
+                            .entry(index)
+                            .or_default()
+                            .dependents
+                            .grow_and_insert(node.index());
+                    }
                 }
             }
 
@@ -166,7 +176,7 @@ impl<'a> IrGraph<'a> {
                 for node in meta.types.ones().map(NodeIndex::new) {
                     transitive_deps.insert(node.index());
                     if let Some(meta) = metadata.schemas.get(&node) {
-                        transitive_deps.union_with(&meta.depends_on);
+                        transitive_deps.union_with(&meta.dependencies);
                     }
                 }
 
@@ -288,7 +298,9 @@ pub(super) struct IrGraphNodeMeta<'a> {
     /// Operations that use this type.
     pub used_by: FxHashSet<ByAddress<&'a IrOperation<'a>>>,
     /// Indices of other types that this type transitively depends on.
-    pub depends_on: FixedBitSet,
+    pub dependencies: FixedBitSet,
+    /// Indices of other types that transitively depend on this type.
+    pub dependents: FixedBitSet,
     /// Opaque extended data for this type.
     pub extensions: AtomicRefCell<ExtensionMap>,
 }
@@ -297,7 +309,8 @@ impl Debug for IrGraphNodeMeta<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("IrGraphNodeMeta")
             .field("used_by", &self.used_by)
-            .field("depends_on", &self.depends_on)
+            .field("dependencies", &self.dependencies)
+            .field("dependents", &self.dependents)
             .finish_non_exhaustive()
     }
 }

@@ -1,7 +1,7 @@
 use itertools::Itertools;
 use ploidy_core::{
     codegen::UniqueNames,
-    ir::{IrTaggedView, IrTypeView, PrimitiveIrType, View},
+    ir::{IrTaggedView, IrTypeView, PrimitiveIrType},
 };
 use proc_macro2::TokenStream;
 use quote::{ToTokens, TokenStreamExt, quote};
@@ -28,15 +28,19 @@ impl ToTokens for CodegenTagged<'_> {
     fn to_tokens(&self, tokens: &mut TokenStream) {
         let mut extra_derives = vec![];
         let is_hashable = self.ty.variants().all(|variant| {
-            variant.reachable().all(|view| {
-                if let IrTypeView::Primitive(p) = &view
-                    && let PrimitiveIrType::F32 | PrimitiveIrType::F64 = p.ty()
-                {
-                    false
-                } else {
-                    true
-                }
-            })
+            variant
+                .ty()
+                .dependencies()
+                .chain(std::iter::once(variant.ty()))
+                .all(|view| {
+                    if let IrTypeView::Primitive(p) = &view
+                        && let PrimitiveIrType::F32 | PrimitiveIrType::F64 = p.ty()
+                    {
+                        false
+                    } else {
+                        true
+                    }
+                })
         });
         if is_hashable {
             extra_derives.push(ExtraDerive::Eq);

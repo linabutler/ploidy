@@ -6,7 +6,7 @@ use crate::{
     ir::{
         ExtendableView, InlineIrTypePathRoot, InlineIrTypePathSegment, InlineIrTypeView,
         IrEnumVariant, IrGraph, IrParameterStyle, IrRequestView, IrResponseView, IrSpec,
-        IrStructFieldName, IrTypeView, PrimitiveIrType, SchemaIrTypeView, SchemaTypeInfo,
+        IrStructFieldName, IrTypeView, PrimitiveIrType, Reach, SchemaIrTypeView, SchemaTypeInfo,
         SomeIrUntaggedVariant, Traversal, View,
     },
     parse::{Document, Method, path::PathFragment},
@@ -281,10 +281,10 @@ fn test_extension_per_node_type() {
     assert_eq!(*ref2_ext.unwrap(), "data_2");
 }
 
-// MARK: `reachable()`
+// MARK: `dependencies()`
 
 #[test]
-fn test_reachable_multiple_dependencies() {
+fn test_dependencies_multiple() {
     let doc = Document::from_yaml(indoc::indoc! {"
         openapi: 3.0.0
         info:
@@ -317,20 +317,21 @@ fn test_reachable_multiple_dependencies() {
 
     let branch_schema = graph.schemas().find(|s| s.name() == "Branch").unwrap();
 
-    // `reachable()` should include `Branch`, `Leaf1`, and `Leaf2`.
-    let mut reachable_names = branch_schema
-        .reachable()
+    // `dependencies()` should include `Leaf1` and `Leaf2`,
+    // but not `Branch` itself.
+    let mut dep_names = branch_schema
+        .dependencies()
         .filter_map(|view| match view {
             IrTypeView::Schema(view) => Some(view.name()),
             _ => None,
         })
         .collect_vec();
-    reachable_names.sort();
-    assert_matches!(&*reachable_names, ["Branch", "Leaf1", "Leaf2"]);
+    dep_names.sort();
+    assert_matches!(&*dep_names, ["Leaf1", "Leaf2"]);
 }
 
 #[test]
-fn test_reachable_no_dependencies() {
+fn test_dependencies_none() {
     let doc = Document::from_yaml(indoc::indoc! {"
         openapi: 3.0.0
         info:
@@ -352,14 +353,13 @@ fn test_reachable_no_dependencies() {
 
     let standalone_schema = graph.schemas().next().unwrap();
 
-    // `reachable()` is a BFS from the starting node to all reachable nodes.
-    // For a struct with a required primitive field, the reachable set includes
-    // the struct and the primitive type.
-    assert_eq!(standalone_schema.reachable().count(), 2);
+    // For a struct with a required primitive field, the dependency set
+    // includes just that primitive type.
+    assert_eq!(standalone_schema.dependencies().count(), 1);
 }
 
 #[test]
-fn test_reachable_handles_cycles_without_infinite_loop() {
+fn test_dependencies_handles_cycles_without_infinite_loop() {
     let doc = Document::from_yaml(indoc::indoc! {"
         openapi: 3.0.0
         info:
@@ -387,12 +387,12 @@ fn test_reachable_handles_cycles_without_infinite_loop() {
 
     let a_schema = graph.schemas().find(|s| s.name() == "A").unwrap();
 
-    // `reachable()` should not revisit already-visited schemas.
-    assert_eq!(a_schema.reachable().count(), 2);
+    // `dependencies()` should not revisit already-visited schemas.
+    assert_eq!(a_schema.dependencies().count(), 1);
 }
 
 #[test]
-fn test_reachable_from_array_includes_inner_types() {
+fn test_dependencies_from_array_includes_inner_types() {
     let doc = Document::from_yaml(indoc::indoc! {"
         openapi: 3.0.0
         info:
@@ -436,20 +436,13 @@ fn test_reachable_from_array_includes_inner_types() {
         other => panic!("expected array; got {other:?}"),
     };
 
-    // `reachable()` from the array should include the array, the schema
-    // reference, and the primitive field in `Item`.
-    let reachable_types = array_view.reachable().collect_vec();
-    assert_eq!(reachable_types.len(), 3);
+    // The `dependencies()` of the array should include the schema reference
+    // and the primitive field in `Item`, but not the array itself.
+    let dep_types = array_view.dependencies().collect_vec();
+    assert_eq!(dep_types.len(), 2);
 
-    // Verify the array itself is reachable.
-    assert!(
-        reachable_types
-            .iter()
-            .any(|t| matches!(t, IrTypeView::Array(_)))
-    );
-
-    // Verify the `Item` schema is reachable.
-    assert!(reachable_types.iter().any(|t| matches!(
+    // Verify the `Item` schema is a dependency.
+    assert!(dep_types.iter().any(|t| matches!(
         t,
         IrTypeView::Schema(SchemaIrTypeView::Struct(
             SchemaTypeInfo { name: "Item", .. },
@@ -457,16 +450,16 @@ fn test_reachable_from_array_includes_inner_types() {
         ))
     )));
 
-    // Verify the primitive field is reachable.
+    // Verify the primitive field is a dependency.
     assert!(
-        reachable_types
+        dep_types
             .iter()
             .any(|t| matches!(t, IrTypeView::Primitive(p) if p.ty() == PrimitiveIrType::String))
     );
 }
 
 #[test]
-fn test_reachable_from_map_includes_inner_types() {
+fn test_dependencies_from_map_includes_inner_types() {
     let doc = Document::from_yaml(indoc::indoc! {"
         openapi: 3.0.0
         info:
@@ -510,20 +503,13 @@ fn test_reachable_from_map_includes_inner_types() {
         other => panic!("expected map; got {other:?}"),
     };
 
-    // `reachable()` from the map should include the map, the schema
-    // reference, and the primitive field in `Item`.
-    let reachable_types = map_view.reachable().collect_vec();
-    assert_eq!(reachable_types.len(), 3);
+    // The `dependencies()` of the map should include the schema reference
+    // and the primitive field in `Item`, but not the map itself.
+    let dep_types = map_view.dependencies().collect_vec();
+    assert_eq!(dep_types.len(), 2);
 
-    // Verify the map itself is reachable.
-    assert!(
-        reachable_types
-            .iter()
-            .any(|t| matches!(t, IrTypeView::Map(_)))
-    );
-
-    // Verify the `Item` schema is reachable.
-    assert!(reachable_types.iter().any(|t| matches!(
+    // Verify the `Item` schema is a dependency.
+    assert!(dep_types.iter().any(|t| matches!(
         t,
         IrTypeView::Schema(SchemaIrTypeView::Struct(
             SchemaTypeInfo { name: "Item", .. },
@@ -531,16 +517,16 @@ fn test_reachable_from_map_includes_inner_types() {
         ))
     )));
 
-    // Verify the primitive field is reachable.
+    // Verify the primitive field is a dependency.
     assert!(
-        reachable_types
+        dep_types
             .iter()
             .any(|t| matches!(t, IrTypeView::Primitive(p) if p.ty() == PrimitiveIrType::String))
     );
 }
 
 #[test]
-fn test_reachable_from_nullable_includes_inner_types() {
+fn test_dependencies_from_nullable_includes_inner_types() {
     let doc = Document::from_yaml(indoc::indoc! {"
         openapi: 3.0.0
         info:
@@ -583,20 +569,13 @@ fn test_reachable_from_nullable_includes_inner_types() {
         other => panic!("expected nullable; got {other:?}"),
     };
 
-    // `reachable()` from the nullable should include the nullable, the schema
-    // reference, and the primitive field in `Item`.
-    let reachable_types = nullable_view.reachable().collect_vec();
-    assert_eq!(reachable_types.len(), 3);
+    // The `dependencies()` of the nullable should include the schema reference
+    // and the primitive field in `Item`, but not the nullable itself.
+    let dep_types = nullable_view.dependencies().collect_vec();
+    assert_eq!(dep_types.len(), 2);
 
-    // Verify the nullable itself is reachable.
-    assert!(
-        reachable_types
-            .iter()
-            .any(|t| matches!(t, IrTypeView::Optional(_)))
-    );
-
-    // Verify the `Item` schema is reachable.
-    assert!(reachable_types.iter().any(|t| matches!(
+    // Verify the `Item` schema is a dependency.
+    assert!(dep_types.iter().any(|t| matches!(
         t,
         IrTypeView::Schema(SchemaIrTypeView::Struct(
             SchemaTypeInfo { name: "Item", .. },
@@ -604,16 +583,16 @@ fn test_reachable_from_nullable_includes_inner_types() {
         ))
     )));
 
-    // Verify the primitive field is reachable.
+    // Verify the primitive field is a dependency.
     assert!(
-        reachable_types
+        dep_types
             .iter()
             .any(|t| matches!(t, IrTypeView::Primitive(p) if p.ty() == PrimitiveIrType::String))
     );
 }
 
 #[test]
-fn test_reachable_from_inline_includes_inner_types() {
+fn test_dependencies_from_inline_includes_inner_types() {
     let doc = Document::from_yaml(indoc::indoc! {"
         openapi: 3.0.0
         info:
@@ -659,20 +638,13 @@ fn test_reachable_from_inline_includes_inner_types() {
         other => panic!("expected inline; got {other:?}"),
     };
 
-    // `reachable()` from an inline type should include the inline struct,
-    // the schema reference, and the primitive field in `RefSchema`.
-    let reachable_types = inline_view.reachable().collect_vec();
-    assert_eq!(reachable_types.len(), 3);
+    // The `dependencies()` of the inline type should include the schema reference
+    // and the primitive field in `RefSchema`, but not the inline itself.
+    let dep_types = inline_view.dependencies().collect_vec();
+    assert_eq!(dep_types.len(), 2);
 
-    // Verify the inline itself is reachable.
-    assert!(
-        reachable_types
-            .iter()
-            .any(|t| matches!(t, IrTypeView::Inline(_)))
-    );
-
-    // Verify the `RefSchema` schema is reachable.
-    assert!(reachable_types.iter().any(|t| matches!(
+    // Verify the `RefSchema` schema is a dependency.
+    assert!(dep_types.iter().any(|t| matches!(
         t,
         IrTypeView::Schema(SchemaIrTypeView::Struct(
             SchemaTypeInfo {
@@ -683,16 +655,16 @@ fn test_reachable_from_inline_includes_inner_types() {
         ))
     )));
 
-    // Verify the primitive field is reachable.
+    // Verify the primitive field is a dependency.
     assert!(
-        reachable_types
+        dep_types
             .iter()
             .any(|t| matches!(t, IrTypeView::Primitive(p) if p.ty() == PrimitiveIrType::String))
     );
 }
 
 #[test]
-fn test_reachable_from_primitive_returns_itself() {
+fn test_dependencies_from_primitive_returns_empty() {
     let doc = Document::from_yaml(indoc::indoc! {"
         openapi: 3.0.0
         info:
@@ -724,21 +696,16 @@ fn test_reachable_from_primitive_returns_itself() {
         .unwrap();
 
     let primitive_view = match name_field.ty() {
-        IrTypeView::Primitive(_) => name_field.ty(),
+        IrTypeView::Primitive(view) => view,
         other => panic!("expected primitive; got {other:?}"),
     };
 
-    // A primitive has no graph edges, so `reachable()` should
-    // only include itself.
-    let reachable_types = primitive_view.reachable().collect_vec();
-    assert_matches!(
-        &*reachable_types,
-        [IrTypeView::Primitive(p)] if p.ty() == PrimitiveIrType::String
-    );
+    // A primitive has no graph edges, so `dependencies()` returns nothing.
+    assert_eq!(primitive_view.dependencies().count(), 0);
 }
 
 #[test]
-fn test_reachable_from_any_returns_itself() {
+fn test_dependencies_from_any_returns_empty() {
     let doc = Document::from_yaml(indoc::indoc! {"
         openapi: 3.0.0
         info:
@@ -769,20 +736,19 @@ fn test_reachable_from_any_returns_itself() {
         .find(|f| matches!(f.name(), IrStructFieldName::Name("untyped")))
         .unwrap();
 
-    let any_view = match untyped_field.ty() {
-        IrTypeView::Any => untyped_field.ty(),
+    let untyped_view = match untyped_field.ty() {
+        view @ IrTypeView::Any => view,
         other => panic!("expected any; got {other:?}"),
     };
 
-    // `Any` has no graph edges, so `reachable()` should only include itself.
-    let reachable_types = any_view.reachable().collect_vec();
-    assert_matches!(&*reachable_types, [IrTypeView::Any]);
+    // `Any` has no graph edges, so `dependencies()` returns nothing.
+    assert_eq!(untyped_view.dependencies().count(), 0);
 }
 
 #[test]
-fn test_reachable_filtered_skip_excludes_node_but_continues_traversal() {
+fn test_traverse_skip_excludes_node_but_continues_traversal() {
     // Graph: Root -> Middle -> Leaf. Skipping `Middle` should yield
-    // `[Root, Leaf]`, and only exclude `Middle`.
+    // `[Leaf]` only, excluding both `Root` and `Middle`.
     let doc = Document::from_yaml(indoc::indoc! {"
         openapi: 3.0.0
         info:
@@ -814,8 +780,8 @@ fn test_reachable_filtered_skip_excludes_node_but_continues_traversal() {
     let root = graph.schemas().find(|s| s.name() == "Root").unwrap();
 
     // Skip `Middle`, but continue into its neighbors.
-    let reachable_names = root
-        .reachable_if(|view| match view {
+    let dep_names = root
+        .traverse(Reach::Dependencies, |view| match view {
             IrTypeView::Schema(s) if s.name() == "Middle" => Traversal::Skip,
             _ => Traversal::Visit,
         })
@@ -826,13 +792,13 @@ fn test_reachable_filtered_skip_excludes_node_but_continues_traversal() {
         .collect_vec();
 
     // `Middle` is skipped, but `Leaf` is still reachable through it.
-    assert_eq!(reachable_names, vec!["Root", "Leaf"]);
+    assert_eq!(dep_names, vec!["Leaf"]);
 }
 
 #[test]
-fn test_reachable_filtered_stop_includes_node_but_stops_traversal() {
-    // Graph: Root -> Middle -> Leaf
-    // Stop at `Middle` -> should yield [Root, Middle] (Leaf excluded).
+fn test_traverse_stop_includes_node_but_stops_traversal() {
+    // Graph: Root -> Middle -> Leaf. Stopping at `Middle`
+    // should yield just `[Middle]`.
     let doc = Document::from_yaml(indoc::indoc! {"
         openapi: 3.0.0
         info:
@@ -864,8 +830,8 @@ fn test_reachable_filtered_stop_includes_node_but_stops_traversal() {
     let root = graph.schemas().find(|s| s.name() == "Root").unwrap();
 
     // Stop at `Middle`; don't descend into its children.
-    let reachable_names = root
-        .reachable_if(|view| match view {
+    let dep_names = root
+        .traverse(Reach::Dependencies, |view| match view {
             IrTypeView::Schema(s) if s.name() == "Middle" => Traversal::Stop,
             _ => Traversal::Visit,
         })
@@ -875,14 +841,13 @@ fn test_reachable_filtered_stop_includes_node_but_stops_traversal() {
         })
         .collect_vec();
 
-    // `Middle` is included, but `Leaf` is not reachable because we stopped at `Middle`.
-    assert_eq!(reachable_names, vec!["Root", "Middle"]);
+    // `Middle` is included, but `Leaf` isn't because we stopped at `Middle`.
+    assert_eq!(dep_names, vec!["Middle"]);
 }
 
 #[test]
-fn test_reachable_if_ignore_excludes_node_and_stops_traversal() {
-    // Graph: Root -> Middle -> Leaf. Ignoring `Middle` should
-    // yield just `[Root]`.
+fn test_traverse_ignore_excludes_node_and_stops_traversal() {
+    // Graph: Root -> Middle -> Leaf. Ignoring `Middle` should yield nothing.
     let doc = Document::from_yaml(indoc::indoc! {"
         openapi: 3.0.0
         info:
@@ -914,8 +879,8 @@ fn test_reachable_if_ignore_excludes_node_and_stops_traversal() {
     let root = graph.schemas().find(|s| s.name() == "Root").unwrap();
 
     // Ignore `Middle`: don't yield it, and don't visit its neighbors.
-    let reachable_names = root
-        .reachable_if(|view| match view {
+    let dep_names = root
+        .traverse(Reach::Dependencies, |view| match view {
             IrTypeView::Schema(s) if s.name() == "Middle" => Traversal::Ignore,
             _ => Traversal::Visit,
         })
@@ -926,7 +891,52 @@ fn test_reachable_if_ignore_excludes_node_and_stops_traversal() {
         .collect_vec();
 
     // `Middle` is ignored entirely, so `Leaf` is also unreachable.
-    assert_eq!(reachable_names, vec!["Root"]);
+    assert!(dep_names.is_empty());
+}
+
+#[test]
+fn test_traverse_dependents_yields_types_that_depend_on_node() {
+    // Graph: Root -> Middle -> Leaf. Traversing dependents from `Leaf` should
+    // yield everything that transitively depends on `Leaf`: `[Middle, Root]`.
+    let doc = Document::from_yaml(indoc::indoc! {"
+        openapi: 3.0.0
+        info:
+          title: Test
+          version: 1.0.0
+        components:
+          schemas:
+            Leaf:
+              type: object
+              properties:
+                value:
+                  type: string
+            Middle:
+              type: object
+              properties:
+                leaf:
+                  $ref: '#/components/schemas/Leaf'
+            Root:
+              type: object
+              properties:
+                middle:
+                  $ref: '#/components/schemas/Middle'
+    "})
+    .unwrap();
+
+    let spec = IrSpec::from_doc(&doc).unwrap();
+    let graph = IrGraph::new(&spec);
+
+    let leaf = graph.schemas().find(|s| s.name() == "Leaf").unwrap();
+
+    let dependent_names = leaf
+        .traverse(Reach::Dependents, |_| Traversal::Visit)
+        .filter_map(|view| match view {
+            IrTypeView::Schema(s) => Some(s.name()),
+            _ => None,
+        })
+        .collect_vec();
+
+    assert_eq!(dependent_names, vec!["Middle", "Root"]);
 }
 
 // MARK: `inlines()`
@@ -1601,8 +1611,8 @@ fn test_inline_view_with_view_trait_methods() {
     // `inlines()` includes the starting node.
     assert_eq!(inline_enum.inlines().count(), 1);
 
-    // `reachable()` should include the inline enum itself.
-    assert_eq!(inline_enum.reachable().count(), 1);
+    // `dependencies()` should be empty for an inline enum.
+    assert_eq!(inline_enum.dependencies().count(), 0);
 }
 
 #[test]
@@ -1878,8 +1888,8 @@ fn test_enum_view_with_view_trait_methods() {
     // Enums can't contain inline types, so `inlines()` should be empty.
     assert_eq!(enum_view.inlines().count(), 0);
 
-    // `reachable()` should include the enum itself.
-    assert_eq!(enum_view.reachable().count(), 1);
+    // `dependencies()` should be empty for an enum.
+    assert_eq!(enum_view.dependencies().count(), 0);
 }
 
 // MARK: Operation views

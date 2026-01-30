@@ -48,24 +48,23 @@ impl<'a> IrTypeView<'a> {
         }
     }
 
-    /// Returns an iterator over all the types that are reachable from this type.
-    /// The first item is always this type.
-    pub fn reachable(&self) -> impl Iterator<Item = IrTypeView<'a>> {
+    /// Returns an iterator over all the types that this type transitively depends on.
+    pub fn dependencies(&self) -> impl Iterator<Item = IrTypeView<'a>> + use<'a> {
         match self {
-            Self::Any => Either::Left(std::iter::once(IrTypeView::Any)),
-            Self::Primitive(v) => Either::Right(Either::Left(v.reachable())),
-            Self::Array(v) => Either::Right(Either::Right(Either::Left(v.reachable()))),
+            Self::Any => Either::Left(std::iter::empty()),
+            Self::Primitive(v) => Either::Right(Either::Left(v.dependencies())),
+            Self::Array(v) => Either::Right(Either::Right(Either::Left(v.dependencies()))),
             Self::Map(v) => {
-                Either::Right(Either::Right(Either::Right(Either::Left(v.reachable()))))
+                Either::Right(Either::Right(Either::Right(Either::Left(v.dependencies()))))
             }
             Self::Optional(v) => Either::Right(Either::Right(Either::Right(Either::Right(
-                Either::Left(v.reachable()),
+                Either::Left(v.dependencies()),
             )))),
             Self::Schema(v) => Either::Right(Either::Right(Either::Right(Either::Right(
-                Either::Right(Either::Left(v.reachable())),
+                Either::Right(Either::Left(v.dependencies())),
             )))),
             Self::Inline(v) => Either::Right(Either::Right(Either::Right(Either::Right(
-                Either::Right(Either::Right(v.reachable())),
+                Either::Right(Either::Right(v.dependencies())),
             )))),
         }
     }
