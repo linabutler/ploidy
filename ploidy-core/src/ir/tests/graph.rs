@@ -1516,3 +1516,116 @@ fn test_dependents_is_inverse_of_dependencies() {
     item_dependents.sort();
     assert_matches!(&*item_dependents, ["Container"]);
 }
+
+#[test]
+fn test_dependencies_diamond() {
+    // A -> B, A -> C, B -> D, C -> D. D should appear only once in A's dependencies.
+    let doc = Document::from_yaml(indoc::indoc! {"
+        openapi: 3.0.0
+        info:
+          title: Test
+          version: 1.0.0
+        components:
+          schemas:
+            A:
+              type: object
+              properties:
+                b:
+                  $ref: '#/components/schemas/B'
+                c:
+                  $ref: '#/components/schemas/C'
+            B:
+              type: object
+              properties:
+                d:
+                  $ref: '#/components/schemas/D'
+            C:
+              type: object
+              properties:
+                d:
+                  $ref: '#/components/schemas/D'
+            D:
+              type: object
+              properties:
+                value:
+                  type: string
+    "})
+    .unwrap();
+
+    let spec = IrSpec::from_doc(&doc).unwrap();
+    let graph = IrGraph::new(&spec);
+
+    let a = graph.schemas().find(|s| s.name() == "A").unwrap();
+    let b = graph.schemas().find(|s| s.name() == "B").unwrap();
+    let c = graph.schemas().find(|s| s.name() == "C").unwrap();
+    let d = graph.schemas().find(|s| s.name() == "D").unwrap();
+
+    // A depends directly on B, C; transitively on D through B and C.
+    let mut a_deps = a
+        .dependencies()
+        .filter_map(IrTypeView::as_schema)
+        .map(|s| s.name())
+        .collect_vec();
+    a_deps.sort();
+    assert_matches!(&*a_deps, ["B", "C", "D"]);
+
+    // D's dependents should include A, B, and C.
+    let mut d_dependents = d
+        .dependents()
+        .filter_map(IrTypeView::as_schema)
+        .map(|s| s.name())
+        .collect_vec();
+    d_dependents.sort();
+    assert_matches!(&*d_dependents, ["A", "B", "C"]);
+
+    // B and C each depend on D only.
+    assert!(b.depends_on(&d));
+    assert!(c.depends_on(&d));
+    assert!(!b.depends_on(&c));
+    assert!(!c.depends_on(&b));
+}
+
+// MARK: Operations with no types
+
+#[test]
+fn test_operation_with_no_types() {
+    // An operation with no parameters, request body, or response body.
+    let doc = Document::from_yaml(indoc::indoc! {"
+        openapi: 3.0.0
+        info:
+          title: Test
+          version: 1.0.0
+        paths:
+          /health:
+            get:
+              operationId: healthCheck
+              x-resource-name: health
+              responses:
+                '200':
+                  description: OK
+    "})
+    .unwrap();
+
+    let spec = IrSpec::from_doc(&doc).unwrap();
+    let graph = IrGraph::new(&spec);
+
+    let op = graph
+        .operations()
+        .find(|o| o.id() == "healthCheck")
+        .unwrap();
+
+    // The operation has no type dependencies.
+    let deps = op
+        .dependencies()
+        .filter_map(IrTypeView::as_schema)
+        .collect_vec();
+    assert_matches!(&*deps, []);
+
+    // No types should be marked as used by this operation.
+    assert!(graph.schemas().all(|schema| {
+        schema
+            .used_by()
+            .map(|op| op.id())
+            .all(|id| id != "healthCheck")
+    }));
+}

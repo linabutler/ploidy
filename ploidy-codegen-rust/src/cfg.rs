@@ -1238,6 +1238,102 @@ mod tests {
     }
 
     #[test]
+    fn test_for_operation_reduces_diamond_deps() {
+        // A -> B, A -> C, B -> D, C -> D. The operation uses A.
+        // Since A depends on B and C (which both depend on D), only `a` should remain.
+        let doc = Document::from_yaml(indoc::indoc! {"
+            openapi: 3.0.0
+            info:
+              title: Test
+              version: 1.0.0
+            paths:
+              /things:
+                get:
+                  operationId: getThings
+                  responses:
+                    '200':
+                      description: OK
+                      content:
+                        application/json:
+                          schema:
+                            $ref: '#/components/schemas/A'
+            components:
+              schemas:
+                A:
+                  type: object
+                  x-resourceId: a
+                  properties:
+                    b:
+                      $ref: '#/components/schemas/B'
+                    c:
+                      $ref: '#/components/schemas/C'
+                B:
+                  type: object
+                  x-resourceId: b
+                  properties:
+                    d:
+                      $ref: '#/components/schemas/D'
+                C:
+                  type: object
+                  x-resourceId: c
+                  properties:
+                    d:
+                      $ref: '#/components/schemas/D'
+                D:
+                  type: object
+                  x-resourceId: d
+                  properties:
+                    value:
+                      type: string
+        "})
+        .unwrap();
+
+        let spec = IrSpec::from_doc(&doc).unwrap();
+        let ir_graph = IrGraph::new(&spec);
+        let graph = CodegenGraph::new(ir_graph);
+
+        let op = graph.operations().find(|o| o.id() == "getThings").unwrap();
+        let cfg = CfgFeature::for_operation(&op);
+
+        // A transitively implies B, C, and D; only `a` should remain.
+        let actual: syn::Attribute = parse_quote!(#cfg);
+        let expected: syn::Attribute = parse_quote!(#[cfg(feature = "a")]);
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn test_for_operation_with_no_types() {
+        // An operation with no parameters, request body, or response body.
+        let doc = Document::from_yaml(indoc::indoc! {"
+            openapi: 3.0.0
+            info:
+              title: Test
+              version: 1.0.0
+            paths:
+              /health:
+                get:
+                  operationId: healthCheck
+                  responses:
+                    '200':
+                      description: OK
+        "})
+        .unwrap();
+
+        let spec = IrSpec::from_doc(&doc).unwrap();
+        let ir_graph = IrGraph::new(&spec);
+        let graph = CodegenGraph::new(ir_graph);
+
+        let op = graph
+            .operations()
+            .find(|o| o.id() == "healthCheck")
+            .unwrap();
+        let cfg = CfgFeature::for_operation(&op);
+
+        // An operation with no type dependencies should have no feature gate.
+        assert_eq!(cfg, None);
+    }
+
+    #[test]
     fn test_for_inline_type_reduces_transitive_features() {
         // Inline type inside a response, with A -> B -> C chain.
         // Only `a` should remain after reduction.
