@@ -510,6 +510,81 @@ mod tests {
         assert_matches!(&*customer_deps, []);
     }
 
+    // MARK: Diamond dependencies
+
+    #[test]
+    fn test_diamond_dependency_deduplicates_feature() {
+        // A -> B, A -> C, B -> D, C -> D. All have resources.
+        // A's feature should depend on B, C, and D; D should appear once.
+        let doc = Document::from_yaml(indoc::indoc! {"
+            openapi: 3.0.0
+            info:
+              title: Test
+              version: 1.0.0
+            components:
+              schemas:
+                A:
+                  type: object
+                  x-resourceId: a
+                  properties:
+                    b:
+                      $ref: '#/components/schemas/B'
+                    c:
+                      $ref: '#/components/schemas/C'
+                B:
+                  type: object
+                  x-resourceId: b
+                  properties:
+                    d:
+                      $ref: '#/components/schemas/D'
+                C:
+                  type: object
+                  x-resourceId: c
+                  properties:
+                    d:
+                      $ref: '#/components/schemas/D'
+                D:
+                  type: object
+                  x-resourceId: d
+                  properties:
+                    value:
+                      type: string
+        "})
+        .unwrap();
+
+        let spec = IrSpec::from_doc(&doc).unwrap();
+        let ir_graph = IrGraph::new(&spec);
+        let graph = CodegenGraph::new(ir_graph);
+        let manifest = CodegenCargoManifest::new(&graph, &default_manifest()).to_manifest();
+
+        // `a` depends directly on `b`, `c`; transitively on `d` though `b` and `c`.
+        let a_deps = manifest.features["a"]
+            .iter()
+            .map(|dep| dep.as_str())
+            .collect_vec();
+        assert_matches!(&*a_deps, ["b", "c", "d"]);
+
+        // `b` and `c` each depend on `d`.
+        let b_deps = manifest.features["b"]
+            .iter()
+            .map(|dep| dep.as_str())
+            .collect_vec();
+        assert_matches!(&*b_deps, ["d"]);
+
+        let c_deps = manifest.features["c"]
+            .iter()
+            .map(|dep| dep.as_str())
+            .collect_vec();
+        assert_matches!(&*c_deps, ["d"]);
+
+        // `d` has no dependencies.
+        let d_deps = manifest.features["d"]
+            .iter()
+            .map(|dep| dep.as_str())
+            .collect_vec();
+        assert_matches!(&*d_deps, []);
+    }
+
     // MARK: Cycles with mixed resources
 
     #[test]
