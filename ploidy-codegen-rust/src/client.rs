@@ -24,7 +24,7 @@ impl<'a> CodegenClientModule<'a> {
 impl ToTokens for CodegenClientModule<'_> {
     fn to_tokens(&self, tokens: &mut TokenStream) {
         let mods = self.features.iter().map(|feature| {
-            let cfg = CfgFeature::for_resource_module(self.graph, feature);
+            let cfg = CfgFeature::for_resource_module(feature);
             let mod_name = CodegenIdentUsage::Module(feature.as_ident());
             quote! {
                 #cfg

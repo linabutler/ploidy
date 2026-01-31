@@ -221,18 +221,12 @@ impl CodegenIdentRef {
 /// A Cargo feature for conditionally compiling generated code.
 ///
 /// Feature names appear in the `Cargo.toml` `[features]` table,
-/// and in `#[cfg(feature = "...")]` attributes. The special `full` feature
+/// and in `#[cfg(feature = "...")]` attributes. The special `default` feature
 /// enables all other features.
-///
-/// # Reserved names
-///
-/// `full` and `default` are reserved names, and the empty string isn't a valid name.
-/// All three map to [`CargoFeature::Full`]; this avoids conflicts, at the cost of
-/// compiling more items than would be necessary with a different name.
 #[derive(Clone, Debug, Default, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub enum CargoFeature {
     #[default]
-    Full,
+    Default,
     Named(CodegenIdent),
 }
 
@@ -240,10 +234,8 @@ impl CargoFeature {
     #[inline]
     pub fn from_name(name: &str) -> Self {
         match name {
-            // `full` and `default` are special features, and the empty string
-            // can't be used as a name. If an operation or schema belongs to
-            // a resource with any of these names, use the catch-all `full` feature.
-            "full" | "default" | "" => Self::Full,
+            // `default` can't be used as a literal feature name; ignore it.
+            "default" => Self::Default,
 
             // Cargo and crates.io limit which characters can appear in feature names;
             // further, we use feature names as module names for operations, so
@@ -256,7 +248,7 @@ impl CargoFeature {
     pub fn as_ident(&self) -> &CodegenIdentRef {
         match self {
             Self::Named(name) => name,
-            Self::Full => CodegenIdentRef::new("full"),
+            Self::Default => CodegenIdentRef::new("default"),
         }
     }
 
@@ -264,7 +256,7 @@ impl CargoFeature {
     pub fn display(&self) -> impl Display {
         match self {
             Self::Named(name) => AsKebabCase(name.0.as_str()),
-            Self::Full => AsKebabCase("full"),
+            Self::Default => AsKebabCase("default"),
         }
     }
 }
@@ -474,22 +466,12 @@ mod tests {
     }
 
     #[test]
-    fn test_feature_full() {
-        let feature = CargoFeature::Full;
-        assert_eq!(feature.display().to_string(), "full");
-    }
-
-    #[test]
-    fn test_features_from_reserved_names() {
-        // Reserved names map to `full`.
-        let feature = CargoFeature::from_name("full");
-        assert_eq!(feature.display().to_string(), "full");
+    fn test_feature_default() {
+        let feature = CargoFeature::Default;
+        assert_eq!(feature.display().to_string(), "default");
 
         let feature = CargoFeature::from_name("default");
-        assert_eq!(feature.display().to_string(), "full");
-
-        let feature = CargoFeature::from_name("");
-        assert_eq!(feature.display().to_string(), "full");
+        assert_eq!(feature, CargoFeature::Default);
     }
 
     #[test]

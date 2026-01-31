@@ -6,7 +6,6 @@ use quote::{ToTokens, TokenStreamExt, quote};
 use super::{
     cfg::CfgFeature,
     enum_::CodegenEnum,
-    graph::CodegenGraph,
     naming::{CodegenTypeName, CodegenTypeNameSortKey},
     struct_::CodegenStruct,
     tagged::CodegenTagged,
@@ -20,22 +19,19 @@ use super::{
 /// emitted by [`CodegenSchemaType`](crate::CodegenSchemaType) instead.
 #[derive(Clone, Copy, Debug)]
 pub enum CodegenInlines<'a> {
-    Resource {
-        graph: &'a CodegenGraph<'a>,
-        ops: &'a [IrOperationView<'a>],
-    },
+    Resource(&'a [IrOperationView<'a>]),
     Schema(&'a SchemaIrTypeView<'a>),
 }
 
 impl ToTokens for CodegenInlines<'_> {
     fn to_tokens(&self, tokens: &mut TokenStream) {
         match self {
-            Self::Resource { graph, ops } => {
-                let items = CodegenInlineItems(CfgFeatureMode::Include(graph), ops);
+            Self::Resource(ops) => {
+                let items = CodegenInlineItems(IncludeCfgFeatures::Include, ops);
                 items.to_tokens(tokens);
             }
             &Self::Schema(ty) => {
-                let items = CodegenInlineItems(CfgFeatureMode::Omit, std::slice::from_ref(ty));
+                let items = CodegenInlineItems(IncludeCfgFeatures::Omit, std::slice::from_ref(ty));
                 items.to_tokens(tokens);
             }
         }
@@ -43,7 +39,7 @@ impl ToTokens for CodegenInlines<'_> {
 }
 
 #[derive(Debug)]
-struct CodegenInlineItems<'a, V>(CfgFeatureMode<'a>, &'a [V]);
+struct CodegenInlineItems<'a, V>(IncludeCfgFeatures, &'a [V]);
 
 impl<'a, V> ToTokens for CodegenInlineItems<'a, V>
 where
@@ -70,10 +66,10 @@ where
                 }
             };
             match self.0 {
-                CfgFeatureMode::Include(graph) => {
+                IncludeCfgFeatures::Include => {
                     // Wrap each type in an inner inline module, so that
                     // the `#[cfg(...)]` applies to all items (types and `impl`s).
-                    let cfg = CfgFeature::for_inline_type(graph, &view);
+                    let cfg = CfgFeature::for_inline_type(&view);
                     let mod_name = name.into_module_name();
                     quote! {
                         #cfg
@@ -84,7 +80,7 @@ where
                         pub use #mod_name::*;
                     }
                 }
-                CfgFeatureMode::Omit => ty,
+                IncludeCfgFeatures::Omit => ty,
             }
         });
 
@@ -100,8 +96,8 @@ where
 }
 
 #[derive(Clone, Copy, Debug)]
-enum CfgFeatureMode<'a> {
-    Include(&'a CodegenGraph<'a>),
+enum IncludeCfgFeatures {
+    Include,
     Omit,
 }
 
@@ -149,10 +145,7 @@ mod tests {
         let graph = CodegenGraph::new(ir);
 
         let ops = graph.operations().collect_vec();
-        let inlines = CodegenInlines::Resource {
-            graph: &graph,
-            ops: &ops,
-        };
+        let inlines = CodegenInlines::Resource(&ops);
 
         let actual: syn::File = parse_quote!(#inlines);
         let expected: syn::File = parse_quote! {
@@ -209,10 +202,7 @@ mod tests {
         let graph = CodegenGraph::new(ir);
 
         let ops = graph.operations().collect_vec();
-        let inlines = CodegenInlines::Resource {
-            graph: &graph,
-            ops: &ops,
-        };
+        let inlines = CodegenInlines::Resource(&ops);
 
         // No inline types should be emitted, since the only inline (`Details`)
         // belongs to the referenced schema.
@@ -266,10 +256,7 @@ mod tests {
         let graph = CodegenGraph::new(ir);
 
         let ops = graph.operations().collect_vec();
-        let inlines = CodegenInlines::Resource {
-            graph: &graph,
-            ops: &ops,
-        };
+        let inlines = CodegenInlines::Resource(&ops);
 
         let actual: syn::File = parse_quote!(#inlines);
         // Types should be sorted: Apple, Mango, Zebra.
@@ -331,10 +318,7 @@ mod tests {
         let graph = CodegenGraph::new(ir);
 
         let ops = graph.operations().collect_vec();
-        let inlines = CodegenInlines::Resource {
-            graph: &graph,
-            ops: &ops,
-        };
+        let inlines = CodegenInlines::Resource(&ops);
 
         let actual: syn::File = parse_quote!(#inlines);
         let expected: syn::File = parse_quote! {};
@@ -372,10 +356,7 @@ mod tests {
         let graph = CodegenGraph::new(ir);
 
         let ops = graph.operations().collect_vec();
-        let inlines = CodegenInlines::Resource {
-            graph: &graph,
-            ops: &ops,
-        };
+        let inlines = CodegenInlines::Resource(&ops);
 
         let actual: syn::File = parse_quote!(#inlines);
         let expected: syn::File = parse_quote! {
@@ -425,10 +406,7 @@ mod tests {
         let graph = CodegenGraph::new(ir);
 
         let ops = graph.operations().collect_vec();
-        let inlines = CodegenInlines::Resource {
-            graph: &graph,
-            ops: &ops,
-        };
+        let inlines = CodegenInlines::Resource(&ops);
 
         let actual: syn::File = parse_quote!(#inlines);
         let expected: syn::File = parse_quote! {
@@ -478,10 +456,7 @@ mod tests {
         let graph = CodegenGraph::new(ir);
 
         let ops = graph.operations().collect_vec();
-        let inlines = CodegenInlines::Resource {
-            graph: &graph,
-            ops: &ops,
-        };
+        let inlines = CodegenInlines::Resource(&ops);
 
         let actual: syn::File = parse_quote!(#inlines);
         let expected: syn::File = parse_quote! {
