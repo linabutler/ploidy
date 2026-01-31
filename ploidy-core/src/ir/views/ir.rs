@@ -10,6 +10,40 @@ use super::{
     wrappers::{IrArrayView, IrMapView, IrOptionalView, IrPrimitiveView},
 };
 
+/// Generates a `match` expression that wraps each arm in nested [`Either`] variants.
+/// All arms except the last are wrapped in `depth` [`Either::Right`]s around an
+/// [`Either::Left`]. The last arm is wrapped in `depth` [`Either::Right`]s around
+/// the last expression.
+macro_rules! either {
+    (match $val:tt { $($body:tt)+ }) => {
+        either!(@collect $val; []; []; $($body)+)
+    };
+    // All arms except the last.
+    (@collect $val:expr; [$($arms:tt)*]; [$($depth:tt)*]; $pat:pat => $expr:expr, $($rest:tt)+) => {
+        either!(@collect $val;
+            [$($arms)* $pat => either!(@left [$($depth)*] $expr),];
+            [$($depth)* R];
+            $($rest)+)
+    };
+    // Last arm.
+    (@collect $val:expr; [$($arms:tt)*]; [$($depth:tt)*]; $pat:pat => $expr:expr $(,)?) => {
+        match $val {
+            $($arms)*
+            $pat => either!(@right [$($depth)*] $expr),
+        }
+    };
+    // Wrap with `depth` `Right`s, then a `Left`.
+    (@left [] $expr:expr) => { Either::Left($expr) };
+    (@left [R $($rest:tt)*] $expr:expr) => {
+        Either::Right(either!(@left [$($rest)*] $expr))
+    };
+    // Wrap with `depth` `Right`s only, for the last arm.
+    (@right [] $expr:expr) => { $expr };
+    (@right [R $($rest:tt)*] $expr:expr) => {
+        Either::Right(either!(@right [$($rest)*] $expr))
+    };
+}
+
 /// A graph-aware view of an [`IrType`][crate::ir::IrType].
 #[derive(Debug)]
 pub enum IrTypeView<'a> {
@@ -50,22 +84,14 @@ impl<'a> IrTypeView<'a> {
 
     /// Returns an iterator over all the types that this type transitively depends on.
     pub fn dependencies(&self) -> impl Iterator<Item = IrTypeView<'a>> + use<'a> {
-        match self {
-            Self::Any => Either::Left(std::iter::empty()),
-            Self::Primitive(v) => Either::Right(Either::Left(v.dependencies())),
-            Self::Array(v) => Either::Right(Either::Right(Either::Left(v.dependencies()))),
-            Self::Map(v) => {
-                Either::Right(Either::Right(Either::Right(Either::Left(v.dependencies()))))
-            }
-            Self::Optional(v) => Either::Right(Either::Right(Either::Right(Either::Right(
-                Either::Left(v.dependencies()),
-            )))),
-            Self::Schema(v) => Either::Right(Either::Right(Either::Right(Either::Right(
-                Either::Right(Either::Left(v.dependencies())),
-            )))),
-            Self::Inline(v) => Either::Right(Either::Right(Either::Right(Either::Right(
-                Either::Right(Either::Right(v.dependencies())),
-            )))),
-        }
+        either!(match self {
+            Self::Any => std::iter::empty(),
+            Self::Primitive(v) => v.dependencies(),
+            Self::Array(v) => v.dependencies(),
+            Self::Map(v) => v.dependencies(),
+            Self::Optional(v) => v.dependencies(),
+            Self::Schema(v) => v.dependencies(),
+            Self::Inline(v) => v.dependencies(),
+        })
     }
 }
