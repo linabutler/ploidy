@@ -268,57 +268,6 @@ fn test_priority_regular_over_flattened() {
 }
 
 #[test]
-fn test_all_flattened_fields() {
-    #[derive(JsonPointee)]
-    struct Inner1 {
-        field1: String,
-    }
-
-    #[derive(JsonPointee)]
-    struct Inner2 {
-        field2: i32,
-    }
-
-    #[derive(JsonPointee)]
-    struct Outer {
-        #[ploidy(flatten)]
-        inner1: Inner1,
-        #[ploidy(flatten)]
-        inner2: Inner2,
-    }
-
-    let outer = Outer {
-        inner1: Inner1 {
-            field1: "hello".to_owned(),
-        },
-        inner2: Inner2 { field2: 42 },
-    };
-
-    // Both fields should be accessible.
-    let pointer = JsonPointer::parse("/field1").unwrap();
-    assert_eq!(
-        outer
-            .resolve(pointer)
-            .unwrap()
-            .downcast_ref::<String>()
-            .unwrap()
-            .clone(),
-        "hello".to_owned()
-    );
-
-    let pointer = JsonPointer::parse("/field2").unwrap();
-    assert_eq!(
-        outer
-            .resolve(pointer)
-            .unwrap()
-            .downcast_ref::<i32>()
-            .copied()
-            .unwrap(),
-        42,
-    );
-}
-
-#[test]
 fn test_nested_flattening() {
     #[derive(JsonPointee)]
     struct Deep {

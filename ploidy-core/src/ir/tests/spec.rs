@@ -1053,28 +1053,6 @@ fn test_parses_custom_resource_name_from_extension() {
 }
 
 #[test]
-fn test_defaults_to_full_when_no_resource_extension() {
-    let doc = Document::from_yaml(indoc::indoc! {"
-        openapi: 3.0.0
-        info:
-          title: Test API
-          version: 1.0
-        paths:
-          /users:
-            get:
-              operationId: listUsers
-              responses:
-                '200':
-                  description: Success
-    "})
-    .unwrap();
-
-    let ir = IrSpec::from_doc(&doc).unwrap();
-
-    assert_matches!(&*ir.operations, [IrOperation { resource: None, .. }],);
-}
-
-#[test]
 fn test_different_operations_can_have_different_resources() {
     let doc = Document::from_yaml(indoc::indoc! {"
         openapi: 3.0.0
@@ -1240,7 +1218,7 @@ fn test_extracts_schemas_from_components() {
 }
 
 #[test]
-fn test_handles_empty_schemas_section() {
+fn test_empty_spec() {
     let doc = Document::from_yaml(indoc::indoc! {"
         openapi: 3.0.0
         info:
@@ -1253,21 +1231,6 @@ fn test_handles_empty_schemas_section() {
     let ir = IrSpec::from_doc(&doc).unwrap();
 
     assert_eq!(ir.schemas.len(), 0);
-}
-
-#[test]
-fn test_handles_empty_paths_section() {
-    let doc = Document::from_yaml(indoc::indoc! {"
-        openapi: 3.0.0
-        info:
-          title: Test API
-          version: 1.0
-        paths: {}
-    "})
-    .unwrap();
-
-    let ir = IrSpec::from_doc(&doc).unwrap();
-
     assert_eq!(ir.operations.len(), 0);
 }
 

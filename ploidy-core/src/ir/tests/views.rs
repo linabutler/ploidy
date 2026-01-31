@@ -1035,7 +1035,7 @@ fn test_inlines_empty_for_schemas_with_no_inlines() {
 // MARK: Tagged union variant views
 
 #[test]
-fn test_tagged_variant_iteration() {
+fn test_tagged_variant_names_and_aliases() {
     let doc = Document::from_yaml(indoc::indoc! {"
         openapi: 3.0.0
         info:
@@ -1077,47 +1077,6 @@ fn test_tagged_variant_iteration() {
     let mut variant_names = tagged_view.variants().map(|v| v.name()).collect_vec();
     variant_names.sort();
     assert_matches!(&*variant_names, ["Cat", "Dog"]);
-}
-
-#[test]
-fn test_tagged_variant_name_and_aliases_access() {
-    let doc = Document::from_yaml(indoc::indoc! {"
-        openapi: 3.0.0
-        info:
-          title: Test
-          version: 1.0
-        components:
-          schemas:
-            Cat:
-              type: object
-              properties:
-                meow:
-                  type: string
-            Dog:
-              type: object
-              properties:
-                bark:
-                  type: string
-            Animal:
-              oneOf:
-                - $ref: '#/components/schemas/Cat'
-                - $ref: '#/components/schemas/Dog'
-              discriminator:
-                propertyName: kind
-                mapping:
-                  cat: '#/components/schemas/Cat'
-                  dog: '#/components/schemas/Dog'
-    "})
-    .unwrap();
-
-    let spec = IrSpec::from_doc(&doc).unwrap();
-    let graph = IrGraph::new(&spec);
-
-    let animal_schema = graph.schemas().find(|s| s.name() == "Animal").unwrap();
-    let tagged_view = match animal_schema {
-        SchemaIrTypeView::Tagged(_, view) => view,
-        other => panic!("expected tagged union `Animal`; got {other:?}"),
-    };
 
     let variant = tagged_view.variants().next().unwrap();
     assert_eq!(variant.name(), "Cat");
