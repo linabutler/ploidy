@@ -4,7 +4,6 @@ use quote::{ToTokens, TokenStreamExt, quote};
 
 use super::{
     cfg::CfgFeature,
-    graph::CodegenGraph,
     inlines::CodegenInlines,
     naming::{CargoFeature, CodegenIdentUsage},
     operation::CodegenOperation,
@@ -13,22 +12,13 @@ use super::{
 /// Generates an `impl Client` block for a feature-gated resource,
 /// with all its operations and inline types.
 pub struct CodegenResource<'a> {
-    graph: &'a CodegenGraph<'a>,
     feature: &'a CargoFeature,
     ops: &'a [IrOperationView<'a>],
 }
 
 impl<'a> CodegenResource<'a> {
-    pub fn new(
-        graph: &'a CodegenGraph<'a>,
-        feature: &'a CargoFeature,
-        ops: &'a [IrOperationView<'a>],
-    ) -> Self {
-        Self {
-            graph,
-            feature,
-            ops,
-        }
+    pub fn new(feature: &'a CargoFeature, ops: &'a [IrOperationView<'a>]) -> Self {
+        Self { feature, ops }
     }
 }
 
@@ -36,17 +26,14 @@ impl ToTokens for CodegenResource<'_> {
     fn to_tokens(&self, tokens: &mut TokenStream) {
         // Each method gets its own `#[cfg(...)]` attribute.
         let methods = self.ops.iter().map(|view| {
-            let cfg = CfgFeature::for_operation(self.graph, view);
+            let cfg = CfgFeature::for_operation(view);
             let method = CodegenOperation::new(view).into_token_stream();
             quote! {
                 #cfg
                 #method
             }
         });
-        let inlines = CodegenInlines::Resource {
-            graph: self.graph,
-            ops: self.ops,
-        };
+        let inlines = CodegenInlines::Resource(self.ops);
         tokens.append_all(quote! {
             impl crate::client::Client {
                 #(#methods)*
@@ -127,7 +114,7 @@ mod tests {
 
         let ops = graph.operations().collect_vec();
         let feature = CargoFeature::from_name("customer");
-        let resource = CodegenResource::new(&graph, &feature, &ops);
+        let resource = CodegenResource::new(&feature, &ops);
 
         // Parse the generated tokens as a file, then
         // extract the `impl` block containing the methods.
@@ -203,7 +190,7 @@ mod tests {
 
         let ops = graph.operations().collect_vec();
         let feature = CargoFeature::from_name("orders");
-        let resource = CodegenResource::new(&graph, &feature, &ops);
+        let resource = CodegenResource::new(&feature, &ops);
 
         let actual: syn::File = parse_quote!(#resource);
         let block = actual

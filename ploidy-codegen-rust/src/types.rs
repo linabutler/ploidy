@@ -28,7 +28,7 @@ impl ToTokens for CodegenTypesModule<'_> {
         });
 
         let mods = tys.iter().map(|ty| {
-            let cfg = CfgFeature::for_schema_type(self.graph, ty);
+            let cfg = CfgFeature::for_schema_type(ty);
             let mod_name = CodegenTypeName::Schema(ty).into_module_name();
             quote! {
                 #cfg
@@ -36,7 +36,7 @@ impl ToTokens for CodegenTypesModule<'_> {
             }
         });
         let uses = tys.iter().map(|ty| {
-            let cfg = CfgFeature::for_schema_type(self.graph, ty);
+            let cfg = CfgFeature::for_schema_type(ty);
             let ty_name = CodegenTypeName::Schema(ty);
             let mod_name = ty_name.into_module_name();
             quote! {

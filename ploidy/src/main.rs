@@ -83,8 +83,6 @@ fn main() -> Result<()> {
                 let status = std::process::Command::new("cargo")
                     .arg("check")
                     .arg("--all-targets")
-                    .arg("--features")
-                    .arg("full")
                     .current_dir(&output)
                     .status()
                     .into_diagnostic()?;

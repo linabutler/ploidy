@@ -701,10 +701,10 @@ mod tests {
         };
 
         // Operations without a declared resource name
-        // should use `full`.
+        // should use `default`.
         let ref_ = CodegenRef::new(&ty);
         let actual: syn::Type = parse_quote!(#ref_);
-        let expected: syn::Type = parse_quote!(crate::client::full::types::DoSomethingRequest);
+        let expected: syn::Type = parse_quote!(crate::client::default::types::DoSomethingRequest);
         assert_eq!(actual, expected);
     }
 }

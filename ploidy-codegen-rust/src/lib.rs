@@ -56,7 +56,7 @@ pub fn write_types_to_disk(output: &Path, graph: &CodegenGraph<'_>) -> miette::R
 
 pub fn write_client_to_disk(output: &Path, graph: &CodegenGraph<'_>) -> miette::Result<()> {
     // Group operations by feature. All operations belong to a feature,
-    // or `full` for operations without a named resource.
+    // or `default` for operations without a named resource.
     let ops_by_feature = graph
         .operations()
         .fold(BTreeMap::<_, Vec<_>>::new(), |mut map, view| {
@@ -70,7 +70,7 @@ pub fn write_client_to_disk(output: &Path, graph: &CodegenGraph<'_>) -> miette::
 
     // Write all operations for each feature into separate modules.
     for (feature, ops) in &ops_by_feature {
-        let code = CodegenResource::new(graph, feature, ops);
+        let code = CodegenResource::new(feature, ops);
         write_to_disk(output, code)?;
     }
 

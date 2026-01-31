@@ -34,12 +34,12 @@ impl<'a> CodegenCargoManifest<'a> {
 
         // Translate resource names from operations and schemas into
         // Cargo feature names with dependencies.
-        let features = if self.graph.has_resources() {
+        let features = {
             let mut deps_by_feature = BTreeMap::new();
 
-            // For each schema type with an explicitly declared resource name
-            // (not `full` or empty), use the resource name as the feature name,
-            // and enable features for all its transitive dependencies.
+            // For each schema type with an explicitly declared resource name,
+            // use the resource name as the feature name, and enable features
+            // for all its transitive dependencies.
             for schema in self.graph.schemas() {
                 let feature = match schema.resource().map(CargoFeature::from_name) {
                     Some(CargoFeature::Named(name)) => CargoFeature::Named(name),
@@ -49,7 +49,7 @@ impl<'a> CodegenCargoManifest<'a> {
                 for dep in schema.dependencies().filter_map(|ty| {
                     match CargoFeature::from_name(ty.as_schema()?.resource()?) {
                         CargoFeature::Named(name) => Some(CargoFeature::Named(name)),
-                        CargoFeature::Full => None,
+                        CargoFeature::Default => None,
                     }
                 }) {
                     entry.insert(dep);
@@ -68,7 +68,7 @@ impl<'a> CodegenCargoManifest<'a> {
                 for dep in op.dependencies().filter_map(|ty| {
                     match CargoFeature::from_name(ty.as_schema()?.resource()?) {
                         CargoFeature::Named(name) => Some(CargoFeature::Named(name)),
-                        CargoFeature::Full => None,
+                        CargoFeature::Default => None,
                     }
                 }) {
                     entry.insert(dep);
@@ -87,18 +87,19 @@ impl<'a> CodegenCargoManifest<'a> {
                     )
                 })
                 .collect();
-            // `full` depends on all other features.
-            features.insert(
-                CargoFeature::Full.display().to_string(),
-                deps_by_feature
-                    .keys()
-                    .map(|feature| feature.display().to_string())
-                    .collect_vec(),
-            );
-            features.insert("default".to_owned(), vec![]);
-            features
-        } else {
-            BTreeMap::new()
+            if features.is_empty() {
+                BTreeMap::new()
+            } else {
+                // `default` enables all other features.
+                features.insert(
+                    "default".to_owned(),
+                    deps_by_feature
+                        .keys()
+                        .map(|feature| feature.display().to_string())
+                        .collect_vec(),
+                );
+                features
+            }
         };
 
         let dependencies = toml::toml! {
@@ -187,7 +188,7 @@ mod tests {
             .keys()
             .map(|feature| feature.as_str())
             .collect_vec();
-        assert_matches!(&*keys, ["customer", "default", "full"]);
+        assert_matches!(&*keys, ["customer", "default"]);
     }
 
     #[test]
@@ -218,7 +219,7 @@ mod tests {
             .keys()
             .map(|feature| feature.as_str())
             .collect_vec();
-        assert_matches!(&*keys, ["default", "full", "pets"]);
+        assert_matches!(&*keys, ["default", "pets"]);
     }
 
     #[test]
@@ -364,8 +365,8 @@ mod tests {
         let manifest = CodegenCargoManifest::new(&graph, &default_manifest()).to_manifest();
 
         // `Customer` depends on `Address`, which doesn't have a resource.
-        // The `customer` feature should _not_ depend on `full`; that's handled
-        // via `cfg` attributes instead.
+        // The `customer` feature should _not_ depend on `default`;
+        // that's handled via `cfg` attributes instead.
         let customer_deps = manifest.features["customer"]
             .iter()
             .map(|dep| dep.as_str())
@@ -501,7 +502,7 @@ mod tests {
         let manifest = CodegenCargoManifest::new(&graph, &default_manifest()).to_manifest();
 
         // `listOrders` returns `Customer`, which references `Address`, but
-        // `customer` should _not_ depend on `full`.
+        // `customer` should _not_ depend on `default`.
         let customer_deps = manifest.features["customer"]
             .iter()
             .map(|dep| dep.as_str())
@@ -562,12 +563,12 @@ mod tests {
             .collect_vec();
         assert_matches!(&*c_deps, ["a"]);
 
-        // `full` should include both named features.
-        let full_deps = manifest.features["full"]
+        // `default` should include both named features.
+        let default_deps = manifest.features["default"]
             .iter()
             .map(|dep| dep.as_str())
             .collect_vec();
-        assert_matches!(&*full_deps, ["a", "c"]);
+        assert_matches!(&*default_deps, ["a", "c"]);
     }
 
     #[test]
@@ -628,18 +629,18 @@ mod tests {
             .collect_vec();
         assert_matches!(&*c_deps, ["a", "b"]);
 
-        // `full` should include all three.
-        let full_deps = manifest.features["full"]
+        // `default` should include all three.
+        let default_deps = manifest.features["default"]
             .iter()
             .map(|dep| dep.as_str())
             .collect_vec();
-        assert_matches!(&*full_deps, ["a", "b", "c"]);
+        assert_matches!(&*default_deps, ["a", "b", "c"]);
     }
 
     // MARK: Special features
 
     #[test]
-    fn test_full_feature_includes_all_other_features() {
+    fn test_default_feature_includes_all_other_features() {
         let doc = Document::from_yaml(indoc::indoc! {"
             openapi: 3.0.0
             info:
@@ -675,16 +676,16 @@ mod tests {
         let graph = CodegenGraph::new(ir_graph);
         let manifest = CodegenCargoManifest::new(&graph, &default_manifest()).to_manifest();
 
-        // The `full` feature should include all other features, but not itself.
-        let full_deps = manifest.features["full"]
+        // The `default` feature should include all other features, but not itself.
+        let default_deps = manifest.features["default"]
             .iter()
             .map(|dep| dep.as_str())
             .collect_vec();
-        assert_matches!(&*full_deps, ["customer", "orders", "pets"]);
+        assert_matches!(&*default_deps, ["customer", "orders", "pets"]);
     }
 
     #[test]
-    fn test_default_feature_is_empty() {
+    fn test_default_feature_includes_all_named_features() {
         let doc = Document::from_yaml(indoc::indoc! {"
             openapi: 3.0.0
             info:
@@ -706,11 +707,11 @@ mod tests {
         let graph = CodegenGraph::new(ir_graph);
         let manifest = CodegenCargoManifest::new(&graph, &default_manifest()).to_manifest();
 
-        // The `default` feature should always be empty.
+        // The `default` feature should include all named features.
         let default_deps = manifest.features["default"]
             .iter()
             .map(|dep| dep.as_str())
             .collect_vec();
-        assert_matches!(&*default_deps, []);
+        assert_matches!(&*default_deps, ["customer"]);
     }
 }
