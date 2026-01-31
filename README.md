@@ -26,11 +26,13 @@ Many OpenAPI specs use `allOf` to model inheritance, and `oneOf`, `anyOf`, and d
   - [Fast and correct](#fast-and-correct)
   - [Strongly opinionated, zero configuration](#strongly-opinionated-zero-configuration)
   - [Code like what you'd write by hand](#code-like-what-youd-write-by-hand)
+  - [Per-resource feature gates](#per-resource-feature-gates)
 * [Under the Hood](#under-the-hood)
   - [The generation pipeline](#the-generation-pipeline)
   - [AST-based generation](#ast-based-generation)
   - [Smart boxing](#smart-boxing)
   - [Inline schemas](#inline-schemas)
+  - [Feature gates](#feature-gates)
 * [Contributing](#contributing)
   - [New languages](#new-languages)
 * [Acknowledgments](#acknowledgments)
@@ -69,7 +71,7 @@ ploidy codegen <INPUT-SPEC> <OUTPUT-DIR> rust
 
 This produces a ready-to-use crate that includes:
 
-* A `Cargo.toml` file, which you can extend with additional metadata, dependencies, or examples.
+* A `Cargo.toml` file, which you can extend with additional metadata, dependencies, or examples. For specs with resource annotations, the generated `Cargo.toml` includes [per-resource feature gates](#per-resource-feature-gates).
 * A `types` module, which contains Rust types for every schema defined in your spec.
 * A `client` module, with a RESTful HTTP client that provides async methods for every operation in your spec.
 
@@ -114,6 +116,7 @@ Ploidy is a good fit if:
 * You have a large or complex spec that's challenging for other generators.
 * Your spec has inline schemas, and you'd like to generate the same strongly-typed models for them as for named schemas.
 * Your spec has recursive or cyclic types.
+* Your spec has resource annotations, and you'd like consumers of the generated crate to compile only the types and operations that they need.
 * You want to generate Rust that reads like you wrote it.
 
 ### Choosing the right tool
@@ -189,6 +192,29 @@ pub struct Customer {
 ```
 
 The optional `name` field uses [`AbsentOr<T>`](https://docs.rs/ploidy-util/latest/ploidy_util/absent/enum.AbsentOr.html), a three-valued type that matches how OpenAPI represents optional fields: either "present with a value", "present and explicitly set to `null`", or "absent from the payload".
+
+### Per-resource feature gates
+
+Large OpenAPI specs can define hundreds of API resources, but most consumers only use a handful. Ploidy generates [Cargo features](https://doc.rust-lang.org/cargo/reference/features.html) for each resource, so your crates can compile just the types and client methods that they need.
+
+Features are derived from [vendor extensions](https://swagger.io/docs/specification/v3_0/openapi-extensions/) in the spec: `x-resourceId` on schemas, and `x-resource-name` on operations. For example, given a spec with `Customer`, `Order`, and `BillingInfo` schemas that each declare an `x-resourceId`, Ploidy generates:
+
+```toml
+[features]
+default = ["billing-info", "customer", "order"]
+billing-info = []
+customer = ["billing-info"]
+order = ["billing-info", "customer"]
+```
+
+All features are enabled by default, so the generated crate works out of the box. Consumers that only need a subset of the API can opt in:
+
+```toml
+[dependencies]
+my-api = { version = "1", default-features = false, features = ["customer"] }
+```
+
+This compiles just the `Customer` type—and its dependency, `BillingInfo`—along with the client methods for customer operations. Types and methods for other resources are excluded entirely, reducing compile times and binary size for large specs.
 
 ## Under the Hood
 
@@ -298,6 +324,16 @@ pub mod types {
 ```
 
 The inline schema gets a descriptive name—in this case, `GetUserResponse`, derived from the `operationId` and its use as a response schema—and the same trait implementations and derives as any named schema. This "just works": inline schemas are first-class types in the generated code.
+
+### Feature gates
+
+When a spec includes resource annotations, Ploidy analyzes the type graph to determine the minimal set of `#[cfg(feature = "...")]` attributes for each type and operation:
+
+* **Types with `x-resourceId`** are gated behind their own resource feature.
+* **Types without `x-resourceId`** that are used, directly or transitively, by **operations with `x-resource-name`** are gated behind those operations' features.
+* **Types with `x-resourceId` that are used by operations with `x-resource-name`** are gated behind both: `#[cfg(all(feature = "own", any(feature = "op1", feature = "op2")))]`.
+* **Utility types** that aren't tied to any resource remain ungated, so they're always available regardless of which features are enabled.
+* **Feature dependencies** are transitively reduced: if enabling feature `a` already implies `b`—because `a` depends on `b` in `Cargo.toml`—a type that depends on both is gated behind just `a`.
 
 ## Contributing
 
