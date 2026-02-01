@@ -177,7 +177,7 @@ impl ToTokens for CodegenOperation<'_> {
                     params.push(quote! { request: impl Into<#param_type> });
                 }
                 IrRequestView::Multipart => {
-                    params.push(quote! { form: reqwest::multipart::Form });
+                    params.push(quote! { form: ::ploidy_util::reqwest::multipart::Form });
                 }
             }
         }
@@ -225,8 +225,8 @@ impl ToTokens for CodegenOperation<'_> {
         let parse_response = if self.op.response().is_some() {
             quote! {
                 let body = response.bytes().await?;
-                let deserializer = &mut serde_json::Deserializer::from_slice(&body);
-                let result = serde_path_to_error::deserialize(deserializer)
+                let deserializer = &mut ::ploidy_util::serde_json::Deserializer::from_slice(&body);
+                let result = ::ploidy_util::serde_path_to_error::deserialize(deserializer)
                     .map_err(crate::error::JsonError::from)?;
                 Ok(result)
             }

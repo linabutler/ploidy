@@ -111,19 +111,19 @@ impl ToTokens for CodegenEnum<'_> {
                     }
                 }
 
-                impl<'de> ::serde::Deserialize<'de> for #type_name {
-                    fn deserialize<D: ::serde::Deserializer<'de>>(
+                impl<'de> ::ploidy_util::serde::Deserialize<'de> for #type_name {
+                    fn deserialize<D: ::ploidy_util::serde::Deserializer<'de>>(
                         deserializer: D,
                     ) -> ::std::result::Result<Self, D::Error> {
                         struct Visitor;
-                        impl<'de> ::serde::de::Visitor<'de> for Visitor {
+                        impl<'de> ::ploidy_util::serde::de::Visitor<'de> for Visitor {
                             type Value = #type_name;
 
                             fn expecting(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
                                 f.write_str(#expecting)
                             }
 
-                            fn visit_str<E: ::serde::de::Error>(
+                            fn visit_str<E: ::ploidy_util::serde::de::Error>(
                                 self,
                                 s: &str,
                             ) -> ::std::result::Result<Self::Value, E> {
@@ -131,17 +131,17 @@ impl ToTokens for CodegenEnum<'_> {
                                 Ok(v)
                             }
                         }
-                        ::serde::Deserializer::deserialize_str(deserializer, Visitor)
+                        ::ploidy_util::serde::Deserializer::deserialize_str(deserializer, Visitor)
                     }
                 }
 
-                impl ::serde::Serialize for #type_name {
-                    fn serialize<S: ::serde::Serializer>(
+                impl ::ploidy_util::serde::Serialize for #type_name {
+                    fn serialize<S: ::ploidy_util::serde::Serializer>(
                         &self,
                         serializer: S,
                     ) -> ::std::result::Result<S::Ok, S::Error> {
                         match self {
-                            Self::#other_name => Err(::serde::ser::Error::custom(#other_serialize_error)),
+                            Self::#other_name => Err(::ploidy_util::serde::ser::Error::custom(#other_serialize_error)),
                             v => v.to_string().serialize(serializer),
                         }
                     }
@@ -237,12 +237,12 @@ mod tests {
                     )
                 }
             }
-            impl<'de> ::serde::Deserialize<'de> for Status {
-                fn deserialize<D: ::serde::Deserializer<'de>>(
+            impl<'de> ::ploidy_util::serde::Deserialize<'de> for Status {
+                fn deserialize<D: ::ploidy_util::serde::Deserializer<'de>>(
                     deserializer: D,
                 ) -> ::std::result::Result<Self, D::Error> {
                     struct Visitor;
-                    impl<'de> ::serde::de::Visitor<'de> for Visitor {
+                    impl<'de> ::ploidy_util::serde::de::Visitor<'de> for Visitor {
                         type Value = Status;
                         fn expecting(
                             &self,
@@ -250,7 +250,7 @@ mod tests {
                         ) -> ::std::fmt::Result {
                             f.write_str("a variant of `Status`")
                         }
-                        fn visit_str<E: ::serde::de::Error>(
+                        fn visit_str<E: ::ploidy_util::serde::de::Error>(
                             self,
                             s: &str,
                         ) -> ::std::result::Result<Self::Value, E> {
@@ -258,17 +258,17 @@ mod tests {
                             Ok(v)
                         }
                     }
-                    ::serde::Deserializer::deserialize_str(deserializer, Visitor)
+                    ::ploidy_util::serde::Deserializer::deserialize_str(deserializer, Visitor)
                 }
             }
-            impl ::serde::Serialize for Status {
-                fn serialize<S: ::serde::Serializer>(
+            impl ::ploidy_util::serde::Serialize for Status {
+                fn serialize<S: ::ploidy_util::serde::Serializer>(
                     &self,
                     serializer: S,
                 ) -> ::std::result::Result<S::Ok, S::Error> {
                     match self {
                         Self::OtherStatus => Err(
-                            ::serde::ser::Error::custom(
+                            ::ploidy_util::serde::ser::Error::custom(
                                 "can't serialize variant `Status::OtherStatus`"
                             )
                         ),

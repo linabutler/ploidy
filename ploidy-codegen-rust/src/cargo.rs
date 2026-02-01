@@ -1,6 +1,6 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-use cargo_toml::{Edition, Manifest};
+use cargo_toml::{Dependency, DependencyDetail, Edition, Manifest};
 use itertools::Itertools;
 use ploidy_core::{codegen::IntoCode, ir::View};
 use serde::{Deserialize, Serialize};
@@ -31,6 +31,18 @@ impl<'a> CodegenCargoManifest<'a> {
             .unwrap()
             .edition
             .set(Edition::E2024);
+
+        // `ploidy-util` is our only runtime dependency.
+        manifest.dependencies.insert(
+            "ploidy-util".to_owned(),
+            Dependency::Detailed(
+                DependencyDetail {
+                    version: Some(PLOIDY_VERSION.to_owned()),
+                    ..Default::default()
+                }
+                .into(),
+            ),
+        );
 
         // Translate resource names from operations and schemas into
         // Cargo feature names with dependencies.
@@ -102,23 +114,8 @@ impl<'a> CodegenCargoManifest<'a> {
             }
         };
 
-        let dependencies = toml::toml! {
-            chrono = { version = "0.4", features = ["serde"] }
-            http = "1"
-            ploidy-util = PLOIDY_VERSION
-            reqwest = { version = "0.12", default-features = false, features = ["http2", "json", "multipart", "rustls-tls"] }
-            serde = { version = "1", features = ["derive"] }
-            serde_bytes = "0.11"
-            serde_json = "1"
-            serde_path_to_error = "0.1"
-            thiserror = "2"
-            url = { version = "2.5", features = ["serde"] }
-            uuid = { version = "1", features = ["serde", "v4"] }
-        }.try_into().unwrap();
-
         Manifest {
             features,
-            dependencies,
             ..manifest
         }
     }
@@ -712,7 +709,7 @@ mod tests {
         assert_matches!(&*default_deps, ["a", "b", "c"]);
     }
 
-    // MARK: Special features
+    // MARK: Default feature
 
     #[test]
     fn test_default_feature_includes_all_other_features() {
@@ -788,5 +785,36 @@ mod tests {
             .map(|dep| dep.as_str())
             .collect_vec();
         assert_matches!(&*default_deps, ["customer"]);
+    }
+
+    // MARK: Dependencies
+
+    #[test]
+    fn test_preserves_existing_dependencies() {
+        let doc = Document::from_yaml(indoc::indoc! {"
+            openapi: 3.0.0
+            info:
+              title: Test
+              version: 1.0.0
+            paths: {}
+        "})
+        .unwrap();
+
+        let mut manifest = default_manifest();
+        manifest
+            .dependencies
+            .insert("serde".to_owned(), Dependency::Simple("1.0".to_owned()));
+
+        let spec = IrSpec::from_doc(&doc).unwrap();
+        let ir_graph = IrGraph::new(&spec);
+        let graph = CodegenGraph::new(ir_graph);
+        let manifest = CodegenCargoManifest::new(&graph, &manifest).to_manifest();
+
+        let dep_names = manifest
+            .dependencies
+            .keys()
+            .map(|k| k.as_str())
+            .collect_vec();
+        assert_matches!(&*dep_names, ["ploidy-util", "serde"]);
     }
 }

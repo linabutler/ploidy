@@ -129,7 +129,8 @@ impl ToTokens for CodegenStruct<'_> {
 
         tokens.append_all(quote! {
             #doc_attrs
-            #[derive(Debug, Clone, PartialEq, #(#extra_derives,)* ::serde::Serialize, ::serde::Deserialize)]
+            #[derive(Debug, Clone, PartialEq, #(#extra_derives,)* ::ploidy_util::serde::Serialize, ::ploidy_util::serde::Deserialize)]
+            #[serde(crate = "::ploidy_util::serde")]
             pub struct #type_name {
                 #(#fields)*
             }
@@ -303,7 +304,8 @@ mod tests {
         // `name` is a required string field, which implements `Default`,
         // so the struct can derive `Default`.
         let expected: syn::ItemStruct = parse_quote! {
-            #[derive(Debug, Clone, PartialEq, Eq, Hash, Default, ::serde::Serialize, ::serde::Deserialize)]
+            #[derive(Debug, Clone, PartialEq, Eq, Hash, Default, ::ploidy_util::serde::Serialize, ::ploidy_util::serde::Deserialize)]
+            #[serde(crate = "::ploidy_util::serde")]
             pub struct Pet {
                 pub name: ::std::string::String,
                 #[serde(default, skip_serializing_if = "::ploidy_util::absent::AbsentOr::is_absent",)]
@@ -354,7 +356,8 @@ mod tests {
         // `name` is a required string field, which implements `Default`,
         // so the struct can derive `Default`. The discriminator field is excluded.
         let expected: syn::ItemStruct = parse_quote! {
-            #[derive(Debug, Clone, PartialEq, Eq, Hash, Default, ::serde::Serialize, ::serde::Deserialize)]
+            #[derive(Debug, Clone, PartialEq, Eq, Hash, Default, ::ploidy_util::serde::Serialize, ::ploidy_util::serde::Deserialize)]
+            #[serde(crate = "::ploidy_util::serde")]
             pub struct Animal {
                 pub name: ::std::string::String,
             }
@@ -404,10 +407,11 @@ mod tests {
         // and without `#[serde(...)]` attributes. Since both `String` and
         // `Option<T>` implement `Default`, the struct can derive `Default`.
         let expected: syn::ItemStruct = parse_quote! {
-            #[derive(Debug, Clone, PartialEq, Eq, Hash, Default, ::serde::Serialize, ::serde::Deserialize)]
+            #[derive(Debug, Clone, PartialEq, Eq, Hash, Default, ::ploidy_util::serde::Serialize, ::ploidy_util::serde::Deserialize)]
+            #[serde(crate = "::ploidy_util::serde")]
             pub struct Record {
                 pub id: ::std::string::String,
-                pub deleted_at: ::std::option::Option<::chrono::DateTime<::chrono::Utc>>,
+                pub deleted_at: ::std::option::Option<::ploidy_util::chrono::DateTime<::ploidy_util::chrono::Utc>>,
             }
         };
         assert_eq!(actual, expected);
@@ -455,10 +459,11 @@ mod tests {
         // Since both `String` and `Option<T>` implement `Default`, the struct can
         // derive `Default`.
         let expected: syn::ItemStruct = parse_quote! {
-            #[derive(Debug, Clone, PartialEq, Eq, Hash, Default, ::serde::Serialize, ::serde::Deserialize)]
+            #[derive(Debug, Clone, PartialEq, Eq, Hash, Default, ::ploidy_util::serde::Serialize, ::ploidy_util::serde::Deserialize)]
+            #[serde(crate = "::ploidy_util::serde")]
             pub struct Record {
                 pub id: ::std::string::String,
-                pub deleted_at: ::std::option::Option<::chrono::DateTime<::chrono::Utc>>,
+                pub deleted_at: ::std::option::Option<::ploidy_util::chrono::DateTime<::ploidy_util::chrono::Utc>>,
             }
         };
         assert_eq!(actual, expected);
@@ -504,11 +509,12 @@ mod tests {
         // Optional nullable field uses `AbsentOr<T>` with `#[serde(...)]` attributes.
         // Since `String` implements `Default`, the struct can derive `Default`.
         let expected: syn::ItemStruct = parse_quote! {
-            #[derive(Debug, Clone, PartialEq, Eq, Hash, Default, ::serde::Serialize, ::serde::Deserialize)]
+            #[derive(Debug, Clone, PartialEq, Eq, Hash, Default, ::ploidy_util::serde::Serialize, ::ploidy_util::serde::Deserialize)]
+            #[serde(crate = "::ploidy_util::serde")]
             pub struct Record {
                 pub id: ::std::string::String,
                 #[serde(default, skip_serializing_if = "::ploidy_util::absent::AbsentOr::is_absent",)]
-                pub deleted_at: ::ploidy_util::absent::AbsentOr<::chrono::DateTime<::chrono::Utc>>,
+                pub deleted_at: ::ploidy_util::absent::AbsentOr<::ploidy_util::chrono::DateTime<::ploidy_util::chrono::Utc>>,
             }
         };
         assert_eq!(actual, expected);
@@ -554,7 +560,8 @@ mod tests {
         // `id` is a required string field, which implements `Default`,
         // so the struct can derive `Default`.
         let expected: syn::ItemStruct = parse_quote! {
-            #[derive(Debug, Clone, PartialEq, Eq, Hash, Default, ::serde::Serialize, ::serde::Deserialize)]
+            #[derive(Debug, Clone, PartialEq, Eq, Hash, Default, ::ploidy_util::serde::Serialize, ::ploidy_util::serde::Deserialize)]
+            #[serde(crate = "::ploidy_util::serde")]
             pub struct User {
                 pub id: ::std::string::String,
                 #[serde(default, skip_serializing_if = "::ploidy_util::absent::AbsentOr::is_absent",)]
@@ -604,7 +611,8 @@ mod tests {
         // `value` and `unit` are required primitive fields. `f64` prevents `Eq`
         // and `Hash`, but both implement `Default`, so the struct can derive it.
         let expected: syn::ItemStruct = parse_quote! {
-            #[derive(Debug, Clone, PartialEq, Default, ::serde::Serialize, ::serde::Deserialize)]
+            #[derive(Debug, Clone, PartialEq, Default, ::ploidy_util::serde::Serialize, ::ploidy_util::serde::Deserialize)]
+            #[serde(crate = "::ploidy_util::serde")]
             pub struct Measurement {
                 pub value: f64,
                 pub unit: ::std::string::String,
@@ -650,7 +658,8 @@ mod tests {
 
         let actual: syn::ItemStruct = parse_quote!(#codegen);
         let expected: syn::ItemStruct = parse_quote! {
-            #[derive(Debug, Clone, PartialEq, Eq, Hash, Default, ::serde::Serialize, ::serde::Deserialize)]
+            #[derive(Debug, Clone, PartialEq, Eq, Hash, Default, ::ploidy_util::serde::Serialize, ::ploidy_util::serde::Deserialize)]
+            #[serde(crate = "::ploidy_util::serde")]
             pub struct Options {
                 #[serde(default, skip_serializing_if = "::ploidy_util::absent::AbsentOr::is_absent",)]
                 pub verbose: ::ploidy_util::absent::AbsentOr<bool>,
@@ -700,7 +709,8 @@ mod tests {
         // Both `Outer` and `Inner` have all optional fields,
         // so `Default` should be derived for both.
         let expected: syn::ItemStruct = parse_quote! {
-            #[derive(Debug, Clone, PartialEq, Eq, Hash, Default, ::serde::Serialize, ::serde::Deserialize)]
+            #[derive(Debug, Clone, PartialEq, Eq, Hash, Default, ::ploidy_util::serde::Serialize, ::ploidy_util::serde::Deserialize)]
+            #[serde(crate = "::ploidy_util::serde")]
             pub struct Outer {
                 #[serde(default, skip_serializing_if = "::ploidy_util::absent::AbsentOr::is_absent",)]
                 pub inner: ::ploidy_util::absent::AbsentOr<crate::types::Inner>,
@@ -753,7 +763,8 @@ mod tests {
         // but `id` is a string which implements `Default`. Since all reachable
         // required fields are defaultable, `Outer` can derive `Default`.
         let expected: syn::ItemStruct = parse_quote! {
-            #[derive(Debug, Clone, PartialEq, Eq, Hash, Default, ::serde::Serialize, ::serde::Deserialize)]
+            #[derive(Debug, Clone, PartialEq, Eq, Hash, Default, ::ploidy_util::serde::Serialize, ::ploidy_util::serde::Deserialize)]
+            #[serde(crate = "::ploidy_util::serde")]
             pub struct Outer {
                 pub inner: crate::types::Inner,
             }
@@ -814,7 +825,8 @@ mod tests {
         // `Pet` is a tagged union, but `Owner.pet` is optional (`AbsentOr<Pet>`),
         // which always implements `Default`.
         let expected: syn::ItemStruct = parse_quote! {
-            #[derive(Debug, Clone, PartialEq, Eq, Hash, Default, ::serde::Serialize, ::serde::Deserialize)]
+            #[derive(Debug, Clone, PartialEq, Eq, Hash, Default, ::ploidy_util::serde::Serialize, ::ploidy_util::serde::Deserialize)]
+            #[serde(crate = "::ploidy_util::serde")]
             pub struct Owner {
                 #[serde(default, skip_serializing_if = "::ploidy_util::absent::AbsentOr::is_absent",)]
                 pub pet: ::ploidy_util::absent::AbsentOr<crate::types::Pet>,
@@ -862,7 +874,8 @@ mod tests {
         // `StringOrInt` is an untagged union, but `Container.value` is optional
         // (`AbsentOr<StringOrInt>`), which always implements `Default`.
         let expected: syn::ItemStruct = parse_quote! {
-            #[derive(Debug, Clone, PartialEq, Eq, Hash, Default, ::serde::Serialize, ::serde::Deserialize)]
+            #[derive(Debug, Clone, PartialEq, Eq, Hash, Default, ::ploidy_util::serde::Serialize, ::ploidy_util::serde::Deserialize)]
+            #[serde(crate = "::ploidy_util::serde")]
             pub struct Container {
                 #[serde(default, skip_serializing_if = "::ploidy_util::absent::AbsentOr::is_absent",)]
                 pub value: ::ploidy_util::absent::AbsentOr<crate::types::StringOrInt>,
@@ -925,7 +938,8 @@ mod tests {
         let actual: syn::ItemStruct = parse_quote!(#codegen);
         // `Pet` is a required field, so `Owner` can't derive `Default`.
         let expected: syn::ItemStruct = parse_quote! {
-            #[derive(Debug, Clone, PartialEq, Eq, Hash, ::serde::Serialize, ::serde::Deserialize)]
+            #[derive(Debug, Clone, PartialEq, Eq, Hash, ::ploidy_util::serde::Serialize, ::ploidy_util::serde::Deserialize)]
+            #[serde(crate = "::ploidy_util::serde")]
             pub struct Owner {
                 pub pet: crate::types::Pet,
             }
@@ -974,7 +988,8 @@ mod tests {
         // `Outer.inner` is optional, so `Outer` can derive `Default` even though
         // `Inner` has a required field.
         let expected: syn::ItemStruct = parse_quote! {
-            #[derive(Debug, Clone, PartialEq, Eq, Hash, Default, ::serde::Serialize, ::serde::Deserialize)]
+            #[derive(Debug, Clone, PartialEq, Eq, Hash, Default, ::ploidy_util::serde::Serialize, ::ploidy_util::serde::Deserialize)]
+            #[serde(crate = "::ploidy_util::serde")]
             pub struct Outer {
                 #[serde(default, skip_serializing_if = "::ploidy_util::absent::AbsentOr::is_absent",)]
                 pub inner: ::ploidy_util::absent::AbsentOr<crate::types::Inner>,
@@ -1018,9 +1033,10 @@ mod tests {
         // `data` is a required `Any` field. Since `serde_json::Value` implements
         // `Default`, the struct can derive `Default`.
         let expected: syn::ItemStruct = parse_quote! {
-            #[derive(Debug, Clone, PartialEq, Eq, Hash, Default, ::serde::Serialize, ::serde::Deserialize)]
+            #[derive(Debug, Clone, PartialEq, Eq, Hash, Default, ::ploidy_util::serde::Serialize, ::ploidy_util::serde::Deserialize)]
+            #[serde(crate = "::ploidy_util::serde")]
             pub struct Container {
-                pub data: ::serde_json::Value,
+                pub data: ::ploidy_util::serde_json::Value,
             }
         };
         assert_eq!(actual, expected);
@@ -1069,7 +1085,8 @@ mod tests {
         // Primitives like `String`, `i32`, and `bool` implement `Default`,
         // so the struct can derive `Default`.
         let expected: syn::ItemStruct = parse_quote! {
-            #[derive(Debug, Clone, PartialEq, Eq, Hash, Default, ::serde::Serialize, ::serde::Deserialize)]
+            #[derive(Debug, Clone, PartialEq, Eq, Hash, Default, ::ploidy_util::serde::Serialize, ::ploidy_util::serde::Deserialize)]
+            #[serde(crate = "::ploidy_util::serde")]
             pub struct Defaults {
                 pub text: ::std::string::String,
                 pub count: i32,
@@ -1115,9 +1132,10 @@ mod tests {
         let actual: syn::ItemStruct = parse_quote!(#codegen);
         // `Url` doesn't implement `Default`, so the struct can't derive it.
         let expected: syn::ItemStruct = parse_quote! {
-            #[derive(Debug, Clone, PartialEq, Eq, Hash, ::serde::Serialize, ::serde::Deserialize)]
+            #[derive(Debug, Clone, PartialEq, Eq, Hash, ::ploidy_util::serde::Serialize, ::ploidy_util::serde::Deserialize)]
+            #[serde(crate = "::ploidy_util::serde")]
             pub struct Resource {
-                pub link: ::url::Url,
+                pub link: ::ploidy_util::url::Url,
             }
         };
         assert_eq!(actual, expected);
@@ -1164,7 +1182,8 @@ mod tests {
         // `next` is required and recursive, so it should be boxed. `value` is a
         // string which implements `Default`, so the struct can derive `Default`.
         let expected: syn::ItemStruct = parse_quote! {
-            #[derive(Debug, Clone, PartialEq, Eq, Hash, Default, ::serde::Serialize, ::serde::Deserialize)]
+            #[derive(Debug, Clone, PartialEq, Eq, Hash, Default, ::ploidy_util::serde::Serialize, ::ploidy_util::serde::Deserialize)]
+            #[serde(crate = "::ploidy_util::serde")]
             pub struct Node {
                 pub value: ::std::string::String,
                 pub next: ::std::boxed::Box<crate::types::Node>,
@@ -1212,7 +1231,8 @@ mod tests {
         // giving `AbsentOr<Box<Node>>`, not `Box<AbsentOr<Node>>`. `value` is a
         // string which implements `Default`, so the struct can derive `Default`.
         let expected: syn::ItemStruct = parse_quote! {
-            #[derive(Debug, Clone, PartialEq, Eq, Hash, Default, ::serde::Serialize, ::serde::Deserialize)]
+            #[derive(Debug, Clone, PartialEq, Eq, Hash, Default, ::ploidy_util::serde::Serialize, ::ploidy_util::serde::Deserialize)]
+            #[serde(crate = "::ploidy_util::serde")]
             pub struct Node {
                 pub value: ::std::string::String,
                 #[serde(default, skip_serializing_if = "::ploidy_util::absent::AbsentOr::is_absent",)]
@@ -1264,7 +1284,8 @@ mod tests {
         // provide their own indirection, so no boxing is needed. `value` is a
         // string which implements `Default`, so the struct can derive `Default`.
         let expected: syn::ItemStruct = parse_quote! {
-            #[derive(Debug, Clone, PartialEq, Eq, Hash, Default, ::serde::Serialize, ::serde::Deserialize)]
+            #[derive(Debug, Clone, PartialEq, Eq, Hash, Default, ::ploidy_util::serde::Serialize, ::ploidy_util::serde::Deserialize)]
+            #[serde(crate = "::ploidy_util::serde")]
             pub struct Node {
                 pub value: ::std::string::String,
                 pub children: ::std::vec::Vec<crate::types::Node>,
@@ -1315,7 +1336,8 @@ mod tests {
         // being optional (`AbsentOr`). `value` is a string which implements
         // `Default`, so the struct can derive `Default`.
         let expected: syn::ItemStruct = parse_quote! {
-            #[derive(Debug, Clone, PartialEq, Eq, Hash, Default, ::serde::Serialize, ::serde::Deserialize)]
+            #[derive(Debug, Clone, PartialEq, Eq, Hash, Default, ::ploidy_util::serde::Serialize, ::ploidy_util::serde::Deserialize)]
+            #[serde(crate = "::ploidy_util::serde")]
             pub struct Node {
                 pub value: ::std::string::String,
                 #[serde(default, skip_serializing_if = "::ploidy_util::absent::AbsentOr::is_absent",)]

@@ -102,8 +102,8 @@ impl ToTokens for CodegenTagged<'_> {
         let type_name = &self.name;
         let main = quote! {
             #doc_attrs
-            #[derive(Debug, Clone, PartialEq, #(#extra_derives,)* ::serde::Serialize, ::serde::Deserialize)]
-            #[serde(tag = #discriminator_field_literal)]
+            #[derive(Debug, Clone, PartialEq, #(#extra_derives,)* ::ploidy_util::serde::Serialize, ::ploidy_util::serde::Deserialize)]
+            #[serde(crate = "::ploidy_util::serde", tag = #discriminator_field_literal)]
             pub enum #type_name {
                 #(#vs)*
             }
@@ -173,8 +173,8 @@ mod tests {
 
         let actual: syn::File = parse_quote!(#codegen);
         let expected: syn::File = parse_quote! {
-            #[derive(Debug, Clone, PartialEq, Eq, Hash, ::serde::Serialize, ::serde::Deserialize)]
-            #[serde(tag = "petType")]
+            #[derive(Debug, Clone, PartialEq, Eq, Hash, ::ploidy_util::serde::Serialize, ::ploidy_util::serde::Deserialize)]
+            #[serde(crate = "::ploidy_util::serde", tag = "petType")]
             pub enum Pet {
                 #[serde(rename = "dog")]
                 Dog(crate::types::Dog),
@@ -240,8 +240,8 @@ mod tests {
 
         let actual: syn::File = parse_quote!(#codegen);
         let expected: syn::File = parse_quote! {
-            #[derive(Debug, Clone, PartialEq, Eq, Hash, ::serde::Serialize, ::serde::Deserialize)]
-            #[serde(tag = "type")]
+            #[derive(Debug, Clone, PartialEq, Eq, Hash, ::ploidy_util::serde::Serialize, ::ploidy_util::serde::Deserialize)]
+            #[serde(crate = "::ploidy_util::serde", tag = "type")]
             pub enum Pet {
                 #[serde(rename = "canine")]
                 Dog(crate::types::Dog),
@@ -302,8 +302,8 @@ mod tests {
 
         let actual: syn::File = parse_quote!(#codegen);
         let expected: syn::File = parse_quote! {
-            #[derive(Debug, Clone, PartialEq, Eq, Hash, ::serde::Serialize, ::serde::Deserialize)]
-            #[serde(tag = "type")]
+            #[derive(Debug, Clone, PartialEq, Eq, Hash, ::ploidy_util::serde::Serialize, ::ploidy_util::serde::Deserialize)]
+            #[serde(crate = "::ploidy_util::serde", tag = "type")]
             pub enum Pet {
                 #[serde(rename = "dog", alias = "canine", alias = "puppy",)]
                 Dog(crate::types::Dog),
@@ -364,8 +364,8 @@ mod tests {
         let actual: syn::File = parse_quote!(#codegen);
         let expected: syn::File = parse_quote! {
             #[doc = "Represents different types of pets"]
-            #[derive(Debug, Clone, PartialEq, Eq, Hash, ::serde::Serialize, ::serde::Deserialize)]
-            #[serde(tag = "type")]
+            #[derive(Debug, Clone, PartialEq, Eq, Hash, ::ploidy_util::serde::Serialize, ::ploidy_util::serde::Deserialize)]
+            #[serde(crate = "::ploidy_util::serde", tag = "type")]
             pub enum Pet {
                 #[serde(rename = "dog")]
                 Dog(crate::types::Dog),
