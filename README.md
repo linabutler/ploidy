@@ -9,7 +9,7 @@
 [<img src="https://img.shields.io/docsrs/ploidy-pointer/latest?style=for-the-badge&label=pointer&logo=docs.rs" alt="ploidy-pointer Documentation" height="24">](https://docs.rs/ploidy-pointer)
 [<img src="https://img.shields.io/docsrs/ploidy-util/latest?style=for-the-badge&label=util&logo=docs.rs" alt="ploidy-util Documentation" height="24">](https://docs.rs/ploidy-util)
 
-Many OpenAPI specs use `allOf` to model inheritance, and `oneOf`, `anyOf`, and discriminators to model [polymorphic or algebraic data types](https://swagger.io/docs/specification/v3_0/data-models/inheritance-and-polymorphism/). These patterns are powerful, but can be tricky to support correctly, and most code generators struggle with them. Ploidy was built specifically with inheritance and polymorphism in mind, and aims to generate clean, type-safe, and idiomatic Rust that looks like what you'd write by hand.
+Many OpenAPI specs use `allOf` to model inheritance, and `oneOf`, `anyOf`, and discriminators to model [polymorphic types](https://swagger.io/docs/specification/v3_0/data-models/inheritance-and-polymorphism/). These patterns are powerful, but can be tricky to support correctly, and most code generators struggle with them. Ploidy was built specifically with inheritance and polymorphism in mind, and aims to generate clean, type-safe, and idiomatic Rust that reads like what you'd write by hand.
 
 ## Table of Contents
 
@@ -18,7 +18,7 @@ Many OpenAPI specs use `allOf` to model inheritance, and `oneOf`, `anyOf`, and d
 * [Generating Code](#generating-code)
   - [Rust](#rust)
     * [Options](#options)
-    * [Advanced Options](#advanced-options)
+    * [Advanced options](#advanced-options)
     * [Minimum Rust version for generated code](#minimum-rust-version-for-generated-code)
 * [Why Ploidy?](#why-ploidy)
   - [Choosing the right tool](#choosing-the-right-tool)
@@ -32,14 +32,14 @@ Many OpenAPI specs use `allOf` to model inheritance, and `oneOf`, `anyOf`, and d
   - [AST-based generation](#ast-based-generation)
   - [Smart boxing](#smart-boxing)
   - [Inline schemas](#inline-schemas)
-  - [Feature gates](#feature-gates)
+  - [Cargo features](#cargo-features)
 * [Contributing](#contributing)
   - [New languages](#new-languages)
 * [Acknowledgments](#acknowledgments)
 
 ## Getting Started
 
-To get started, [download a pre-built binary of Ploidy for your platform](https://github.com/linabutler/ploidy/releases/latest), or install Ploidy via [**cargo-binstall**](https://github.com/cargo-bins/cargo-binstall):
+[Download a pre-built binary of Ploidy for your platform](https://github.com/linabutler/ploidy/releases/latest), or install Ploidy via [**cargo-binstall**](https://github.com/cargo-bins/cargo-binstall):
 
 ```sh
 cargo binstall ploidy
@@ -83,7 +83,7 @@ This produces a ready-to-use crate that includes:
 | `--name <NAME>` | Set or override the generated package name. If not passed, and a `Cargo.toml` already exists in the output directory, preserves the existing `package.name`; otherwise, defaults to the name of the output directory |
 | `--version <bump-major, bump-minor, bump-patch>` | If a `Cargo.toml` already exists in the output directory, increments the major, minor, or patch component of `package.version`. If not passed, preserves the existing `package.version`. Ignored if the package doesn't exist yet |
 
-#### Advanced Options
+#### Advanced options
 
 Ploidy reads additional options from `[package.metadata.ploidy]` in the generated crate's `Cargo.toml`:
 
@@ -116,7 +116,7 @@ Ploidy is a good fit if:
 * You have a large or complex spec that's challenging for other generators.
 * Your spec has inline schemas, and you'd like to generate the same strongly-typed models for them as for named schemas.
 * Your spec has recursive or cyclic types.
-* Your spec has resource annotations, and you'd like consumers of the generated crate to compile only the types and operations that they need.
+* Your spec has [resource annotations](#cargo-features), and you'd like consumers of the generated crate to compile only the types and operations that they need.
 * You want to generate Rust that reads like you wrote it.
 
 ### Choosing the right tool
@@ -127,7 +127,7 @@ The OpenAPI ecosystem has great options for different needs. Here's how to pick:
 |----------------|----------|
 | **Broad OpenAPI feature coverage** | [**openapi-generator**](https://openapi-generator.tech), [**Progenitor**](https://github.com/oxidecomputer/progenitor), or [**Schema Tools**](https://github.com/kstasik/schema-tools), especially if your spec is simpler and doesn't rely heavily on polymorphism |
 | **Custom templates or a different HTTP client** | A template-based generator like **openapi-generator**, which offers more control over output |
-| **Languages other than Rust** | **openapi-generator** or [**swagger-codegen**](https://github.com/swagger-api/swagger-codegen) (OpenAPI < 3.1) |
+| **Languages other than Rust** | **openapi-generator**, or [**swagger-codegen**](https://github.com/swagger-api/swagger-codegen) for OpenAPI < 3.1 |
 | **OpenAPI 2.0 (Swagger) support** | **openapi-generator** or **swagger-codegen** |
 | **Server stubs** | **openapi-generator** for Rust web frameworks, or [**Dropshot**](https://github.com/oxidecomputer/dropshot) for generating specs from Rust definitions |
 
@@ -137,16 +137,16 @@ Ploidy is young and evolving. If you need a feature that isn't supported yet, pl
 
 Ploidy is designed from the ground up to handle inheritance and polymorphism correctly:
 
-* ✅ **`allOf`**: Structs with fields from all parent schemas.
+* ✅ **`allOf`**: Structs with fields linearized from all parent schemas.
 * ✅ **`oneOf` with discriminator**: Enums with named newtype variants for each mapping, represented as an [internally tagged](https://serde.rs/enum-representations.html#internally-tagged) Serde enum.
-* ✅ **`oneOf` without discriminator**: Enums with automatically named (`V1`, `V2`, `V3`...) variants for each mapping, represented as an [untagged](https://serde.rs/enum-representations.html#untagged) Serde enum.
-* ✅ **`anyOf`**: Structs with optional flattened fields for each mapping.
+* ✅ **`oneOf` without discriminator**: Enums with automatically named (`V1`, `V2`, `V3`...) variants for each subschema, represented as an [untagged](https://serde.rs/enum-representations.html#untagged) Serde enum.
+* ✅ **`anyOf`**: Structs with optional [flattened fields](https://serde.rs/attr-flatten.html) for each subschema.
 
 ### Fast and correct
 
 Ploidy is fast enough to run on every save, and correct enough that you won't need to hand-edit the output.
 
-As a benchmark, Ploidy can generate a working crate from a large polymorphic spec (2.6 MB, ~3500 schemas, ~1300 operations) in under 2 seconds.
+As an example, Ploidy can generate a working crate from a large polymorphic spec (2.6 MB, ~3500 schemas, ~1300 operations) in under 2 seconds.
 
 ### Strongly opinionated, zero configuration
 
@@ -191,13 +191,13 @@ pub struct Customer {
 }
 ```
 
-The optional `name` field uses [`AbsentOr<T>`](https://docs.rs/ploidy-util/latest/ploidy_util/absent/enum.AbsentOr.html), a three-valued type that matches how OpenAPI represents optional fields: either "present with a value", "present and explicitly set to `null`", or "absent from the payload".
+The optional `name` field uses [`AbsentOr<T>`](https://docs.rs/ploidy-util/latest/ploidy_util/absent/enum.AbsentOr.html), a three-valued type that matches how OpenAPI represents optional fields: "present with a value", "present and explicitly set to `null`", or "absent from the payload".
 
 ### Per-resource feature gates
 
 Large OpenAPI specs can define hundreds of API resources, but most consumers only use a handful. Ploidy generates [Cargo features](https://doc.rust-lang.org/cargo/reference/features.html) for each resource, so your crates can compile just the types and client methods that they need.
 
-Features are derived from [vendor extensions](https://swagger.io/docs/specification/v3_0/openapi-extensions/) in the spec: `x-resourceId` on schemas, and `x-resource-name` on operations. For example, given a spec with `Customer`, `Order`, and `BillingInfo` schemas that each declare an `x-resourceId`, Ploidy generates:
+For example, given a spec with `Customer`, `Order`, and `BillingInfo` schemas, where `Customer` references `BillingInfo`, and `Order` references both, Ploidy generates:
 
 ```toml
 [features]
@@ -207,7 +207,7 @@ customer = ["billing-info"]
 order = ["billing-info", "customer"]
 ```
 
-All features are enabled by default, so the generated crate works out of the box. Consumers that only need a subset of the API can opt in:
+All features are enabled by default, so the generated crate works out of the box. Consumers that only need a subset of the API can pick the specific features they need:
 
 ```toml
 [dependencies]
@@ -224,19 +224,19 @@ Ploidy takes a somewhat different approach to code generation. If you're curious
 
 Ploidy processes an OpenAPI spec in three stages:
 
-📝 **Parsing** a JSON or YAML OpenAPI spec into Rust data structures. The parser is intentionally forgiving; Ploidy doesn't rigorously enforce OpenAPI (or JSON Schema Draft 2020-12) semantics.
+📝 **Parsing** a JSON or YAML OpenAPI spec into Rust data structures. The parser is intentionally forgiving; Ploidy doesn't rigorously enforce OpenAPI (or JSON Schema) semantics.
 
 🏗️ **Constructing an IR** (intermediate representation). Ploidy constructs a type graph from the spec, which lets it answer questions like "which types can derive `Eq`, `Hash`, and `Default`?" and "which fields need `Box<T>` to break cycles?"
 
-✍️ **Generating code** from the IR. During the final stage, Ploidy builds proper Rust syntax trees from the processed schema, prettifies the code, and writes the generated code to disk.
+✍️ **Generating code** from the IR. During the final stage, Ploidy builds proper Rust syntax trees from the type graph, prettifies the code, and writes it to disk.
 
 ### AST-based generation
 
-Most code generators use string templates, but Ploidy uses Rust's `syn` and `quote` crates to generate **syntax trees**. The generated code has the advantage of being syntactically valid by construction.
+Most code generators use string templates, but Ploidy uses Rust's `syn` and `quote` crates to generate **syntax trees**. This means the generated code is syntactically valid by construction.
 
 ### Smart boxing
 
-Schemas that represent graph and tree-like structures typically contain circular references: a `User` has `friends: Vec<User>`; a `Comment` has a `parent: Option<Comment>` and `children: Vec<Comment>`, and so on. Ploidy detects these cycles, and inserts `Box<T>` only where necessary.
+Schemas that represent graph- and tree-like structures typically contain circular references: a `User` might have `friends: Vec<User>`; a `Comment` might have a `parent: Option<Comment>` and `children: Vec<Comment>`, and so on. Ploidy detects these cycles, and inserts `Box<T>` only where necessary.
 
 For example, given a schema like:
 
@@ -274,7 +274,7 @@ Since `Vec<T>` is already heap-allocated, only the `parent` field needs boxing t
 
 OpenAPI specs can define schemas directly at their point of use—in operation parameters, in request and response bodies, or nested within other schemas—rather than in the `/components/schemas` section. These are called **inline schemas**.
 
-Many code generators treat inline schemas as untyped values (`Any` or `serde_json::Value`), but Ploidy generates the same strongly-typed models for inline schemas as it does for named schemas. Inline schemas are named based on where they occur in the spec, and are namespaced in submodules within the parent schema module.
+Many code generators treat inline schemas as untyped values (`Any` or `serde_json::Value`), but Ploidy generates the same strongly-typed models for inline schemas as it does for named schemas. Inline schemas are named based on where they occur in the spec, and are namespaced in submodules within the parent module.
 
 For example, given an operation with an inline response schema:
 
@@ -325,19 +325,19 @@ pub mod types {
 
 The inline schema gets a descriptive name—in this case, `GetUserResponse`, derived from the `operationId` and its use as a response schema—and the same trait implementations and derives as any named schema. This "just works": inline schemas are first-class types in the generated code.
 
-### Feature gates
+### Cargo features
 
-When a spec includes resource annotations, Ploidy analyzes the type graph to determine the minimal set of `#[cfg(feature = "...")]` attributes for each type and operation:
+When a spec includes resource annotations, Ploidy analyzes the type graph to determine the minimal set of `#[cfg(feature = "...")]` attributes for each type and operation. Resource annotations are derived from [vendor extensions](https://swagger.io/docs/specification/v3_0/openapi-extensions/) in the spec (`x-resourceId` on schemas; `x-resource-name` on operations):
 
 * **Types with `x-resourceId`** are gated behind their own resource feature.
-* **Types without `x-resourceId`** that are used, directly or transitively, by **operations with `x-resource-name`** are gated behind those operations' features.
-* **Types with `x-resourceId` that are used by operations with `x-resource-name`** are gated behind both: `#[cfg(all(feature = "own", any(feature = "op1", feature = "op2")))]`.
-* **Utility types** that aren't tied to any resource remain ungated, so they're always available regardless of which features are enabled.
+* **Types without `x-resourceId`** that are directly or transitively used by **operations with `x-resource-name`** are gated behind those operations' features.
+* **Types with `x-resourceId` that are used by operations with `x-resource-name`** are gated behind both.
+* **Types without `x-resourceId` that aren't used by any operation** remain ungated, so they're always available regardless of which features are enabled.
 * **Feature dependencies** are transitively reduced: if enabling feature `a` already implies `b`—because `a` depends on `b` in `Cargo.toml`—a type that depends on both is gated behind just `a`.
 
 ## Contributing
 
-We love contributions: issues, feature requests, discussions, code, documentation, and examples are all welcome!
+We love contributions!
 
 If you find a case where Ploidy fails, or generates incorrect or unidiomatic code, please [open an issue](https://github.com/linabutler/ploidy/issues/new) with your OpenAPI spec. For questions, or for planning larger contributions, please [start a discussion](https://github.com/linabutler/ploidy/discussions).
 
@@ -351,7 +351,7 @@ We welcome LLM-assisted contributions, but hold them to the same quality bar: ne
 
 ### New languages
 
-Ploidy only targets Rust now, but its architecture is designed to support other languages. Our philosophy is to only support languages where we can:
+Ploidy currently targets only Rust, but its architecture is designed to support other languages. Our philosophy is to only support languages where we can:
 
 1. Generate code from valid syntax trees that are correct by construction, rather than from string templates.
 2. Leverage existing tools for those languages, like parsers, linters, and formatters, that are written _in_ Rust.
@@ -364,8 +364,7 @@ This does mean that Ploidy won't target every language. We'd rather support thre
 Ploidy is inspired by, learns from, and builds on the wonderful work of:
 
 * The OpenAPI ecosystem: **openapi-generator**, **Progenitor**, and other code generators.
-* The async Rust ecosystem: Tokio and Reqwest.
-* The Rust parsing ecosystem: `quote`, `serde`, `syn`, and `winnow`.
+* The Rust ecosystem: Tokio, Reqwest, Serde, `quote`, `syn`, and `winnow`.
 * [**Petgraph**](https://crates.io/crates/petgraph), a Rust graph data structure library that's Ploidy's secret sauce.
 
 And yes, the name is a biology pun! [Ploidy](https://en.wikipedia.org/wiki/Ploidy) refers to the number of chromosome sets in a cell, and _polyploidy_ is when cells have many chromosome sets...and polymorphic types have many forms through inheritance.
