@@ -41,24 +41,24 @@ impl ToTokens for CodegenClientModule<'_> {
             #[doc = #client_doc]
             #[derive(Clone, Debug)]
             pub struct Client {
-                client: ::reqwest::Client,
-                headers: ::http::HeaderMap,
-                base_url: ::url::Url,
+                client: ::ploidy_util::reqwest::Client,
+                headers: ::ploidy_util::http::HeaderMap,
+                base_url: ::ploidy_util::url::Url,
             }
 
             impl Client {
                 /// Create a new client.
                 pub fn new(base_url: impl AsRef<str>) -> Result<Self, crate::error::Error> {
                     Ok(Self::with_reqwest_client(
-                        ::reqwest::Client::new(),
+                        ::ploidy_util::reqwest::Client::new(),
                         base_url.as_ref().parse()?,
                     ))
                 }
 
-                pub fn with_reqwest_client(client: ::reqwest::Client, base_url: ::url::Url) -> Self {
+                pub fn with_reqwest_client(client: ::ploidy_util::reqwest::Client, base_url: ::ploidy_util::url::Url) -> Self {
                     Self {
                         client,
-                        headers: ::http::HeaderMap::new(),
+                        headers: ::ploidy_util::http::HeaderMap::new(),
                         base_url,
                     }
                 }
@@ -66,10 +66,10 @@ impl ToTokens for CodegenClientModule<'_> {
                 /// Adds a header to each request.
                 pub fn with_header<K, V>(mut self, name: K, value: V) -> Result<Self, crate::error::Error>
                 where
-                    K: TryInto<::http::HeaderName>,
-                    V: TryInto<::http::HeaderValue>,
-                    K::Error: Into<::http::Error>,
-                    V::Error: Into<::http::Error>,
+                    K: TryInto<::ploidy_util::http::HeaderName>,
+                    V: TryInto<::ploidy_util::http::HeaderValue>,
+                    K::Error: Into<::ploidy_util::http::Error>,
+                    V::Error: Into<::ploidy_util::http::Error>,
                 {
                     let name = name
                         .try_into()
@@ -99,15 +99,15 @@ impl ToTokens for CodegenClientModule<'_> {
                 /// ```
                 pub fn with_sensitive_header<K, V>(self, name: K, value: V) -> Result<Self, crate::error::Error>
                 where
-                    K: TryInto<::http::HeaderName>,
-                    V: TryInto<::http::HeaderValue>,
-                    K::Error: Into<::http::Error>,
-                    V::Error: Into<::http::Error>,
+                    K: TryInto<::ploidy_util::http::HeaderName>,
+                    V: TryInto<::ploidy_util::http::HeaderValue>,
+                    K::Error: Into<::ploidy_util::http::Error>,
+                    V::Error: Into<::ploidy_util::http::Error>,
                 {
                     let name = name
                         .try_into()
                         .map_err(|err| crate::error::Error::BadHeaderName(err.into()))?;
-                    let mut value: ::http::HeaderValue = value
+                    let mut value: ::ploidy_util::http::HeaderValue = value
                         .try_into()
                         .map_err(|err| crate::error::Error::BadHeaderValue(name.clone(), err.into()))?;
                     value.set_sensitive(true);
@@ -116,10 +116,10 @@ impl ToTokens for CodegenClientModule<'_> {
 
                 pub fn with_user_agent<V>(self, value: V) -> Result<Self, crate::error::Error>
                 where
-                    V: TryInto<::http::HeaderValue>,
-                    V::Error: Into<::http::Error>,
+                    V: TryInto<::ploidy_util::http::HeaderValue>,
+                    V::Error: Into<::ploidy_util::http::Error>,
                 {
-                    self.with_header(::http::header::USER_AGENT, value)
+                    self.with_header(::ploidy_util::http::header::USER_AGENT, value)
                 }
             }
 

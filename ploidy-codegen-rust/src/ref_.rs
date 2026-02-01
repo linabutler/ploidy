@@ -41,7 +41,7 @@ impl ToTokens for CodegenRef<'_> {
                 let ty = CodegenRef::new(&inner);
                 quote! { ::std::option::Option<#ty> }
             }
-            IrTypeView::Any => quote! { ::serde_json::Value },
+            IrTypeView::Any => quote! { ::ploidy_util::serde_json::Value },
             IrTypeView::Inline(ty) => {
                 let path = ty.path();
                 let root: syn::Path = match path.root {
@@ -87,7 +87,7 @@ mod tests {
         let ty = IrTypeView::Any;
         let ref_ = CodegenRef::new(&ty);
         let actual: syn::Type = parse_quote!(#ref_);
-        let expected: syn::Type = parse_quote!(::serde_json::Value);
+        let expected: syn::Type = parse_quote!(::ploidy_util::serde_json::Value);
         assert_eq!(actual, expected);
     }
 

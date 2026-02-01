@@ -112,7 +112,8 @@ mod tests {
         // but the inline types in `mod types` should be sorted alphabetically
         // (`Apple`, `Mango`, `Zebra`).
         let expected: syn::File = parse_quote! {
-            #[derive(Debug, Clone, PartialEq, Eq, Hash, Default, ::serde::Serialize, ::serde::Deserialize)]
+            #[derive(Debug, Clone, PartialEq, Eq, Hash, Default, ::ploidy_util::serde::Serialize, ::ploidy_util::serde::Deserialize)]
+            #[serde(crate = "::ploidy_util::serde")]
             pub struct Container {
                 #[serde(default, skip_serializing_if = "::ploidy_util::absent::AbsentOr::is_absent",)]
                 pub zebra: ::ploidy_util::absent::AbsentOr<crate::types::container::types::Zebra>,
@@ -122,17 +123,20 @@ mod tests {
                 pub apple: ::ploidy_util::absent::AbsentOr<crate::types::container::types::Apple>,
             }
             pub mod types {
-                #[derive(Debug, Clone, PartialEq, Eq, Hash, Default, ::serde::Serialize, ::serde::Deserialize)]
+                #[derive(Debug, Clone, PartialEq, Eq, Hash, Default, ::ploidy_util::serde::Serialize, ::ploidy_util::serde::Deserialize)]
+                #[serde(crate = "::ploidy_util::serde")]
                 pub struct Apple {
                     #[serde(default, skip_serializing_if = "::ploidy_util::absent::AbsentOr::is_absent",)]
                     pub name: ::ploidy_util::absent::AbsentOr<::std::string::String>,
                 }
-                #[derive(Debug, Clone, PartialEq, Eq, Hash, Default, ::serde::Serialize, ::serde::Deserialize)]
+                #[derive(Debug, Clone, PartialEq, Eq, Hash, Default, ::ploidy_util::serde::Serialize, ::ploidy_util::serde::Deserialize)]
+                #[serde(crate = "::ploidy_util::serde")]
                 pub struct Mango {
                     #[serde(default, skip_serializing_if = "::ploidy_util::absent::AbsentOr::is_absent",)]
                     pub name: ::ploidy_util::absent::AbsentOr<::std::string::String>,
                 }
-                #[derive(Debug, Clone, PartialEq, Eq, Hash, Default, ::serde::Serialize, ::serde::Deserialize)]
+                #[derive(Debug, Clone, PartialEq, Eq, Hash, Default, ::ploidy_util::serde::Serialize, ::ploidy_util::serde::Deserialize)]
+                #[serde(crate = "::ploidy_util::serde")]
                 pub struct Zebra {
                     #[serde(default, skip_serializing_if = "::ploidy_util::absent::AbsentOr::is_absent",)]
                     pub name: ::ploidy_util::absent::AbsentOr<::std::string::String>,

@@ -40,7 +40,7 @@ impl<'a> ToTokens for CodegenPrimitive<'a> {
                     .unwrap_or_default();
                 match format {
                     DateTimeFormat::Rfc3339 => {
-                        quote! { ::chrono::DateTime<::chrono::Utc> }
+                        quote! { ::ploidy_util::chrono::DateTime<::ploidy_util::chrono::Utc> }
                     }
                     DateTimeFormat::UnixSeconds => {
                         quote! { ::ploidy_util::date_time::UnixSeconds }
@@ -57,11 +57,11 @@ impl<'a> ToTokens for CodegenPrimitive<'a> {
                 }
             }
             PrimitiveIrType::UnixTime => quote! { ::ploidy_util::date_time::UnixSeconds },
-            PrimitiveIrType::Date => quote! { ::chrono::NaiveDate },
-            PrimitiveIrType::Url => quote! { ::url::Url },
-            PrimitiveIrType::Uuid => quote! { ::uuid::Uuid },
+            PrimitiveIrType::Date => quote! { ::ploidy_util::chrono::NaiveDate },
+            PrimitiveIrType::Url => quote! { ::ploidy_util::url::Url },
+            PrimitiveIrType::Uuid => quote! { ::ploidy_util::uuid::Uuid },
             PrimitiveIrType::Bytes => quote! { ::ploidy_util::binary::Base64 },
-            PrimitiveIrType::Binary => quote! { ::serde_bytes::ByteBuf },
+            PrimitiveIrType::Binary => quote! { ::ploidy_util::serde_bytes::ByteBuf },
         });
     }
 }
@@ -474,7 +474,8 @@ mod tests {
         };
         let p = CodegenPrimitive::new(ty);
         let actual: syn::Type = parse_quote!(#p);
-        let expected: syn::Type = parse_quote!(::chrono::DateTime<::chrono::Utc>);
+        let expected: syn::Type =
+            parse_quote!(::ploidy_util::chrono::DateTime<::ploidy_util::chrono::Utc>);
         assert_eq!(actual, expected);
     }
 
@@ -649,7 +650,7 @@ mod tests {
         };
         let p = CodegenPrimitive::new(ty);
         let actual: syn::Type = parse_quote!(#p);
-        let expected: syn::Type = parse_quote!(::chrono::NaiveDate);
+        let expected: syn::Type = parse_quote!(::ploidy_util::chrono::NaiveDate);
         assert_eq!(actual, expected);
     }
 
@@ -680,7 +681,7 @@ mod tests {
         };
         let p = CodegenPrimitive::new(ty);
         let actual: syn::Type = parse_quote!(#p);
-        let expected: syn::Type = parse_quote!(::url::Url);
+        let expected: syn::Type = parse_quote!(::ploidy_util::url::Url);
         assert_eq!(actual, expected);
     }
 
@@ -711,7 +712,7 @@ mod tests {
         };
         let p = CodegenPrimitive::new(ty);
         let actual: syn::Type = parse_quote!(#p);
-        let expected: syn::Type = parse_quote!(::uuid::Uuid);
+        let expected: syn::Type = parse_quote!(::ploidy_util::uuid::Uuid);
         assert_eq!(actual, expected);
     }
 
@@ -773,7 +774,7 @@ mod tests {
         };
         let p = CodegenPrimitive::new(ty);
         let actual: syn::Type = parse_quote!(#p);
-        let expected: syn::Type = parse_quote!(::serde_bytes::ByteBuf);
+        let expected: syn::Type = parse_quote!(::ploidy_util::serde_bytes::ByteBuf);
         assert_eq!(actual, expected);
     }
 }
