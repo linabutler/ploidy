@@ -1,8 +1,8 @@
-use petgraph::graph::NodeIndex;
+use petgraph::{Direction, graph::NodeIndex};
 
 use crate::ir::{
     graph::{IrGraph, IrGraphNode},
-    types::{IrStruct, IrStructField, IrStructFieldName},
+    types::{InlineIrType, IrStruct, IrStructField, IrStructFieldName, SchemaIrType},
 };
 
 use super::{ViewNode, ir::IrTypeView};
@@ -81,9 +81,31 @@ impl<'view, 'a> IrStructFieldView<'view, 'a> {
         self.field.description
     }
 
-    #[inline]
+    /// Returns `true` if this field is a discriminator property.
+    ///
+    /// A field is a discriminator if it's explicitly named as the `discriminator`
+    /// in its parent struct's definition, if it's named as an ancestor struct's
+    /// discriminator, or if its parent struct is a variant of a tagged union
+    /// whose `tag` matches this field's name.
     pub fn discriminator(&self) -> bool {
-        self.field.discriminator
+        if self.field.discriminator {
+            return true;
+        }
+
+        // Check whether an incoming tagged union uses this field
+        // as _its_ discriminator.
+        let IrStructFieldName::Name(name) = self.field.name else {
+            return false;
+        };
+        self.parent
+            .graph
+            .g
+            .neighbors_directed(self.parent.index, Direction::Incoming)
+            .any(|neighbor| match self.parent.graph.g[neighbor] {
+                IrGraphNode::Schema(SchemaIrType::Tagged(_, tagged)) => tagged.tag == name,
+                IrGraphNode::Inline(InlineIrType::Tagged(_, tagged)) => tagged.tag == name,
+                _ => false,
+            })
     }
 
     #[inline]

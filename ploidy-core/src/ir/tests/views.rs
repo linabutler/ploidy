@@ -2559,6 +2559,149 @@ fn test_operation_request_and_response() {
     );
 }
 
+// MARK: Discriminator fields
+
+#[test]
+fn test_variant_field_matching_tagged_union_discriminator_is_discriminator() {
+    let doc = Document::from_yaml(indoc::indoc! {"
+        openapi: 3.0.0
+        info:
+          title: Test
+          version: 1.0.0
+        components:
+          schemas:
+            Post:
+              oneOf:
+                - $ref: '#/components/schemas/Comment'
+                - $ref: '#/components/schemas/Reaction'
+              discriminator:
+                propertyName: kind
+                mapping:
+                  comment: '#/components/schemas/Comment'
+                  reaction: '#/components/schemas/Reaction'
+            Comment:
+              type: object
+              required: [kind, id, text]
+              properties:
+                kind:
+                  type: string
+                id:
+                  type: string
+                text:
+                  type: string
+            Reaction:
+              type: object
+              required: [kind, id, emoji]
+              properties:
+                kind:
+                  type: string
+                id:
+                  type: string
+                emoji:
+                  type: string
+    "})
+    .unwrap();
+
+    let spec = IrSpec::from_doc(&doc).unwrap();
+    let graph = IrGraph::new(&spec);
+
+    // `Comment.kind` should be detected as a discriminator because
+    // `Comment` is a direct variant of the `Post` tagged union.
+    let comment = graph.schemas().find(|s| s.name() == "Comment").unwrap();
+    let SchemaIrTypeView::Struct(_, comment_struct) = comment else {
+        panic!("expected struct `Comment`; got `{comment:?}`");
+    };
+    let kind_field = comment_struct
+        .fields()
+        .find(|f| matches!(f.name(), IrStructFieldName::Name("kind")))
+        .unwrap();
+    assert!(kind_field.discriminator());
+
+    // Other fields on `Comment` should not be discriminators.
+    let id_field = comment_struct
+        .fields()
+        .find(|f| matches!(f.name(), IrStructFieldName::Name("id")))
+        .unwrap();
+    assert!(!id_field.discriminator());
+
+    // `Reaction.kind` should also be detected as a discriminator.
+    let reaction = graph.schemas().find(|s| s.name() == "Reaction").unwrap();
+    let SchemaIrTypeView::Struct(_, reaction_struct) = reaction else {
+        panic!("expected struct `Reaction`; got `{reaction:?}`");
+    };
+    let kind_field = reaction_struct
+        .fields()
+        .find(|f| matches!(f.name(), IrStructFieldName::Name("kind")))
+        .unwrap();
+    assert!(kind_field.discriminator());
+}
+
+#[test]
+fn test_transitive_dependency_field_matching_discriminator_is_not_discriminator() {
+    // `Inner` has a `kind` field that matches the `Outer` tagged union's
+    // discriminator, but `Inner` is _not_ a direct variant of `Outer`;
+    // only `Wrapper` is. The `kind` field on `Inner` should _not_ be
+    // treated as a discriminator.
+    let doc = Document::from_yaml(indoc::indoc! {"
+        openapi: 3.0.0
+        info:
+          title: Test
+          version: 1.0.0
+        components:
+          schemas:
+            Outer:
+              oneOf:
+                - $ref: '#/components/schemas/Wrapper'
+              discriminator:
+                propertyName: kind
+                mapping:
+                  wrapper: '#/components/schemas/Wrapper'
+            Wrapper:
+              type: object
+              required: [kind, data]
+              properties:
+                kind:
+                  type: string
+                data:
+                  $ref: '#/components/schemas/Inner'
+            Inner:
+              type: object
+              properties:
+                kind:
+                  type: string
+                value:
+                  type: string
+    "})
+    .unwrap();
+
+    let spec = IrSpec::from_doc(&doc).unwrap();
+    let graph = IrGraph::new(&spec);
+
+    // `Wrapper.kind` _is_ a discriminator, because `Wrapper` is a
+    // direct variant of `Outer`.
+    let wrapper = graph.schemas().find(|s| s.name() == "Wrapper").unwrap();
+    let SchemaIrTypeView::Struct(_, wrapper_struct) = wrapper else {
+        panic!("expected struct `Wrapper`; got `{wrapper:?}`");
+    };
+    let kind_field = wrapper_struct
+        .fields()
+        .find(|f| matches!(f.name(), IrStructFieldName::Name("kind")))
+        .unwrap();
+    assert!(kind_field.discriminator());
+
+    // `Inner.kind` is _not_ a discriminator, because `Inner` is only
+    // transitively reachable from `Outer`, not a direct variant.
+    let inner = graph.schemas().find(|s| s.name() == "Inner").unwrap();
+    let SchemaIrTypeView::Struct(_, inner_struct) = inner else {
+        panic!("expected struct `Inner`; got `{inner:?}`");
+    };
+    let kind_field = inner_struct
+        .fields()
+        .find(|f| matches!(f.name(), IrStructFieldName::Name("kind")))
+        .unwrap();
+    assert!(!kind_field.discriminator());
+}
+
 // MARK: Inline tagged union views
 
 #[test]
