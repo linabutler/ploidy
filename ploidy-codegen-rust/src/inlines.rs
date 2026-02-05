@@ -51,7 +51,7 @@ where
             CodegenTypeNameSortKey::for_inline(a).cmp(&CodegenTypeNameSortKey::for_inline(b))
         });
 
-        let mut items = inlines.into_iter().map(|view| {
+        let mut items = inlines.into_iter().filter_map(|view| {
             let name = CodegenTypeName::Inline(&view);
             let ty = match &view {
                 InlineIrTypeView::Enum(_, view) => CodegenEnum::new(name, view).into_token_stream(),
@@ -64,8 +64,13 @@ where
                 InlineIrTypeView::Untagged(_, view) => {
                     CodegenUntagged::new(name, view).into_token_stream()
                 }
+                InlineIrTypeView::Container(..) => {
+                    // We emit inline container types directly,
+                    // so they don't need type aliases.
+                    return None;
+                }
             };
-            match self.0 {
+            Some(match self.0 {
                 IncludeCfgFeatures::Include => {
                     // Wrap each type in an inner inline module, so that
                     // the `#[cfg(...)]` applies to all items (types and `impl`s).
@@ -81,7 +86,7 @@ where
                     }
                 }
                 IncludeCfgFeatures::Omit => ty,
-            }
+            })
         });
 
         if let Some(first) = items.next() {

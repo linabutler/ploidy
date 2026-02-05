@@ -4,10 +4,10 @@ use itertools::Itertools;
 
 use crate::{
     ir::{
-        ExtendableView, InlineIrTypePathRoot, InlineIrTypePathSegment, InlineIrTypeView,
-        IrEnumVariant, IrGraph, IrParameterStyle, IrRequestView, IrResponseView, IrSpec,
-        IrStructFieldName, IrTypeView, PrimitiveIrType, Reach, SchemaIrTypeView, SchemaTypeInfo,
-        SomeIrUntaggedVariant, Traversal, View,
+        ContainerView, ExtendableView, InlineIrTypePathRoot, InlineIrTypePathSegment,
+        InlineIrTypeView, IrEnumVariant, IrGraph, IrParameterStyle, IrRequestView, IrResponseView,
+        IrSpec, IrStructFieldName, IrTypeView, PrimitiveIrType, Reach, SchemaIrTypeView,
+        SchemaTypeInfo, SomeIrUntaggedVariant, Traversal, View,
     },
     parse::{Document, Method, path::PathFragment},
     tests::assert_matches,
@@ -431,14 +431,14 @@ fn test_dependencies_from_array_includes_inner_types() {
         .find(|f| matches!(f.name(), IrStructFieldName::Name("items")))
         .unwrap();
 
-    let array_view = match items_field.ty() {
-        IrTypeView::Array(view) => view,
-        other => panic!("expected array; got {other:?}"),
+    let container_view = match items_field.ty() {
+        IrTypeView::Inline(InlineIrTypeView::Container(_, view @ ContainerView::Array(_))) => view,
+        other => panic!("expected inline array; got {other:?}"),
     };
 
     // The `dependencies()` of the array should include the schema reference
     // and the primitive field in `Item`, but not the array itself.
-    let dep_types = array_view.dependencies().collect_vec();
+    let dep_types = container_view.dependencies().collect_vec();
     assert_eq!(dep_types.len(), 2);
 
     // Verify the `Item` schema is a dependency.
@@ -498,14 +498,14 @@ fn test_dependencies_from_map_includes_inner_types() {
         .find(|f| matches!(f.name(), IrStructFieldName::Name("map_field")))
         .unwrap();
 
-    let map_view = match map_field.ty() {
-        IrTypeView::Map(view) => view,
-        other => panic!("expected map; got {other:?}"),
+    let container_view = match map_field.ty() {
+        IrTypeView::Inline(InlineIrTypeView::Container(_, view @ ContainerView::Map(_))) => view,
+        other => panic!("expected inline map; got {other:?}"),
     };
 
-    // The `dependencies()` of the map should include the schema reference
+    // The `dependencies()` of the map should include the schema reference,
     // and the primitive field in `Item`, but not the map itself.
-    let dep_types = map_view.dependencies().collect_vec();
+    let dep_types = container_view.dependencies().collect_vec();
     assert_eq!(dep_types.len(), 2);
 
     // Verify the `Item` schema is a dependency.
@@ -564,14 +564,16 @@ fn test_dependencies_from_nullable_includes_inner_types() {
         .find(|f| matches!(f.name(), IrStructFieldName::Name("nullable_field")))
         .unwrap();
 
-    let nullable_view = match nullable_field.ty() {
-        IrTypeView::Optional(view) => view,
-        other => panic!("expected nullable; got {other:?}"),
+    let container_view = match nullable_field.ty() {
+        IrTypeView::Inline(InlineIrTypeView::Container(_, view @ ContainerView::Optional(_))) => {
+            view
+        }
+        other => panic!("expected optional; got {other:?}"),
     };
 
-    // The `dependencies()` of the nullable should include the schema reference
-    // and the primitive field in `Item`, but not the nullable itself.
-    let dep_types = nullable_view.dependencies().collect_vec();
+    // The `dependencies()` of the optional should include the schema reference,
+    // and the primitive field in `Item`, but not the optional itself.
+    let dep_types = container_view.dependencies().collect_vec();
     assert_eq!(dep_types.len(), 2);
 
     // Verify the `Item` schema is a dependency.
@@ -966,8 +968,9 @@ fn test_inlines_finds_inline_structs_in_struct_fields() {
 
     let parent_schema = graph.schemas().next().unwrap();
 
-    // Should find the inline struct.
-    assert_eq!(parent_schema.inlines().count(), 1);
+    // Should find (1) the optional from the `inline_obj` field; (2) the inline struct; and
+    // (3) the optional for `nested_field` within the inline struct.
+    assert_eq!(parent_schema.inlines().count(), 3);
 }
 
 #[test]
@@ -997,8 +1000,10 @@ fn test_inlines_finds_inline_types_in_nested_arrays() {
 
     let container_schema = graph.schemas().next().unwrap();
 
-    // Should find inline types within array.
-    assert_eq!(container_schema.inlines().count(), 1);
+    // Should find (1) the optional for the `items` field; (2) the array;
+    // (3) the inline struct inside the array; and (4) the optional for `item`
+    // within the struct.
+    assert_eq!(container_schema.inlines().count(), 4);
 }
 
 #[test]
@@ -1028,8 +1033,8 @@ fn test_inlines_empty_for_schemas_with_no_inlines() {
 
     let simple_schema = graph.schemas().find(|s| s.name() == "Simple").unwrap();
 
-    // `Simple` only references schemas, so shouldn't have any inlines.
-    assert_eq!(simple_schema.inlines().count(), 0);
+    // `Simple` has one inline: an optional for the `field` property.
+    assert_eq!(simple_schema.inlines().count(), 1);
 }
 
 // MARK: Tagged union variant views
@@ -1164,7 +1169,7 @@ fn test_untagged_variant_iteration() {
     assert_eq!(untagged_view.variants().count(), 2);
 }
 
-// MARK: Wrapper views
+// MARK: Container views
 
 #[test]
 fn test_array_view_provides_access_to_item_type() {
@@ -1204,10 +1209,11 @@ fn test_array_view_provides_access_to_item_type() {
     // and is a string primitive.
     assert_matches!(
         items_field.ty(),
-        IrTypeView::Array(view) if matches!(
-            view.inner(),
-            IrTypeView::Primitive(p) if p.ty() == PrimitiveIrType::String,
-        ),
+        IrTypeView::Inline(InlineIrTypeView::Container(_, ContainerView::Array(inner)))
+            if matches!(
+                inner.ty(),
+                IrTypeView::Primitive(p) if p.ty() == PrimitiveIrType::String,
+            ),
     );
 }
 
@@ -1249,10 +1255,11 @@ fn test_map_view_provides_access_to_value_type() {
     // and is a string primitive.
     assert_matches!(
         map_field.ty(),
-        IrTypeView::Map(view) if matches!(
-            view.inner(),
-            IrTypeView::Primitive(p) if p.ty() == PrimitiveIrType::String,
-        ),
+        IrTypeView::Inline(InlineIrTypeView::Container(_, ContainerView::Map(inner)))
+            if matches!(
+                inner.ty(),
+                IrTypeView::Primitive(p) if p.ty() == PrimitiveIrType::String,
+            ),
     );
 }
 
@@ -1291,14 +1298,14 @@ fn test_nullable_view_provides_access_to_inner_type() {
         .find(|f| matches!(f.name(), IrStructFieldName::Name("nullable_field")))
         .unwrap();
 
-    // Verify the nullable's inner type is accessible,
-    // and is an inline struct.
+    // Verify the optional's inner type is accessible, and is an inline struct.
     assert_matches!(
         nullable_field.ty(),
-        IrTypeView::Optional(view) if matches!(
-            view.inner(),
-            IrTypeView::Inline(InlineIrTypeView::Struct(_, _)),
-        ),
+        IrTypeView::Inline(InlineIrTypeView::Container(_, ContainerView::Optional(inner)))
+            if matches!(
+                inner.ty(),
+                IrTypeView::Inline(InlineIrTypeView::Struct(_, _)),
+            ),
     );
 }
 
@@ -2035,9 +2042,12 @@ fn test_operation_view_inlines_with_mixed_types() {
 
     let operation = graph.operations().next().unwrap();
 
-    // Should find the inline request body and the inline metadata object.
+    // Should find (1) the inline request body struct; (2) the optional for the `profile` field;
+    // (3) the optional for the `metadata` field; (4) the inline `metadata` struct;
+    // (5) the optional for `tags`; (6) the array for `tags`.
+    //
     // `Profile` is a schema reference, and should be excluded.
-    assert_eq!(operation.inlines().count(), 2);
+    assert_eq!(operation.inlines().count(), 6);
 }
 
 #[test]
@@ -2085,10 +2095,11 @@ fn test_operation_parameter_ty() {
     let query_param = operation.query().next().unwrap();
     assert_matches!(
         query_param.ty(),
-        IrTypeView::Array(view) if matches!(
-            view.inner(),
-            IrTypeView::Primitive(p) if p.ty() == PrimitiveIrType::String,
-        ),
+        IrTypeView::Inline(InlineIrTypeView::Container(_, ContainerView::Array(inner)))
+            if matches!(
+                inner.ty(),
+                IrTypeView::Primitive(p) if p.ty() == PrimitiveIrType::String,
+            ),
     );
 }
 
@@ -2438,24 +2449,23 @@ fn test_operation_view_inlines_finds_inline_types() {
 
     let operation = graph.operations().next().unwrap();
 
-    // `createUser` references two inline types: the request body,
-    // and the response body. The request body also contains a nested
-    // inline type (`address`), so the total is 3.
+    // `createUser` references 7 inline types: (1) the request body struct,
+    // (2) optional `name`, (3) optional `address`, (4) inline address struct,
+    // (5) optional `street`, (6) optional response body struct, (7) optional `id`.
     let inlines = operation.inlines().collect_vec();
-    assert_eq!(inlines.len(), 3);
+    assert_eq!(inlines.len(), 7);
 
     let address = inlines
         .iter()
         .find(|inline| {
-            let path = inline.path();
-            matches!(
+            matches!(inline, InlineIrTypeView::Struct(path, _) if matches!(
                 &*path.segments,
                 [
                     InlineIrTypePathSegment::Operation("createUser"),
                     InlineIrTypePathSegment::Request,
                     InlineIrTypePathSegment::Field(IrStructFieldName::Name("address")),
                 ],
-            )
+            ))
         })
         .unwrap();
     assert_matches!(address, InlineIrTypeView::Struct(_, _));
@@ -2463,14 +2473,13 @@ fn test_operation_view_inlines_finds_inline_types() {
     let request = inlines
         .iter()
         .find(|inline| {
-            let path = inline.path();
-            matches!(
+            matches!(inline, InlineIrTypeView::Struct(path, _) if matches!(
                 &*path.segments,
                 [
                     InlineIrTypePathSegment::Operation("createUser"),
                     InlineIrTypePathSegment::Request,
                 ],
-            )
+            ))
         })
         .unwrap();
     assert_matches!(request, InlineIrTypeView::Struct(_, _));
@@ -2478,14 +2487,13 @@ fn test_operation_view_inlines_finds_inline_types() {
     let response = inlines
         .iter()
         .find(|inline| {
-            let path = inline.path();
-            matches!(
+            matches!(inline, InlineIrTypeView::Struct(path, _) if matches!(
                 &*path.segments,
                 [
                     InlineIrTypePathSegment::Operation("createUser"),
                     InlineIrTypePathSegment::Response,
                 ],
-            )
+            ))
         })
         .unwrap();
     assert_matches!(response, InlineIrTypeView::Struct(_, _));
@@ -2871,7 +2879,13 @@ fn test_inlines_finds_inline_tagged_unions() {
 
     let container_schema = graph.schemas().find(|s| s.name() == "Container").unwrap();
 
-    // Should find the inline tagged union.
+    // Should find the optional for `animal` and the inline tagged union.
     let inlines = container_schema.inlines().collect_vec();
-    assert_matches!(&*inlines, [InlineIrTypeView::Tagged(_, _)]);
+    assert_matches!(
+        &*inlines,
+        [
+            InlineIrTypeView::Container(_, _),
+            InlineIrTypeView::Tagged(_, _)
+        ]
+    );
 }

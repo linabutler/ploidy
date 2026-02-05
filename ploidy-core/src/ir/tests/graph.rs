@@ -533,7 +533,7 @@ fn test_circular_refs_multiple_sccs() {
 }
 
 #[test]
-fn test_circular_refs_through_wrappers() {
+fn test_circular_refs_through_containers() {
     let doc = Document::from_yaml(indoc::indoc! {"
         openapi: 3.0.0
         info:
@@ -561,7 +561,7 @@ fn test_circular_refs_through_wrappers() {
     let spec = IrSpec::from_doc(&doc).unwrap();
     let graph = IrGraph::new(&spec);
 
-    // Cycles through wrappers should be detected.
+    // Cycles through containers should be detected.
     let a_schema = graph.schemas().find(|s| s.name() == "A").unwrap();
     let a_struct = match a_schema {
         SchemaIrTypeView::Struct(_, struct_) => struct_,

@@ -87,6 +87,7 @@ impl<'view, 'a> IrStructFieldView<'view, 'a> {
     /// in its parent struct's definition, if it's named as an ancestor struct's
     /// discriminator, or if its parent struct is a variant of a tagged union
     /// whose `tag` matches this field's name.
+    #[inline]
     pub fn discriminator(&self) -> bool {
         if self.field.discriminator {
             return true;
@@ -114,6 +115,7 @@ impl<'view, 'a> IrStructFieldView<'view, 'a> {
     }
 
     /// Returns `true` if this field needs indirection to break a cycle.
+    #[inline]
     pub fn needs_indirection(&self) -> bool {
         let node = IrGraphNode::from_ref(self.parent.graph.spec, self.field.ty.as_ref());
         let index = self.parent.graph.indices[&node];

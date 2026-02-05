@@ -2,8 +2,8 @@ use itertools::Itertools;
 use ploidy_core::{
     codegen::UniqueNames,
     ir::{
-        IrOperationView, IrParameterStyle, IrParameterView, IrPathParameter, IrQueryParameter,
-        IrRequestView, IrResponseView, IrTypeView,
+        ContainerView, IrOperationView, IrParameterStyle, IrParameterView, IrPathParameter,
+        IrQueryParameter, IrRequestView, IrResponseView,
     },
     parse::{Method, path::PathFragment},
 };
@@ -159,7 +159,9 @@ impl ToTokens for CodegenOperation<'_> {
             .collect_vec();
         for (ident, param) in &queries {
             let view = param.ty();
-            let ty = if param.required() || matches!(view, IrTypeView::Optional(_)) {
+            let ty = if param.required()
+                || matches!(view.as_container(), Some(ContainerView::Optional(_)))
+            {
                 let path = CodegenRef::new(&view);
                 quote!(#path)
             } else {

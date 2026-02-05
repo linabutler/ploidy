@@ -4,10 +4,10 @@ use serde_json::Number;
 
 use crate::{
     ir::{
-        InlineIrType, InlineIrTypePathRoot, InlineIrTypePathSegment, IrEnumVariant, IrStructField,
-        IrStructFieldName, IrStructFieldNameHint, IrTaggedVariant, IrType, IrUntaggedVariant,
-        IrUntaggedVariantNameHint, PrimitiveIrType, SchemaIrType, SchemaTypeInfo,
-        transform::transform,
+        Container, InlineIrType, InlineIrTypePathRoot, InlineIrTypePathSegment, Inner,
+        IrEnumVariant, IrStructField, IrStructFieldName, IrStructFieldNameHint, IrTaggedVariant,
+        IrType, IrUntaggedVariant, IrUntaggedVariantNameHint, PrimitiveIrType, SchemaIrType,
+        SchemaTypeInfo, transform::transform,
     },
     parse::{Document, Schema},
     tests::assert_matches,
@@ -331,11 +331,18 @@ fn test_array_with_ref_items() {
 
     let result = transform(&doc, "Items", &schema);
 
-    let items = match result {
-        IrType::Array(items) => items,
+    let container = match result {
+        IrType::Schema(SchemaIrType::Container(
+            SchemaTypeInfo { name: "Items", .. },
+            container,
+        )) => container,
+        other => panic!("expected container `Items`; got `{other:?}`"),
+    };
+    let items = match &container {
+        Container::Array(Inner { ty, .. }) => ty,
         other => panic!("expected array; got `{other:?}`"),
     };
-    assert_matches!(*items, IrType::Ref(_));
+    assert_matches!(&**items, IrType::Ref(_));
 }
 
 #[test]
@@ -356,11 +363,20 @@ fn test_array_with_inline_items() {
 
     let result = transform(&doc, "Strings", &schema);
 
-    let items = match result {
-        IrType::Array(items) => items,
+    let container = match result {
+        IrType::Schema(SchemaIrType::Container(
+            SchemaTypeInfo {
+                name: "Strings", ..
+            },
+            container,
+        )) => container,
+        other => panic!("expected container `Strings`; got `{other:?}`"),
+    };
+    let items = match &container {
+        Container::Array(Inner { ty, .. }) => ty,
         other => panic!("expected array; got `{other:?}`"),
     };
-    assert_matches!(*items, IrType::Primitive(PrimitiveIrType::String));
+    assert_matches!(&**items, IrType::Primitive(PrimitiveIrType::String));
 }
 
 // MARK: Maps
@@ -387,11 +403,20 @@ fn test_map_with_additional_properties_ref() {
 
     let result = transform(&doc, "StringMap", &schema);
 
-    let value = match result {
-        IrType::Map(value) => value,
+    let container = match result {
+        IrType::Schema(SchemaIrType::Container(
+            SchemaTypeInfo {
+                name: "StringMap", ..
+            },
+            container,
+        )) => container,
+        other => panic!("expected container `StringMap`; got `{other:?}`"),
+    };
+    let value = match &container {
+        Container::Map(Inner { ty, .. }) => ty,
         other => panic!("expected map; got `{other:?}`"),
     };
-    assert_matches!(*value, IrType::Ref(_));
+    assert_matches!(&**value, IrType::Ref(_));
 }
 
 #[test]
@@ -412,11 +437,18 @@ fn test_map_with_additional_properties_inline() {
 
     let result = transform(&doc, "IntMap", &schema);
 
-    let value = match result {
-        IrType::Map(value) => value,
+    let container = match result {
+        IrType::Schema(SchemaIrType::Container(
+            SchemaTypeInfo { name: "IntMap", .. },
+            container,
+        )) => container,
+        other => panic!("expected container `IntMap`; got `{other:?}`"),
+    };
+    let value = match &container {
+        Container::Map(Inner { ty, .. }) => ty,
         other => panic!("expected map; got `{other:?}`"),
     };
-    assert_matches!(*value, IrType::Primitive(PrimitiveIrType::I32));
+    assert_matches!(&**value, IrType::Primitive(PrimitiveIrType::I32));
 }
 
 #[test]
@@ -437,11 +469,20 @@ fn test_map_with_additional_properties_true() {
 
     let result = transform(&doc, "DynamicMap", &schema);
 
-    let value = match result {
-        IrType::Map(value) => value,
+    let container = match result {
+        IrType::Schema(SchemaIrType::Container(
+            SchemaTypeInfo {
+                name: "DynamicMap", ..
+            },
+            container,
+        )) => container,
+        other => panic!("expected container `DynamicMap`; got `{other:?}`"),
+    };
+    let value = match &container {
+        Container::Map(Inner { ty, .. }) => ty,
         other => panic!("expected map; got `{other:?}`"),
     };
-    assert_matches!(*value, IrType::Any);
+    assert_matches!(&**value, IrType::Any);
 }
 
 // MARK: `try_struct()`
@@ -513,8 +554,17 @@ fn test_struct_with_additional_properties() {
     let result = transform(&doc, "DynamicObj", &schema);
 
     // When `additionalProperties` is present, it should fall through
-    // to `other()`, which creates a `Map`.
-    assert_matches!(result, IrType::Map(_));
+    // to `other()`, which creates a `Container(Map(...))`.
+    let container = match result {
+        IrType::Schema(SchemaIrType::Container(
+            SchemaTypeInfo {
+                name: "DynamicObj", ..
+            },
+            container,
+        )) => container,
+        other => panic!("expected container `DynamicObj`; got `{other:?}`"),
+    };
+    assert_matches!(&container, Container::Map(_));
 }
 
 #[test]
@@ -599,7 +649,8 @@ fn test_struct_with_nullable_field_ref() {
     let [
         IrStructField {
             name: IrStructFieldName::Name("value"),
-            ty: IrType::Optional(inner),
+            ty:
+                IrType::Inline(InlineIrType::Container(_, Container::Optional(Inner { ty: inner, .. }))),
             ..
         },
     ] = &*struct_.fields
@@ -641,7 +692,8 @@ fn test_struct_with_nullable_field_inline() {
     let [
         IrStructField {
             name: IrStructFieldName::Name("value"),
-            ty: IrType::Optional(inner),
+            ty:
+                IrType::Inline(InlineIrType::Container(_, Container::Optional(Inner { ty: inner, .. }))),
             ..
         },
     ] = &*struct_.fields
@@ -686,7 +738,8 @@ fn test_struct_with_nullable_field_openapi_31_syntax() {
     let [
         IrStructField {
             name: IrStructFieldName::Name("value"),
-            ty: IrType::Optional(inner),
+            ty:
+                IrType::Inline(InlineIrType::Container(_, Container::Optional(Inner { ty: inner, .. }))),
             required: true,
             ..
         },
@@ -1183,7 +1236,17 @@ fn test_untagged_null_detection() {
 
     let result = transform(&doc, "StringOrNull", &schema);
 
-    assert_matches!(result, IrType::Optional(_));
+    let container = match result {
+        IrType::Schema(SchemaIrType::Container(
+            SchemaTypeInfo {
+                name: "StringOrNull",
+                ..
+            },
+            container,
+        )) => container,
+        other => panic!("expected container `StringOrNull`; got `{other:?}`"),
+    };
+    assert_matches!(&container, Container::Optional(_));
 }
 
 // MARK: `try_any_of()`
@@ -1614,11 +1677,20 @@ fn test_array_without_items_produces_array_of_any() {
 
     let result = transform(&doc, "ArrayAny", &schema);
 
-    let items = match result {
-        IrType::Array(items) => items,
+    let container = match result {
+        IrType::Schema(SchemaIrType::Container(
+            SchemaTypeInfo {
+                name: "ArrayAny", ..
+            },
+            container,
+        )) => container,
+        other => panic!("expected container `ArrayAny`; got `{other:?}`"),
+    };
+    let items = match &container {
+        Container::Array(Inner { ty, .. }) => ty,
         other => panic!("expected array; got `{other:?}`"),
     };
-    assert_matches!(*items, IrType::Any);
+    assert_matches!(&**items, IrType::Any);
 }
 
 #[test]
@@ -1688,13 +1760,109 @@ fn test_type_and_null_in_type_array_creates_nullable() {
 
     let result = transform(&doc, "StringOrNull", &schema);
 
-    // As a special case, any type + `null` should produce `Optional(T)`,
-    // not an untagged union.
-    let inner = match result {
-        IrType::Optional(inner) => inner,
+    // As a special case, `type: [T, "null"]` should produce a
+    // `Container(Optional(T))`.
+    let container = match result {
+        IrType::Schema(SchemaIrType::Container(
+            SchemaTypeInfo {
+                name: "StringOrNull",
+                ..
+            },
+            container,
+        )) => container,
+        other => panic!("expected container `StringOrNull`; got `{other:?}`"),
+    };
+    let inner = match &container {
+        Container::Optional(Inner { ty, .. }) => ty,
         other => panic!("expected nullable; got `{other:?}`"),
     };
-    assert_matches!(*inner, IrType::Primitive(PrimitiveIrType::String));
+    assert_matches!(&**inner, IrType::Primitive(PrimitiveIrType::String));
+}
+
+#[test]
+fn test_type_array_and_null_creates_nullable_array() {
+    let doc = Document::from_yaml(indoc::indoc! {"
+        openapi: 3.1.0
+        info:
+          title: Test
+          version: 1.0.0
+    "})
+    .unwrap();
+    let schema: Schema = serde_yaml::from_str(indoc::indoc! {"
+        type: [array, 'null']
+        items:
+          type: string
+    "})
+    .unwrap();
+
+    let result = transform(&doc, "StringArrayOrNull", &schema);
+
+    let container = match result {
+        IrType::Schema(SchemaIrType::Container(
+            SchemaTypeInfo {
+                name: "StringArrayOrNull",
+                ..
+            },
+            container,
+        )) => container,
+        other => panic!("expected container `StringArrayOrNull`; got `{other:?}`"),
+    };
+    let inner = match &container {
+        Container::Optional(Inner { ty, .. }) => ty,
+        other => panic!("expected optional; got `{other:?}`"),
+    };
+    let inner_container = match &**inner {
+        IrType::Inline(InlineIrType::Container(_, container)) => container,
+        other => panic!("expected inline container; got `{other:?}`"),
+    };
+    let items = match inner_container {
+        Container::Array(Inner { ty, .. }) => ty,
+        other => panic!("expected array; got `{other:?}`"),
+    };
+    assert_matches!(&**items, IrType::Primitive(PrimitiveIrType::String));
+}
+
+#[test]
+fn test_type_object_and_null_creates_nullable_map() {
+    let doc = Document::from_yaml(indoc::indoc! {"
+        openapi: 3.1.0
+        info:
+          title: Test
+          version: 1.0.0
+    "})
+    .unwrap();
+    let schema: Schema = serde_yaml::from_str(indoc::indoc! {"
+        type: [object, 'null']
+        additionalProperties:
+          type: integer
+    "})
+    .unwrap();
+
+    let result = transform(&doc, "IntMapOrNull", &schema);
+
+    let container = match result {
+        IrType::Schema(SchemaIrType::Container(
+            SchemaTypeInfo {
+                name: "IntMapOrNull",
+                ..
+            },
+            container,
+        )) => container,
+        other => panic!("expected container `IntMapOrNull`; got `{other:?}`"),
+    };
+    let inner = match &container {
+        Container::Optional(Inner { ty, .. }) => ty,
+        other => panic!("expected optional; got `{other:?}`"),
+    };
+    let inner_container = match &**inner {
+        IrType::Inline(InlineIrType::Container(_, container)) => container,
+        other => panic!("expected inline container; got `{other:?}`"),
+    };
+    let values = match inner_container {
+        Container::Map(Inner { ty, .. }) => ty,
+        other => panic!("expected map; got `{other:?}`"),
+    };
+    assert_matches!(&**values, IrType::Primitive(PrimitiveIrType::I32));
 }
 
 #[test]
@@ -1773,18 +1941,30 @@ fn test_deeply_nested_inline_types() {
     let [
         IrStructField {
             name: IrStructFieldName::Name("items"),
-            ty: IrType::Array(items),
+            ty:
+                IrType::Inline(InlineIrType::Container(path, Container::Array(Inner { ty: items, .. }))),
             ..
         },
     ] = &*struct_.fields
     else {
-        panic!("expected named array; got `{:?}`", struct_.fields);
+        panic!("expected named inline array; got `{:?}`", struct_.fields);
     };
+
+    // Container type path should be correct.
+    assert_matches!(path.root, InlineIrTypePathRoot::Type("Outer"));
+    assert_matches!(
+        &*path.segments,
+        [InlineIrTypePathSegment::Field(IrStructFieldName::Name(
+            "items"
+        ))],
+    );
+
     let (path, inner_struct) = match &**items {
         IrType::Inline(InlineIrType::Struct(path, inner_struct)) => (path, inner_struct),
         other => panic!("expected inline struct; got `{other:?}`"),
     };
-    // Check that the path has correct segments.
+
+    // Inner struct path should have correct segments.
     assert_matches!(path.root, InlineIrTypePathRoot::Type("Outer"));
     assert_matches!(
         &*path.segments,
@@ -1793,7 +1973,8 @@ fn test_deeply_nested_inline_types() {
             InlineIrTypePathSegment::ArrayItem,
         ],
     );
-    // Verify that the inner struct has the expected field.
+
+    // Inner struct should have correct fields.
     assert_matches!(
         &*inner_struct.fields,
         [IrStructField {
@@ -1899,11 +2080,20 @@ fn test_array_inline_path_construction() {
 
     let result = transform(&doc, "Container", &schema);
 
-    let items = match result {
-        IrType::Array(items) => items,
-        other => panic!("expected named array; got `{other:?}`"),
+    let container = match result {
+        IrType::Schema(SchemaIrType::Container(
+            SchemaTypeInfo {
+                name: "Container", ..
+            },
+            container,
+        )) => container,
+        other => panic!("expected container `Container`; got `{other:?}`"),
     };
-    let path = match *items {
+    let items = match &container {
+        Container::Array(Inner { ty, .. }) => ty,
+        other => panic!("expected array; got `{other:?}`"),
+    };
+    let path = match &**items {
         IrType::Inline(InlineIrType::Struct(path, _)) => path,
         other => panic!("expected inline struct; got `{other:?}`"),
     };
@@ -1932,11 +2122,20 @@ fn test_map_inline_path_construction() {
 
     let result = transform(&doc, "Dictionary", &schema);
 
-    let value = match result {
-        IrType::Map(value) => value,
-        other => panic!("expected named map; got `{other:?}`"),
+    let container = match result {
+        IrType::Schema(SchemaIrType::Container(
+            SchemaTypeInfo {
+                name: "Dictionary", ..
+            },
+            container,
+        )) => container,
+        other => panic!("expected container `Dictionary`; got `{other:?}`"),
     };
-    let path = match *value {
+    let value = match &container {
+        Container::Map(Inner { ty, .. }) => ty,
+        other => panic!("expected map; got `{other:?}`"),
+    };
+    let path = match &**value {
         IrType::Inline(InlineIrType::Struct(path, _)) => path,
         other => panic!("expected inline struct; got `{other:?}`"),
     };
@@ -2139,7 +2338,7 @@ fn test_recursive_all_of_ref_nullable() {
             },
             IrStructField {
                 name: IrStructFieldName::Name("next"),
-                ty: IrType::Optional(_),
+                ty: IrType::Inline(InlineIrType::Container(_, Container::Optional(_))),
                 required: true,
                 ..
             },
@@ -2186,13 +2385,13 @@ fn test_recursive_all_of_ref() {
         [
             IrStructField {
                 name: IrStructFieldName::Name("value"),
-                ty: IrType::Optional(_),
+                ty: IrType::Inline(InlineIrType::Container(_, Container::Optional(_))),
                 required: false,
                 ..
             },
             IrStructField {
                 name: IrStructFieldName::Name("next"),
-                ty: IrType::Optional(_),
+                ty: IrType::Inline(InlineIrType::Container(_, Container::Optional(_))),
                 required: false,
                 ..
             },
@@ -2255,4 +2454,344 @@ fn test_recursive_multi_all_of_ref_no_stack_overflow() {
             ..
         }
     );
+}
+
+// MARK: Named containers
+
+#[test]
+fn test_named_array_schema_produces_container() {
+    let doc = Document::from_yaml(indoc::indoc! {"
+        openapi: 3.0.0
+        info:
+          title: Test
+          version: 1.0.0
+    "})
+    .unwrap();
+    let schema: Schema = serde_yaml::from_str(indoc::indoc! {"
+        type: array
+        items:
+          type: string
+    "})
+    .unwrap();
+
+    let result = transform(&doc, "StringList", &schema);
+
+    let container = match result {
+        IrType::Schema(SchemaIrType::Container(
+            SchemaTypeInfo {
+                name: "StringList", ..
+            },
+            container,
+        )) => container,
+        other => panic!("expected container `StringList`; got `{other:?}`"),
+    };
+    let items = match &container {
+        Container::Array(Inner { ty, .. }) => ty,
+        other => panic!("expected array; got `{other:?}`"),
+    };
+    assert_matches!(&**items, IrType::Primitive(PrimitiveIrType::String));
+}
+
+#[test]
+fn test_named_array_with_inline_one_of_items_produces_container() {
+    let doc = Document::from_yaml(indoc::indoc! {"
+        openapi: 3.0.0
+        info:
+          title: Test API
+          version: 1.0.0
+        components:
+          schemas:
+            Cat:
+              type: object
+              properties:
+                meow:
+                  type: string
+            Dog:
+              type: object
+              properties:
+                bark:
+                  type: string
+    "})
+    .unwrap();
+    let schema: Schema = serde_yaml::from_str(indoc::indoc! {"
+        type: array
+        items:
+          oneOf:
+            - $ref: '#/components/schemas/Cat'
+            - $ref: '#/components/schemas/Dog'
+    "})
+    .unwrap();
+
+    let result = transform(&doc, "Animals", &schema);
+
+    // A named array schema should produce a `Container` for the array,
+    // wrapped in a `SchemaIrType` that preserves the schema's identity.
+    let container = match result {
+        IrType::Schema(SchemaIrType::Container(
+            SchemaTypeInfo {
+                name: "Animals", ..
+            },
+            container,
+        )) => container,
+        other => panic!("expected container `Animals`; got `{other:?}`"),
+    };
+    let items = match &container {
+        Container::Array(Inner { ty, .. }) => ty,
+        other => panic!("expected array; got `{other:?}`"),
+    };
+    // The inline `oneOf` should produce an inline untagged union.
+    assert_matches!(&**items, IrType::Inline(InlineIrType::Untagged(..)));
+}
+
+#[test]
+fn test_named_map_schema_produces_container() {
+    let doc = Document::from_yaml(indoc::indoc! {"
+        openapi: 3.0.0
+        info:
+          title: Test
+          version: 1.0.0
+    "})
+    .unwrap();
+    let schema: Schema = serde_yaml::from_str(indoc::indoc! {"
+        type: object
+        additionalProperties:
+          type: string
+    "})
+    .unwrap();
+
+    let result = transform(&doc, "Metadata", &schema);
+
+    let container = match result {
+        IrType::Schema(SchemaIrType::Container(
+            SchemaTypeInfo {
+                name: "Metadata", ..
+            },
+            container,
+        )) => container,
+        other => panic!("expected container `Metadata`; got `{other:?}`"),
+    };
+    assert_matches!(&container, Container::Map(_));
+}
+
+#[test]
+fn test_named_nullable_schema_produces_container() {
+    let doc = Document::from_yaml(indoc::indoc! {"
+        openapi: 3.1.0
+        info:
+          title: Test
+          version: 1.0.0
+    "})
+    .unwrap();
+    let schema: Schema = serde_yaml::from_str(indoc::indoc! {"
+        type: [string, 'null']
+    "})
+    .unwrap();
+
+    let result = transform(&doc, "NullableString", &schema);
+
+    let container = match result {
+        IrType::Schema(SchemaIrType::Container(
+            SchemaTypeInfo {
+                name: "NullableString",
+                ..
+            },
+            container,
+        )) => container,
+        other => panic!("expected container `NullableString`; got `{other:?}`"),
+    };
+    let inner = match &container {
+        Container::Optional(Inner { ty, .. }) => ty,
+        other => panic!("expected optional; got `{other:?}`"),
+    };
+    assert_matches!(&**inner, IrType::Primitive(PrimitiveIrType::String));
+}
+
+#[test]
+fn test_named_container_preserves_description() {
+    let doc = Document::from_yaml(indoc::indoc! {"
+        openapi: 3.0.0
+        info:
+          title: Test
+          version: 1.0.0
+    "})
+    .unwrap();
+    let schema: Schema = serde_yaml::from_str(indoc::indoc! {"
+        description: A list of identifiers
+        type: array
+        items:
+          type: string
+    "})
+    .unwrap();
+
+    let result = transform(&doc, "Ids", &schema);
+
+    let container = match result {
+        IrType::Schema(SchemaIrType::Container(SchemaTypeInfo { name: "Ids", .. }, container)) => {
+            container
+        }
+        other => panic!("expected container `Ids`; got `{other:?}`"),
+    };
+    let description = match &container {
+        Container::Array(Inner { description, .. }) => *description,
+        other => panic!("expected array; got `{other:?}`"),
+    };
+    assert_eq!(description, Some("A list of identifiers"));
+}
+
+#[test]
+fn test_named_primitive_does_not_produce_container() {
+    let doc = Document::from_yaml(indoc::indoc! {"
+        openapi: 3.0.0
+        info:
+          title: Test
+          version: 1.0.0
+    "})
+    .unwrap();
+    let schema: Schema = serde_yaml::from_str(indoc::indoc! {"
+        type: string
+    "})
+    .unwrap();
+
+    let result = transform(&doc, "Name", &schema);
+
+    // Bare primitives should _not_ be wrapped; they don't contain inline types,
+    // and don't benefit from a type alias.
+    assert_matches!(result, IrType::Primitive(PrimitiveIrType::String));
+}
+
+#[test]
+fn test_untagged_single_variant_one_of_ref_produces_container() {
+    let doc = Document::from_yaml(indoc::indoc! {"
+        openapi: 3.0.0
+        info:
+          title: Test API
+          version: 1.0.0
+        components:
+          schemas:
+            Inner:
+              type: object
+              properties:
+                value:
+                  type: string
+    "})
+    .unwrap();
+    let schema: Schema = serde_yaml::from_str(indoc::indoc! {"
+        oneOf:
+          - type: 'null'
+          - $ref: '#/components/schemas/Inner'
+    "})
+    .unwrap();
+
+    let result = transform(&doc, "MaybeInner", &schema);
+
+    // A `oneOf` with `null` and a schema reference should produce a
+    // `Container(Optional(Ref(...)))`.
+    let container = match result {
+        IrType::Schema(SchemaIrType::Container(
+            SchemaTypeInfo {
+                name: "MaybeInner", ..
+            },
+            container,
+        )) => container,
+        other => panic!("expected container `MaybeInner`; got `{other:?}`"),
+    };
+    let inner = match &container {
+        Container::Optional(Inner { ty, .. }) => ty,
+        other => panic!("expected optional; got `{other:?}`"),
+    };
+    assert_matches!(&**inner, IrType::Ref(_));
+}
+
+// MARK: Inline containers
+
+#[test]
+fn test_inline_array_produces_inline_container() {
+    let doc = Document::from_yaml(indoc::indoc! {"
+        openapi: 3.0.0
+        info:
+          title: Test
+          version: 1.0.0
+    "})
+    .unwrap();
+    let schema: Schema = serde_yaml::from_str(indoc::indoc! {"
+        type: object
+        required: [items]
+        properties:
+          items:
+            type: array
+            items:
+              type: string
+    "})
+    .unwrap();
+
+    let result = transform(&doc, "Container", &schema);
+
+    // Struct fields that are arrays become inline containers,
+    // not schema containers.
+    let struct_ = match result {
+        IrType::Schema(SchemaIrType::Struct(
+            SchemaTypeInfo {
+                name: "Container", ..
+            },
+            struct_,
+        )) => struct_,
+        other => panic!("expected struct `Container`; got `{other:?}`"),
+    };
+    assert_matches!(
+        &*struct_.fields,
+        [IrStructField {
+            name: IrStructFieldName::Name("items"),
+            ty: IrType::Inline(InlineIrType::Container(_, Container::Array(_))),
+            ..
+        }],
+    );
+}
+
+#[test]
+fn test_optional_field_container_description_is_not_parent_schema() {
+    // When a struct field is wrapped in `Optional`, the container's `Inner`
+    // description should reflect the field, not the parent struct's description.
+    let doc = Document::from_yaml(indoc::indoc! {"
+        openapi: 3.0.0
+        info:
+          title: Test
+          version: 1.0.0
+    "})
+    .unwrap();
+    let schema: Schema = serde_yaml::from_str(indoc::indoc! {"
+        description: A parent struct
+        type: object
+        properties:
+          nickname:
+            description: The nickname
+            type: string
+    "})
+    .unwrap();
+
+    let result = transform(&doc, "Parent", &schema);
+
+    let struct_ = match result {
+        IrType::Schema(SchemaIrType::Struct(SchemaTypeInfo { name: "Parent", .. }, struct_)) => {
+            struct_
+        }
+        other => panic!("expected struct `Parent`; got `{other:?}`"),
+    };
+    let [
+        IrStructField {
+            name: IrStructFieldName::Name("nickname"),
+            ty:
+                IrType::Inline(InlineIrType::Container(
+                    _,
+                    Container::Optional(Inner { description, .. }),
+                )),
+            ..
+        },
+    ] = &*struct_.fields
+    else {
+        panic!(
+            "expected optional field `nickname`; got `{:?}`",
+            struct_.fields
+        );
+    };
+    assert_matches!(description, Some("The nickname"));
 }

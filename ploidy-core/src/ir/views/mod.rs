@@ -16,15 +16,16 @@ use ref_cast::{RefCastCustom, ref_cast_custom};
 
 use super::graph::{Extension, ExtensionMap, IrGraph, IrGraphNode};
 
+pub mod container;
 pub mod enum_;
 pub mod inline;
 pub mod ir;
 pub mod operation;
+pub mod primitive;
 pub mod schema;
 pub mod struct_;
 pub mod tagged;
 pub mod untagged;
-pub mod wrappers;
 
 use self::{inline::InlineIrTypeView, ir::IrTypeView, operation::IrOperationView};
 

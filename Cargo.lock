@@ -938,7 +938,6 @@ name = "ploidy-codegen-rust"
 version = "0.9.0"
 dependencies = [
  "cargo_toml",
- "either",
  "heck",
  "indoc",
  "itertools",
