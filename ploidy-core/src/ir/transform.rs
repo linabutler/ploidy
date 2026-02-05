@@ -1,17 +1,14 @@
 use itertools::Itertools;
 use ploidy_pointer::JsonPointee;
-use rustc_hash::{FxHashMap, FxHashSet};
+use rustc_hash::FxHashMap;
 
-use crate::parse::{AdditionalProperties, ComponentRef, Document, Format, RefOrSchema, Schema, Ty};
+use crate::parse::{AdditionalProperties, Document, Format, RefOrSchema, Schema, Ty};
 
-use super::{
-    fields::{IrSchemaField, all_fields},
-    types::{
-        Container, InlineIrType, InlineIrTypePath, InlineIrTypePathRoot, InlineIrTypePathSegment,
-        Inner, IrEnum, IrEnumVariant, IrStruct, IrStructField, IrStructFieldName,
-        IrStructFieldNameHint, IrTagged, IrTaggedVariant, IrType, IrTypeName, IrUntagged,
-        IrUntaggedVariant, IrUntaggedVariantNameHint, PrimitiveIrType, SchemaIrType,
-    },
+use super::types::{
+    Container, InlineIrType, InlineIrTypePath, InlineIrTypePathRoot, InlineIrTypePathSegment,
+    Inner, IrEnum, IrEnumVariant, IrStruct, IrStructField, IrStructFieldName,
+    IrStructFieldNameHint, IrTagged, IrTaggedVariant, IrType, IrTypeName, IrUntagged,
+    IrUntaggedVariant, IrUntaggedVariantNameHint, PrimitiveIrType, SchemaIrType,
 };
 
 #[inline]
@@ -29,29 +26,12 @@ pub fn transform<'a>(
 pub struct TransformContext<'a> {
     /// The document being transformed.
     pub doc: &'a Document,
-
-    /// The set of schema references to skip when traversing `allOf` references.
-    /// These are already being processed by a transformation further up the stack,
-    /// and should be skipped to avoid infinite recursion.
-    pub skip_refs: FxHashSet<&'a ComponentRef>,
 }
 
 impl<'a> TransformContext<'a> {
     /// Creates a new context for the given document.
     pub fn new(doc: &'a Document) -> Self {
-        Self {
-            doc,
-            skip_refs: FxHashSet::default(),
-        }
-    }
-
-    /// Creates a new context with the same document, and
-    /// additional schema references to skip.
-    pub fn with_followed(&self, followed: &FxHashSet<&'a ComponentRef>) -> Self {
-        Self {
-            doc: self.doc,
-            skip_refs: self.skip_refs.union(followed).copied().collect(),
-        }
+        Self { doc }
     }
 }
 
@@ -303,107 +283,13 @@ impl<'context, 'a> IrTransformer<'context, 'a> {
                     ty,
                     required: false,
                     description,
-                    inherited: false,
-                    discriminator: false,
                     flattened: true,
                 }
             })
             .collect_vec();
 
-        // Collect inherited and own fields from `allOf` and `properties`,
-        // if present.
-        let (inner_context, field_infos) = all_fields(self.context, self.schema);
-
-        let regular_fields = field_infos
-            .into_iter()
-            .map(|(field_name, field)| {
-                let info = field.info();
-                let ty = match info.schema {
-                    RefOrSchema::Ref(r) => IrType::Ref(&r.path),
-                    RefOrSchema::Other(schema) => {
-                        let path = match &self.name {
-                            IrTypeName::Schema(info) => InlineIrTypePath {
-                                root: InlineIrTypePathRoot::Type(info.name),
-                                segments: vec![InlineIrTypePathSegment::Field(
-                                    IrStructFieldName::Name(field_name),
-                                )],
-                            },
-                            IrTypeName::Inline(path) => {
-                                let mut path = path.clone();
-                                path.segments.push(InlineIrTypePathSegment::Field(
-                                    IrStructFieldName::Name(field_name),
-                                ));
-                                path
-                            }
-                        };
-                        transform_with_context(&inner_context, path, schema)
-                    }
-                };
-                let description = match info.schema {
-                    RefOrSchema::Other(schema) => schema.description.as_deref(),
-                    RefOrSchema::Ref(r) => self
-                        .context
-                        .doc
-                        .resolve(r.path.pointer().clone())
-                        .ok()
-                        .and_then(|p| p.downcast_ref::<Schema>())
-                        .and_then(|schema| schema.description.as_deref()),
-                };
-                let nullable = match info.schema {
-                    RefOrSchema::Other(schema) if schema.nullable => true,
-                    RefOrSchema::Ref(r) => {
-                        if let Ok(resolved) = self.context.doc.resolve(r.path.pointer().clone())
-                            && let Some(schema) = resolved.downcast_ref::<Schema>()
-                            && schema.nullable
-                        {
-                            true
-                        } else {
-                            false
-                        }
-                    }
-                    _ => false,
-                };
-                // Wrap the type in `Optional` if the field is either
-                // explicitly nullable, or implicitly optional. The `required`
-                // flag distinguishes between the two for codegen.
-                let ty = if nullable || !info.required {
-                    let path = match &self.name {
-                        IrTypeName::Schema(info) => InlineIrTypePath {
-                            root: InlineIrTypePathRoot::Type(info.name),
-                            segments: vec![InlineIrTypePathSegment::Field(
-                                IrStructFieldName::Name(field_name),
-                            )],
-                        },
-                        IrTypeName::Inline(path) => {
-                            let mut path = path.clone();
-                            path.segments.push(InlineIrTypePathSegment::Field(
-                                IrStructFieldName::Name(field_name),
-                            ));
-                            path
-                        }
-                    };
-                    InlineIrType::Container(
-                        path,
-                        Container::Optional(Inner {
-                            description,
-                            ty: ty.into(),
-                        }),
-                    )
-                    .into()
-                } else {
-                    ty
-                };
-                IrStructField {
-                    name: IrStructFieldName::Name(field_name),
-                    ty,
-                    required: info.required,
-                    description,
-                    inherited: matches!(field, IrSchemaField::Inherited(_)),
-                    discriminator: info.discriminator,
-                    flattened: info.flattened,
-                }
-            })
-            .collect_vec();
+        let parents = self.parents().collect();
+        let regular_fields = self.properties();
 
         // Combine all the fields: regular properties first,
         // followed by the flattened `anyOf` fields. This ordering
@@ -414,6 +300,12 @@ impl<'context, 'a> IrTransformer<'context, 'a> {
         let ty = IrStruct {
             description: self.schema.description.as_deref(),
             fields: all_fields,
+            parents,
+            discriminator: self
+                .schema
+                .discriminator
+                .as_ref()
+                .map(|d| d.property_name.as_str()),
         };
 
         Ok(match self.name {
@@ -466,101 +358,17 @@ impl<'context, 'a> IrTransformer<'context, 'a> {
             return Err(self);
         }
 
-        let (inner_context, field_infos) = all_fields(self.context, self.schema);
-
-        let fields = field_infos
-            .into_iter()
-            .map(|(field_name, field)| {
-                let info = field.info();
-                let ty = match info.schema {
-                    RefOrSchema::Ref(reference) => IrType::Ref(&reference.path),
-                    RefOrSchema::Other(schema) => {
-                        let path = match &self.name {
-                            IrTypeName::Schema(info) => InlineIrTypePath {
-                                root: InlineIrTypePathRoot::Type(info.name),
-                                segments: vec![InlineIrTypePathSegment::Field(
-                                    IrStructFieldName::Name(field_name),
-                                )],
-                            },
-                            IrTypeName::Inline(path) => {
-                                let mut path = path.clone();
-                                path.segments.push(InlineIrTypePathSegment::Field(
-                                    IrStructFieldName::Name(field_name),
-                                ));
-                                path
-                            }
-                        };
-                        transform_with_context(&inner_context, path, schema)
-                    }
-                };
-                let description = match info.schema {
-                    RefOrSchema::Other(schema) => schema.description.as_deref(),
-                    RefOrSchema::Ref(r) => self
-                        .context
-                        .doc
-                        .resolve(r.path.pointer().clone())
-                        .ok()
-                        .and_then(|p| p.downcast_ref::<Schema>())
-                        .and_then(|schema| schema.description.as_deref()),
-                };
-                let nullable = match info.schema {
-                    RefOrSchema::Other(schema) if schema.nullable => true,
-                    RefOrSchema::Ref(r) => {
-                        if let Ok(resolved) = self.context.doc.resolve(r.path.pointer().clone())
-                            && let Some(schema) = resolved.downcast_ref::<Schema>()
-                            && schema.nullable
-                        {
-                            true
-                        } else {
-                            false
-                        }
-                    }
-                    _ => false,
-                };
-                // Wrap the type in `Optional` if the field is either
-                // explicitly nullable, or implicitly optional. The `required`
-                // flag distinguishes between the two for codegen.
-                let ty = if nullable || !info.required {
-                    let path = match &self.name {
-                        IrTypeName::Schema(info) => InlineIrTypePath {
-                            root: InlineIrTypePathRoot::Type(info.name),
-                            segments: vec![InlineIrTypePathSegment::Field(
-                                IrStructFieldName::Name(field_name),
-                            )],
-                        },
-                        IrTypeName::Inline(path) => {
-                            let mut path = path.clone();
-                            path.segments.push(InlineIrTypePathSegment::Field(
-                                IrStructFieldName::Name(field_name),
-                            ));
-                            path
-                        }
-                    };
-                    InlineIrType::Container(
-                        path,
-                        Container::Optional(Inner {
-                            description,
-                            ty: ty.into(),
-                        }),
-                    )
-                    .into()
-                } else {
-                    ty
-                };
-                IrStructField {
-                    name: IrStructFieldName::Name(field_name),
-                    ty,
-                    required: info.required,
-                    description,
-                    inherited: matches!(field, IrSchemaField::Inherited(_)),
-                    discriminator: info.discriminator,
-                    flattened: false,
-                }
-            })
-            .collect_vec();
+        let parents = self.parents().collect();
+        let fields = self.properties().collect();
         let ty = IrStruct {
             description: self.schema.description.as_deref(),
             fields,
+            parents,
+            discriminator: self
+                .schema
+                .discriminator
+                .as_ref()
+                .map(|d| d.property_name.as_str()),
         };
         Ok(match self.name {
             IrTypeName::Schema(info) => SchemaIrType::Struct(info, ty).into(),
@@ -746,6 +554,130 @@ impl<'context, 'a> IrTransformer<'context, 'a> {
                 }
             }
         }
+    }
+
+    // MARK: Shared lowering
+
+    /// Lowers immediate parents from `allOf` into a list of types.
+    fn parents(&self) -> impl Iterator<Item = IrType<'a>> {
+        self.schema
+            .all_of
+            .iter()
+            .flatten()
+            .enumerate()
+            .map(|(index, parent)| (index + 1, parent))
+            .map(|(index, parent)| match parent {
+                RefOrSchema::Ref(r) => IrType::Ref(&r.path),
+                RefOrSchema::Other(schema) => {
+                    let path = match &self.name {
+                        IrTypeName::Schema(info) => InlineIrTypePath {
+                            root: InlineIrTypePathRoot::Type(info.name),
+                            segments: vec![InlineIrTypePathSegment::Parent(index)],
+                        },
+                        IrTypeName::Inline(path) => {
+                            let mut path = path.clone();
+                            path.segments.push(InlineIrTypePathSegment::Parent(index));
+                            path
+                        }
+                    };
+                    transform_with_context(self.context, path, schema)
+                }
+            })
+    }
+
+    /// Lowers regular fields from `properties` into struct fields,
+    /// wrapping nullable and optional fields in [`Container::Optional`].
+    fn properties(&self) -> impl Iterator<Item = IrStructField<'a>> {
+        self.schema
+            .properties
+            .iter()
+            .flatten()
+            .map(|(name, field_schema)| {
+                let field_name = name.as_str();
+                let required = self.schema.required.contains(name);
+                let ty = match field_schema {
+                    RefOrSchema::Ref(r) => IrType::Ref(&r.path),
+                    RefOrSchema::Other(schema) => {
+                        let path = match &self.name {
+                            IrTypeName::Schema(info) => InlineIrTypePath {
+                                root: InlineIrTypePathRoot::Type(info.name),
+                                segments: vec![InlineIrTypePathSegment::Field(
+                                    IrStructFieldName::Name(field_name),
+                                )],
+                            },
+                            IrTypeName::Inline(path) => {
+                                let mut path = path.clone();
+                                path.segments.push(InlineIrTypePathSegment::Field(
+                                    IrStructFieldName::Name(field_name),
+                                ));
+                                path
+                            }
+                        };
+                        transform_with_context(self.context, path, schema)
+                    }
+                };
+                let description = match field_schema {
+                    RefOrSchema::Other(schema) => schema.description.as_deref(),
+                    RefOrSchema::Ref(r) => self
+                        .context
+                        .doc
+                        .resolve(r.path.pointer().clone())
+                        .ok()
+                        .and_then(|p| p.downcast_ref::<Schema>())
+                        .and_then(|schema| schema.description.as_deref()),
+                };
+                let nullable = match field_schema {
+                    RefOrSchema::Other(schema) if schema.nullable => true,
+                    RefOrSchema::Ref(r) => {
+                        if let Ok(resolved) = self.context.doc.resolve(r.path.pointer().clone())
+                            && let Some(schema) = resolved.downcast_ref::<Schema>()
+                            && schema.nullable
+                        {
+                            true
+                        } else {
+                            false
+                        }
+                    }
+                    _ => false,
+                };
+                // Wrap the type in `Optional` if the field is either
+                // explicitly nullable, or implicitly optional. The `required`
+                // flag distinguishes between the two for codegen.
+                let ty = if nullable || !required {
+                    let path = match &self.name {
+                        IrTypeName::Schema(info) => InlineIrTypePath {
+                            root: InlineIrTypePathRoot::Type(info.name),
+                            segments: vec![InlineIrTypePathSegment::Field(
+                                IrStructFieldName::Name(field_name),
+                            )],
+                        },
+                        IrTypeName::Inline(path) => {
+                            let mut path = path.clone();
+                            path.segments.push(InlineIrTypePathSegment::Field(
+                                IrStructFieldName::Name(field_name),
+                            ));
+                            path
+                        }
+                    };
+                    InlineIrType::Container(
+                        path,
+                        Container::Optional(Inner {
+                            description,
+                            ty: ty.into(),
+                        }),
+                    )
+                    .into()
+                } else {
+                    ty
+                };
+                IrStructField {
+                    name: IrStructFieldName::Name(field_name),
+                    ty,
+                    required,
+                    description,
+                    flattened: false,
+                }
+            })
     }
 }
 

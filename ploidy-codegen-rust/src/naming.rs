@@ -426,6 +426,7 @@ impl<'a> CodegenTypePathSegment<'a> {
                     MapValue => f.write_str("Value"),
                     ArrayItem => f.write_str("Item"),
                     Variant(index) => write!(f, "V{index}"),
+                    Parent(index) => write!(f, "P{index}"),
                 }
             }
         }
