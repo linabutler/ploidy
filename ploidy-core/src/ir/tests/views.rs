@@ -4,7 +4,7 @@ use itertools::Itertools;
 
 use crate::{
     ir::{
-        ContainerView, ExtendableView, InlineIrTypePathRoot, InlineIrTypePathSegment,
+        ContainerView, EdgeKind, ExtendableView, InlineIrTypePathRoot, InlineIrTypePathSegment,
         InlineIrTypeView, IrEnumVariant, IrGraph, IrParameterStyle, IrRequestView, IrResponseView,
         IrSpec, IrStructFieldName, IrTypeView, PrimitiveIrType, Reach, SchemaIrTypeView,
         SchemaTypeInfo, SomeIrUntaggedVariant, Traversal, View,
@@ -783,9 +783,12 @@ fn test_traverse_skip_excludes_node_but_continues_traversal() {
 
     // Skip `Middle`, but continue into its neighbors.
     let dep_names = root
-        .traverse(Reach::Dependencies, |view| match view {
-            IrTypeView::Schema(s) if s.name() == "Middle" => Traversal::Skip,
-            _ => Traversal::Visit,
+        .traverse(Reach::Dependencies, |kind, view| {
+            assert_eq!(kind, EdgeKind::Reference);
+            match view {
+                IrTypeView::Schema(s) if s.name() == "Middle" => Traversal::Skip,
+                _ => Traversal::Visit,
+            }
         })
         .filter_map(|view| match view {
             IrTypeView::Schema(s) => Some(s.name()),
@@ -833,9 +836,12 @@ fn test_traverse_stop_includes_node_but_stops_traversal() {
 
     // Stop at `Middle`; don't descend into its children.
     let dep_names = root
-        .traverse(Reach::Dependencies, |view| match view {
-            IrTypeView::Schema(s) if s.name() == "Middle" => Traversal::Stop,
-            _ => Traversal::Visit,
+        .traverse(Reach::Dependencies, |kind, view| {
+            assert_eq!(kind, EdgeKind::Reference);
+            match view {
+                IrTypeView::Schema(s) if s.name() == "Middle" => Traversal::Stop,
+                _ => Traversal::Visit,
+            }
         })
         .filter_map(|view| match view {
             IrTypeView::Schema(s) => Some(s.name()),
@@ -882,9 +888,12 @@ fn test_traverse_ignore_excludes_node_and_stops_traversal() {
 
     // Ignore `Middle`: don't yield it, and don't visit its neighbors.
     let dep_names = root
-        .traverse(Reach::Dependencies, |view| match view {
-            IrTypeView::Schema(s) if s.name() == "Middle" => Traversal::Ignore,
-            _ => Traversal::Visit,
+        .traverse(Reach::Dependencies, |kind, view| {
+            assert_eq!(kind, EdgeKind::Reference);
+            match view {
+                IrTypeView::Schema(s) if s.name() == "Middle" => Traversal::Ignore,
+                _ => Traversal::Visit,
+            }
         })
         .filter_map(|view| match view {
             IrTypeView::Schema(s) => Some(s.name()),
@@ -931,7 +940,10 @@ fn test_traverse_dependents_yields_types_that_depend_on_node() {
     let leaf = graph.schemas().find(|s| s.name() == "Leaf").unwrap();
 
     let dependent_names = leaf
-        .traverse(Reach::Dependents, |_| Traversal::Visit)
+        .traverse(Reach::Dependents, |kind, _| {
+            assert_eq!(kind, EdgeKind::Reference);
+            Traversal::Visit
+        })
         .filter_map(|view| match view {
             IrTypeView::Schema(s) => Some(s.name()),
             _ => None,
@@ -939,6 +951,69 @@ fn test_traverse_dependents_yields_types_that_depend_on_node() {
         .collect_vec();
 
     assert_eq!(dependent_names, vec!["Middle", "Root"]);
+}
+
+#[test]
+fn test_traverse_filter_on_edge_kind() {
+    // `Child` inherits from `Parent` via `allOf` (an inheritance edge)
+    // and has its own field referencing `Leaf` (a reference edge).
+    let doc = Document::from_yaml(indoc::indoc! {"
+        openapi: 3.0.0
+        info:
+          title: Test
+          version: 1.0.0
+        components:
+          schemas:
+            Leaf:
+              type: object
+              properties:
+                value:
+                  type: string
+            Parent:
+              type: object
+              properties:
+                id:
+                  type: integer
+            Child:
+              allOf:
+                - $ref: '#/components/schemas/Parent'
+              type: object
+              properties:
+                leaf:
+                  $ref: '#/components/schemas/Leaf'
+    "})
+    .unwrap();
+
+    let spec = IrSpec::from_doc(&doc).unwrap();
+    let graph = IrGraph::new(&spec);
+
+    let child = graph.schemas().find(|s| s.name() == "Child").unwrap();
+
+    // Including just inheritance edges should yield the `allOf` parent.
+    let inherits_only = child
+        .traverse(Reach::Dependencies, |kind, _| match kind {
+            EdgeKind::Inherits => Traversal::Visit,
+            EdgeKind::Reference => Traversal::Ignore,
+        })
+        .filter_map(|view| match view {
+            IrTypeView::Schema(s) => Some(s.name()),
+            _ => None,
+        })
+        .collect_vec();
+    assert_eq!(inherits_only, vec!["Parent"]);
+
+    // Including just reference edges should yield the field target.
+    let references_only = child
+        .traverse(Reach::Dependencies, |kind, _| match kind {
+            EdgeKind::Reference => Traversal::Visit,
+            EdgeKind::Inherits => Traversal::Ignore,
+        })
+        .filter_map(|view| match view {
+            IrTypeView::Schema(s) => Some(s.name()),
+            _ => None,
+        })
+        .collect_vec();
+    assert_eq!(references_only, vec!["Leaf"]);
 }
 
 // MARK: `inlines()`
@@ -2708,6 +2783,171 @@ fn test_transitive_dependency_field_matching_discriminator_is_not_discriminator(
         .find(|f| matches!(f.name(), IrStructFieldName::Name("kind")))
         .unwrap();
     assert!(!kind_field.discriminator());
+}
+
+#[test]
+fn test_own_struct_discriminator_field() {
+    // A struct with its own `discriminator` property should mark that field
+    // as a discriminator.
+    let doc = Document::from_yaml(indoc::indoc! {"
+        openapi: 3.0.0
+        info:
+          title: Test
+          version: 1.0.0
+        components:
+          schemas:
+            Base:
+              type: object
+              properties:
+                kind:
+                  type: string
+                name:
+                  type: string
+              discriminator:
+                propertyName: kind
+    "})
+    .unwrap();
+
+    let spec = IrSpec::from_doc(&doc).unwrap();
+    let graph = IrGraph::new(&spec);
+
+    let base = graph.schemas().find(|s| s.name() == "Base").unwrap();
+    let SchemaIrTypeView::Struct(_, base_struct) = base else {
+        panic!("expected struct `Base`; got `{base:?}`");
+    };
+
+    // The `kind` field should be marked as a discriminator.
+    let kind_field = base_struct
+        .fields()
+        .find(|f| matches!(f.name(), IrStructFieldName::Name("kind")))
+        .unwrap();
+    assert!(kind_field.discriminator());
+
+    // The `name` field should not be a discriminator.
+    let name_field = base_struct
+        .fields()
+        .find(|f| matches!(f.name(), IrStructFieldName::Name("name")))
+        .unwrap();
+    assert!(!name_field.discriminator());
+}
+
+#[test]
+fn test_inherited_discriminator_field() {
+    // A child struct that inherits from a parent with a discriminator should
+    // mark inherited fields with the same name as discriminators.
+    let doc = Document::from_yaml(indoc::indoc! {"
+        openapi: 3.0.0
+        info:
+          title: Test
+          version: 1.0.0
+        components:
+          schemas:
+            Parent:
+              type: object
+              properties:
+                kind:
+                  type: string
+              discriminator:
+                propertyName: kind
+            Child:
+              allOf:
+                - $ref: '#/components/schemas/Parent'
+              properties:
+                name:
+                  type: string
+    "})
+    .unwrap();
+
+    let spec = IrSpec::from_doc(&doc).unwrap();
+    let graph = IrGraph::new(&spec);
+
+    let child = graph.schemas().find(|s| s.name() == "Child").unwrap();
+    let SchemaIrTypeView::Struct(_, child_struct) = child else {
+        panic!("expected struct `Child`; got `{child:?}`");
+    };
+
+    // The child's inherited `kind` field should be marked as a discriminator.
+    let kind_field = child_struct
+        .fields()
+        .find(|f| matches!(f.name(), IrStructFieldName::Name("kind")))
+        .unwrap();
+    assert!(kind_field.discriminator());
+    assert!(kind_field.inherited());
+
+    // The child's own `name` field should not be a discriminator.
+    let name_field = child_struct
+        .fields()
+        .find(|f| matches!(f.name(), IrStructFieldName::Name("name")))
+        .unwrap();
+    assert!(!name_field.discriminator());
+    assert!(!name_field.inherited());
+}
+
+#[test]
+fn test_fields_linearizes_inline_all_of_parents() {
+    // Inline `allOf` schemas become parent types, and their fields should be
+    // linearized into the child struct via `fields()`.
+    let doc = Document::from_yaml(indoc::indoc! {"
+        openapi: 3.0.0
+        info:
+          title: Test
+          version: 1.0.0
+        components:
+          schemas:
+            Person:
+              allOf:
+                - type: object
+                  properties:
+                    name:
+                      type: string
+                - type: object
+                  properties:
+                    age:
+                      type: integer
+              properties:
+                email:
+                  type: string
+    "})
+    .unwrap();
+
+    let spec = IrSpec::from_doc(&doc).unwrap();
+    let graph = IrGraph::new(&spec);
+
+    let person = graph.schemas().find(|s| s.name() == "Person").unwrap();
+    let SchemaIrTypeView::Struct(_, person_struct) = person else {
+        panic!("expected struct `Person`; got `{person:?}`");
+    };
+
+    // `fields()` should return all fields in declaration order: inherited
+    // fields from the first parent, then the second parent, then own fields.
+    let field_names = person_struct
+        .fields()
+        .filter_map(|f| match f.name() {
+            IrStructFieldName::Name(n) => Some(n),
+            _ => None,
+        })
+        .collect_vec();
+    assert_eq!(field_names, vec!["name", "age", "email"]);
+
+    // Fields from inline parents should be marked as inherited.
+    let name_field = person_struct
+        .fields()
+        .find(|f| matches!(f.name(), IrStructFieldName::Name("name")))
+        .unwrap();
+    assert!(name_field.inherited());
+
+    let age_field = person_struct
+        .fields()
+        .find(|f| matches!(f.name(), IrStructFieldName::Name("age")))
+        .unwrap();
+    assert!(age_field.inherited());
+
+    // Own field should not be inherited.
+    let email_field = person_struct
+        .fields()
+        .find(|f| matches!(f.name(), IrStructFieldName::Name("email")))
+        .unwrap();
+    assert!(!email_field.inherited());
 }
 
 // MARK: Inline tagged union views

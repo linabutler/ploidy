@@ -829,6 +829,115 @@ fn test_struct_inline_field_description() {
     );
 }
 
+#[test]
+fn test_struct_inline_all_of_becomes_parent() {
+    let doc = Document::from_yaml(indoc::indoc! {"
+        openapi: 3.0.0
+        info:
+          title: Test
+          version: 1.0.0
+    "})
+    .unwrap();
+    let schema: Schema = serde_yaml::from_str(indoc::indoc! {"
+        allOf:
+          - type: object
+            properties:
+              name:
+                type: string
+          - type: object
+            properties:
+              age:
+                type: integer
+        properties:
+          email:
+            type: string
+    "})
+    .unwrap();
+
+    let result = transform(&doc, "Person", &schema);
+
+    let struct_ = match result {
+        IrType::Schema(SchemaIrType::Struct(SchemaTypeInfo { name: "Person", .. }, struct_)) => {
+            struct_
+        }
+        other => panic!("expected struct `Person`; got `{other:?}`"),
+    };
+
+    // The struct's own field is `email`; inherited fields come from parents.
+    assert_matches!(
+        &*struct_.fields,
+        [IrStructField {
+            name: IrStructFieldName::Name("email"),
+            ..
+        }],
+    );
+
+    // The inline `allOf` schemas become inline parent types.
+    assert_matches!(
+        &*struct_.parents,
+        [
+            IrType::Inline(InlineIrType::Struct(path1, parent1)),
+            IrType::Inline(InlineIrType::Struct(path2, parent2)),
+        ] if path1.root == InlineIrTypePathRoot::Type("Person")
+            && path1.segments == vec![InlineIrTypePathSegment::Parent(1)]
+            && matches!(&*parent1.fields, [IrStructField { name: IrStructFieldName::Name("name"), .. }])
+            && path2.root == InlineIrTypePathRoot::Type("Person")
+            && path2.segments == vec![InlineIrTypePathSegment::Parent(2)]
+            && matches!(&*parent2.fields, [IrStructField { name: IrStructFieldName::Name("age"), .. }]),
+    );
+}
+
+#[test]
+fn test_struct_mixed_all_of_ref_and_inline() {
+    let doc = Document::from_yaml(indoc::indoc! {"
+        openapi: 3.0.0
+        info:
+          title: Test
+          version: 1.0.0
+        components:
+          schemas:
+            Base:
+              type: object
+              properties:
+                id:
+                  type: string
+    "})
+    .unwrap();
+    let schema: Schema = serde_yaml::from_str(indoc::indoc! {"
+        allOf:
+          - $ref: '#/components/schemas/Base'
+          - type: object
+            properties:
+              name:
+                type: string
+    "})
+    .unwrap();
+
+    let result = transform(&doc, "Child", &schema);
+
+    let struct_ = match result {
+        IrType::Schema(SchemaIrType::Struct(SchemaTypeInfo { name: "Child", .. }, struct_)) => {
+            struct_
+        }
+        other => panic!("expected struct `Child`; got `{other:?}`"),
+    };
+
+    // No own fields; all fields come from parents.
+    assert!(struct_.fields.is_empty());
+
+    // Parents include both the named and inline schemas.
+    assert_matches!(
+        &*struct_.parents,
+        [
+            IrType::Ref(r),
+            IrType::Inline(InlineIrType::Struct(path, parent)),
+        ] if r.name() == "Base"
+            && path.root == InlineIrTypePathRoot::Type("Child")
+            && path.segments == vec![InlineIrTypePathSegment::Parent(2)]
+            && matches!(&*parent.fields, [IrStructField { name: IrStructFieldName::Name("name"), .. }])
+    );
+}
+
 // MARK: `try_tagged()`
 
 #[test]
@@ -1565,7 +1674,6 @@ fn test_any_of_with_all_of() {
 
     let result = transform(&doc, "Combined", &schema);
 
-    // Should have both inherited and flattened fields.
     let struct_ = match result {
         IrType::Schema(SchemaIrType::Struct(
             SchemaTypeInfo {
@@ -1575,29 +1683,26 @@ fn test_any_of_with_all_of() {
         )) => struct_,
         other => panic!("expected struct `Combined`; got `{other:?}`"),
     };
+
+    // Only flattened `anyOf` fields should be stored directly; the inherited
+    // `id` field is accessed via graph traversal through `parents()`.
     assert_matches!(
         &*struct_.fields,
         [
             IrStructField {
-                name: IrStructFieldName::Name("id"),
-                inherited: true,
-                flattened: false,
-                ..
-            },
-            IrStructField {
                 name: IrStructFieldName::Name("Extra1"),
-                inherited: false,
                 flattened: true,
                 ..
             },
             IrStructField {
                 name: IrStructFieldName::Name("Extra2"),
-                inherited: false,
                 flattened: true,
                 ..
             },
         ],
     );
+    // Parent reference to `Base` should be present.
+    assert_eq!(struct_.parents.len(), 1);
 }
 
 // MARK: Edge cases

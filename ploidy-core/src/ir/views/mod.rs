@@ -4,17 +4,17 @@
 //! for code generation. Each view decorates an IR type with
 //! additional information from the type graph.
 
-use std::{any::TypeId, collections::VecDeque, fmt::Debug};
+use std::{any::TypeId, fmt::Debug};
 
 use atomic_refcell::{AtomicRef, AtomicRefMut};
 use petgraph::{
     Direction,
     graph::NodeIndex,
-    visit::{Bfs, EdgeFiltered, EdgeRef, VisitMap, Visitable},
+    visit::{Bfs, EdgeFiltered, EdgeRef},
 };
 use ref_cast::{RefCastCustom, ref_cast_custom};
 
-use super::graph::{Extension, ExtensionMap, IrGraph, IrGraphNode};
+use super::graph::{EdgeKind, Extension, ExtensionMap, IrGraph, IrGraphNode, Traversal, Traverse};
 
 pub mod container;
 pub mod enum_;
@@ -52,18 +52,23 @@ pub trait View<'a> {
     /// Complexity: O(n), where `n` is the number of dependent types.
     fn dependents(&self) -> impl Iterator<Item = IrTypeView<'a>> + use<'a, Self>;
 
-    /// Walks the type graph toward dependencies or dependents, using a
-    /// `filter` function to control the traversal.
+    /// Traverses this type's dependencies or dependents breadth-first,
+    /// using `filter` to control which nodes are yielded and explored.
     ///
-    /// Complexity: O(V + E), where `V` and `E` are the number of
-    /// nodes and edges in the visited subgraph.
+    /// The filter receives the [`EdgeKind`] describing how the node
+    /// was reached, and returns a [`Traversal`].
+    ///
+    /// A node reachable via multiple edge kinds may be yielded more
+    /// than once, once per distinct edge kind.
+    ///
+    /// Complexity: O(V + E) over the visited subgraph.
     fn traverse<F>(
         &self,
         reach: Reach,
         filter: F,
     ) -> impl Iterator<Item = IrTypeView<'a>> + use<'a, Self, F>
     where
-        F: Fn(&IrTypeView<'a>) -> Traversal;
+        F: Fn(EdgeKind, &IrTypeView<'a>) -> Traversal;
 }
 
 pub trait ExtendableView<'a>: View<'a> {
@@ -85,9 +90,9 @@ where
     #[inline]
     fn inlines(&self) -> impl Iterator<Item = InlineIrTypeView<'a>> + use<'a, T> {
         let graph = self.graph();
-        // Exclude edges that reference other schemas.
+        // Only include edges to other inline schemas.
         let filtered = EdgeFiltered::from_fn(&graph.g, |r| {
-            !matches!(graph.g[r.target()], IrGraphNode::Schema(_))
+            matches!(graph.g[r.target()], IrGraphNode::Inline(_))
         });
         let mut bfs = Bfs::new(&graph.g, self.index());
         std::iter::from_fn(move || bfs.next(&filtered)).filter_map(|index| match graph.g[index] {
@@ -144,48 +149,22 @@ where
         filter: F,
     ) -> impl Iterator<Item = IrTypeView<'a>> + use<'a, T, F>
     where
-        F: Fn(&IrTypeView<'a>) -> Traversal,
+        F: Fn(EdgeKind, &IrTypeView<'a>) -> Traversal,
     {
         let graph = self.graph();
-        let mut stack = VecDeque::new();
-        let mut discovered = graph.g.visit_map();
-        let direction = match reach {
-            Reach::Dependencies => Direction::Outgoing,
-            Reach::Dependents => Direction::Incoming,
-        };
-
-        // Mark ourselves as discovered, but don't add ourselves to the queue,
-        // since our dependencies and dependents shouldn't include ourselves.
-        discovered.visit(self.index());
-        for neighbor in graph.g.neighbors_directed(self.index(), direction) {
-            if discovered.visit(neighbor) {
-                stack.push_back(neighbor);
-            }
-        }
-
-        std::iter::from_fn(move || {
-            while let Some(index) = stack.pop_front() {
-                let view = IrTypeView::new(graph, index);
-                let traversal = filter(&view);
-
-                if matches!(traversal, Traversal::Visit | Traversal::Skip) {
-                    // Add the neighbors to the stack of nodes to visit.
-                    for neighbor in graph.g.neighbors_directed(index, direction) {
-                        if discovered.visit(neighbor) {
-                            stack.push_back(neighbor);
-                        }
-                    }
-                }
-
-                if matches!(traversal, Traversal::Visit | Traversal::Stop) {
-                    // Yield this node.
-                    return Some(view);
-                }
-
-                // (`Skip` and `Ignore` continue the loop without yielding).
-            }
-            None
+        let t = Traverse::from_neighbors(
+            &graph.g,
+            self.index(),
+            match reach {
+                Reach::Dependencies => Direction::Outgoing,
+                Reach::Dependents => Direction::Incoming,
+            },
+        );
+        t.run(move |kind, index| {
+            let view = IrTypeView::new(graph, index);
+            filter(kind, &view)
         })
+        .map(|index| IrTypeView::new(graph, index))
     }
 }
 
@@ -315,17 +294,4 @@ pub enum Reach {
     Dependencies,
     /// Traverse in toward types that depend on this node.
     Dependents,
-}
-
-/// Controls how to continue traversing the graph when at a node.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum Traversal {
-    /// Yield this node, then continue into its neighbors.
-    Visit,
-    /// Yield this node, but don't continue into its neighbors.
-    Stop,
-    /// Don't yield this node, but continue into its neighbors.
-    Skip,
-    /// Don't yield this node, and don't continue into its neighbors.
-    Ignore,
 }

@@ -1629,3 +1629,329 @@ fn test_operation_with_no_types() {
             .all(|id| id != "healthCheck")
     }));
 }
+
+// MARK: Inheritance
+
+#[test]
+fn test_parents_returns_immediate_parents() {
+    // `Entity` -> `NamedEntity` -> `User`; `User` should only have
+    // `NamedEntity` as its parent.
+    let doc = Document::from_yaml(indoc::indoc! {"
+        openapi: 3.0.0
+        info:
+          title: Test
+          version: 1.0.0
+        components:
+          schemas:
+            Entity:
+              type: object
+              properties:
+                id:
+                  type: string
+            NamedEntity:
+              allOf:
+                - $ref: '#/components/schemas/Entity'
+              properties:
+                name:
+                  type: string
+            User:
+              allOf:
+                - $ref: '#/components/schemas/NamedEntity'
+              properties:
+                email:
+                  type: string
+    "})
+    .unwrap();
+
+    let spec = IrSpec::from_doc(&doc).unwrap();
+    let graph = IrGraph::new(&spec);
+
+    let user = graph.schemas().find(|s| s.name() == "User").unwrap();
+    let user_struct = match user {
+        SchemaIrTypeView::Struct(_, view) => view,
+        other => panic!("expected struct `User`; got {other:?}"),
+    };
+
+    // `User` should only have `NamedEntity` as a parent, not `Entity`.
+    let parent_names = user_struct
+        .parents()
+        .filter_map(|p| p.into_schema().ok())
+        .map(|s| s.name())
+        .collect_vec();
+    assert_matches!(&*parent_names, ["NamedEntity"]);
+
+    // ...But `User` should inherit fields from both ancestors.
+    let field_names = user_struct
+        .fields()
+        .map(|f| match f.name() {
+            IrStructFieldName::Name(n) => n,
+            other => panic!("expected named field; got {other:?}"),
+        })
+        .collect_vec();
+    assert_matches!(&*field_names, ["id", "name", "email"]);
+}
+
+#[test]
+fn test_all_of_inheritance_with_fields() {
+    let doc = Document::from_yaml(indoc::indoc! {"
+        openapi: 3.0.0
+        info:
+          title: Test
+          version: 1.0.0
+        components:
+          schemas:
+            Parent:
+              type: object
+              properties:
+                parent_field:
+                  type: string
+            Child:
+              allOf:
+                - $ref: '#/components/schemas/Parent'
+              properties:
+                child_field:
+                  type: string
+    "})
+    .unwrap();
+
+    let spec = IrSpec::from_doc(&doc).unwrap();
+    let graph = IrGraph::new(&spec);
+
+    let child = graph.schemas().find(|s| s.name() == "Child").unwrap();
+    let child_struct = match child {
+        SchemaIrTypeView::Struct(_, view) => view,
+        other => panic!("expected struct `Child`; got {other:?}"),
+    };
+
+    // `Child` should have `Parent` as its parent.
+    let parent_names = child_struct
+        .parents()
+        .filter_map(|p| p.into_schema().ok())
+        .map(|s| s.name())
+        .collect_vec();
+    assert_matches!(&*parent_names, ["Parent"]);
+
+    // `own_fields()` should only return the child's own fields.
+    let own_field_names = child_struct
+        .own_fields()
+        .map(|f| match f.name() {
+            IrStructFieldName::Name(n) => n,
+            other => panic!("expected named field; got {other:?}"),
+        })
+        .collect_vec();
+    assert_matches!(&*own_field_names, ["child_field"]);
+
+    // `fields()` should return both the inherited and own fields.
+    let all_field_names = child_struct
+        .fields()
+        .map(|f| match f.name() {
+            IrStructFieldName::Name(n) => n,
+            _ => panic!("expected named field"),
+        })
+        .collect_vec();
+    assert_matches!(&*all_field_names, ["parent_field", "child_field"]);
+
+    // The `inherited()` flag should be correct for each field.
+    let parent_field = child_struct
+        .fields()
+        .find(|f| matches!(f.name(), IrStructFieldName::Name("parent_field")))
+        .unwrap();
+    assert!(parent_field.inherited());
+
+    let child_field = child_struct
+        .fields()
+        .find(|f| matches!(f.name(), IrStructFieldName::Name("child_field")))
+        .unwrap();
+    assert!(!child_field.inherited());
+}
+
+#[test]
+fn test_circular_refs_excludes_inherits_edges() {
+    // This test constructs a graph like:
+    //   Parent --[Reference]--> Child --[Inherits]--> Parent
+    //
+    // This is a cycle, but since the back edge is an inheritance edge,
+    // not a reference edge, `Parent.child` shouldn't need indirection.
+    // Only reference edges contribute to `needs_indirection()`.
+    let doc = Document::from_yaml(indoc::indoc! {"
+        openapi: 3.0.0
+        info:
+          title: Test
+          version: 1.0.0
+        components:
+          schemas:
+            Parent:
+              type: object
+              properties:
+                child:
+                  $ref: '#/components/schemas/Child'
+            Child:
+              allOf:
+                - $ref: '#/components/schemas/Parent'
+              properties:
+                own_field:
+                  type: string
+    "})
+    .unwrap();
+
+    let spec = IrSpec::from_doc(&doc).unwrap();
+    let graph = IrGraph::new(&spec);
+
+    let parent = graph.schemas().find(|s| s.name() == "Parent").unwrap();
+    let parent_struct = match parent {
+        SchemaIrTypeView::Struct(_, view) => view,
+        other => panic!("expected struct `Parent`; got {other:?}"),
+    };
+
+    // `Parent.child` references `Child`, but the only path back to `Parent`
+    // is through inheritance, so no indirection is needed.
+    let child_field = parent_struct
+        .own_fields()
+        .find(|f| matches!(f.name(), IrStructFieldName::Name("child")))
+        .unwrap();
+    assert!(!child_field.needs_indirection());
+}
+
+#[test]
+fn test_multiple_parents() {
+    // A schema with multiple `allOf` keywords should have multiple parents.
+    let doc = Document::from_yaml(indoc::indoc! {"
+        openapi: 3.0.0
+        info:
+          title: Test
+          version: 1.0.0
+        components:
+          schemas:
+            Mixin1:
+              type: object
+              properties:
+                alpha:
+                  type: string
+                beta:
+                  type: string
+            Mixin2:
+              type: object
+              properties:
+                gamma:
+                  type: string
+                delta:
+                  type: string
+            Combined:
+              allOf:
+                - $ref: '#/components/schemas/Mixin1'
+                - $ref: '#/components/schemas/Mixin2'
+              properties:
+                own_field:
+                  type: string
+    "})
+    .unwrap();
+
+    let spec = IrSpec::from_doc(&doc).unwrap();
+    let graph = IrGraph::new(&spec);
+
+    let combined = graph.schemas().find(|s| s.name() == "Combined").unwrap();
+    let combined_struct = match combined {
+        SchemaIrTypeView::Struct(_, view) => view,
+        other => panic!("expected struct `Combined`; got {other:?}"),
+    };
+
+    // Should have both mixins as parents.
+    let parent_names = combined_struct
+        .parents()
+        .filter_map(|p| p.into_schema().ok())
+        .map(|s| s.name())
+        .collect_vec();
+    assert_matches!(&*parent_names, ["Mixin1", "Mixin2"]);
+
+    // `own_fields()` should only return `own_field`.
+    let own_field_names = combined_struct
+        .own_fields()
+        .map(|f| match f.name() {
+            IrStructFieldName::Name(n) => n,
+            other => panic!("expected named field; got {other:?}"),
+        })
+        .collect_vec();
+    assert_matches!(&*own_field_names, ["own_field"]);
+
+    // `fields()` should return ancestor fields first, in the order of
+    // their parents in `allOf`, then own fields.
+    let all_field_names = combined_struct
+        .fields()
+        .map(|f| match f.name() {
+            IrStructFieldName::Name(n) => n,
+            other => panic!("expected named field; got {other:?}"),
+        })
+        .collect_vec();
+    assert_matches!(
+        &*all_field_names,
+        ["alpha", "beta", "gamma", "delta", "own_field"]
+    );
+}
+
+#[test]
+fn test_circular_all_of_terminates() {
+    // A circular `allOf` (A -> B -> A) is invalid, but can appear in the wild.
+    // `fields()` and `discriminator()` should still terminate and
+    // yield all fields.
+    let doc = Document::from_yaml(indoc::indoc! {"
+        openapi: 3.0.0
+        info:
+          title: Test
+          version: 1.0.0
+        components:
+          schemas:
+            A:
+              allOf:
+                - $ref: '#/components/schemas/B'
+              properties:
+                a_field:
+                  type: string
+            B:
+              allOf:
+                - $ref: '#/components/schemas/A'
+              properties:
+                b_field:
+                  type: string
+                kind:
+                  type: string
+              discriminator:
+                propertyName: kind
+    "})
+    .unwrap();
+
+    let spec = IrSpec::from_doc(&doc).unwrap();
+    let graph = IrGraph::new(&spec);
+
+    let a = graph.schemas().find(|s| s.name() == "A").unwrap();
+    let a_struct = match a {
+        SchemaIrTypeView::Struct(_, view) => view,
+        other => panic!("expected struct `A`; got {other:?}"),
+    };
+
+    // `fields()` must terminate and yield both A's own field
+    // and B's inherited fields.
+    let field_names = a_struct
+        .fields()
+        .map(|f| match f.name() {
+            IrStructFieldName::Name(n) => n,
+            other => panic!("expected named field; got {other:?}"),
+        })
+        .collect_vec();
+    assert_matches!(&*field_names, ["b_field", "kind", "a_field"]);
+
+    // `discriminator()` must also terminate, and B's `kind` discriminator
+    // should be visible on A's inherited field.
+    let kind_field = a_struct
+        .fields()
+        .find(|f| matches!(f.name(), IrStructFieldName::Name("kind")))
+        .unwrap();
+    assert!(kind_field.discriminator());
+    assert!(kind_field.inherited());
+
+    // A's own field should not be a discriminator.
+    let a_field = a_struct
+        .fields()
+        .find(|f| matches!(f.name(), IrStructFieldName::Name("a_field")))
+        .unwrap();
+    assert!(!a_field.discriminator());
+}
