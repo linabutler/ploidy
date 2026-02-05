@@ -201,6 +201,7 @@ pub enum InlineIrTypePathSegment<'a> {
     MapValue,
     ArrayItem,
     Variant(usize),
+    Parent(usize),
 }
 
 /// An enum type.
@@ -223,6 +224,10 @@ pub enum IrEnumVariant<'a> {
 pub struct IrStruct<'a> {
     pub description: Option<&'a str>,
     pub fields: Vec<IrStructField<'a>>,
+    /// Immediate parent types from `allOf`, in declaration order.
+    pub parents: Vec<IrType<'a>>,
+    /// The discriminator property name, if this struct defines one.
+    pub discriminator: Option<&'a str>,
 }
 
 /// A field in a struct.
@@ -232,8 +237,6 @@ pub struct IrStructField<'a> {
     pub ty: IrType<'a>,
     pub required: bool,
     pub description: Option<&'a str>,
-    pub inherited: bool,
-    pub discriminator: bool,
     pub flattened: bool,
 }
 

@@ -2,8 +2,8 @@ use itertools::Itertools;
 use ploidy_core::{
     codegen::UniqueNames,
     ir::{
-        ContainerView, InlineIrTypeView, IrStructFieldName, IrStructFieldView, IrStructView,
-        IrTypeView, PrimitiveIrType, Reach, SchemaIrTypeView, Traversal, View,
+        ContainerView, EdgeKind, InlineIrTypeView, IrStructFieldName, IrStructFieldView,
+        IrStructView, IrTypeView, PrimitiveIrType, Reach, SchemaIrTypeView, Traversal, View,
     },
 };
 use proc_macro2::TokenStream;
@@ -81,15 +81,25 @@ impl ToTokens for CodegenStruct<'_> {
         }
         let is_defaultable = self
             .ty
-            .traverse(Reach::Dependencies, |view| {
-                match view {
-                    IrTypeView::Schema(SchemaIrTypeView::Container(_, _))
-                    | IrTypeView::Inline(InlineIrTypeView::Container(_, _)) => {
+            .traverse(Reach::Dependencies, |kind, view| {
+                match (kind, view) {
+                    (
+                        EdgeKind::Reference,
+                        IrTypeView::Schema(SchemaIrTypeView::Container(_, _))
+                        | IrTypeView::Inline(InlineIrTypeView::Container(_, _)),
+                    ) => {
                         // All container types implement `Default`.
                         Traversal::Ignore
                     }
-                    IrTypeView::Schema(SchemaIrTypeView::Struct(_, view))
-                    | IrTypeView::Inline(InlineIrTypeView::Struct(_, view)) => {
+                    (
+                        EdgeKind::Reference | EdgeKind::Inherits,
+                        IrTypeView::Schema(SchemaIrTypeView::Struct(_, view))
+                        | IrTypeView::Inline(InlineIrTypeView::Struct(_, view)),
+                    ) => {
+                        // Structs may or may not implement `Default`,
+                        // depending on their fields. If this struct
+                        // inherits fields from another struct,
+                        // we need to consider that struct's fields, too.
                         if view
                             .fields()
                             .filter(|f| !f.discriminator())
@@ -104,7 +114,17 @@ impl ToTokens for CodegenStruct<'_> {
                             Traversal::Skip
                         }
                     }
-                    _ => Traversal::Visit,
+                    (EdgeKind::Inherits, _) => {
+                        // Inheriting from a non-struct type isn't semantically meaningful
+                        // because the parent doesn't contribute any fields, so we can
+                        // ignore it for the purposes of deriving `Default`.
+                        Traversal::Ignore
+                    }
+                    (EdgeKind::Reference, _) => {
+                        // Any other type that this struct references must be defaultable
+                        // for this struct to derive `Default`.
+                        Traversal::Visit
+                    }
                 }
             })
             .all(|ty| {
@@ -1251,6 +1271,78 @@ mod tests {
         assert_eq!(actual, expected);
     }
 
+    #[test]
+    fn test_struct_derives_default_when_inheriting_from_tagged_union() {
+        let doc = Document::from_yaml(indoc::indoc! {"
+            openapi: 3.0.0
+            info:
+              title: Test API
+              version: 1.0.0
+            paths: {}
+            components:
+              schemas:
+                Dog:
+                  type: object
+                  properties:
+                    bark:
+                      type: string
+                Cat:
+                  type: object
+                  properties:
+                    meow:
+                      type: string
+                Animal:
+                  oneOf:
+                    - $ref: '#/components/schemas/Dog'
+                    - $ref: '#/components/schemas/Cat'
+                  discriminator:
+                    propertyName: type
+                    mapping:
+                      dog: '#/components/schemas/Dog'
+                      cat: '#/components/schemas/Cat'
+                  properties:
+                    type:
+                      type: string
+                  required:
+                    - type
+                Corgi:
+                  allOf:
+                    - $ref: '#/components/schemas/Animal'
+                    - type: object
+                      properties:
+                        name:
+                          type: string
+        "})
+        .unwrap();
+
+        let spec = IrSpec::from_doc(&doc).unwrap();
+        let ir = IrGraph::new(&spec);
+        let graph = CodegenGraph::new(ir);
+
+        let schema = graph.schemas().find(|s| s.name() == "Corgi");
+        let Some(schema @ SchemaIrTypeView::Struct(_, struct_view)) = &schema else {
+            panic!("expected struct `Corgi`; got `{schema:?}`");
+        };
+
+        let name = CodegenTypeName::Schema(schema);
+        let codegen = CodegenStruct::new(name, struct_view);
+
+        let actual: syn::ItemStruct = parse_quote!(#codegen);
+        // `Corgi` inherits from the tagged union `Animal` via `allOf`.
+        // Inheriting from a tagged union isn't structurally meaningful;
+        // the union's variants aren't fields. Since `Corgi`'s own field
+        // (`name`) is optional, it should derive `Default`.
+        let expected: syn::ItemStruct = parse_quote! {
+            #[derive(Debug, Clone, PartialEq, Eq, Hash, Default, ::ploidy_util::serde::Serialize, ::ploidy_util::serde::Deserialize)]
+            #[serde(crate = "::ploidy_util::serde")]
+            pub struct Corgi {
+                #[serde(default, skip_serializing_if = "::ploidy_util::absent::AbsentOr::is_absent",)]
+                pub name: ::ploidy_util::absent::AbsentOr<::std::string::String>,
+            }
+        };
+        assert_eq!(actual, expected);
+    }
+
     // MARK: Boxing
 
     #[test]
@@ -1452,6 +1544,68 @@ mod tests {
                 pub value: ::std::string::String,
                 #[serde(default, skip_serializing_if = "::ploidy_util::absent::AbsentOr::is_absent",)]
                 pub children: ::ploidy_util::absent::AbsentOr<::std::vec::Vec<crate::types::Node>>,
+            }
+        };
+        assert_eq!(actual, expected);
+    }
+
+    // MARK: Inheritance
+
+    #[test]
+    fn test_struct_linearizes_inline_all_of_parent_fields() {
+        let doc = Document::from_yaml(indoc::indoc! {"
+            openapi: 3.0.0
+            info:
+              title: Test API
+              version: 1.0.0
+            paths: {}
+            components:
+              schemas:
+                Person:
+                  allOf:
+                    - type: object
+                      properties:
+                        name:
+                          type: string
+                      required:
+                        - name
+                    - type: object
+                      properties:
+                        age:
+                          type: integer
+                          format: int32
+                      required:
+                        - age
+                  properties:
+                    email:
+                      type: string
+                  required:
+                    - email
+        "})
+        .unwrap();
+
+        let spec = IrSpec::from_doc(&doc).unwrap();
+        let ir = IrGraph::new(&spec);
+        let graph = CodegenGraph::new(ir);
+
+        let schema = graph.schemas().find(|s| s.name() == "Person");
+        let Some(schema @ SchemaIrTypeView::Struct(_, struct_view)) = &schema else {
+            panic!("expected struct `Person`; got `{schema:?}`");
+        };
+
+        let name = CodegenTypeName::Schema(schema);
+        let codegen = CodegenStruct::new(name, struct_view);
+
+        let actual: syn::ItemStruct = parse_quote!(#codegen);
+        // Inherited fields from inline `allOf` parents should appear first
+        // in declaration order, followed by the struct's own fields.
+        let expected: syn::ItemStruct = parse_quote! {
+            #[derive(Debug, Clone, PartialEq, Eq, Hash, Default, ::ploidy_util::serde::Serialize, ::ploidy_util::serde::Deserialize)]
+            #[serde(crate = "::ploidy_util::serde")]
+            pub struct Person {
+                pub name: ::std::string::String,
+                pub age: i32,
+                pub email: ::std::string::String,
             }
         };
         assert_eq!(actual, expected);

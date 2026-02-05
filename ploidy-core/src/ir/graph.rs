@@ -1,10 +1,12 @@
 use std::{
     any::{Any, TypeId},
+    collections::VecDeque,
     fmt::Debug,
 };
 
 use atomic_refcell::AtomicRefCell;
 use by_address::ByAddress;
+use enum_map::{Enum, EnumMap, enum_map};
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use petgraph::{
@@ -13,7 +15,7 @@ use petgraph::{
     algo::{TarjanScc, tred},
     data::Build,
     graph::{DiGraph, NodeIndex},
-    visit::{IntoNeighbors, NodeCount},
+    visit::{EdgeFiltered, EdgeRef, IntoNeighbors, NodeCount, VisitMap, Visitable},
 };
 use rustc_hash::{FxHashMap, FxHashSet};
 
@@ -27,7 +29,7 @@ use super::{
 };
 
 /// The type graph.
-pub(super) type IrGraphG<'a> = DiGraph<IrGraphNode<'a>, (), usize>;
+pub(super) type IrGraphG<'a> = DiGraph<IrGraphNode<'a>, EdgeKind, usize>;
 
 /// A graph of all the types in an [`IrSpec`], where each edge
 /// is a reference from one type to another.
@@ -37,8 +39,6 @@ pub struct IrGraph<'a> {
     pub(super) g: IrGraphG<'a>,
     /// An inverted index of nodes to graph indices.
     pub(super) indices: FxHashMap<IrGraphNode<'a>, NodeIndex<usize>>,
-    /// Edges that are part of a cycle.
-    pub(super) circular_refs: FxHashSet<(NodeIndex<usize>, NodeIndex<usize>)>,
     /// Additional metadata for each node.
     pub(super) metadata: IrGraphMetadata<'a>,
 }
@@ -57,7 +57,7 @@ impl<'a> IrGraph<'a> {
         );
 
         // Add nodes for all types, and edges for references between them.
-        for (parent, child) in tys {
+        for (parent, kind, child) in tys {
             use std::collections::hash_map::Entry;
             let &mut to = match indices.entry(IrGraphNode::from_ref(spec, child.as_ref())) {
                 // We might see the same schema multiple times, if it's
@@ -78,30 +78,27 @@ impl<'a> IrGraph<'a> {
                     }
                 };
                 // Add a directed edge from parent to child.
-                g.add_edge(from, to, ());
+                g.add_edge(from, to, kind);
             }
         }
 
         let sccs = TopoSccs::new(&g);
 
-        // Precompute all circular reference edges, where both endpoints
-        // are in the same SCC, to speed up `needs_indirection()`.
-        let circular_refs = {
-            let mut edges = FxHashSet::default();
-            for members in sccs.iter() {
-                for node in members.ones().map(NodeIndex::new) {
-                    edges.extend(
-                        g.neighbors(node)
-                            .filter(|neighbor| members.contains(neighbor.index()))
-                            .map(|neighbor| (node, neighbor)),
-                    );
-                }
-            }
-            edges
-        };
-
         let metadata = {
-            let mut metadata = IrGraphMetadata::default();
+            let mut metadata = IrGraphMetadata {
+                scc_indices: {
+                    // Precompute SCC indices, using just the reference edges.
+                    // Inheritance edges don't contribute to cycles.
+                    let refs =
+                        EdgeFiltered::from_fn(&g, |e| matches!(e.weight(), EdgeKind::Reference));
+                    let mut scc = TarjanScc::new();
+                    scc.run(&refs, |_| ());
+                    g.node_indices()
+                        .map(|node| scc.node_component_index(&refs, node))
+                        .collect()
+                },
+                ..Default::default()
+            };
 
             // Precompute the set of type indices that each operation
             // references directly.
@@ -198,7 +195,6 @@ impl<'a> IrGraph<'a> {
             spec,
             indices,
             g,
-            circular_refs,
             metadata,
         }
     }
@@ -270,9 +266,21 @@ impl<'a> IrGraphNode<'a> {
     }
 }
 
+/// An edge between two types in the type graph.
+#[derive(Clone, Copy, Debug, Enum, Eq, Hash, PartialEq)]
+pub enum EdgeKind {
+    /// The source type contains or references the target type.
+    Reference,
+    /// The source type inherits from the target type.
+    Inherits,
+}
+
 /// Precomputed metadata for schema types and operations in the graph.
 #[derive(Debug, Default)]
 pub struct IrGraphMetadata<'a> {
+    /// Maps each node index to its strongly connected component index.
+    /// Nodes in the same SCC form a cycle.
+    pub scc_indices: Vec<usize>,
     pub schemas: FxHashMap<NodeIndex<usize>, IrGraphNodeMeta<'a>>,
     pub operations: FxHashMap<ByAddress<&'a IrOperation<'a>>, IrGraphOperationMeta>,
 }
@@ -312,86 +320,74 @@ impl Debug for IrGraphNodeMeta<'_> {
 /// Visits all the types and references contained within a type.
 #[derive(Debug)]
 struct IrTypeVisitor<'a> {
-    stack: Vec<(Option<&'a IrType<'a>>, &'a IrType<'a>)>,
+    stack: Vec<(Option<&'a IrType<'a>>, EdgeKind, &'a IrType<'a>)>,
 }
 
 impl<'a> IrTypeVisitor<'a> {
     /// Creates a visitor with `root` on the stack of types to visit.
     #[inline]
     fn new(roots: impl Iterator<Item = &'a IrType<'a>>) -> Self {
-        let mut stack = roots.map(|root| (None, root)).collect_vec();
+        let mut stack = roots
+            .map(|root| (None, EdgeKind::Reference, root))
+            .collect_vec();
         stack.reverse();
         Self { stack }
     }
 }
 
 impl<'a> Iterator for IrTypeVisitor<'a> {
-    type Item = (Option<&'a IrType<'a>>, &'a IrType<'a>);
+    type Item = (Option<&'a IrType<'a>>, EdgeKind, &'a IrType<'a>);
 
     fn next(&mut self) -> Option<Self::Item> {
-        let (parent, top) = self.stack.pop()?;
+        let (parent, kind, top) = self.stack.pop()?;
         match top {
-            IrType::Schema(SchemaIrType::Struct(_, ty)) => {
-                self.stack
-                    .extend(ty.fields.iter().map(|field| (Some(top), &field.ty)).rev());
+            IrType::Schema(SchemaIrType::Struct(_, ty))
+            | IrType::Inline(InlineIrType::Struct(_, ty)) => {
+                self.stack.extend(
+                    itertools::chain!(
+                        ty.fields
+                            .iter()
+                            .map(|field| (EdgeKind::Reference, &field.ty)),
+                        ty.parents.iter().map(|parent| (EdgeKind::Inherits, parent)),
+                    )
+                    .map(|(kind, ty)| (Some(top), kind, ty))
+                    .rev(),
+                );
             }
-            IrType::Schema(SchemaIrType::Untagged(_, ty)) => {
+            IrType::Schema(SchemaIrType::Untagged(_, ty))
+            | IrType::Inline(InlineIrType::Untagged(_, ty)) => {
                 self.stack.extend(
                     ty.variants
                         .iter()
                         .filter_map(|variant| match variant {
-                            IrUntaggedVariant::Some(_, ty) => Some((Some(top), ty)),
+                            IrUntaggedVariant::Some(_, ty) => {
+                                Some((Some(top), EdgeKind::Reference, ty))
+                            }
                             _ => None,
                         })
                         .rev(),
                 );
             }
-            IrType::Schema(SchemaIrType::Tagged(_, ty)) => {
+            IrType::Schema(SchemaIrType::Tagged(_, ty))
+            | IrType::Inline(InlineIrType::Tagged(_, ty)) => {
                 self.stack.extend(
                     ty.variants
                         .iter()
-                        .map(|variant| (Some(top), &variant.ty))
+                        .map(|variant| (Some(top), EdgeKind::Reference, &variant.ty))
                         .rev(),
                 );
             }
-            IrType::Schema(SchemaIrType::Container(_, container)) => {
-                self.stack.push((Some(top), &container.inner().ty));
+            IrType::Schema(SchemaIrType::Container(_, container))
+            | IrType::Inline(InlineIrType::Container(_, container)) => {
+                self.stack
+                    .push((Some(top), EdgeKind::Reference, &container.inner().ty));
             }
-            IrType::Schema(SchemaIrType::Enum(..)) => (),
+            IrType::Schema(SchemaIrType::Enum(..)) | IrType::Inline(InlineIrType::Enum(..)) => (),
             IrType::Any => (),
             IrType::Primitive(_) => (),
-            IrType::Inline(ty) => match ty {
-                InlineIrType::Container(_, container) => {
-                    self.stack.push((Some(top), &container.inner().ty));
-                }
-                InlineIrType::Enum(..) => (),
-                InlineIrType::Tagged(_, ty) => {
-                    self.stack.extend(
-                        ty.variants
-                            .iter()
-                            .map(|variant| (Some(top), &variant.ty))
-                            .rev(),
-                    );
-                }
-                InlineIrType::Untagged(_, ty) => {
-                    self.stack.extend(
-                        ty.variants
-                            .iter()
-                            .filter_map(|variant| match variant {
-                                IrUntaggedVariant::Some(_, ty) => Some((Some(top), ty)),
-                                _ => None,
-                            })
-                            .rev(),
-                    );
-                }
-                InlineIrType::Struct(_, ty) => {
-                    self.stack
-                        .extend(ty.fields.iter().map(|field| (Some(top), &field.ty)).rev());
-                }
-            },
             IrType::Ref(_) => (),
         }
-        Some((parent, top))
+        Some((parent, kind, top))
     }
 }
 
@@ -460,7 +456,7 @@ impl<'a, N, E> TopoSccs<'a, N, E> {
     }
 
     /// Iterates over the SCCs in topological order.
-    #[inline]
+    #[cfg(test)]
     fn iter(&self) -> std::slice::Iter<'_, FixedBitSet> {
         self.sccs.iter()
     }
@@ -487,6 +483,129 @@ impl<'a, N, E> TopoSccs<'a, N, E> {
         }
         dag
     }
+}
+
+/// Controls how to continue traversing the graph when at a node.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum Traversal {
+    /// Yield this node, then explore its neighbors.
+    Visit,
+    /// Yield this node, but skip its neighbors.
+    Stop,
+    /// Don't yield this node, but explore its neighbors.
+    Skip,
+    /// Don't yield this node, and skip its neighbors.
+    Ignore,
+}
+
+/// Edge-kind-aware breadth-first traversal of the type graph.
+///
+/// [`Traverse`] tracks discovered nodes separately per [`EdgeKind`],
+/// so a node that's reachable via both reference and inheritance edges
+/// is visited once for each kind.
+///
+/// Use [`Traverse::run`] with a filter to control which nodes are
+/// yielded and explored.
+pub struct Traverse<'a> {
+    graph: &'a IrGraphG<'a>,
+    stack: VecDeque<(EdgeKind, NodeIndex<usize>)>,
+    discovered: EnumMap<EdgeKind, FixedBitSet>,
+    direction: Direction,
+}
+
+impl<'a> Traverse<'a> {
+    pub fn from_roots(
+        graph: &'a IrGraphG<'a>,
+        roots: EnumMap<EdgeKind, FixedBitSet>,
+        direction: Direction,
+    ) -> Self {
+        let mut stack = VecDeque::new();
+        let mut discovered = enum_map!(_ => graph.visit_map());
+        for (kind, indices) in roots {
+            stack.extend(indices.ones().map(|index| (kind, NodeIndex::new(index))));
+            discovered[kind].union_with(&indices);
+        }
+        Self {
+            graph,
+            stack,
+            discovered,
+            direction,
+        }
+    }
+
+    pub fn from_neighbors(
+        graph: &'a IrGraphG<'a>,
+        root: NodeIndex<usize>,
+        direction: Direction,
+    ) -> Self {
+        let mut stack = VecDeque::new();
+        let mut discovered = enum_map! {
+            _ => {
+                let mut map = graph.visit_map();
+                map.visit(root);
+                map
+            }
+        };
+        for (kind, neighbors) in neighbors(graph, root, direction) {
+            stack.extend(
+                neighbors
+                    .difference(&discovered[kind])
+                    .map(|index| (kind, NodeIndex::new(index))),
+            );
+            discovered[kind].union_with(&neighbors);
+        }
+        Self {
+            graph,
+            stack,
+            discovered,
+            direction,
+        }
+    }
+
+    pub fn run<F>(mut self, filter: F) -> impl Iterator<Item = NodeIndex<usize>> + use<'a, F>
+    where
+        F: Fn(EdgeKind, NodeIndex<usize>) -> Traversal,
+    {
+        std::iter::from_fn(move || {
+            while let Some((kind, index)) = self.stack.pop_front() {
+                let traversal = filter(kind, index);
+
+                if matches!(traversal, Traversal::Visit | Traversal::Skip) {
+                    for (kind, neighbors) in neighbors(self.graph, index, self.direction) {
+                        for neighbor in neighbors.difference(&self.discovered[kind]) {
+                            self.stack.push_back((kind, NodeIndex::new(neighbor)));
+                        }
+                        self.discovered[kind].union_with(&neighbors);
+                    }
+                }
+
+                if matches!(traversal, Traversal::Visit | Traversal::Stop) {
+                    return Some(index);
+                }
+
+                // `Skip` and `Ignore` continue the loop without yielding.
+            }
+            None
+        })
+    }
+}
+
+/// Returns the neighbors of `node` in the given `direction`,
+/// grouped by their [`EdgeKind`].
+fn neighbors(
+    graph: &IrGraphG<'_>,
+    node: NodeIndex<usize>,
+    direction: Direction,
+) -> EnumMap<EdgeKind, FixedBitSet> {
+    let mut neighbors = enum_map!(_ => graph.visit_map());
+    for edge in graph.edges_directed(node, direction) {
+        let neighbor = match direction {
+            Direction::Outgoing => edge.target(),
+            Direction::Incoming => edge.source(),
+        };
+        neighbors[*edge.weight()].insert(neighbor.index());
+    }
+    neighbors
 }
 
 #[cfg(test)]

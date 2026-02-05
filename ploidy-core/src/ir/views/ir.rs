@@ -1,4 +1,3 @@
-use either::Either;
 use petgraph::graph::NodeIndex;
 
 use crate::ir::graph::{IrGraph, IrGraphNode};
@@ -7,40 +6,6 @@ use super::{
     View, container::ContainerView, inline::InlineIrTypeView, primitive::IrPrimitiveView,
     schema::SchemaIrTypeView,
 };
-
-/// Generates a `match` expression that wraps each arm in nested [`Either`] variants.
-/// All arms except the last are wrapped in `depth` [`Either::Right`]s around an
-/// [`Either::Left`]. The last arm is wrapped in `depth` [`Either::Right`]s around
-/// the last expression.
-macro_rules! either {
-    (match $val:tt { $($body:tt)+ }) => {
-        either!(@collect $val; []; []; $($body)+)
-    };
-    // All arms except the last.
-    (@collect $val:expr; [$($arms:tt)*]; [$($depth:tt)*]; $pat:pat => $expr:expr, $($rest:tt)+) => {
-        either!(@collect $val;
-            [$($arms)* $pat => either!(@left [$($depth)*] $expr),];
-            [$($depth)* R];
-            $($rest)+)
-    };
-    // Last arm.
-    (@collect $val:expr; [$($arms:tt)*]; [$($depth:tt)*]; $pat:pat => $expr:expr $(,)?) => {
-        match $val {
-            $($arms)*
-            $pat => either!(@right [$($depth)*] $expr),
-        }
-    };
-    // Wrap with `depth` `Right`s, then a `Left`.
-    (@left [] $expr:expr) => { Either::Left($expr) };
-    (@left [R $($rest:tt)*] $expr:expr) => {
-        Either::Right(either!(@left [$($rest)*] $expr))
-    };
-    // Wrap with `depth` `Right`s only, for the last arm.
-    (@right [] $expr:expr) => { $expr };
-    (@right [R $($rest:tt)*] $expr:expr) => {
-        Either::Right(either!(@right [$($rest)*] $expr))
-    };
-}
 
 /// A graph-aware view of an [`IrType`][crate::ir::IrType].
 #[derive(Debug)]
