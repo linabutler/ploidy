@@ -1,4 +1,6 @@
-use ploidy_core::ir::{ExtendableView, InlineIrTypePathRoot, IrTypeView};
+use ploidy_core::ir::{
+    ContainerView, ExtendableView, InlineIrTypePathRoot, InlineIrTypeView, IrTypeView,
+};
 use proc_macro2::TokenStream;
 use quote::{ToTokens, TokenStreamExt, quote};
 use syn::parse_quote;
@@ -26,44 +28,46 @@ impl ToTokens for CodegenRef<'_> {
                 let ty = CodegenPrimitive::new(ty);
                 quote!(#ty)
             }
-            IrTypeView::Array(ty) => {
-                let inner = ty.inner();
-                let ty = CodegenRef::new(&inner);
-                quote! { ::std::vec::Vec<#ty> }
-            }
-            IrTypeView::Map(ty) => {
-                let inner = ty.inner();
-                let ty = CodegenRef::new(&inner);
-                quote! { ::std::collections::BTreeMap<::std::string::String, #ty> }
-            }
-            IrTypeView::Optional(ty) => {
-                let inner = ty.inner();
-                let ty = CodegenRef::new(&inner);
-                quote! { ::std::option::Option<#ty> }
-            }
             IrTypeView::Any => quote! { ::ploidy_util::serde_json::Value },
+            // Emit inline container types directly. (Note that we only do this for inlines;
+            // named schema containers are always emitted as references).
+            IrTypeView::Inline(InlineIrTypeView::Container(_, ContainerView::Array(inner))) => {
+                let inner_ty = inner.ty();
+                let inner_ref = CodegenRef::new(&inner_ty);
+                quote! { ::std::vec::Vec<#inner_ref> }
+            }
+            IrTypeView::Inline(InlineIrTypeView::Container(_, ContainerView::Map(inner))) => {
+                let inner_ty = inner.ty();
+                let inner_ref = CodegenRef::new(&inner_ty);
+                quote! { ::std::collections::BTreeMap<::std::string::String, #inner_ref> }
+            }
+            IrTypeView::Inline(InlineIrTypeView::Container(_, ContainerView::Optional(inner))) => {
+                let inner_ty = inner.ty();
+                let inner_ref = CodegenRef::new(&inner_ty);
+                quote! { ::std::option::Option<#inner_ref> }
+            }
             IrTypeView::Inline(ty) => {
                 let path = ty.path();
                 let root: syn::Path = match path.root {
                     InlineIrTypePathRoot::Resource(resource) => {
                         let feature = resource.map(CargoFeature::from_name).unwrap_or_default();
-                        let module = CodegenIdentUsage::Module(feature.as_ident());
-                        parse_quote!(crate::client::#module::types)
+                        let mod_name = CodegenIdentUsage::Module(feature.as_ident());
+                        parse_quote!(crate::client::#mod_name::types)
                     }
                     InlineIrTypePathRoot::Type(name) => {
-                        let ident = CodegenIdent::new(name);
-                        let module = CodegenIdentUsage::Module(&ident);
-                        parse_quote!(crate::types::#module::types)
+                        let mod_ident = CodegenIdent::new(name);
+                        let mod_name = CodegenIdentUsage::Module(&mod_ident);
+                        parse_quote!(crate::types::#mod_name::types)
                     }
                 };
-                let name = CodegenTypeName::Inline(ty);
-                parse_quote!(#root::#name)
+                let ty_name = CodegenTypeName::Inline(ty);
+                parse_quote!(#root::#ty_name)
             }
-            IrTypeView::Schema(view) => {
-                let ext = view.extensions();
-                let ident = ext.get::<CodegenIdent>().unwrap();
-                let usage = CodegenIdentUsage::Type(&ident);
-                quote! { crate::types::#usage }
+            IrTypeView::Schema(ty) => {
+                let ext = ty.extensions();
+                let ty_ident = ext.get::<CodegenIdent>().unwrap();
+                let ty_name = CodegenIdentUsage::Type(&ty_ident);
+                quote! { crate::types::#ty_name }
             }
         })
     }
@@ -74,7 +78,10 @@ mod tests {
     use super::*;
 
     use ploidy_core::{
-        ir::{IrGraph, IrSpec, IrStructFieldName, IrTypeView, SchemaIrTypeView},
+        ir::{
+            ContainerView, InlineIrTypeView, IrGraph, IrSpec, IrStructFieldName, IrTypeView,
+            SchemaIrTypeView,
+        },
         parse::Document,
     };
     use pretty_assertions::assert_eq;
@@ -91,7 +98,7 @@ mod tests {
         assert_eq!(actual, expected);
     }
 
-    // MARK: Wrappers
+    // MARK: Containers
 
     #[test]
     fn test_codegen_ref_array_of_strings() {
@@ -295,7 +302,10 @@ mod tests {
             .find(|f| matches!(f.name(), IrStructFieldName::Name("value")))
             .unwrap();
         let ty = field.ty();
-        assert_matches!(ty, IrTypeView::Optional(_));
+        assert_matches!(
+            ty,
+            IrTypeView::Inline(InlineIrTypeView::Container(_, ContainerView::Optional(_)))
+        );
 
         let ref_ = CodegenRef::new(&ty);
         let actual: syn::Type = parse_quote!(#ref_);
@@ -336,7 +346,10 @@ mod tests {
             .find(|f| matches!(f.name(), IrStructFieldName::Name("count")))
             .unwrap();
         let ty = field.ty();
-        assert_matches!(ty, IrTypeView::Optional(_));
+        assert_matches!(
+            ty,
+            IrTypeView::Inline(InlineIrTypeView::Container(_, ContainerView::Optional(_)))
+        );
 
         let ref_ = CodegenRef::new(&ty);
         let actual: syn::Type = parse_quote!(#ref_);
@@ -344,7 +357,7 @@ mod tests {
         assert_eq!(actual, expected);
     }
 
-    // MARK: Nested wrappers
+    // MARK: Nested containers
 
     #[test]
     fn test_codegen_ref_array_of_arrays() {
@@ -426,7 +439,10 @@ mod tests {
             .find(|f| matches!(f.name(), IrStructFieldName::Name("items")))
             .unwrap();
         let ty = field.ty();
-        assert_matches!(ty, IrTypeView::Optional(_));
+        assert_matches!(
+            ty,
+            IrTypeView::Inline(InlineIrTypeView::Container(_, ContainerView::Optional(_)))
+        );
 
         let ref_ = CodegenRef::new(&ty);
         let actual: syn::Type = parse_quote!(#ref_);
@@ -561,6 +577,41 @@ mod tests {
         let expected: syn::Type = parse_quote! {
             ::std::vec::Vec<crate::types::User>
         };
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn test_codegen_ref_container_schema() {
+        // A reference to a named container schema should generate
+        // `crate::types::Name`, the same as any other schema.
+        // The actual schema is emitted as a type alias.
+        let doc = Document::from_yaml(indoc::indoc! {"
+            openapi: 3.0.0
+            info:
+              title: Test API
+              version: 1.0.0
+            paths: {}
+            components:
+              schemas:
+                Tags:
+                  type: array
+                  items:
+                    type: string
+        "})
+        .unwrap();
+
+        let spec = IrSpec::from_doc(&doc).unwrap();
+        let ir = IrGraph::new(&spec);
+        let graph = CodegenGraph::new(ir);
+
+        let schema = graph
+            .schemas()
+            .find(|s| s.name() == "Tags")
+            .expect("expected schema `Tags`");
+        let ty = IrTypeView::Schema(schema);
+        let ref_ = CodegenRef::new(&ty);
+        let actual: syn::Type = parse_quote!(#ref_);
+        let expected: syn::Type = parse_quote!(crate::types::Tags);
         assert_eq!(actual, expected);
     }
 

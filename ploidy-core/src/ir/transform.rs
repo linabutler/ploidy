@@ -7,10 +7,10 @@ use crate::parse::{AdditionalProperties, ComponentRef, Document, Format, RefOrSc
 use super::{
     fields::{IrSchemaField, all_fields},
     types::{
-        InlineIrType, InlineIrTypePath, InlineIrTypePathRoot, InlineIrTypePathSegment, IrEnum,
-        IrEnumVariant, IrStruct, IrStructField, IrStructFieldName, IrStructFieldNameHint, IrTagged,
-        IrTaggedVariant, IrType, IrTypeName, IrUntagged, IrUntaggedVariant,
-        IrUntaggedVariantNameHint, PrimitiveIrType, SchemaIrType,
+        Container, InlineIrType, InlineIrTypePath, InlineIrTypePathRoot, InlineIrTypePathSegment,
+        Inner, IrEnum, IrEnumVariant, IrStruct, IrStructField, IrStructFieldName,
+        IrStructFieldNameHint, IrTagged, IrTaggedVariant, IrType, IrTypeName, IrUntagged,
+        IrUntaggedVariant, IrUntaggedVariantNameHint, PrimitiveIrType, SchemaIrType,
     },
 };
 
@@ -134,6 +134,7 @@ impl<'context, 'a> IrTransformer<'context, 'a> {
         let Some(one_of) = &self.schema.one_of else {
             return Err(self);
         };
+
         let variants = one_of
             .iter()
             .enumerate()
@@ -160,8 +161,14 @@ impl<'context, 'a> IrTransformer<'context, 'a> {
                 ty.map(|ty| {
                     let hint = match &ty {
                         &IrType::Primitive(ty) => IrUntaggedVariantNameHint::Primitive(ty),
-                        IrType::Array(_) => IrUntaggedVariantNameHint::Array,
-                        IrType::Map(_) => IrUntaggedVariantNameHint::Map,
+                        IrType::Inline(InlineIrType::Container(_, Container::Array(_)))
+                        | IrType::Schema(SchemaIrType::Container(_, Container::Array(_))) => {
+                            IrUntaggedVariantNameHint::Array
+                        }
+                        IrType::Inline(InlineIrType::Container(_, Container::Map(_)))
+                        | IrType::Schema(SchemaIrType::Container(_, Container::Map(_))) => {
+                            IrUntaggedVariantNameHint::Map
+                        }
                         _ => IrUntaggedVariantNameHint::Index(index),
                     };
                     IrUntaggedVariant::Some(hint, ty)
@@ -169,24 +176,40 @@ impl<'context, 'a> IrTransformer<'context, 'a> {
                 .unwrap_or(IrUntaggedVariant::Null)
             })
             .collect_vec();
+
         Ok(match &*variants {
             [] => IrType::Any,
+
+            // Unwrap single-variant untagged unions.
             [IrUntaggedVariant::Null] => IrType::Any,
             [IrUntaggedVariant::Some(_, ty)] => ty.clone(),
-            [IrUntaggedVariant::Some(_, ty), IrUntaggedVariant::Null] => {
-                IrType::Optional(ty.clone().into())
+
+            // Simplify two-variant untagged unions, where one is a type
+            // and the other is `null`, into optionals.
+            [IrUntaggedVariant::Some(_, ty), IrUntaggedVariant::Null]
+            | [IrUntaggedVariant::Null, IrUntaggedVariant::Some(_, ty)] => {
+                let container = Container::Optional(Inner {
+                    description: self.schema.description.as_deref(),
+                    ty: ty.clone().into(),
+                });
+                match self.name {
+                    IrTypeName::Schema(info) => SchemaIrType::Container(info, container).into(),
+                    IrTypeName::Inline(path) => {
+                        InlineIrType::Container(path.clone(), container).into()
+                    }
+                }
             }
-            [IrUntaggedVariant::Null, IrUntaggedVariant::Some(_, ty)] => {
-                IrType::Optional(ty.clone().into())
-            }
+
             _ => {
                 let untagged = IrUntagged {
                     description: self.schema.description.as_deref(),
                     variants,
                 };
-                match self.name {
-                    IrTypeName::Schema(info) => SchemaIrType::Untagged(info, untagged).into(),
-                    IrTypeName::Inline(path) => InlineIrType::Untagged(path, untagged).into(),
+                match &self.name {
+                    IrTypeName::Schema(info) => SchemaIrType::Untagged(*info, untagged).into(),
+                    IrTypeName::Inline(path) => {
+                        InlineIrType::Untagged(path.clone(), untagged).into()
+                    }
                 }
             }
         })
@@ -196,13 +219,13 @@ impl<'context, 'a> IrTransformer<'context, 'a> {
         let Some(any_of) = &self.schema.any_of else {
             return Err(self);
         };
-        if let [schema] = any_of.as_slice() {
+        if let [schema] = &**any_of {
             // A single-variant `anyOf` should unwrap to the variant type. This
             // preserves type references that would otherwise become `Any`.
             return Ok(match schema {
                 RefOrSchema::Ref(r) => IrType::Ref(&r.path),
                 RefOrSchema::Other(schema) => {
-                    let path = match &self.name {
+                    let path = match self.name {
                         IrTypeName::Schema(info) => InlineIrTypePath {
                             root: InlineIrTypePathRoot::Type(info.name),
                             segments: vec![],
@@ -255,7 +278,26 @@ impl<'context, 'a> IrTransformer<'context, 'a> {
                     }
                 };
                 // Flattened `anyOf` fields are always optional.
-                let ty = IrType::Optional(ty.into());
+                let path = match &self.name {
+                    IrTypeName::Schema(info) => InlineIrTypePath {
+                        root: InlineIrTypePathRoot::Type(info.name),
+                        segments: vec![InlineIrTypePathSegment::Field(field_name)],
+                    },
+                    IrTypeName::Inline(path) => {
+                        let mut path = path.clone();
+                        path.segments
+                            .push(InlineIrTypePathSegment::Field(field_name));
+                        path
+                    }
+                };
+                let ty = InlineIrType::Container(
+                    path,
+                    Container::Optional(Inner {
+                        description,
+                        ty: ty.into(),
+                    }),
+                )
+                .into();
                 IrStructField {
                     name: field_name,
                     ty,
@@ -325,7 +367,29 @@ impl<'context, 'a> IrTransformer<'context, 'a> {
                 // explicitly nullable, or implicitly optional. The `required`
                 // flag distinguishes between the two for codegen.
                 let ty = if nullable || !info.required {
-                    IrType::Optional(ty.into())
+                    let path = match &self.name {
+                        IrTypeName::Schema(info) => InlineIrTypePath {
+                            root: InlineIrTypePathRoot::Type(info.name),
+                            segments: vec![InlineIrTypePathSegment::Field(
+                                IrStructFieldName::Name(field_name),
+                            )],
+                        },
+                        IrTypeName::Inline(path) => {
+                            let mut path = path.clone();
+                            path.segments.push(InlineIrTypePathSegment::Field(
+                                IrStructFieldName::Name(field_name),
+                            ));
+                            path
+                        }
+                    };
+                    InlineIrType::Container(
+                        path,
+                        Container::Optional(Inner {
+                            description,
+                            ty: ty.into(),
+                        }),
+                    )
+                    .into()
                 } else {
                     ty
                 };
@@ -457,7 +521,29 @@ impl<'context, 'a> IrTransformer<'context, 'a> {
                 // explicitly nullable, or implicitly optional. The `required`
                 // flag distinguishes between the two for codegen.
                 let ty = if nullable || !info.required {
-                    IrType::Optional(ty.into())
+                    let path = match &self.name {
+                        IrTypeName::Schema(info) => InlineIrTypePath {
+                            root: InlineIrTypePathRoot::Type(info.name),
+                            segments: vec![InlineIrTypePathSegment::Field(
+                                IrStructFieldName::Name(field_name),
+                            )],
+                        },
+                        IrTypeName::Inline(path) => {
+                            let mut path = path.clone();
+                            path.segments.push(InlineIrTypePathSegment::Field(
+                                IrStructFieldName::Name(field_name),
+                            ));
+                            path
+                        }
+                    };
+                    InlineIrType::Container(
+                        path,
+                        Container::Optional(Inner {
+                            description,
+                            ty: ty.into(),
+                        }),
+                    )
+                    .into()
                 } else {
                     ty
                 };
@@ -483,36 +569,52 @@ impl<'context, 'a> IrTransformer<'context, 'a> {
     }
 
     fn other(self) -> IrType<'a> {
-        let variants = self
-            .schema
-            .ty
-            .iter()
-            .map(|&ty| match (ty, self.schema.format) {
-                (Ty::String, Some(Format::DateTime)) => PrimitiveIrType::DateTime.into(),
-                (Ty::String, Some(Format::Date)) => PrimitiveIrType::Date.into(),
-                (Ty::String, Some(Format::Uri)) => PrimitiveIrType::Url.into(),
-                (Ty::String, Some(Format::Uuid)) => PrimitiveIrType::Uuid.into(),
-                (Ty::String, Some(Format::Byte)) => PrimitiveIrType::Bytes.into(),
-                (Ty::String, Some(Format::Binary)) => PrimitiveIrType::Binary.into(),
-                (Ty::String, _) => PrimitiveIrType::String.into(),
+        let mut other = Other {
+            variants: Vec::with_capacity(self.schema.ty.len()),
+            nullable: false,
+        };
 
-                (Ty::Integer, Some(Format::Int8)) => PrimitiveIrType::I8.into(),
-                (Ty::Integer, Some(Format::UInt8)) => PrimitiveIrType::U8.into(),
-                (Ty::Integer, Some(Format::Int16)) => PrimitiveIrType::I16.into(),
-                (Ty::Integer, Some(Format::UInt16)) => PrimitiveIrType::U16.into(),
-                (Ty::Integer, Some(Format::Int32)) => PrimitiveIrType::I32.into(),
-                (Ty::Integer, Some(Format::UInt32)) => PrimitiveIrType::U32.into(),
-                (Ty::Integer, Some(Format::Int64)) => PrimitiveIrType::I64.into(),
-                (Ty::Integer, Some(Format::UInt64)) => PrimitiveIrType::U64.into(),
-                (Ty::Integer, Some(Format::UnixTime)) => PrimitiveIrType::UnixTime.into(),
-                (Ty::Integer, _) => PrimitiveIrType::I32.into(),
+        for ty in &self.schema.ty {
+            let variant = match (ty, self.schema.format) {
+                (Ty::String, Some(Format::DateTime)) => {
+                    OtherVariant::Primitive(PrimitiveIrType::DateTime)
+                }
+                (Ty::String, Some(Format::Date)) => OtherVariant::Primitive(PrimitiveIrType::Date),
+                (Ty::String, Some(Format::Uri)) => OtherVariant::Primitive(PrimitiveIrType::Url),
+                (Ty::String, Some(Format::Uuid)) => OtherVariant::Primitive(PrimitiveIrType::Uuid),
+                (Ty::String, Some(Format::Byte)) => OtherVariant::Primitive(PrimitiveIrType::Bytes),
+                (Ty::String, Some(Format::Binary)) => {
+                    OtherVariant::Primitive(PrimitiveIrType::Binary)
+                }
+                (Ty::String, _) => OtherVariant::Primitive(PrimitiveIrType::String),
 
-                (Ty::Number, Some(Format::Float)) => PrimitiveIrType::F32.into(),
-                (Ty::Number, Some(Format::Double)) => PrimitiveIrType::F64.into(),
-                (Ty::Number, Some(Format::UnixTime)) => PrimitiveIrType::UnixTime.into(),
-                (Ty::Number, _) => PrimitiveIrType::F64.into(),
+                (Ty::Integer, Some(Format::Int8)) => OtherVariant::Primitive(PrimitiveIrType::I8),
+                (Ty::Integer, Some(Format::UInt8)) => OtherVariant::Primitive(PrimitiveIrType::U8),
+                (Ty::Integer, Some(Format::Int16)) => OtherVariant::Primitive(PrimitiveIrType::I16),
+                (Ty::Integer, Some(Format::UInt16)) => {
+                    OtherVariant::Primitive(PrimitiveIrType::U16)
+                }
+                (Ty::Integer, Some(Format::Int32)) => OtherVariant::Primitive(PrimitiveIrType::I32),
+                (Ty::Integer, Some(Format::UInt32)) => {
+                    OtherVariant::Primitive(PrimitiveIrType::U32)
+                }
+                (Ty::Integer, Some(Format::Int64)) => OtherVariant::Primitive(PrimitiveIrType::I64),
+                (Ty::Integer, Some(Format::UInt64)) => {
+                    OtherVariant::Primitive(PrimitiveIrType::U64)
+                }
+                (Ty::Integer, Some(Format::UnixTime)) => {
+                    OtherVariant::Primitive(PrimitiveIrType::UnixTime)
+                }
+                (Ty::Integer, _) => OtherVariant::Primitive(PrimitiveIrType::I32),
 
-                (Ty::Boolean, _) => PrimitiveIrType::Bool.into(),
+                (Ty::Number, Some(Format::Float)) => OtherVariant::Primitive(PrimitiveIrType::F32),
+                (Ty::Number, Some(Format::Double)) => OtherVariant::Primitive(PrimitiveIrType::F64),
+                (Ty::Number, Some(Format::UnixTime)) => {
+                    OtherVariant::Primitive(PrimitiveIrType::UnixTime)
+                }
+                (Ty::Number, _) => OtherVariant::Primitive(PrimitiveIrType::F64),
+
+                (Ty::Boolean, _) => OtherVariant::Primitive(PrimitiveIrType::Bool),
 
                 (Ty::Array, _) => {
                     let items = match &self.schema.items {
@@ -533,14 +635,22 @@ impl<'context, 'a> IrTransformer<'context, 'a> {
                         }
                         None => IrType::Any,
                     };
-                    let ty = IrType::Array(items.into());
-                    IrUntaggedVariant::Some(IrUntaggedVariantNameHint::Array, ty)
+                    OtherVariant::Array(
+                        &self.name,
+                        Inner {
+                            description: self.schema.description.as_deref(),
+                            ty: items.into(),
+                        },
+                    )
                 }
 
                 (Ty::Object, _) => {
-                    let ty = match &self.schema.additional_properties {
+                    let inner = match &self.schema.additional_properties {
                         Some(AdditionalProperties::RefOrSchema(RefOrSchema::Ref(r))) => {
-                            IrType::Map(IrType::Ref(&r.path).into())
+                            Some(Inner {
+                                description: self.schema.description.as_deref(),
+                                ty: IrType::Ref(&r.path).into(),
+                            })
                         }
                         Some(AdditionalProperties::RefOrSchema(RefOrSchema::Other(schema))) => {
                             let path = match &self.name {
@@ -554,38 +664,175 @@ impl<'context, 'a> IrTransformer<'context, 'a> {
                                     path
                                 }
                             };
-                            IrType::Map(transform_with_context(self.context, path, schema).into())
+                            Some(Inner {
+                                description: self.schema.description.as_deref(),
+                                ty: transform_with_context(self.context, path, schema).into(),
+                            })
                         }
-                        Some(AdditionalProperties::Bool(true)) => IrType::Map(IrType::Any.into()),
-                        _ => IrType::Any,
+                        Some(AdditionalProperties::Bool(true)) => Some(Inner {
+                            description: self.schema.description.as_deref(),
+                            ty: IrType::Any.into(),
+                        }),
+                        _ => None,
                     };
-                    IrUntaggedVariant::Some(IrUntaggedVariantNameHint::Map, ty)
+                    match inner {
+                        Some(inner) => OtherVariant::Map(&self.name, inner),
+                        None => OtherVariant::Any,
+                    }
                 }
 
-                (Ty::Null, _) => IrUntaggedVariant::Null,
-            })
-            .collect_vec();
+                (Ty::Null, _) => {
+                    other.nullable = true;
+                    continue;
+                }
+            };
+            other.variants.push(variant);
+        }
 
-        match &*variants {
-            [] => IrType::Any,
-            [IrUntaggedVariant::Null] => IrType::Any,
-            [IrUntaggedVariant::Some(_, ty)] => ty.clone(),
-            [IrUntaggedVariant::Some(_, ty), IrUntaggedVariant::Null] => {
-                IrType::Optional(ty.clone().into())
+        match (&*other.variants, other.nullable) {
+            // An empty `type` array is invalid in JSON Schema,
+            // but we treat it as "any type".
+            ([], false) => IrType::Any,
+
+            // A `null` variant becomes `Any`.
+            ([], true) => IrType::Any,
+
+            // A union with a single, non-`null` variant unwraps to
+            // the type of that variant.
+            ([variant], false) => variant.to_type(),
+
+            // A two-variant union, with one type T and one `null` variant,
+            // simplifies to `Optional(T)`.
+            ([variant], true) => {
+                let container = Container::Optional(Inner {
+                    description: self.schema.description.as_deref(),
+                    ty: variant.to_inline_type().into(),
+                });
+                match self.name {
+                    IrTypeName::Schema(info) => SchemaIrType::Container(info, container).into(),
+                    IrTypeName::Inline(path) => {
+                        InlineIrType::Container(path.clone(), container).into()
+                    }
+                }
             }
-            [IrUntaggedVariant::Null, IrUntaggedVariant::Some(_, ty)] => {
-                IrType::Optional(ty.clone().into())
-            }
-            _ => {
+
+            // Anything else becomes an untagged union.
+            (many, nullable) => {
+                let mut variants = many
+                    .iter()
+                    .enumerate()
+                    .map(|(index, variant)| (index + 1, variant))
+                    .map(|(index, variant)| {
+                        IrUntaggedVariant::Some(
+                            variant
+                                .hint()
+                                .unwrap_or(IrUntaggedVariantNameHint::Index(index)),
+                            variant.to_type(),
+                        )
+                    })
+                    .collect_vec();
+                if nullable {
+                    variants.push(IrUntaggedVariant::Null);
+                }
                 let untagged = IrUntagged {
                     description: self.schema.description.as_deref(),
                     variants,
                 };
                 match self.name {
                     IrTypeName::Schema(info) => SchemaIrType::Untagged(info, untagged).into(),
-                    IrTypeName::Inline(path) => InlineIrType::Untagged(path, untagged).into(),
+                    IrTypeName::Inline(path) => {
+                        InlineIrType::Untagged(path.clone(), untagged).into()
+                    }
                 }
             }
+        }
+    }
+}
+
+/// A union of variants for representing OpenAPI 3.1-style
+/// `type` arrays.
+struct Other<'name, 'a> {
+    variants: Vec<OtherVariant<'name, 'a>>,
+    nullable: bool,
+}
+
+/// A variant of an [`Other`] union.
+enum OtherVariant<'name, 'a> {
+    Primitive(PrimitiveIrType),
+    Array(&'name IrTypeName<'a>, Inner<'a>),
+    Map(&'name IrTypeName<'a>, Inner<'a>),
+    Any,
+}
+
+impl<'name, 'a> OtherVariant<'name, 'a> {
+    /// Returns the name hint for this variant when used in an untagged union.
+    fn hint(&self) -> Option<IrUntaggedVariantNameHint> {
+        Some(match self {
+            &Self::Primitive(p) => IrUntaggedVariantNameHint::Primitive(p),
+            Self::Array(..) => IrUntaggedVariantNameHint::Array,
+            Self::Map(..) => IrUntaggedVariantNameHint::Map,
+            Self::Any => return None,
+        })
+    }
+
+    /// Converts this variant to an [`IrType`].
+    ///
+    /// This is used to unwrap variants for the single-variant
+    /// and untagged union cases.
+    fn to_type(&self) -> IrType<'a> {
+        match self {
+            &Self::Primitive(p) => IrType::Primitive(p),
+            Self::Array(name, inner) => {
+                let container = Container::Array(inner.clone());
+                match name {
+                    IrTypeName::Schema(info) => SchemaIrType::Container(*info, container).into(),
+                    IrTypeName::Inline(path) => {
+                        InlineIrType::Container(path.clone(), container).into()
+                    }
+                }
+            }
+            Self::Map(name, inner) => {
+                let container = Container::Map(inner.clone());
+                match name {
+                    IrTypeName::Schema(info) => SchemaIrType::Container(*info, container).into(),
+                    IrTypeName::Inline(path) => {
+                        InlineIrType::Container(path.clone(), container).into()
+                    }
+                }
+            }
+            Self::Any => IrType::Any,
+        }
+    }
+
+    /// Converts this variant to an inline [`IrType`].
+    ///
+    /// This is used to rewrite `[T, null]` unions as `Optional(T)`.
+    fn to_inline_type(&self) -> IrType<'a> {
+        match self {
+            &Self::Primitive(p) => IrType::Primitive(p),
+            Self::Array(name, inner) => {
+                let container = Container::Array(inner.clone());
+                let path = match name {
+                    IrTypeName::Schema(info) => InlineIrTypePath {
+                        root: InlineIrTypePathRoot::Type(info.name),
+                        segments: vec![],
+                    },
+                    IrTypeName::Inline(path) => path.clone(),
+                };
+                InlineIrType::Container(path, container).into()
+            }
+            Self::Map(name, inner) => {
+                let container = Container::Map(inner.clone());
+                let path = match name {
+                    IrTypeName::Schema(info) => InlineIrTypePath {
+                        root: InlineIrTypePathRoot::Type(info.name),
+                        segments: vec![],
+                    },
+                    IrTypeName::Inline(path) => path.clone(),
+                };
+                InlineIrType::Container(path, container).into()
+            }
+            Self::Any => IrType::Any,
         }
     }
 }

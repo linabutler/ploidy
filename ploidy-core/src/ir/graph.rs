@@ -23,7 +23,7 @@ use super::{
         InlineIrType, IrOperation, IrType, IrTypeRef, IrUntaggedVariant, PrimitiveIrType,
         SchemaIrType,
     },
-    views::{operation::IrOperationView, schema::SchemaIrTypeView, wrappers::IrPrimitiveView},
+    views::{operation::IrOperationView, primitive::IrPrimitiveView, schema::SchemaIrTypeView},
 };
 
 /// The type graph.
@@ -49,7 +49,7 @@ impl<'a> IrGraph<'a> {
         let mut indices = FxHashMap::default();
 
         // All roots (named schemas, parameters, request and response bodies),
-        // and all the types within them (inline schemas, wrappers, primitives).
+        // and all the types within them (inline schemas and primitives).
         let tys = IrTypeVisitor::new(
             spec.schemas
                 .values()
@@ -252,9 +252,6 @@ impl<'a> IrGraph<'a> {
 pub enum IrGraphNode<'a> {
     Schema(&'a SchemaIrType<'a>),
     Inline(&'a InlineIrType<'a>),
-    Array(&'a IrType<'a>),
-    Map(&'a IrType<'a>),
-    Optional(&'a IrType<'a>),
     Primitive(PrimitiveIrType),
     Any,
 }
@@ -266,9 +263,6 @@ impl<'a> IrGraphNode<'a> {
         match ty {
             IrTypeRef::Schema(ty) => IrGraphNode::Schema(ty),
             IrTypeRef::Inline(ty) => IrGraphNode::Inline(ty),
-            IrTypeRef::Array(ty) => IrGraphNode::Array(ty),
-            IrTypeRef::Map(ty) => IrGraphNode::Map(ty),
-            IrTypeRef::Optional(ty) => IrGraphNode::Optional(ty),
             IrTypeRef::Ref(r) => Self::from_ref(spec, spec.schemas[r.name()].as_ref()),
             IrTypeRef::Primitive(ty) => IrGraphNode::Primitive(ty),
             IrTypeRef::Any => IrGraphNode::Any,
@@ -337,15 +331,6 @@ impl<'a> Iterator for IrTypeVisitor<'a> {
     fn next(&mut self) -> Option<Self::Item> {
         let (parent, top) = self.stack.pop()?;
         match top {
-            IrType::Array(ty) => {
-                self.stack.push((Some(top), ty.as_ref()));
-            }
-            IrType::Map(ty) => {
-                self.stack.push((Some(top), ty.as_ref()));
-            }
-            IrType::Optional(ty) => {
-                self.stack.push((Some(top), ty.as_ref()));
-            }
             IrType::Schema(SchemaIrType::Struct(_, ty)) => {
                 self.stack
                     .extend(ty.fields.iter().map(|field| (Some(top), &field.ty)).rev());
@@ -369,10 +354,16 @@ impl<'a> Iterator for IrTypeVisitor<'a> {
                         .rev(),
                 );
             }
+            IrType::Schema(SchemaIrType::Container(_, container)) => {
+                self.stack.push((Some(top), &container.inner().ty));
+            }
             IrType::Schema(SchemaIrType::Enum(..)) => (),
             IrType::Any => (),
             IrType::Primitive(_) => (),
             IrType::Inline(ty) => match ty {
+                InlineIrType::Container(_, container) => {
+                    self.stack.push((Some(top), &container.inner().ty));
+                }
                 InlineIrType::Enum(..) => (),
                 InlineIrType::Tagged(_, ty) => {
                     self.stack.extend(

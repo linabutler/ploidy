@@ -3,8 +3,8 @@ use petgraph::graph::NodeIndex;
 use crate::ir::{InlineIrTypePath, graph::IrGraph, types::InlineIrType};
 
 use super::{
-    ViewNode, enum_::IrEnumView, struct_::IrStructView, tagged::IrTaggedView,
-    untagged::IrUntaggedView,
+    ViewNode, container::ContainerView, enum_::IrEnumView, struct_::IrStructView,
+    tagged::IrTaggedView, untagged::IrUntaggedView,
 };
 
 /// A graph-aware view of an [`InlineIrType`].
@@ -14,6 +14,7 @@ pub enum InlineIrTypeView<'a> {
     Struct(&'a InlineIrTypePath<'a>, IrStructView<'a>),
     Tagged(&'a InlineIrTypePath<'a>, IrTaggedView<'a>),
     Untagged(&'a InlineIrTypePath<'a>, IrUntaggedView<'a>),
+    Container(&'a InlineIrTypePath<'a>, ContainerView<'a>),
 }
 
 impl<'a> InlineIrTypeView<'a> {
@@ -23,15 +24,18 @@ impl<'a> InlineIrTypeView<'a> {
         ty: &'a InlineIrType<'a>,
     ) -> Self {
         match ty {
-            InlineIrType::Enum(name, ty) => Self::Enum(name, IrEnumView::new(graph, index, ty)),
-            InlineIrType::Struct(name, ty) => {
-                Self::Struct(name, IrStructView::new(graph, index, ty))
+            InlineIrType::Enum(path, ty) => Self::Enum(path, IrEnumView::new(graph, index, ty)),
+            InlineIrType::Struct(path, ty) => {
+                Self::Struct(path, IrStructView::new(graph, index, ty))
             }
-            InlineIrType::Tagged(name, ty) => {
-                Self::Tagged(name, IrTaggedView::new(graph, index, ty))
+            InlineIrType::Tagged(path, ty) => {
+                Self::Tagged(path, IrTaggedView::new(graph, index, ty))
             }
-            InlineIrType::Untagged(name, ty) => {
-                Self::Untagged(name, IrUntaggedView::new(graph, index, ty))
+            InlineIrType::Untagged(path, ty) => {
+                Self::Untagged(path, IrUntaggedView::new(graph, index, ty))
+            }
+            InlineIrType::Container(path, container) => {
+                Self::Container(path, ContainerView::new(graph, index, container))
             }
         }
     }
@@ -41,7 +45,8 @@ impl<'a> InlineIrTypeView<'a> {
         let (Self::Enum(path, _)
         | Self::Struct(path, _)
         | Self::Tagged(path, _)
-        | Self::Untagged(path, _)) = self;
+        | Self::Untagged(path, _)
+        | Self::Container(path, _)) = self;
         path
     }
 }
@@ -54,6 +59,7 @@ impl<'a> ViewNode<'a> for InlineIrTypeView<'a> {
             Self::Struct(_, view) => view.graph(),
             Self::Tagged(_, view) => view.graph(),
             Self::Untagged(_, view) => view.graph(),
+            Self::Container(_, view) => view.graph(),
         }
     }
 
@@ -63,6 +69,7 @@ impl<'a> ViewNode<'a> for InlineIrTypeView<'a> {
             Self::Struct(_, view) => view.index(),
             Self::Tagged(_, view) => view.index(),
             Self::Untagged(_, view) => view.index(),
+            Self::Container(_, view) => view.index(),
         }
     }
 }

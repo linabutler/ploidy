@@ -4,10 +4,8 @@ use petgraph::graph::NodeIndex;
 use crate::ir::graph::{IrGraph, IrGraphNode};
 
 use super::{
-    View,
-    inline::InlineIrTypeView,
+    View, container::ContainerView, inline::InlineIrTypeView, primitive::IrPrimitiveView,
     schema::SchemaIrTypeView,
-    wrappers::{IrArrayView, IrMapView, IrOptionalView, IrPrimitiveView},
 };
 
 /// Generates a `match` expression that wraps each arm in nested [`Either`] variants.
@@ -49,9 +47,6 @@ macro_rules! either {
 pub enum IrTypeView<'a> {
     Any,
     Primitive(IrPrimitiveView<'a>),
-    Array(IrArrayView<'a>),
-    Map(IrMapView<'a>),
-    Optional(IrOptionalView<'a>),
     Schema(SchemaIrTypeView<'a>),
     Inline(InlineIrTypeView<'a>),
 }
@@ -59,15 +54,8 @@ pub enum IrTypeView<'a> {
 impl<'a> IrTypeView<'a> {
     pub(in crate::ir) fn new(graph: &'a IrGraph<'a>, index: NodeIndex<usize>) -> Self {
         match &graph.g[index] {
-            IrGraphNode::Any => IrTypeView::Any,
-            &IrGraphNode::Primitive(ty) => {
-                IrTypeView::Primitive(IrPrimitiveView::new(graph, index, ty))
-            }
-            IrGraphNode::Array(inner) => IrTypeView::Array(IrArrayView::new(graph, index, inner)),
-            IrGraphNode::Map(inner) => IrTypeView::Map(IrMapView::new(graph, index, inner)),
-            IrGraphNode::Optional(inner) => {
-                IrTypeView::Optional(IrOptionalView::new(graph, index, inner))
-            }
+            IrGraphNode::Any => Self::Any,
+            &IrGraphNode::Primitive(ty) => Self::Primitive(IrPrimitiveView::new(graph, index, ty)),
             IrGraphNode::Schema(ty) => Self::Schema(SchemaIrTypeView::new(graph, index, ty)),
             IrGraphNode::Inline(ty) => Self::Inline(InlineIrTypeView::new(graph, index, ty)),
         }
@@ -82,14 +70,23 @@ impl<'a> IrTypeView<'a> {
         }
     }
 
+    /// If this is a view of a named or inline container type,
+    /// returns the container view.
+    #[inline]
+    pub fn as_container(&self) -> Option<&ContainerView<'a>> {
+        match self {
+            Self::Schema(SchemaIrTypeView::Container(_, view)) => Some(view),
+            Self::Inline(InlineIrTypeView::Container(_, view)) => Some(view),
+            _ => None,
+        }
+    }
+
     /// Returns an iterator over all the types that this type transitively depends on.
+    #[inline]
     pub fn dependencies(&self) -> impl Iterator<Item = IrTypeView<'a>> + use<'a> {
         either!(match self {
             Self::Any => std::iter::empty(),
             Self::Primitive(v) => v.dependencies(),
-            Self::Array(v) => v.dependencies(),
-            Self::Map(v) => v.dependencies(),
-            Self::Optional(v) => v.dependencies(),
             Self::Schema(v) => v.dependencies(),
             Self::Inline(v) => v.dependencies(),
         })

@@ -117,7 +117,7 @@ impl<'a> View<'a> for IrOperationView<'a> {
             // by `CodegenSchemaType`.
             IrTypeView::Schema(_) => Traversal::Ignore,
 
-            // Continue traversing into wrapper types without yielding.
+            // Continue traversing into containers without yielding.
             _ => Traversal::Skip,
         })
         .filter_map(|ty| match ty {

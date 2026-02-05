@@ -3,8 +3,8 @@ use petgraph::graph::NodeIndex;
 use crate::ir::{SchemaTypeInfo, graph::IrGraph, types::SchemaIrType};
 
 use super::{
-    ViewNode, enum_::IrEnumView, struct_::IrStructView, tagged::IrTaggedView,
-    untagged::IrUntaggedView,
+    ViewNode, container::ContainerView, enum_::IrEnumView, struct_::IrStructView,
+    tagged::IrTaggedView, untagged::IrUntaggedView,
 };
 
 /// A graph-aware view of a [`SchemaIrType`].
@@ -14,6 +14,7 @@ pub enum SchemaIrTypeView<'a> {
     Struct(SchemaTypeInfo<'a>, IrStructView<'a>),
     Tagged(SchemaTypeInfo<'a>, IrTaggedView<'a>),
     Untagged(SchemaTypeInfo<'a>, IrUntaggedView<'a>),
+    Container(SchemaTypeInfo<'a>, ContainerView<'a>),
 }
 
 impl<'a> SchemaIrTypeView<'a> {
@@ -33,6 +34,9 @@ impl<'a> SchemaIrTypeView<'a> {
             SchemaIrType::Untagged(info, ty) => {
                 Self::Untagged(*info, IrUntaggedView::new(graph, index, ty))
             }
+            SchemaIrType::Container(info, container) => {
+                Self::Container(*info, ContainerView::new(graph, index, container))
+            }
         }
     }
 
@@ -41,7 +45,8 @@ impl<'a> SchemaIrTypeView<'a> {
         let (Self::Enum(SchemaTypeInfo { name, .. }, ..)
         | Self::Struct(SchemaTypeInfo { name, .. }, ..)
         | Self::Tagged(SchemaTypeInfo { name, .. }, ..)
-        | Self::Untagged(SchemaTypeInfo { name, .. }, ..)) = self;
+        | Self::Untagged(SchemaTypeInfo { name, .. }, ..)
+        | Self::Container(SchemaTypeInfo { name, .. }, ..)) = self;
         name
     }
 
@@ -62,7 +67,8 @@ impl<'a> SchemaIrTypeView<'a> {
         let (&Self::Enum(SchemaTypeInfo { resource, .. }, ..)
         | &Self::Struct(SchemaTypeInfo { resource, .. }, ..)
         | &Self::Tagged(SchemaTypeInfo { resource, .. }, ..)
-        | &Self::Untagged(SchemaTypeInfo { resource, .. }, ..)) = self;
+        | &Self::Untagged(SchemaTypeInfo { resource, .. }, ..)
+        | &Self::Container(SchemaTypeInfo { resource, .. }, ..)) = self;
         resource
     }
 }
@@ -75,6 +81,7 @@ impl<'a> ViewNode<'a> for SchemaIrTypeView<'a> {
             Self::Struct(_, view) => view.graph(),
             Self::Tagged(_, view) => view.graph(),
             Self::Untagged(_, view) => view.graph(),
+            Self::Container(_, view) => view.graph(),
         }
     }
 
@@ -85,6 +92,7 @@ impl<'a> ViewNode<'a> for SchemaIrTypeView<'a> {
             Self::Struct(_, view) => view.index(),
             Self::Tagged(_, view) => view.index(),
             Self::Untagged(_, view) => view.index(),
+            Self::Container(_, view) => view.index(),
         }
     }
 }

@@ -9,12 +9,6 @@ use crate::parse::{ComponentRef, Method, path::PathSegment};
 pub enum IrType<'a> {
     /// A primitive type.
     Primitive(PrimitiveIrType),
-    /// An array of items.
-    Array(Box<IrType<'a>>),
-    /// A map with string keys.
-    Map(Box<IrType<'a>>),
-    /// A nullable value, or an optional struct field.
-    Optional(Box<IrType<'a>>),
     /// A reference to another named schema type.
     Ref(&'a ComponentRef),
     /// A named schema type.
@@ -30,9 +24,6 @@ impl IrType<'_> {
         match self {
             Self::Schema(ty) => IrTypeRef::Schema(ty),
             Self::Inline(ty) => IrTypeRef::Inline(ty),
-            Self::Array(ty) => IrTypeRef::Array(ty),
-            Self::Map(ty) => IrTypeRef::Map(ty),
-            Self::Optional(ty) => IrTypeRef::Optional(ty),
             Self::Ref(r) => IrTypeRef::Ref(r),
             &Self::Primitive(ty) => IrTypeRef::Primitive(ty),
             Self::Any => IrTypeRef::Any,
@@ -62,9 +53,6 @@ impl<'a> From<InlineIrType<'a>> for IrType<'a> {
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub enum IrTypeRef<'a> {
     Primitive(PrimitiveIrType),
-    Array(&'a IrType<'a>),
-    Map(&'a IrType<'a>),
-    Optional(&'a IrType<'a>),
     Ref(&'a ComponentRef),
     Schema(&'a SchemaIrType<'a>),
     Inline(&'a InlineIrType<'a>),
@@ -94,6 +82,33 @@ pub enum PrimitiveIrType {
     Binary,
 }
 
+/// A container type.
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+pub enum Container<'a> {
+    /// An array of items.
+    Array(Inner<'a>),
+    /// A map with string keys.
+    Map(Inner<'a>),
+    /// A nullable value, or an optional struct field.
+    Optional(Inner<'a>),
+}
+
+impl<'a> Container<'a> {
+    /// Returns a reference to the inner type of this container.
+    #[inline]
+    pub fn inner(&self) -> &Inner<'a> {
+        let (Self::Array(inner) | Self::Map(inner) | Self::Optional(inner)) = self;
+        inner
+    }
+}
+
+/// The inner type of a [`Container`].
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+pub struct Inner<'a> {
+    pub description: Option<&'a str>,
+    pub ty: Box<IrType<'a>>,
+}
+
 /// Metadata for a named schema type.
 #[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
 pub struct SchemaTypeInfo<'a> {
@@ -114,6 +129,8 @@ pub enum SchemaIrType<'a> {
     Tagged(SchemaTypeInfo<'a>, IrTagged<'a>),
     /// An untagged union.
     Untagged(SchemaTypeInfo<'a>, IrUntagged<'a>),
+    /// A named container.
+    Container(SchemaTypeInfo<'a>, Container<'a>),
 }
 
 impl<'a> SchemaIrType<'a> {
@@ -122,7 +139,8 @@ impl<'a> SchemaIrType<'a> {
         let (Self::Enum(info, ..)
         | Self::Struct(info, ..)
         | Self::Tagged(info, ..)
-        | Self::Untagged(info, ..)) = self;
+        | Self::Untagged(info, ..)
+        | Self::Container(info, ..)) = self;
         info.name
     }
 
@@ -131,7 +149,8 @@ impl<'a> SchemaIrType<'a> {
         let (Self::Enum(info, ..)
         | Self::Struct(info, ..)
         | Self::Tagged(info, ..)
-        | Self::Untagged(info, ..)) = self;
+        | Self::Untagged(info, ..)
+        | Self::Container(info, ..)) = self;
         info.resource
     }
 }
@@ -143,6 +162,7 @@ pub enum InlineIrType<'a> {
     Struct(InlineIrTypePath<'a>, IrStruct<'a>),
     Tagged(InlineIrTypePath<'a>, IrTagged<'a>),
     Untagged(InlineIrTypePath<'a>, IrUntagged<'a>),
+    Container(InlineIrTypePath<'a>, Container<'a>),
 }
 
 impl<'a> InlineIrType<'a> {
@@ -151,7 +171,8 @@ impl<'a> InlineIrType<'a> {
         let (Self::Enum(path, _)
         | Self::Struct(path, _)
         | Self::Tagged(path, _)
-        | Self::Untagged(path, _)) = self;
+        | Self::Untagged(path, _)
+        | Self::Container(path, _)) = self;
         path
     }
 }

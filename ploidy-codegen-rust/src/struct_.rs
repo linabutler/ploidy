@@ -1,10 +1,9 @@
-use either::Either;
 use itertools::Itertools;
 use ploidy_core::{
     codegen::UniqueNames,
     ir::{
-        InlineIrTypeView, IrStructFieldName, IrStructFieldView, IrStructView, IrTypeView,
-        PrimitiveIrType, Reach, SchemaIrTypeView, Traversal, View,
+        ContainerView, InlineIrTypeView, IrStructFieldName, IrStructFieldView, IrStructView,
+        IrTypeView, PrimitiveIrType, Reach, SchemaIrTypeView, Traversal, View,
     },
 };
 use proc_macro2::TokenStream;
@@ -84,10 +83,9 @@ impl ToTokens for CodegenStruct<'_> {
             .ty
             .traverse(Reach::Dependencies, |view| {
                 match view {
-                    IrTypeView::Optional(_) | IrTypeView::Array(_) | IrTypeView::Map(_) => {
-                        // All wrappers implement `Default`: optional fields become `AbsentOr<T>`,
-                        // nullable fields become `Option<T>`, and arrays and maps don't require
-                        // `T: Default`.
+                    IrTypeView::Schema(SchemaIrTypeView::Container(_, _))
+                    | IrTypeView::Inline(InlineIrTypeView::Container(_, _)) => {
+                        // All container types implement `Default`.
                         Traversal::Ignore
                     }
                     IrTypeView::Schema(SchemaIrTypeView::Struct(_, view))
@@ -150,60 +148,69 @@ impl<'view, 'a> CodegenField<'view, 'a> {
     }
 
     fn needs_box(&self) -> bool {
-        let mut ty = self.field.ty();
-        loop {
-            match ty {
-                IrTypeView::Optional(optional) => {
-                    // Unwrap nested optionals, since `Optional(T)`
-                    // doesn't determine whether T needs to be boxed.
-                    ty = optional.inner();
-                }
-                IrTypeView::Array(_)
-                | IrTypeView::Map(_)
-                | IrTypeView::Primitive(_)
-                | IrTypeView::Any => {
-                    // Arrays and maps are heap-allocated, and so already
-                    // provide their own indirection. Leaf types like primitives
-                    // and `Any` don't contain references, and don't need
-                    // boxing, either.
-                    return false;
-                }
-                _ => {
-                    // For other types, consult whether the struct field has
-                    // an edge back to the struct.
-                    return self.field.needs_indirection();
-                }
+        // Peel away optional layers until we reach a non-optional type,
+        // because `Optional(T)` doesn't determine whether T needs to be boxed.
+        let ty = std::iter::successors(Some(self.field.ty()), |ty| match ty {
+            IrTypeView::Schema(SchemaIrTypeView::Container(_, ContainerView::Optional(inner))) => {
+                Some(inner.ty())
             }
+            IrTypeView::Inline(InlineIrTypeView::Container(_, ContainerView::Optional(inner))) => {
+                Some(inner.ty())
+            }
+            _ => None,
+        })
+        .last() // Guaranteed to exist.
+        .unwrap();
+
+        match ty {
+            IrTypeView::Schema(SchemaIrTypeView::Container(_, container))
+            | IrTypeView::Inline(InlineIrTypeView::Container(_, container)) => {
+                // Arrays and maps are heap-allocated, providing their own indirection.
+                !matches!(container, ContainerView::Array(_) | ContainerView::Map(_))
+            }
+            // Leaf types don't contain references.
+            IrTypeView::Primitive(_) | IrTypeView::Any => false,
+            // For other types, check if there's a cycle back to the struct.
+            _ => self.field.needs_indirection(),
         }
     }
 }
 
 impl ToTokens for CodegenField<'_, '_> {
     fn to_tokens(&self, tokens: &mut TokenStream) {
-        // For `Optional(T)`, we emit either `Option<T>` or `AbsentOr<T>`,
-        // depending on whether the field is required; but `CodegenRef`
-        // always emits `Option<T>`, so we extract the inner T to avoid
-        // double-wrapping.
-        let inner_view = match self.field.ty() {
-            IrTypeView::Optional(nullable) => Either::Left(nullable.inner()),
-            other => Either::Right(other),
-        };
+        // For `Optional` struct fields, we emit either `Option<T>` or `AbsentOr<T>`,
+        // depending on whether the field is required. We also peel away nested optionals
+        // until we reach a non-optional type, to avoid emitting types like `AbsentOr<Option<T>>`.
+        let (ty, nullable) =
+            std::iter::successors(Some((self.field.ty(), false)), |(ty, _)| match ty {
+                IrTypeView::Schema(SchemaIrTypeView::Container(
+                    _,
+                    ContainerView::Optional(inner),
+                )) => Some((inner.ty(), true)),
+                IrTypeView::Inline(InlineIrTypeView::Container(
+                    _,
+                    ContainerView::Optional(inner),
+                )) => Some((inner.ty(), true)),
+                _ => None,
+            })
+            .last() // Guaranteed to exist, since our initial item is `Some`.
+            .unwrap();
 
-        let inner_ty = CodegenRef::new(inner_view.as_ref().into_inner());
+        let inner_ref = CodegenRef::new(&ty);
         let inner = if self.needs_box() {
-            quote! { ::std::boxed::Box<#inner_ty> }
+            quote! { ::std::boxed::Box<#inner_ref> }
         } else {
-            quote! { #inner_ty }
+            quote! { #inner_ref }
         };
 
-        tokens.append_all(match (inner_view, self.field.required()) {
+        tokens.append_all(match (nullable, self.field.required()) {
             // Since `AbsentOr` can represent `null`,
             // always emit it for optional fields.
             (_, false) => quote! { ::ploidy_util::absent::AbsentOr<#inner> },
             // For required fields, use `Option` if it's nullable,
             // or the original type if not.
-            (Either::Left(_), true) => quote! { ::std::option::Option<#inner> },
-            (Either::Right(_), true) => inner,
+            (true, true) => quote! { ::std::option::Option<#inner> },
+            (false, true) => inner,
         });
     }
 }
@@ -515,6 +522,58 @@ mod tests {
                 pub id: ::std::string::String,
                 #[serde(default, skip_serializing_if = "::ploidy_util::absent::AbsentOr::is_absent",)]
                 pub deleted_at: ::ploidy_util::absent::AbsentOr<::ploidy_util::chrono::DateTime<::ploidy_util::chrono::Utc>>,
+            }
+        };
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn test_struct_optional_field_referencing_nullable_schema_unwraps() {
+        // A field that references a named nullable schema (like `NullableString`)
+        // should unwrap the inner type to avoid `AbsentOr<Option<T>>`. The
+        // `AbsentOr` type already has `Absent`, `Null`, and `Present(T)` variants,
+        // so wrapping `Option<T>` would create redundant representations for null.
+        let doc = Document::from_yaml(indoc::indoc! {"
+            openapi: 3.1.0
+            info:
+              title: Test API
+              version: 1.0.0
+            paths: {}
+            components:
+              schemas:
+                NullableString:
+                  type:
+                    - string
+                    - 'null'
+                Record:
+                  type: object
+                  properties:
+                    nickname:
+                      $ref: '#/components/schemas/NullableString'
+        "})
+        .unwrap();
+
+        let spec = IrSpec::from_doc(&doc).unwrap();
+        let ir = IrGraph::new(&spec);
+        let graph = CodegenGraph::new(ir);
+
+        let schema = graph.schemas().find(|s| s.name() == "Record");
+        let Some(schema @ SchemaIrTypeView::Struct(_, struct_view)) = &schema else {
+            panic!("expected struct `Record`; got `{schema:?}`");
+        };
+
+        let name = CodegenTypeName::Schema(schema);
+        let codegen = CodegenStruct::new(name, struct_view);
+
+        let actual: syn::ItemStruct = parse_quote!(#codegen);
+        // The field should be `AbsentOr<String>`, not `AbsentOr<NullableString>`
+        // (which would be `AbsentOr<Option<String>>`).
+        let expected: syn::ItemStruct = parse_quote! {
+            #[derive(Debug, Clone, PartialEq, Eq, Hash, Default, ::ploidy_util::serde::Serialize, ::ploidy_util::serde::Deserialize)]
+            #[serde(crate = "::ploidy_util::serde")]
+            pub struct Record {
+                #[serde(default, skip_serializing_if = "::ploidy_util::absent::AbsentOr::is_absent",)]
+                pub nickname: ::ploidy_util::absent::AbsentOr<::std::string::String>,
             }
         };
         assert_eq!(actual, expected);
@@ -1136,6 +1195,57 @@ mod tests {
             #[serde(crate = "::ploidy_util::serde")]
             pub struct Resource {
                 pub link: ::ploidy_util::url::Url,
+            }
+        };
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn test_struct_derives_default_with_required_container_schema_field() {
+        // A required field that references a container schema should still allow
+        // the struct to derive `Default`, since `Vec<T>` implements `Default`.
+        let doc = Document::from_yaml(indoc::indoc! {"
+            openapi: 3.0.0
+            info:
+              title: Test API
+              version: 1.0.0
+            paths: {}
+            components:
+              schemas:
+                Tags:
+                  type: array
+                  items:
+                    type: string
+                Container:
+                  type: object
+                  required:
+                    - tags
+                  properties:
+                    tags:
+                      $ref: '#/components/schemas/Tags'
+        "})
+        .unwrap();
+
+        let spec = IrSpec::from_doc(&doc).unwrap();
+        let ir = IrGraph::new(&spec);
+        let graph = CodegenGraph::new(ir);
+
+        let schema = graph.schemas().find(|s| s.name() == "Container");
+        let Some(schema @ SchemaIrTypeView::Struct(_, struct_view)) = &schema else {
+            panic!("expected struct `Container`; got `{schema:?}`");
+        };
+
+        let name = CodegenTypeName::Schema(schema);
+        let codegen = CodegenStruct::new(name, struct_view);
+
+        let actual: syn::ItemStruct = parse_quote!(#codegen);
+        // `Tags` is a type alias for `Vec<String>`, which implements `Default`,
+        // so the struct can derive `Default`.
+        let expected: syn::ItemStruct = parse_quote! {
+            #[derive(Debug, Clone, PartialEq, Eq, Hash, Default, ::ploidy_util::serde::Serialize, ::ploidy_util::serde::Deserialize)]
+            #[serde(crate = "::ploidy_util::serde")]
+            pub struct Container {
+                pub tags: crate::types::Tags,
             }
         };
         assert_eq!(actual, expected);
