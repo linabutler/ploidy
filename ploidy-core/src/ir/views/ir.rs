@@ -61,12 +61,13 @@ impl<'a> IrTypeView<'a> {
         }
     }
 
-    /// If this is a view of a named schema type, returns the view for that type.
+    /// If this is a view of a named schema type, returns that schema type;
+    /// otherwise, returns an [`Err`] with this view.
     #[inline]
-    pub fn as_schema(self) -> Option<SchemaIrTypeView<'a>> {
+    pub fn into_schema(self) -> Result<SchemaIrTypeView<'a>, Self> {
         match self {
-            Self::Schema(view) => Some(view),
-            _ => None,
+            Self::Schema(view) => Ok(view),
+            other => Err(other),
         }
     }
 
