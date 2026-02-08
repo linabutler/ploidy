@@ -1,5 +1,4 @@
 mod error;
-mod fields;
 mod graph;
 mod spec;
 mod transform;
@@ -9,11 +8,11 @@ mod views;
 #[cfg(test)]
 mod tests;
 
-pub use graph::IrGraph;
+pub use graph::{EdgeKind, IrGraph, Traversal};
 pub use spec::IrSpec;
 pub use types::*;
 
 pub use views::{
-    ExtendableView, Reach, Traversal, View, container::*, enum_::*, inline::*, ir::*, operation::*,
+    ExtendableView, Reach, View, container::*, enum_::*, inline::*, ir::*, operation::*,
     primitive::*, schema::*, struct_::*, tagged::*, untagged::*,
 };

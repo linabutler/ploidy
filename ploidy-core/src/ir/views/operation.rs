@@ -1,17 +1,17 @@
 use std::marker::PhantomData;
 
 use by_address::ByAddress;
-use either::Either;
+use enum_map::enum_map;
 use fixedbitset::FixedBitSet;
 use petgraph::{
     Direction,
     graph::NodeIndex,
-    visit::{Bfs, VisitMap, Visitable},
+    visit::{Bfs, EdgeFiltered, EdgeRef, VisitMap, Visitable},
 };
 
 use crate::{
     ir::{
-        graph::{IrGraph, IrGraphNode},
+        graph::{EdgeKind, IrGraph, IrGraphNode, Traversal, Traverse},
         types::{
             IrOperation, IrParameter, IrParameterInfo, IrParameterStyle, IrRequest, IrResponse,
         },
@@ -19,7 +19,7 @@ use crate::{
     parse::{Method, path::PathSegment},
 };
 
-use super::{Reach, Traversal, View, inline::InlineIrTypeView, ir::IrTypeView};
+use super::{Reach, View, inline::InlineIrTypeView, ir::IrTypeView};
 
 /// A graph-aware view of an [`IrOperation`].
 #[derive(Debug)]
@@ -91,17 +91,6 @@ impl<'a> IrOperationView<'a> {
     pub fn resource(&self) -> Option<&'a str> {
         self.op.resource
     }
-
-    fn bfs(&self) -> Bfs<NodeIndex<usize>, FixedBitSet> {
-        // `Bfs::new()` starts with just one root on the stack,
-        // but operations aren't roots; they reference types that are roots,
-        // so we construct our own visitor with those types on the stack.
-        let meta = &self.graph.metadata.operations[&ByAddress(self.op)];
-        let mut discovered = self.graph.g.visit_map();
-        discovered.union_with(&meta.types);
-        let stack = discovered.ones().map(NodeIndex::new).collect();
-        Bfs { stack, discovered }
-    }
 }
 
 impl<'a> View<'a> for IrOperationView<'a> {
@@ -109,19 +98,32 @@ impl<'a> View<'a> for IrOperationView<'a> {
     /// contained within this operation's referenced types.
     #[inline]
     fn inlines(&self) -> impl Iterator<Item = InlineIrTypeView<'a>> + use<'a> {
-        self.traverse(Reach::Dependencies, |view| match view {
-            // Yield inline types and continue into their fields.
-            IrTypeView::Inline(_) => Traversal::Visit,
-
-            // Stop at schema references; their inlines are emitted
-            // by `CodegenSchemaType`.
-            IrTypeView::Schema(_) => Traversal::Ignore,
-
-            // Continue traversing into containers without yielding.
-            _ => Traversal::Skip,
-        })
-        .filter_map(|ty| match ty {
-            IrTypeView::Inline(ty) => Some(ty),
+        let graph = self.graph;
+        // Only include edges to other inline schemas.
+        let filtered = EdgeFiltered::from_fn(&graph.g, |r| {
+            matches!(graph.g[r.target()], IrGraphNode::Inline(_))
+        });
+        let mut bfs = {
+            let meta = &self.graph.metadata.operations[&ByAddress(self.op)];
+            let stack = meta
+                .types
+                .ones()
+                .map(NodeIndex::new)
+                .filter(|&index| {
+                    // Exclude operation types that aren't inline schemas;
+                    // those types, and their inlines, are already emitted
+                    // as named schema types.
+                    matches!(graph.g[index], IrGraphNode::Inline(_))
+                })
+                .collect();
+            let mut discovered = self.graph.g.visit_map();
+            for &index in &stack {
+                discovered.visit(index);
+            }
+            Bfs { stack, discovered }
+        };
+        std::iter::from_fn(move || bfs.next(&filtered)).filter_map(|index| match graph.g[index] {
+            IrGraphNode::Inline(ty) => Some(InlineIrTypeView::new(graph, index, ty)),
             _ => None,
         })
     }
@@ -162,42 +164,29 @@ impl<'a> View<'a> for IrOperationView<'a> {
         filter: F,
     ) -> impl Iterator<Item = IrTypeView<'a>> + use<'a, F>
     where
-        F: Fn(&IrTypeView<'a>) -> Traversal,
+        F: Fn(EdgeKind, &IrTypeView<'a>) -> Traversal,
     {
-        match reach {
-            Reach::Dependents => Either::Left(std::iter::empty()),
+        either!(match reach {
+            Reach::Dependents => std::iter::empty(),
             Reach::Dependencies => {
                 let graph = self.graph;
-                let Bfs {
-                    mut stack,
-                    mut discovered,
-                } = self.bfs();
-
-                Either::Right(std::iter::from_fn(move || {
-                    while let Some(index) = stack.pop_front() {
+                let meta = &graph.metadata.operations[&ByAddress(self.op)];
+                let traverse = Traverse::from_roots(
+                    &graph.g,
+                    enum_map! {
+                        EdgeKind::Reference => meta.types.clone(),
+                        EdgeKind::Inherits => FixedBitSet::new(),
+                    },
+                    Direction::Outgoing,
+                );
+                traverse
+                    .run(move |kind, index| {
                         let view = IrTypeView::new(graph, index);
-                        let traversal = filter(&view);
-
-                        if matches!(traversal, Traversal::Visit | Traversal::Skip) {
-                            // Add the neighbors to the stack of nodes to visit.
-                            for neighbor in graph.g.neighbors_directed(index, Direction::Outgoing) {
-                                if discovered.visit(neighbor) {
-                                    stack.push_back(neighbor);
-                                }
-                            }
-                        }
-
-                        if matches!(traversal, Traversal::Visit | Traversal::Stop) {
-                            // Yield this node.
-                            return Some(view);
-                        }
-
-                        // (`Skip` and `Ignore` continue the loop without yielding).
-                    }
-                    None
-                }))
+                        filter(kind, &view)
+                    })
+                    .map(|index| IrTypeView::new(graph, index))
             }
-        }
+        })
     }
 }
 
