@@ -11,7 +11,7 @@ After making changes, **always** run in order:
 ```bash
 cargo check --workspace
 cargo test --workspace --no-fail-fast --all-features
-cargo clippy --workspace --all-targets --fix --allow-dirty --allow-staged --no-deps
+cargo clippy --workspace --all-targets --fix --allow-dirty --allow-staged --no-deps # Auto-fixes lint suggestions
 cargo +nightly fmt --all
 ```
 
@@ -39,7 +39,7 @@ OpenAPI code generator for polymorphic specs (`allOf`/`oneOf`/`anyOf`): Parse �
 ### Key Abstractions
 
 - **`IrSpec`**: Raw IR data (schemas, operations). Created by `IrSpec::from_doc(&doc)`.
-- **`IrGraph`**: Wraps `IrSpec` with type graph for traversal, transitive closure, and cycle detection. Created by `IrGraph::from_spec(&ir)`. Use this for traversal and view types.
+- **`IrGraph`**: Wraps `IrSpec` with type graph for traversal, transitive closure, and cycle detection. Created by `IrGraph::new(&ir)`. Use this for traversal and view types.
 - **View types** (e.g., `IrStructView`, `IrTaggedView`, `IrEnumView`, `IrOperationView`): Graph-aware wrappers providing `inlines()`, `traverse()`, `used_by()`, `needs_indirection()`, and metadata access.
 - **Inline type paths**: Anonymous schemas get semantic paths like `Type/Field/MapValue` for stable naming.
 
@@ -83,13 +83,14 @@ struct MyView {
 }
 ```
 
-- Use minimal lifetimes. Name semantically: `'a` for data, `'view` for views, `'graph` for graphs.
+- Use semantic names (`'view` for views, `'graph` for graphs) when multiple lifetimes coexist; `'a` is fine for single-lifetime cases.
 - Never elide lifetimes that distinguish borrowed sources.
+- **Deref coercion:** Use `&*vec` for `&[T]`, `&*r` for `&T`, `&**ref_to_box` for `&T` from `&Box<T>`.
 
 ### Data Structures
 
 - `IndexMap` where insertion order matters.
-- `FxHashMap` instead of `std::collections::HashMap` (faster for CLI).
+- `FxHash{Map, Set}` instead of `std::collections::Hash{Map, Set}` (HashDoS not a concern).
 - `Box<T>` only to break recursive types; `Vec`/`HashMap` provide their own indirection.
 
 ### Documentation (`///`)
@@ -129,19 +130,19 @@ if f.discriminator() { continue; }
 
 // ❌ Restates code, sentence fragment, no backticks around `f`
 // Check if f is discriminator
-if field.discriminator() { continue; }
+if f.discriminator() { continue; }
 ```
 
 ### Strings
 
 - Raw strings (`r#"..."#`) for strings with quotes
-- `.to_owned()` or `.into()` for `&str` → `String`
+- `.to_owned()` for `&str` → `String`
 - `.to_string()` only when formatting (numbers, `Display` types)
 
 ### Other
 
-- **Imports:** Ordered groups (blank lines between): `std::` → external crates (alphabetical) → `crate::` → `super::`. No globs except re-exports in `mod.rs`.
-- `#[inline]` on trivial accessors only
+- **Imports:** Ordered groups (blank lines between): `std::` → external crates (alphabetical) → `crate::` → `super::`. No globs except re-exports in `mod.rs`, `use super::*` in tests.
+- `#[inline]` on small functions only
 - `pub(in crate::path)` for internal constructors
 - `thiserror` for errors, `miette` for user-facing diagnostics
 - Justify lint suppressions with comments
@@ -152,16 +153,15 @@ if field.discriminator() { continue; }
 
 - **Naming:** `test_<behavior>_<condition>`, grouped with `// MARK:` comments.
 - **No new helper functions.** Inline all fixtures directly. Use existing helpers, don't add new ones without asking.
-- **YAML fixtures:** Always use `indoc::indoc!` for OpenAPI documents. Never construct `Document` directly.
+- **YAML fixtures:** Always use `Document::from_yaml(indoc::indoc! { ... })` for OpenAPI documents. Never construct `Document` directly.
 - **Assertions:** Use `assert_matches!` from `crate::tests` for pattern matching. Include actual value in `let-else` panic messages: `panic!("expected X; got `{ty:?}`")`.
 - **Throwaway tests:** When behavior is unclear, write a quick test to prove it rather than theorizing. Delete or convert once done.
-- **Deref coercion:** Use `&*vec` for `&[T]`, `&*boxed` for `&T`, `&**ref_to_box` for `&T` from `&Box<T>`.
 
 ---
 
 ## Crate-Specific Rules
 
-- **ploidy-core:** Language-agnostic only (no `syn`, no Rust naming). Use view types for graph operations; raw IR only during transformation or in view implementations. Never access `IrGraph.g` directly except in views. Tests in `src/**/tests/*.rs`.
+- **ploidy-core:** Language-agnostic only (no Rust-specific knowledge). Use view types for graph operations; raw IR only during transformation or in view implementations. Never access `IrGraph.g` directly except in views. Tests in `src/**/tests/*.rs`.
 - **ploidy-codegen-rust:** All types implement `ToTokens`. Use `quote!` for tokens, never string-format. Tests compare AST with `parse_quote!`, never strings.
 - **ploidy-pointer:** Follows RFC 6901. Tests in `src/lib.rs` and `tests/`. Simpler assertions OK.
 - **ploidy-pointer-derive:** Proc-macro constraints apply. Test via `ploidy-pointer/tests/`.
@@ -171,6 +171,7 @@ if field.discriminator() { continue; }
 
 ## Process
 
-- **Dependencies:** Prefer `[workspace.dependencies]`. Justify new deps. Pre-release: prefer breaking changes over parallel methods.
+- **Dependencies:** Prefer `[workspace.dependencies]`. Justify new deps.
+- **Breaking changes:** Make breaking changes; don't prioritize backward-compatibility.
 - **Design:** Push back or propose alternatives. Keep changes modular for partial reverts. Don't `git revert`; manually restore.
 - **Ask for help when:** requirements ambiguous, multiple valid approaches, tests fail for unclear reasons, scope larger than expected, new workspace crate needed, or approach seems wrong.
