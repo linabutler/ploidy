@@ -77,33 +77,42 @@ impl<'context, 'a> IrTransformer<'context, 'a> {
         else {
             return Err(self);
         };
-        let inverted: FxHashMap<_, Vec<_>> = discriminator.mapping.iter().fold(
-            FxHashMap::default(),
-            |mut mapping, (tag, reference)| {
-                mapping.entry(reference).or_default().push(tag.as_str());
-                mapping
-            },
-        );
-        let variants = one_of
-            .iter()
-            .filter_map(|schema| match schema {
-                RefOrSchema::Ref(r) => {
-                    let aliases = inverted.get(&r.path).cloned().unwrap_or_default();
-                    Some(IrTaggedVariant {
-                        name: r.path.name(),
-                        ty: IrType::Ref(&r.path),
-                        aliases,
-                    })
+
+        let variants = {
+            let mut inverted = FxHashMap::<_, Vec<_>>::default();
+            for (tag, r) in &discriminator.mapping {
+                inverted.entry(r).or_default().push(tag.as_str());
+            }
+            let mut variants = Vec::with_capacity(one_of.len());
+            for schema in one_of {
+                match schema {
+                    RefOrSchema::Ref(r) => {
+                        let aliases = inverted.get(&r.path).map(|s| s.as_slice()).unwrap_or(&[]);
+                        if aliases.is_empty() {
+                            // Variant missing from discriminator mapping;
+                            // fall through to `try_untagged`.
+                            return Err(self);
+                        }
+                        variants.push(IrTaggedVariant {
+                            name: r.path.name(),
+                            ty: IrType::Ref(&r.path),
+                            aliases: aliases.to_vec(),
+                        });
+                    }
+                    // An inline schema variant can't have a discriminator mapping;
+                    // fall through to `try_untagged`.
+                    RefOrSchema::Other(_) => return Err(self),
                 }
-                RefOrSchema::Other(_) => None,
-            })
-            .filter(|v| !v.aliases.is_empty())
-            .collect();
+            }
+            variants
+        };
+
         let tagged = IrTagged {
             description: self.schema.description.as_deref(),
             tag: discriminator.property_name.as_str(),
             variants,
         };
+
         Ok(match self.name {
             IrTypeName::Schema(info) => SchemaIrType::Tagged(info, tagged).into(),
             IrTypeName::Inline(path) => InlineIrType::Tagged(path, tagged).into(),

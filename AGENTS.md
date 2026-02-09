@@ -92,6 +92,7 @@ struct MyView {
 - `IndexMap` where insertion order matters.
 - `FxHash{Map, Set}` instead of `std::collections::Hash{Map, Set}` (HashDoS not a concern).
 - `Box<T>` only to break recursive types; `Vec`/`HashMap` provide their own indirection.
+- `.collect_vec()` (from `itertools`) instead of `.collect::<Vec<_>>()` or `let v: Vec<_> = … .collect()`.
 
 ### Documentation (`///`)
 

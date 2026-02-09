@@ -1029,14 +1029,21 @@ fn test_tagged_filters_non_refs() {
 
     let result = transform(&doc, "Animal", &schema);
 
-    // Should only have the `Dog` variant; inline schema is filtered out.
-    let tagged = match result {
-        IrType::Schema(SchemaIrType::Tagged(SchemaTypeInfo { name: "Animal", .. }, tagged)) => {
-            tagged
+    // Inline schemas can't have discriminator mappings, so `Animal`
+    // should lower to an untagged union with two variants.
+    let untagged = match result {
+        IrType::Schema(SchemaIrType::Untagged(SchemaTypeInfo { name: "Animal", .. }, untagged)) => {
+            untagged
         }
-        other => panic!("expected tagged union `Animal`; got `{other:?}`"),
+        other => panic!("expected untagged union `Animal`; got `{other:?}`"),
     };
-    assert_matches!(&*tagged.variants, [IrTaggedVariant { name: "Dog", .. }]);
+    assert_matches!(
+        &*untagged.variants,
+        [
+            IrUntaggedVariant::Some(IrUntaggedVariantNameHint::Index(1), IrType::Ref(_)),
+            IrUntaggedVariant::Some(IrUntaggedVariantNameHint::Index(2), IrType::Inline(_)),
+        ],
+    );
 }
 
 #[test]
@@ -1123,14 +1130,21 @@ fn test_tagged_missing_variant() {
 
     let result = transform(&doc, "Animal", &schema);
 
-    // Only `Dog` should be included, since `Cat` isn't in the mapping.
-    let tagged = match result {
-        IrType::Schema(SchemaIrType::Tagged(SchemaTypeInfo { name: "Animal", .. }, tagged)) => {
-            tagged
+    // `Cat` has no discriminator tag, so `Animal` should lower to
+    // an untagged union with two variants.
+    let untagged = match result {
+        IrType::Schema(SchemaIrType::Untagged(SchemaTypeInfo { name: "Animal", .. }, untagged)) => {
+            untagged
         }
-        other => panic!("expected tagged union `Animal`; got `{other:?}`"),
+        other => panic!("expected untagged union `Animal`; got `{other:?}`"),
     };
-    assert_matches!(&*tagged.variants, [IrTaggedVariant { name: "Dog", .. }]);
+    assert_matches!(
+        &*untagged.variants,
+        [
+            IrUntaggedVariant::Some(IrUntaggedVariantNameHint::Index(1), IrType::Ref(_)),
+            IrUntaggedVariant::Some(IrUntaggedVariantNameHint::Index(2), IrType::Ref(_)),
+        ],
+    );
 }
 
 #[test]
