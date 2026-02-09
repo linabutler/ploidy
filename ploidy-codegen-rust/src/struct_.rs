@@ -2,8 +2,9 @@ use itertools::Itertools;
 use ploidy_core::{
     codegen::UniqueNames,
     ir::{
-        ContainerView, EdgeKind, InlineIrTypeView, IrStructFieldName, IrStructFieldView,
-        IrStructView, IrTypeView, PrimitiveIrType, Reach, SchemaIrTypeView, Traversal, View,
+        ContainerView, EdgeKind, InlineIrTypeView, IrStructFieldName, IrStructFieldNameHint,
+        IrStructFieldView, IrStructView, IrTypeView, PrimitiveIrType, Reach, SchemaIrTypeView,
+        Traversal, View,
     },
 };
 use proc_macro2::TokenStream;
@@ -32,7 +33,20 @@ impl<'a> CodegenStruct<'a> {
 impl ToTokens for CodegenStruct<'_> {
     fn to_tokens(&self, tokens: &mut TokenStream) {
         let unique = UniqueNames::new();
-        let mut scope = CodegenIdentScope::new(&unique);
+        let mut scope = {
+            if self.ty.fields().any(|f| {
+                matches!(
+                    f.name(),
+                    IrStructFieldName::Hint(IrStructFieldNameHint::AdditionalProperties)
+                )
+            }) {
+                // Make sure the `additional_properties` field that we emit
+                // doesn't conflict with a schema property of the same name.
+                CodegenIdentScope::with_reserved(&unique, &["additional_properties"])
+            } else {
+                CodegenIdentScope::new(&unique)
+            }
+        };
         let fields = self
             .ty
             .fields()
@@ -1606,6 +1620,55 @@ mod tests {
                 pub name: ::std::string::String,
                 pub age: i32,
                 pub email: ::std::string::String,
+            }
+        };
+        assert_eq!(actual, expected);
+    }
+
+    // MARK: Additional properties
+
+    #[test]
+    fn test_struct_with_additional_properties() {
+        let doc = Document::from_yaml(indoc::indoc! {"
+            openapi: 3.0.0
+            info:
+              title: Test API
+              version: 1.0.0
+            paths: {}
+            components:
+              schemas:
+                Config:
+                  type: object
+                  properties:
+                    name:
+                      type: string
+                  required:
+                    - name
+                  additionalProperties:
+                    type: string
+        "})
+        .unwrap();
+
+        let spec = IrSpec::from_doc(&doc).unwrap();
+        let ir = IrGraph::new(&spec);
+        let graph = CodegenGraph::new(ir);
+
+        let schema = graph.schemas().find(|s| s.name() == "Config");
+        let Some(schema @ SchemaIrTypeView::Struct(_, struct_view)) = &schema else {
+            panic!("expected struct `Config`; got `{schema:?}`");
+        };
+
+        let name = CodegenTypeName::Schema(schema);
+        let codegen = CodegenStruct::new(name, struct_view);
+
+        let actual: syn::ItemStruct = parse_quote!(#codegen);
+        let expected: syn::ItemStruct = parse_quote! {
+            #[derive(Debug, Clone, PartialEq, Eq, Hash, Default, ::ploidy_util::serde::Serialize, ::ploidy_util::serde::Deserialize)]
+            #[serde(crate = "::ploidy_util::serde")]
+            pub struct Config {
+                pub name: ::std::string::String,
+                #[serde(flatten,)]
+                pub additional_properties: ::std::collections::BTreeMap<::std::string::String, ::std::string::String>,
             }
         };
         assert_eq!(actual, expected);

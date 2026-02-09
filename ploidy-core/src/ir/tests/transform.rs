@@ -379,112 +379,6 @@ fn test_array_with_inline_items() {
     assert_matches!(&**items, IrType::Primitive(PrimitiveIrType::String));
 }
 
-// MARK: Maps
-
-#[test]
-fn test_map_with_additional_properties_ref() {
-    let doc = Document::from_yaml(indoc::indoc! {"
-        openapi: 3.0.0
-        info:
-          title: Test API
-          version: 1.0.0
-        components:
-          schemas:
-            Value:
-              type: string
-    "})
-    .unwrap();
-    let schema: Schema = serde_yaml::from_str(indoc::indoc! {"
-        type: object
-        additionalProperties:
-          $ref: '#/components/schemas/Value'
-    "})
-    .unwrap();
-
-    let result = transform(&doc, "StringMap", &schema);
-
-    let container = match result {
-        IrType::Schema(SchemaIrType::Container(
-            SchemaTypeInfo {
-                name: "StringMap", ..
-            },
-            container,
-        )) => container,
-        other => panic!("expected container `StringMap`; got `{other:?}`"),
-    };
-    let value = match &container {
-        Container::Map(Inner { ty, .. }) => ty,
-        other => panic!("expected map; got `{other:?}`"),
-    };
-    assert_matches!(&**value, IrType::Ref(_));
-}
-
-#[test]
-fn test_map_with_additional_properties_inline() {
-    let doc = Document::from_yaml(indoc::indoc! {"
-        openapi: 3.0.0
-        info:
-          title: Test
-          version: 1.0.0
-    "})
-    .unwrap();
-    let schema: Schema = serde_yaml::from_str(indoc::indoc! {"
-        type: object
-        additionalProperties:
-          type: integer
-    "})
-    .unwrap();
-
-    let result = transform(&doc, "IntMap", &schema);
-
-    let container = match result {
-        IrType::Schema(SchemaIrType::Container(
-            SchemaTypeInfo { name: "IntMap", .. },
-            container,
-        )) => container,
-        other => panic!("expected container `IntMap`; got `{other:?}`"),
-    };
-    let value = match &container {
-        Container::Map(Inner { ty, .. }) => ty,
-        other => panic!("expected map; got `{other:?}`"),
-    };
-    assert_matches!(&**value, IrType::Primitive(PrimitiveIrType::I32));
-}
-
-#[test]
-fn test_map_with_additional_properties_true() {
-    let doc = Document::from_yaml(indoc::indoc! {"
-        openapi: 3.0.0
-        info:
-          title: Test
-          version: 1.0.0
-    "})
-    .unwrap();
-    let schema: Schema = serde_yaml::from_str(indoc::indoc! {"
-        type: object
-        properties: {}
-        additionalProperties: true
-    "})
-    .unwrap();
-
-    let result = transform(&doc, "DynamicMap", &schema);
-
-    let container = match result {
-        IrType::Schema(SchemaIrType::Container(
-            SchemaTypeInfo {
-                name: "DynamicMap", ..
-            },
-            container,
-        )) => container,
-        other => panic!("expected container `DynamicMap`; got `{other:?}`"),
-    };
-    let value = match &container {
-        Container::Map(Inner { ty, .. }) => ty,
-        other => panic!("expected map; got `{other:?}`"),
-    };
-    assert_matches!(&**value, IrType::Any);
-}
-
 // MARK: `try_struct()`
 
 #[test]
@@ -533,7 +427,59 @@ fn test_struct_with_own_properties() {
 }
 
 #[test]
-fn test_struct_with_additional_properties() {
+fn test_struct_with_additional_properties_ref() {
+    let doc = Document::from_yaml(indoc::indoc! {"
+        openapi: 3.0.0
+        info:
+          title: Test
+          version: 1.0.0
+        components:
+          schemas:
+            Value:
+              type: string
+    "})
+    .unwrap();
+    let schema: Schema = serde_yaml::from_str(indoc::indoc! {"
+        type: object
+        properties:
+          name:
+            type: string
+        additionalProperties:
+          $ref: '#/components/schemas/Value'
+    "})
+    .unwrap();
+
+    let result = transform(&doc, "Config", &schema);
+
+    let struct_ = match result {
+        IrType::Schema(SchemaIrType::Struct(SchemaTypeInfo { name: "Config", .. }, struct_)) => {
+            struct_
+        }
+        other => panic!("expected struct `Config`; got `{other:?}`"),
+    };
+    let [
+        _,
+        IrStructField {
+            name: IrStructFieldName::Hint(IrStructFieldNameHint::AdditionalProperties),
+            flattened: true,
+            required: true,
+            ty,
+            ..
+        },
+    ] = &*struct_.fields
+    else {
+        panic!("expected two fields; got `{:?}`", struct_.fields);
+    };
+    assert_matches!(
+        ty,
+        IrType::Inline(
+            InlineIrType::Container(_, Container::Map(inner)),
+        ) if matches!(&*inner.ty, IrType::Ref(_)),
+    );
+}
+
+#[test]
+fn test_struct_with_additional_properties_inline() {
     let doc = Document::from_yaml(indoc::indoc! {"
         openapi: 3.0.0
         info:
@@ -547,24 +493,140 @@ fn test_struct_with_additional_properties() {
           name:
             type: string
         additionalProperties:
+          type: object
+          properties:
+            inner:
+              type: string
+    "})
+    .unwrap();
+
+    let result = transform(&doc, "Config", &schema);
+
+    // When `additionalProperties` is present alongside `properties`,
+    // the result should be a struct with a flattened map field.
+    let struct_ = match result {
+        IrType::Schema(SchemaIrType::Struct(SchemaTypeInfo { name: "Config", .. }, struct_)) => {
+            struct_
+        }
+        other => panic!("expected struct `Config`; got `{other:?}`"),
+    };
+    let [
+        IrStructField {
+            name: IrStructFieldName::Name("name"),
+            flattened: false,
+            ..
+        },
+        IrStructField {
+            name: IrStructFieldName::Hint(IrStructFieldNameHint::AdditionalProperties),
+            flattened: true,
+            required: true,
+            ty,
+            ..
+        },
+    ] = &*struct_.fields
+    else {
+        panic!("expected two fields; got `{:?}`", struct_.fields);
+    };
+
+    // The container path should be `Type("Config") / Field(AdditionalProperties)`.
+    let IrType::Inline(InlineIrType::Container(container_path, Container::Map(inner))) = ty else {
+        panic!("expected map; got `{ty:?}`");
+    };
+    assert_matches!(container_path.root, InlineIrTypePathRoot::Type("Config"));
+    assert_matches!(
+        &*container_path.segments,
+        [InlineIrTypePathSegment::Field(IrStructFieldName::Hint(
+            IrStructFieldNameHint::AdditionalProperties,
+        ))]
+    );
+
+    // The inline value type path should append `MapValue`.
+    let IrType::Inline(InlineIrType::Struct(value_path, _)) = &*inner.ty else {
+        panic!("expected inline struct; got `{:?}`", inner.ty);
+    };
+    assert_matches!(value_path.root, InlineIrTypePathRoot::Type("Config"));
+    assert_matches!(
+        &*value_path.segments,
+        [
+            InlineIrTypePathSegment::Field(IrStructFieldName::Hint(
+                IrStructFieldNameHint::AdditionalProperties,
+            )),
+            InlineIrTypePathSegment::MapValue,
+        ]
+    );
+}
+
+#[test]
+fn test_struct_with_additional_properties_true() {
+    let doc = Document::from_yaml(indoc::indoc! {"
+        openapi: 3.0.0
+        info:
+          title: Test
+          version: 1.0.0
+    "})
+    .unwrap();
+    let schema: Schema = serde_yaml::from_str(indoc::indoc! {"
+        type: object
+        properties: {}
+        additionalProperties: true
+    "})
+    .unwrap();
+
+    let result = transform(&doc, "DynamicMap", &schema);
+
+    // Empty `properties` with `additionalProperties: true` produces a
+    // struct with a single flattened map field of type `Any`.
+    let struct_ = match result {
+        IrType::Schema(SchemaIrType::Struct(
+            SchemaTypeInfo {
+                name: "DynamicMap", ..
+            },
+            struct_,
+        )) => struct_,
+        other => panic!("expected struct `DynamicMap`; got `{other:?}`"),
+    };
+    assert_matches!(
+        &*struct_.fields,
+        [IrStructField {
+            name: IrStructFieldName::Hint(IrStructFieldNameHint::AdditionalProperties),
+            flattened: true,
+            required: true,
+            ty: IrType::Inline(InlineIrType::Container(_, Container::Map(inner))),
+            ..
+        }] if matches!(&*inner.ty, IrType::Any)
+    );
+}
+
+#[test]
+fn test_struct_without_properties_falls_through() {
+    // A schema with only `additionalProperties` and no `properties`
+    // falls through to `other()`, producing a map.
+    let doc = Document::from_yaml(indoc::indoc! {"
+        openapi: 3.0.0
+        info:
+          title: Test
+          version: 1.0.0
+    "})
+    .unwrap();
+    let schema: Schema = serde_yaml::from_str(indoc::indoc! {"
+        type: object
+        additionalProperties:
           type: string
     "})
     .unwrap();
 
-    let result = transform(&doc, "DynamicObj", &schema);
+    let result = transform(&doc, "DynamicMap", &schema);
 
-    // When `additionalProperties` is present, it should fall through
-    // to `other()`, which creates a `Container(Map(...))`.
-    let container = match result {
+    assert_matches!(
+        &result,
         IrType::Schema(SchemaIrType::Container(
             SchemaTypeInfo {
-                name: "DynamicObj", ..
+                name: "DynamicMap",
+                ..
             },
-            container,
-        )) => container,
-        other => panic!("expected container `DynamicObj`; got `{other:?}`"),
-    };
-    assert_matches!(&container, Container::Map(_));
+            Container::Map(_),
+        ))
+    );
 }
 
 #[test]

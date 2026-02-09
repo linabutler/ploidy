@@ -350,25 +350,12 @@ impl<'context, 'a> IrTransformer<'context, 'a> {
     }
 
     fn try_struct(self) -> Result<IrType<'a>, Self> {
-        if self
-            .schema
-            .additional_properties
-            .as_ref()
-            .is_some_and(|additional| {
-                matches!(
-                    additional,
-                    AdditionalProperties::RefOrSchema(_) | AdditionalProperties::Bool(true)
-                )
-            })
-        {
-            return Err(self);
-        }
         if self.schema.properties.is_none() && self.schema.all_of.is_none() {
             return Err(self);
         }
 
         let parents = self.parents().collect();
-        let fields = self.properties().collect();
+        let fields = itertools::chain!(self.properties(), self.additional_properties()).collect();
         let ty = IrStruct {
             description: self.schema.description.as_deref(),
             fields,
@@ -687,6 +674,53 @@ impl<'context, 'a> IrTransformer<'context, 'a> {
                     flattened: false,
                 }
             })
+    }
+
+    /// Lowers `additionalProperties` into a struct field definition,
+    /// if the schema specifies them.
+    fn additional_properties(&self) -> Option<IrStructField<'a>> {
+        let name = IrStructFieldName::Hint(IrStructFieldNameHint::AdditionalProperties);
+        let path = match &self.name {
+            IrTypeName::Schema(info) => InlineIrTypePath {
+                root: InlineIrTypePathRoot::Type(info.name),
+                segments: vec![InlineIrTypePathSegment::Field(name)],
+            },
+            IrTypeName::Inline(path) => {
+                let mut path = path.clone();
+                path.segments.push(InlineIrTypePathSegment::Field(name));
+                path
+            }
+        };
+
+        let inner = match &self.schema.additional_properties {
+            Some(AdditionalProperties::RefOrSchema(RefOrSchema::Ref(r))) => Inner {
+                description: self.schema.description.as_deref(),
+                ty: IrType::Ref(&r.path).into(),
+            },
+            Some(AdditionalProperties::RefOrSchema(RefOrSchema::Other(schema))) => {
+                let mut path = path.clone();
+                path.segments.push(InlineIrTypePathSegment::MapValue);
+                Inner {
+                    description: self.schema.description.as_deref(),
+                    ty: transform_with_context(self.context, path, schema).into(),
+                }
+            }
+            Some(AdditionalProperties::Bool(true)) => Inner {
+                description: self.schema.description.as_deref(),
+                ty: IrType::Any.into(),
+            },
+            _ => return None,
+        };
+
+        let ty = InlineIrType::Container(path, Container::Map(inner));
+
+        Some(IrStructField {
+            name,
+            ty: ty.into(),
+            required: true,
+            description: None,
+            flattened: true,
+        })
     }
 }
 

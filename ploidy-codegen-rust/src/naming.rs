@@ -397,6 +397,10 @@ impl ToTokens for CodegenStructFieldName {
                 CodegenIdentUsage::Field(&CodegenIdent(format!("variant_{index}")))
                     .to_tokens(tokens)
             }
+            IrStructFieldNameHint::AdditionalProperties => {
+                CodegenIdentUsage::Field(CodegenIdentRef::new("additional_properties"))
+                    .to_tokens(tokens)
+            }
         }
     }
 }
@@ -422,6 +426,9 @@ impl<'a> CodegenTypePathSegment<'a> {
                     }
                     Field(IrStructFieldName::Hint(IrStructFieldNameHint::Index(index))) => {
                         write!(f, "Variant{index}")
+                    }
+                    Field(IrStructFieldName::Hint(IrStructFieldNameHint::AdditionalProperties)) => {
+                        f.write_str("AdditionalProperties")
                     }
                     MapValue => f.write_str("Value"),
                     ArrayItem => f.write_str("Item"),
@@ -735,6 +742,14 @@ mod tests {
         let field_name = CodegenStructFieldName(IrStructFieldNameHint::Index(5));
         let actual: syn::Ident = parse_quote!(#field_name);
         let expected: syn::Ident = parse_quote!(variant_5);
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn test_struct_field_name_additional_properties() {
+        let field_name = CodegenStructFieldName(IrStructFieldNameHint::AdditionalProperties);
+        let actual: syn::Ident = parse_quote!(#field_name);
+        let expected: syn::Ident = parse_quote!(additional_properties);
         assert_eq!(actual, expected);
     }
 

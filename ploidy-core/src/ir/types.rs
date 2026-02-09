@@ -287,10 +287,12 @@ pub enum IrStructFieldName<'a> {
 }
 
 /// A hint that's used to generate a name for a struct field.
-/// These are emitted for inline `anyOf` schemas.
+/// These are emitted for inline `anyOf` schemas and
+/// additional properties fields.
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub enum IrStructFieldNameHint {
     Index(usize),
+    AdditionalProperties,
 }
 
 /// A variant of an untagged union.
