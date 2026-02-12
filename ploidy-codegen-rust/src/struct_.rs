@@ -80,14 +80,12 @@ impl ToTokens for CodegenStruct<'_> {
         let mut extra_derives = vec![];
         // Structs that don't contain any floating-point types
         // can derive `Eq` and `Hash`.
-        let is_hashable = self.ty.dependencies().all(|view| {
-            if let IrTypeView::Primitive(p) = &view
-                && let PrimitiveIrType::F32 | PrimitiveIrType::F64 = p.ty()
-            {
-                false
-            } else {
-                true
+        let is_hashable = self.ty.dependencies().all(|view| match view {
+            IrTypeView::Inline(InlineIrTypeView::Primitive(_, view))
+            | IrTypeView::Schema(SchemaIrTypeView::Primitive(_, view)) => {
+                !matches!(view.ty(), PrimitiveIrType::F32 | PrimitiveIrType::F64)
             }
+            _ => true,
         });
         if is_hashable {
             extra_derives.push(ExtraDerive::Eq);
@@ -144,10 +142,17 @@ impl ToTokens for CodegenStruct<'_> {
             .all(|ty| {
                 match ty {
                     // `serde_json::Value` implements `Default`.
-                    IrTypeView::Any => true,
+                    IrTypeView::Inline(InlineIrTypeView::Any(..))
+                    | IrTypeView::Schema(SchemaIrTypeView::Any(..)) => true,
                     // `Url` doesn't implement `Default`, but other primitives do.
-                    IrTypeView::Primitive(p) if p.ty() == PrimitiveIrType::Url => false,
-                    IrTypeView::Primitive(_) => true,
+                    IrTypeView::Inline(InlineIrTypeView::Primitive(_, view))
+                    | IrTypeView::Schema(SchemaIrTypeView::Primitive(_, view))
+                        if matches!(view.ty(), PrimitiveIrType::Url) =>
+                    {
+                        false
+                    }
+                    IrTypeView::Inline(InlineIrTypeView::Primitive(..))
+                    | IrTypeView::Schema(SchemaIrTypeView::Primitive(..)) => true,
                     // Other types aren't defaultable.
                     _ => false,
                 }
@@ -203,7 +208,10 @@ impl<'view, 'a> CodegenField<'view, 'a> {
                 !matches!(container, ContainerView::Array(_) | ContainerView::Map(_))
             }
             // Leaf types don't contain references.
-            IrTypeView::Primitive(_) | IrTypeView::Any => false,
+            IrTypeView::Inline(InlineIrTypeView::Primitive(..) | InlineIrTypeView::Any(..))
+            | IrTypeView::Schema(SchemaIrTypeView::Primitive(..) | SchemaIrTypeView::Any(..)) => {
+                false
+            }
             // For other types, check if there's a cycle back to the struct.
             _ => self.field.needs_indirection(),
         }

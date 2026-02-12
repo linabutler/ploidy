@@ -159,7 +159,10 @@ fn test_primitive_string_formats() {
     "})
     .unwrap();
     let result = transform(&doc, "Timestamp", &schema);
-    assert_matches!(result, IrType::Primitive(PrimitiveIrType::DateTime));
+    assert_matches!(
+        result,
+        IrType::Schema(SchemaIrType::Primitive(_, PrimitiveIrType::DateTime))
+    );
 
     // `string` with `date` format.
     let schema: Schema = serde_yaml::from_str(indoc::indoc! {"
@@ -168,7 +171,10 @@ fn test_primitive_string_formats() {
     "})
     .unwrap();
     let result = transform(&doc, "Date", &schema);
-    assert_matches!(result, IrType::Primitive(PrimitiveIrType::Date));
+    assert_matches!(
+        result,
+        IrType::Schema(SchemaIrType::Primitive(_, PrimitiveIrType::Date))
+    );
 
     // `string` with `uri` format.
     let schema: Schema = serde_yaml::from_str(indoc::indoc! {"
@@ -177,7 +183,10 @@ fn test_primitive_string_formats() {
     "})
     .unwrap();
     let result = transform(&doc, "Url", &schema);
-    assert_matches!(result, IrType::Primitive(PrimitiveIrType::Url));
+    assert_matches!(
+        result,
+        IrType::Schema(SchemaIrType::Primitive(_, PrimitiveIrType::Url))
+    );
 
     // `string` with `uuid` format.
     let schema: Schema = serde_yaml::from_str(indoc::indoc! {"
@@ -186,7 +195,10 @@ fn test_primitive_string_formats() {
     "})
     .unwrap();
     let result = transform(&doc, "Id", &schema);
-    assert_matches!(result, IrType::Primitive(PrimitiveIrType::Uuid));
+    assert_matches!(
+        result,
+        IrType::Schema(SchemaIrType::Primitive(_, PrimitiveIrType::Uuid))
+    );
 
     // `string` with `byte` format.
     let schema: Schema = serde_yaml::from_str(indoc::indoc! {"
@@ -195,7 +207,10 @@ fn test_primitive_string_formats() {
     "})
     .unwrap();
     let result = transform(&doc, "Data", &schema);
-    assert_matches!(result, IrType::Primitive(PrimitiveIrType::Bytes));
+    assert_matches!(
+        result,
+        IrType::Schema(SchemaIrType::Primitive(_, PrimitiveIrType::Bytes))
+    );
 
     // `string` with `binary` format.
     let schema: Schema = serde_yaml::from_str(indoc::indoc! {"
@@ -204,7 +219,10 @@ fn test_primitive_string_formats() {
     "})
     .unwrap();
     let result = transform(&doc, "RawData", &schema);
-    assert_matches!(result, IrType::Primitive(PrimitiveIrType::Binary));
+    assert_matches!(
+        result,
+        IrType::Schema(SchemaIrType::Primitive(_, PrimitiveIrType::Binary))
+    );
 
     // `string` without format.
     let schema: Schema = serde_yaml::from_str(indoc::indoc! {"
@@ -212,7 +230,10 @@ fn test_primitive_string_formats() {
     "})
     .unwrap();
     let result = transform(&doc, "Text", &schema);
-    assert_matches!(result, IrType::Primitive(PrimitiveIrType::String));
+    assert_matches!(
+        result,
+        IrType::Schema(SchemaIrType::Primitive(_, PrimitiveIrType::String))
+    );
 }
 
 #[test]
@@ -232,7 +253,10 @@ fn test_primitive_integer_formats() {
     "})
     .unwrap();
     let result = transform(&doc, "Count", &schema);
-    assert_matches!(result, IrType::Primitive(PrimitiveIrType::I32));
+    assert_matches!(
+        result,
+        IrType::Schema(SchemaIrType::Primitive(_, PrimitiveIrType::I32))
+    );
 
     // `integer` with `int64` format.
     let schema: Schema = serde_yaml::from_str(indoc::indoc! {"
@@ -241,7 +265,10 @@ fn test_primitive_integer_formats() {
     "})
     .unwrap();
     let result = transform(&doc, "BigCount", &schema);
-    assert_matches!(result, IrType::Primitive(PrimitiveIrType::I64));
+    assert_matches!(
+        result,
+        IrType::Schema(SchemaIrType::Primitive(_, PrimitiveIrType::I64))
+    );
 
     // `integer` with `unix-time` format.
     let schema: Schema = serde_yaml::from_str(indoc::indoc! {"
@@ -250,7 +277,10 @@ fn test_primitive_integer_formats() {
     "})
     .unwrap();
     let result = transform(&doc, "Timestamp", &schema);
-    assert_matches!(result, IrType::Primitive(PrimitiveIrType::UnixTime));
+    assert_matches!(
+        result,
+        IrType::Schema(SchemaIrType::Primitive(_, PrimitiveIrType::UnixTime))
+    );
 
     // `integer` without format defaults to `int32`.
     let schema: Schema = serde_yaml::from_str(indoc::indoc! {"
@@ -258,7 +288,10 @@ fn test_primitive_integer_formats() {
     "})
     .unwrap();
     let result = transform(&doc, "DefaultInt", &schema);
-    assert_matches!(result, IrType::Primitive(PrimitiveIrType::I32));
+    assert_matches!(
+        result,
+        IrType::Schema(SchemaIrType::Primitive(_, PrimitiveIrType::I32))
+    );
 }
 
 #[test]
@@ -278,7 +311,10 @@ fn test_primitive_number_formats() {
     "})
     .unwrap();
     let result = transform(&doc, "Price", &schema);
-    assert_matches!(result, IrType::Primitive(PrimitiveIrType::F32));
+    assert_matches!(
+        result,
+        IrType::Schema(SchemaIrType::Primitive(_, PrimitiveIrType::F32))
+    );
 
     // `number` with `double` format.
     let schema: Schema = serde_yaml::from_str(indoc::indoc! {"
@@ -287,7 +323,10 @@ fn test_primitive_number_formats() {
     "})
     .unwrap();
     let result = transform(&doc, "BigPrice", &schema);
-    assert_matches!(result, IrType::Primitive(PrimitiveIrType::F64));
+    assert_matches!(
+        result,
+        IrType::Schema(SchemaIrType::Primitive(_, PrimitiveIrType::F64))
+    );
 
     // `number` with `unix-time` format.
     let schema: Schema = serde_yaml::from_str(indoc::indoc! {"
@@ -296,7 +335,10 @@ fn test_primitive_number_formats() {
     "})
     .unwrap();
     let result = transform(&doc, "FloatTime", &schema);
-    assert_matches!(result, IrType::Primitive(PrimitiveIrType::UnixTime));
+    assert_matches!(
+        result,
+        IrType::Schema(SchemaIrType::Primitive(_, PrimitiveIrType::UnixTime))
+    );
 
     // `number` without format defaults to `double`.
     let schema: Schema = serde_yaml::from_str(indoc::indoc! {"
@@ -304,7 +346,10 @@ fn test_primitive_number_formats() {
     "})
     .unwrap();
     let result = transform(&doc, "DefaultNumber", &schema);
-    assert_matches!(result, IrType::Primitive(PrimitiveIrType::F64));
+    assert_matches!(
+        result,
+        IrType::Schema(SchemaIrType::Primitive(_, PrimitiveIrType::F64))
+    );
 }
 
 // MARK: Arrays
@@ -376,7 +421,10 @@ fn test_array_with_inline_items() {
         Container::Array(Inner { ty, .. }) => ty,
         other => panic!("expected array; got `{other:?}`"),
     };
-    assert_matches!(&**items, IrType::Primitive(PrimitiveIrType::String));
+    assert_matches!(
+        &**items,
+        IrType::Inline(InlineIrType::Primitive(_, PrimitiveIrType::String))
+    );
 }
 
 // MARK: `try_struct()`
@@ -414,12 +462,12 @@ fn test_struct_with_own_properties() {
         [
             IrStructField {
                 name: IrStructFieldName::Name("name"),
-                ty: IrType::Primitive(PrimitiveIrType::String),
+                ty: IrType::Inline(InlineIrType::Primitive(_, PrimitiveIrType::String)),
                 ..
             },
             IrStructField {
                 name: IrStructFieldName::Name("age"),
-                ty: IrType::Primitive(PrimitiveIrType::I32),
+                ty: IrType::Inline(InlineIrType::Primitive(_, PrimitiveIrType::I32)),
                 ..
             },
         ],
@@ -593,7 +641,7 @@ fn test_struct_with_additional_properties_true() {
             required: true,
             ty: IrType::Inline(InlineIrType::Container(_, Container::Map(inner))),
             ..
-        }] if matches!(&*inner.ty, IrType::Any)
+        }] if matches!(&*inner.ty, IrType::Inline(InlineIrType::Any(_)))
     );
 }
 
@@ -762,7 +810,10 @@ fn test_struct_with_nullable_field_inline() {
     else {
         panic!("expected single nullable field; got `{:?}`", struct_.fields);
     };
-    assert_matches!(&**inner, IrType::Primitive(PrimitiveIrType::String));
+    assert_matches!(
+        &**inner,
+        IrType::Inline(InlineIrType::Primitive(_, PrimitiveIrType::String))
+    );
 }
 
 #[test]
@@ -812,7 +863,10 @@ fn test_struct_with_nullable_field_openapi_31_syntax() {
             struct_.fields
         );
     };
-    assert_matches!(&**inner, IrType::Primitive(PrimitiveIrType::String));
+    assert_matches!(
+        &**inner,
+        IrType::Inline(InlineIrType::Primitive(_, PrimitiveIrType::String))
+    );
 }
 
 #[test]
@@ -1312,7 +1366,7 @@ fn test_untagged_empty_simplifies() {
 
     let result = transform(&doc, "Empty", &schema);
 
-    assert_matches!(result, IrType::Any);
+    assert_matches!(result, IrType::Schema(SchemaIrType::Any(_)));
 }
 
 #[test]
@@ -1332,7 +1386,7 @@ fn test_untagged_single_null_simplifies() {
 
     let result = transform(&doc, "JustNull", &schema);
 
-    assert_matches!(result, IrType::Any);
+    assert_matches!(result, IrType::Schema(SchemaIrType::Any(_)));
 }
 
 #[test]
@@ -1799,7 +1853,10 @@ fn test_boolean_primitive_transformation() {
 
     let result = transform(&doc, "Flag", &schema);
 
-    assert_matches!(result, IrType::Primitive(PrimitiveIrType::Bool));
+    assert_matches!(
+        result,
+        IrType::Schema(SchemaIrType::Primitive(_, PrimitiveIrType::Bool))
+    );
 }
 
 #[test]
@@ -1820,7 +1877,10 @@ fn test_unhandled_string_format_falls_back_to_string() {
 
     let result = transform(&doc, "CustomType", &schema);
 
-    assert_matches!(result, IrType::Primitive(PrimitiveIrType::String));
+    assert_matches!(
+        result,
+        IrType::Schema(SchemaIrType::Primitive(_, PrimitiveIrType::String))
+    );
 }
 
 #[test]
@@ -1839,7 +1899,7 @@ fn test_empty_type_array_produces_any() {
 
     let result = transform(&doc, "NoType", &schema);
 
-    assert_matches!(result, IrType::Any);
+    assert_matches!(result, IrType::Schema(SchemaIrType::Any(_)));
 }
 
 #[test]
@@ -1871,7 +1931,7 @@ fn test_array_without_items_produces_array_of_any() {
         Container::Array(Inner { ty, .. }) => ty,
         other => panic!("expected array; got `{other:?}`"),
     };
-    assert_matches!(&**items, IrType::Any);
+    assert_matches!(&**items, IrType::Inline(InlineIrType::Any(_)));
 }
 
 #[test]
@@ -1922,7 +1982,7 @@ fn test_schema_without_type_or_properties_produces_any() {
     let result = transform(&doc, "Empty", &schema);
 
     // A schema with no `type` and no `properties` should become `Any`.
-    assert_matches!(result, IrType::Any);
+    assert_matches!(result, IrType::Schema(SchemaIrType::Any(_)));
 }
 
 #[test]
@@ -1957,7 +2017,10 @@ fn test_type_and_null_in_type_array_creates_nullable() {
         Container::Optional(Inner { ty, .. }) => ty,
         other => panic!("expected nullable; got `{other:?}`"),
     };
-    assert_matches!(&**inner, IrType::Primitive(PrimitiveIrType::String));
+    assert_matches!(
+        &**inner,
+        IrType::Inline(InlineIrType::Primitive(_, PrimitiveIrType::String))
+    );
 }
 
 #[test]
@@ -2000,7 +2063,10 @@ fn test_type_array_and_null_creates_nullable_array() {
         Container::Array(Inner { ty, .. }) => ty,
         other => panic!("expected array; got `{other:?}`"),
     };
-    assert_matches!(&**items, IrType::Primitive(PrimitiveIrType::String));
+    assert_matches!(
+        &**items,
+        IrType::Inline(InlineIrType::Primitive(_, PrimitiveIrType::String))
+    );
 }
 
 #[test]
@@ -2043,7 +2109,10 @@ fn test_type_object_and_null_creates_nullable_map() {
         Container::Map(Inner { ty, .. }) => ty,
         other => panic!("expected map; got `{other:?}`"),
     };
-    assert_matches!(&**values, IrType::Primitive(PrimitiveIrType::I32));
+    assert_matches!(
+        &**values,
+        IrType::Inline(InlineIrType::Primitive(_, PrimitiveIrType::I32))
+    );
 }
 
 #[test]
@@ -2077,11 +2146,11 @@ fn test_multiple_types_string_and_integer_untagged() {
         [
             IrUntaggedVariant::Some(
                 IrUntaggedVariantNameHint::Primitive(PrimitiveIrType::String),
-                IrType::Primitive(PrimitiveIrType::String),
+                IrType::Schema(SchemaIrType::Primitive(_, PrimitiveIrType::String)),
             ),
             IrUntaggedVariant::Some(
                 IrUntaggedVariantNameHint::Primitive(PrimitiveIrType::I32),
-                IrType::Primitive(PrimitiveIrType::I32),
+                IrType::Schema(SchemaIrType::Primitive(_, PrimitiveIrType::I32)),
             ),
         ],
     );
@@ -2160,7 +2229,7 @@ fn test_deeply_nested_inline_types() {
         &*inner_struct.fields,
         [IrStructField {
             name: IrStructFieldName::Name("field"),
-            ty: IrType::Primitive(PrimitiveIrType::String),
+            ty: IrType::Inline(InlineIrType::Primitive(_, PrimitiveIrType::String)),
             ..
         },]
     );
@@ -2232,7 +2301,7 @@ fn test_additional_properties_false_creates_struct() {
         &*struct_.fields,
         [IrStructField {
             name: IrStructFieldName::Name("name"),
-            ty: IrType::Primitive(PrimitiveIrType::String),
+            ty: IrType::Inline(InlineIrType::Primitive(_, PrimitiveIrType::String)),
             ..
         }],
     );
@@ -2513,7 +2582,7 @@ fn test_recursive_all_of_ref_nullable() {
         [
             IrStructField {
                 name: IrStructFieldName::Name("value"),
-                ty: IrType::Primitive(PrimitiveIrType::String),
+                ty: IrType::Inline(InlineIrType::Primitive(_, PrimitiveIrType::String)),
                 required: true,
                 ..
             },
@@ -2670,7 +2739,10 @@ fn test_named_array_schema_produces_container() {
         Container::Array(Inner { ty, .. }) => ty,
         other => panic!("expected array; got `{other:?}`"),
     };
-    assert_matches!(&**items, IrType::Primitive(PrimitiveIrType::String));
+    assert_matches!(
+        &**items,
+        IrType::Inline(InlineIrType::Primitive(_, PrimitiveIrType::String))
+    );
 }
 
 #[test]
@@ -2784,7 +2856,10 @@ fn test_named_nullable_schema_produces_container() {
         Container::Optional(Inner { ty, .. }) => ty,
         other => panic!("expected optional; got `{other:?}`"),
     };
-    assert_matches!(&**inner, IrType::Primitive(PrimitiveIrType::String));
+    assert_matches!(
+        &**inner,
+        IrType::Inline(InlineIrType::Primitive(_, PrimitiveIrType::String))
+    );
 }
 
 #[test]
@@ -2837,7 +2912,10 @@ fn test_named_primitive_does_not_produce_container() {
 
     // Bare primitives should _not_ be wrapped; they don't contain inline types,
     // and don't benefit from a type alias.
-    assert_matches!(result, IrType::Primitive(PrimitiveIrType::String));
+    assert_matches!(
+        result,
+        IrType::Schema(SchemaIrType::Primitive(_, PrimitiveIrType::String))
+    );
 }
 
 #[test]

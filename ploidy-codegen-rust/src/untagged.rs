@@ -1,4 +1,7 @@
-use ploidy_core::ir::{IrTypeView, IrUntaggedView, PrimitiveIrType, SomeIrUntaggedVariant};
+use ploidy_core::ir::{
+    InlineIrTypeView, IrTypeView, IrUntaggedView, PrimitiveIrType, SchemaIrTypeView,
+    SomeIrUntaggedVariant,
+};
 use proc_macro2::TokenStream;
 use quote::{ToTokens, TokenStreamExt, quote};
 
@@ -44,14 +47,12 @@ impl ToTokens for CodegenUntagged<'_> {
             Some(SomeIrUntaggedVariant { view, .. }) => view
                 .dependencies()
                 .chain(std::iter::once(view))
-                .all(|view| {
-                    if let IrTypeView::Primitive(p) = &view
-                        && let PrimitiveIrType::F32 | PrimitiveIrType::F64 = p.ty()
-                    {
-                        false
-                    } else {
-                        true
+                .all(|view| match view {
+                    IrTypeView::Inline(InlineIrTypeView::Primitive(_, view))
+                    | IrTypeView::Schema(SchemaIrTypeView::Primitive(_, view)) => {
+                        !matches!(view.ty(), PrimitiveIrType::F32 | PrimitiveIrType::F64)
                     }
+                    _ => true,
                 }),
             None => true,
         });

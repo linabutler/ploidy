@@ -16,6 +16,7 @@ use ref_cast::{RefCastCustom, ref_cast_custom};
 
 use super::graph::{EdgeKind, Extension, ExtensionMap, IrGraph, IrGraphNode, Traversal, Traverse};
 
+pub mod any;
 pub mod container;
 pub mod enum_;
 pub mod inline;

@@ -3,8 +3,9 @@ use petgraph::graph::NodeIndex;
 use crate::ir::{SchemaTypeInfo, graph::IrGraph, types::SchemaIrType};
 
 use super::{
-    ViewNode, container::ContainerView, enum_::IrEnumView, struct_::IrStructView,
-    tagged::IrTaggedView, untagged::IrUntaggedView,
+    ViewNode, any::AnyView, container::ContainerView, enum_::IrEnumView,
+    primitive::IrPrimitiveView, struct_::IrStructView, tagged::IrTaggedView,
+    untagged::IrUntaggedView,
 };
 
 /// A graph-aware view of a [`SchemaIrType`].
@@ -15,6 +16,8 @@ pub enum SchemaIrTypeView<'a> {
     Tagged(SchemaTypeInfo<'a>, IrTaggedView<'a>),
     Untagged(SchemaTypeInfo<'a>, IrUntaggedView<'a>),
     Container(SchemaTypeInfo<'a>, ContainerView<'a>),
+    Primitive(SchemaTypeInfo<'a>, IrPrimitiveView<'a>),
+    Any(SchemaTypeInfo<'a>, AnyView<'a>),
 }
 
 impl<'a> SchemaIrTypeView<'a> {
@@ -37,6 +40,10 @@ impl<'a> SchemaIrTypeView<'a> {
             SchemaIrType::Container(info, container) => {
                 Self::Container(*info, ContainerView::new(graph, index, container))
             }
+            &SchemaIrType::Primitive(info, p) => {
+                Self::Primitive(info, IrPrimitiveView::new(graph, index, p))
+            }
+            &SchemaIrType::Any(info) => Self::Any(info, AnyView::new(graph, index)),
         }
     }
 
@@ -46,7 +53,9 @@ impl<'a> SchemaIrTypeView<'a> {
         | Self::Struct(SchemaTypeInfo { name, .. }, ..)
         | Self::Tagged(SchemaTypeInfo { name, .. }, ..)
         | Self::Untagged(SchemaTypeInfo { name, .. }, ..)
-        | Self::Container(SchemaTypeInfo { name, .. }, ..)) = self;
+        | Self::Container(SchemaTypeInfo { name, .. }, ..)
+        | Self::Primitive(SchemaTypeInfo { name, .. }, ..)
+        | Self::Any(SchemaTypeInfo { name, .. }, ..)) = self;
         name
     }
 
@@ -68,7 +77,9 @@ impl<'a> SchemaIrTypeView<'a> {
         | &Self::Struct(SchemaTypeInfo { resource, .. }, ..)
         | &Self::Tagged(SchemaTypeInfo { resource, .. }, ..)
         | &Self::Untagged(SchemaTypeInfo { resource, .. }, ..)
-        | &Self::Container(SchemaTypeInfo { resource, .. }, ..)) = self;
+        | &Self::Container(SchemaTypeInfo { resource, .. }, ..)
+        | &Self::Primitive(SchemaTypeInfo { resource, .. }, ..)
+        | &Self::Any(SchemaTypeInfo { resource, .. }, ..)) = self;
         resource
     }
 }
@@ -82,6 +93,8 @@ impl<'a> ViewNode<'a> for SchemaIrTypeView<'a> {
             Self::Tagged(_, view) => view.graph(),
             Self::Untagged(_, view) => view.graph(),
             Self::Container(_, view) => view.graph(),
+            Self::Primitive(_, view) => view.graph(),
+            Self::Any(_, view) => view.graph(),
         }
     }
 
@@ -93,6 +106,8 @@ impl<'a> ViewNode<'a> for SchemaIrTypeView<'a> {
             Self::Tagged(_, view) => view.index(),
             Self::Untagged(_, view) => view.index(),
             Self::Container(_, view) => view.index(),
+            Self::Primitive(_, view) => view.index(),
+            Self::Any(_, view) => view.index(),
         }
     }
 }

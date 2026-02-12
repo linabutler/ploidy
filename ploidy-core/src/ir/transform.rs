@@ -149,7 +149,10 @@ impl<'context, 'a> IrTransformer<'context, 'a> {
                 };
                 ty.map(|ty| {
                     let hint = match &ty {
-                        &IrType::Primitive(ty) => IrUntaggedVariantNameHint::Primitive(ty),
+                        IrType::Schema(SchemaIrType::Primitive(_, p))
+                        | IrType::Inline(InlineIrType::Primitive(_, p)) => {
+                            IrUntaggedVariantNameHint::Primitive(*p)
+                        }
                         IrType::Inline(InlineIrType::Container(_, Container::Array(_)))
                         | IrType::Schema(SchemaIrType::Container(_, Container::Array(_))) => {
                             IrUntaggedVariantNameHint::Array
@@ -167,10 +170,16 @@ impl<'context, 'a> IrTransformer<'context, 'a> {
             .collect_vec();
 
         Ok(match &*variants {
-            [] => IrType::Any,
+            [] => match &self.name {
+                IrTypeName::Schema(info) => SchemaIrType::Any(*info).into(),
+                IrTypeName::Inline(path) => InlineIrType::Any(path.clone()).into(),
+            },
 
             // Unwrap single-variant untagged unions.
-            [IrUntaggedVariant::Null] => IrType::Any,
+            [IrUntaggedVariant::Null] => match &self.name {
+                IrTypeName::Schema(info) => SchemaIrType::Any(*info).into(),
+                IrTypeName::Inline(path) => InlineIrType::Any(path.clone()).into(),
+            },
             [IrUntaggedVariant::Some(_, ty)] => ty.clone(),
 
             // Simplify two-variant untagged unions, where one is a type
@@ -381,44 +390,66 @@ impl<'context, 'a> IrTransformer<'context, 'a> {
         for ty in &self.schema.ty {
             let variant = match (ty, self.schema.format) {
                 (Ty::String, Some(Format::DateTime)) => {
-                    OtherVariant::Primitive(PrimitiveIrType::DateTime)
+                    OtherVariant::Primitive(&self.name, PrimitiveIrType::DateTime)
                 }
-                (Ty::String, Some(Format::Date)) => OtherVariant::Primitive(PrimitiveIrType::Date),
-                (Ty::String, Some(Format::Uri)) => OtherVariant::Primitive(PrimitiveIrType::Url),
-                (Ty::String, Some(Format::Uuid)) => OtherVariant::Primitive(PrimitiveIrType::Uuid),
-                (Ty::String, Some(Format::Byte)) => OtherVariant::Primitive(PrimitiveIrType::Bytes),
+                (Ty::String, Some(Format::Date)) => {
+                    OtherVariant::Primitive(&self.name, PrimitiveIrType::Date)
+                }
+                (Ty::String, Some(Format::Uri)) => {
+                    OtherVariant::Primitive(&self.name, PrimitiveIrType::Url)
+                }
+                (Ty::String, Some(Format::Uuid)) => {
+                    OtherVariant::Primitive(&self.name, PrimitiveIrType::Uuid)
+                }
+                (Ty::String, Some(Format::Byte)) => {
+                    OtherVariant::Primitive(&self.name, PrimitiveIrType::Bytes)
+                }
                 (Ty::String, Some(Format::Binary)) => {
-                    OtherVariant::Primitive(PrimitiveIrType::Binary)
+                    OtherVariant::Primitive(&self.name, PrimitiveIrType::Binary)
                 }
-                (Ty::String, _) => OtherVariant::Primitive(PrimitiveIrType::String),
+                (Ty::String, _) => OtherVariant::Primitive(&self.name, PrimitiveIrType::String),
 
-                (Ty::Integer, Some(Format::Int8)) => OtherVariant::Primitive(PrimitiveIrType::I8),
-                (Ty::Integer, Some(Format::UInt8)) => OtherVariant::Primitive(PrimitiveIrType::U8),
-                (Ty::Integer, Some(Format::Int16)) => OtherVariant::Primitive(PrimitiveIrType::I16),
+                (Ty::Integer, Some(Format::Int8)) => {
+                    OtherVariant::Primitive(&self.name, PrimitiveIrType::I8)
+                }
+                (Ty::Integer, Some(Format::UInt8)) => {
+                    OtherVariant::Primitive(&self.name, PrimitiveIrType::U8)
+                }
+                (Ty::Integer, Some(Format::Int16)) => {
+                    OtherVariant::Primitive(&self.name, PrimitiveIrType::I16)
+                }
                 (Ty::Integer, Some(Format::UInt16)) => {
-                    OtherVariant::Primitive(PrimitiveIrType::U16)
+                    OtherVariant::Primitive(&self.name, PrimitiveIrType::U16)
                 }
-                (Ty::Integer, Some(Format::Int32)) => OtherVariant::Primitive(PrimitiveIrType::I32),
+                (Ty::Integer, Some(Format::Int32)) => {
+                    OtherVariant::Primitive(&self.name, PrimitiveIrType::I32)
+                }
                 (Ty::Integer, Some(Format::UInt32)) => {
-                    OtherVariant::Primitive(PrimitiveIrType::U32)
+                    OtherVariant::Primitive(&self.name, PrimitiveIrType::U32)
                 }
-                (Ty::Integer, Some(Format::Int64)) => OtherVariant::Primitive(PrimitiveIrType::I64),
+                (Ty::Integer, Some(Format::Int64)) => {
+                    OtherVariant::Primitive(&self.name, PrimitiveIrType::I64)
+                }
                 (Ty::Integer, Some(Format::UInt64)) => {
-                    OtherVariant::Primitive(PrimitiveIrType::U64)
+                    OtherVariant::Primitive(&self.name, PrimitiveIrType::U64)
                 }
                 (Ty::Integer, Some(Format::UnixTime)) => {
-                    OtherVariant::Primitive(PrimitiveIrType::UnixTime)
+                    OtherVariant::Primitive(&self.name, PrimitiveIrType::UnixTime)
                 }
-                (Ty::Integer, _) => OtherVariant::Primitive(PrimitiveIrType::I32),
+                (Ty::Integer, _) => OtherVariant::Primitive(&self.name, PrimitiveIrType::I32),
 
-                (Ty::Number, Some(Format::Float)) => OtherVariant::Primitive(PrimitiveIrType::F32),
-                (Ty::Number, Some(Format::Double)) => OtherVariant::Primitive(PrimitiveIrType::F64),
+                (Ty::Number, Some(Format::Float)) => {
+                    OtherVariant::Primitive(&self.name, PrimitiveIrType::F32)
+                }
+                (Ty::Number, Some(Format::Double)) => {
+                    OtherVariant::Primitive(&self.name, PrimitiveIrType::F64)
+                }
                 (Ty::Number, Some(Format::UnixTime)) => {
-                    OtherVariant::Primitive(PrimitiveIrType::UnixTime)
+                    OtherVariant::Primitive(&self.name, PrimitiveIrType::UnixTime)
                 }
-                (Ty::Number, _) => OtherVariant::Primitive(PrimitiveIrType::F64),
+                (Ty::Number, _) => OtherVariant::Primitive(&self.name, PrimitiveIrType::F64),
 
-                (Ty::Boolean, _) => OtherVariant::Primitive(PrimitiveIrType::Bool),
+                (Ty::Boolean, _) => OtherVariant::Primitive(&self.name, PrimitiveIrType::Bool),
 
                 (Ty::Array, _) => {
                     let items = match &self.schema.items {
@@ -437,7 +468,20 @@ impl<'context, 'a> IrTransformer<'context, 'a> {
                             };
                             transform_with_context(self.context, path, schema)
                         }
-                        None => IrType::Any,
+                        None => {
+                            let path = match &self.name {
+                                IrTypeName::Schema(info) => InlineIrTypePath {
+                                    root: InlineIrTypePathRoot::Type(info.name),
+                                    segments: vec![InlineIrTypePathSegment::ArrayItem],
+                                },
+                                IrTypeName::Inline(path) => {
+                                    let mut path = path.clone();
+                                    path.segments.push(InlineIrTypePathSegment::ArrayItem);
+                                    path
+                                }
+                            };
+                            InlineIrType::Any(path).into()
+                        }
                     };
                     OtherVariant::Array(
                         &self.name,
@@ -473,15 +517,28 @@ impl<'context, 'a> IrTransformer<'context, 'a> {
                                 ty: transform_with_context(self.context, path, schema).into(),
                             })
                         }
-                        Some(AdditionalProperties::Bool(true)) => Some(Inner {
-                            description: self.schema.description.as_deref(),
-                            ty: IrType::Any.into(),
-                        }),
+                        Some(AdditionalProperties::Bool(true)) => {
+                            let path = match &self.name {
+                                IrTypeName::Schema(info) => InlineIrTypePath {
+                                    root: InlineIrTypePathRoot::Type(info.name),
+                                    segments: vec![InlineIrTypePathSegment::MapValue],
+                                },
+                                IrTypeName::Inline(path) => {
+                                    let mut path = path.clone();
+                                    path.segments.push(InlineIrTypePathSegment::MapValue);
+                                    path
+                                }
+                            };
+                            Some(Inner {
+                                description: self.schema.description.as_deref(),
+                                ty: Box::new(IrType::Inline(InlineIrType::Any(path))),
+                            })
+                        }
                         _ => None,
                     };
                     match inner {
                         Some(inner) => OtherVariant::Map(&self.name, inner),
-                        None => OtherVariant::Any,
+                        None => OtherVariant::Any(&self.name),
                     }
                 }
 
@@ -496,10 +553,16 @@ impl<'context, 'a> IrTransformer<'context, 'a> {
         match (&*other.variants, other.nullable) {
             // An empty `type` array is invalid in JSON Schema,
             // but we treat it as "any type".
-            ([], false) => IrType::Any,
+            ([], false) => match &self.name {
+                IrTypeName::Schema(info) => SchemaIrType::Any(*info).into(),
+                IrTypeName::Inline(path) => InlineIrType::Any(path.clone()).into(),
+            },
 
             // A `null` variant becomes `Any`.
-            ([], true) => IrType::Any,
+            ([], true) => match &self.name {
+                IrTypeName::Schema(info) => SchemaIrType::Any(*info).into(),
+                IrTypeName::Inline(path) => InlineIrType::Any(path.clone()).into(),
+            },
 
             // A union with a single, non-`null` variant unwraps to
             // the type of that variant.
@@ -705,10 +768,14 @@ impl<'context, 'a> IrTransformer<'context, 'a> {
                     ty: transform_with_context(self.context, path, schema).into(),
                 }
             }
-            Some(AdditionalProperties::Bool(true)) => Inner {
-                description: self.schema.description.as_deref(),
-                ty: IrType::Any.into(),
-            },
+            Some(AdditionalProperties::Bool(true)) => {
+                let mut path = path.clone();
+                path.segments.push(InlineIrTypePathSegment::MapValue);
+                Inner {
+                    description: self.schema.description.as_deref(),
+                    ty: Box::new(IrType::Inline(InlineIrType::Any(path))),
+                }
+            }
             _ => return None,
         };
 
@@ -733,20 +800,20 @@ struct Other<'name, 'a> {
 
 /// A variant of an [`Other`] union.
 enum OtherVariant<'name, 'a> {
-    Primitive(PrimitiveIrType),
+    Primitive(&'name IrTypeName<'a>, PrimitiveIrType),
     Array(&'name IrTypeName<'a>, Inner<'a>),
     Map(&'name IrTypeName<'a>, Inner<'a>),
-    Any,
+    Any(&'name IrTypeName<'a>),
 }
 
 impl<'name, 'a> OtherVariant<'name, 'a> {
     /// Returns the name hint for this variant when used in an untagged union.
     fn hint(&self) -> Option<IrUntaggedVariantNameHint> {
         Some(match self {
-            &Self::Primitive(p) => IrUntaggedVariantNameHint::Primitive(p),
+            &Self::Primitive(_, p) => IrUntaggedVariantNameHint::Primitive(p),
             Self::Array(..) => IrUntaggedVariantNameHint::Array,
             Self::Map(..) => IrUntaggedVariantNameHint::Map,
-            Self::Any => return None,
+            Self::Any(_) => return None,
         })
     }
 
@@ -756,7 +823,10 @@ impl<'name, 'a> OtherVariant<'name, 'a> {
     /// and untagged union cases.
     fn to_type(&self) -> IrType<'a> {
         match self {
-            &Self::Primitive(p) => IrType::Primitive(p),
+            &Self::Primitive(name, p) => match name {
+                IrTypeName::Schema(info) => SchemaIrType::Primitive(*info, p).into(),
+                IrTypeName::Inline(path) => InlineIrType::Primitive(path.clone(), p).into(),
+            },
             Self::Array(name, inner) => {
                 let container = Container::Array(inner.clone());
                 match name {
@@ -775,7 +845,10 @@ impl<'name, 'a> OtherVariant<'name, 'a> {
                     }
                 }
             }
-            Self::Any => IrType::Any,
+            Self::Any(name) => match name {
+                IrTypeName::Schema(info) => SchemaIrType::Any(*info).into(),
+                IrTypeName::Inline(path) => InlineIrType::Any(path.clone()).into(),
+            },
         }
     }
 
@@ -784,7 +857,16 @@ impl<'name, 'a> OtherVariant<'name, 'a> {
     /// This is used to rewrite `[T, null]` unions as `Optional(T)`.
     fn to_inline_type(&self) -> IrType<'a> {
         match self {
-            &Self::Primitive(p) => IrType::Primitive(p),
+            &Self::Primitive(name, p) => {
+                let path = match name {
+                    IrTypeName::Schema(info) => InlineIrTypePath {
+                        root: InlineIrTypePathRoot::Type(info.name),
+                        segments: vec![],
+                    },
+                    IrTypeName::Inline(path) => path.clone(),
+                };
+                InlineIrType::Primitive(path, p).into()
+            }
             Self::Array(name, inner) => {
                 let container = Container::Array(inner.clone());
                 let path = match name {
@@ -807,7 +889,16 @@ impl<'name, 'a> OtherVariant<'name, 'a> {
                 };
                 InlineIrType::Container(path, container).into()
             }
-            Self::Any => IrType::Any,
+            Self::Any(name) => {
+                let path = match name {
+                    IrTypeName::Schema(info) => InlineIrTypePath {
+                        root: InlineIrTypePathRoot::Type(info.name),
+                        segments: vec![],
+                    },
+                    IrTypeName::Inline(path) => path.clone(),
+                };
+                InlineIrType::Any(path).into()
+            }
         }
     }
 }

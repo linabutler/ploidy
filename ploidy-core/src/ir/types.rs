@@ -7,16 +7,12 @@ use crate::parse::{ComponentRef, Method, path::PathSegment};
 /// A schema type ready for code generation.
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub enum IrType<'a> {
-    /// A primitive type.
-    Primitive(PrimitiveIrType),
     /// A reference to another named schema type.
     Ref(&'a ComponentRef),
     /// A named schema type.
     Schema(SchemaIrType<'a>),
     /// An inline type defined within a schema.
     Inline(InlineIrType<'a>),
-    /// Any JSON value.
-    Any,
 }
 
 impl IrType<'_> {
@@ -25,15 +21,7 @@ impl IrType<'_> {
             Self::Schema(ty) => IrTypeRef::Schema(ty),
             Self::Inline(ty) => IrTypeRef::Inline(ty),
             Self::Ref(r) => IrTypeRef::Ref(r),
-            &Self::Primitive(ty) => IrTypeRef::Primitive(ty),
-            Self::Any => IrTypeRef::Any,
         }
-    }
-}
-
-impl From<PrimitiveIrType> for IrType<'_> {
-    fn from(ty: PrimitiveIrType) -> Self {
-        Self::Primitive(ty)
     }
 }
 
@@ -52,11 +40,9 @@ impl<'a> From<InlineIrType<'a>> for IrType<'a> {
 /// A reference to a schema type.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub enum IrTypeRef<'a> {
-    Primitive(PrimitiveIrType),
     Ref(&'a ComponentRef),
     Schema(&'a SchemaIrType<'a>),
     Inline(&'a InlineIrType<'a>),
-    Any,
 }
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
@@ -131,6 +117,10 @@ pub enum SchemaIrType<'a> {
     Untagged(SchemaTypeInfo<'a>, IrUntagged<'a>),
     /// A named container.
     Container(SchemaTypeInfo<'a>, Container<'a>),
+    /// A primitive type.
+    Primitive(SchemaTypeInfo<'a>, PrimitiveIrType),
+    /// Any JSON value.
+    Any(SchemaTypeInfo<'a>),
 }
 
 impl<'a> SchemaIrType<'a> {
@@ -140,7 +130,9 @@ impl<'a> SchemaIrType<'a> {
         | Self::Struct(info, ..)
         | Self::Tagged(info, ..)
         | Self::Untagged(info, ..)
-        | Self::Container(info, ..)) = self;
+        | Self::Container(info, ..)
+        | Self::Primitive(info, ..)
+        | Self::Any(info)) = self;
         info.name
     }
 
@@ -150,7 +142,9 @@ impl<'a> SchemaIrType<'a> {
         | Self::Struct(info, ..)
         | Self::Tagged(info, ..)
         | Self::Untagged(info, ..)
-        | Self::Container(info, ..)) = self;
+        | Self::Container(info, ..)
+        | Self::Primitive(info, ..)
+        | Self::Any(info)) = self;
         info.resource
     }
 }
@@ -163,6 +157,8 @@ pub enum InlineIrType<'a> {
     Tagged(InlineIrTypePath<'a>, IrTagged<'a>),
     Untagged(InlineIrTypePath<'a>, IrUntagged<'a>),
     Container(InlineIrTypePath<'a>, Container<'a>),
+    Primitive(InlineIrTypePath<'a>, PrimitiveIrType),
+    Any(InlineIrTypePath<'a>),
 }
 
 impl<'a> InlineIrType<'a> {
@@ -172,7 +168,9 @@ impl<'a> InlineIrType<'a> {
         | Self::Struct(path, _)
         | Self::Tagged(path, _)
         | Self::Untagged(path, _)
-        | Self::Container(path, _)) = self;
+        | Self::Container(path, _)
+        | Self::Primitive(path, _)
+        | Self::Any(path)) = self;
         path
     }
 }
@@ -300,12 +298,6 @@ pub enum IrStructFieldNameHint {
 pub enum IrUntaggedVariant<'a> {
     Some(IrUntaggedVariantNameHint, IrType<'a>),
     Null,
-}
-
-impl From<PrimitiveIrType> for IrUntaggedVariant<'_> {
-    fn from(ty: PrimitiveIrType) -> Self {
-        Self::Some(IrUntaggedVariantNameHint::Primitive(ty), ty.into())
-    }
 }
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]

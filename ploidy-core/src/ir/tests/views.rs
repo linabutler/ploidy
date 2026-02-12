@@ -451,11 +451,10 @@ fn test_dependencies_from_array_includes_inner_types() {
     )));
 
     // Verify the primitive field is a dependency.
-    assert!(
-        dep_types
-            .iter()
-            .any(|t| matches!(t, IrTypeView::Primitive(p) if p.ty() == PrimitiveIrType::String))
-    );
+    assert!(dep_types.iter().any(|t| matches!(
+        t,
+        IrTypeView::Inline(InlineIrTypeView::Primitive(_, p)) if p.ty() == PrimitiveIrType::String
+    )));
 }
 
 #[test]
@@ -518,11 +517,10 @@ fn test_dependencies_from_map_includes_inner_types() {
     )));
 
     // Verify the primitive field is a dependency.
-    assert!(
-        dep_types
-            .iter()
-            .any(|t| matches!(t, IrTypeView::Primitive(p) if p.ty() == PrimitiveIrType::String))
-    );
+    assert!(dep_types.iter().any(|t| matches!(
+        t,
+        IrTypeView::Inline(InlineIrTypeView::Primitive(_, p)) if p.ty() == PrimitiveIrType::String
+    )));
 }
 
 #[test]
@@ -586,11 +584,10 @@ fn test_dependencies_from_nullable_includes_inner_types() {
     )));
 
     // Verify the primitive field is a dependency.
-    assert!(
-        dep_types
-            .iter()
-            .any(|t| matches!(t, IrTypeView::Primitive(p) if p.ty() == PrimitiveIrType::String))
-    );
+    assert!(dep_types.iter().any(|t| matches!(
+        t,
+        IrTypeView::Inline(InlineIrTypeView::Primitive(_, p)) if p.ty() == PrimitiveIrType::String
+    )));
 }
 
 #[test]
@@ -658,11 +655,10 @@ fn test_dependencies_from_inline_includes_inner_types() {
     )));
 
     // Verify the primitive field is a dependency.
-    assert!(
-        dep_types
-            .iter()
-            .any(|t| matches!(t, IrTypeView::Primitive(p) if p.ty() == PrimitiveIrType::String))
-    );
+    assert!(dep_types.iter().any(|t| matches!(
+        t,
+        IrTypeView::Inline(InlineIrTypeView::Primitive(_, p)) if p.ty() == PrimitiveIrType::String
+    )));
 }
 
 #[test]
@@ -698,7 +694,7 @@ fn test_dependencies_from_primitive_returns_empty() {
         .unwrap();
 
     let primitive_view = match name_field.ty() {
-        IrTypeView::Primitive(view) => view,
+        IrTypeView::Inline(InlineIrTypeView::Primitive(_, view)) => view,
         other => panic!("expected primitive; got {other:?}"),
     };
 
@@ -739,7 +735,7 @@ fn test_dependencies_from_any_returns_empty() {
         .unwrap();
 
     let untyped_view = match untyped_field.ty() {
-        view @ IrTypeView::Any => view,
+        IrTypeView::Inline(InlineIrTypeView::Any(_, view)) => view,
         other => panic!("expected any; got {other:?}"),
     };
 
@@ -1043,9 +1039,10 @@ fn test_inlines_finds_inline_structs_in_struct_fields() {
 
     let parent_schema = graph.schemas().next().unwrap();
 
-    // Should find (1) the optional from the `inline_obj` field; (2) the inline struct; and
-    // (3) the optional for `nested_field` within the inline struct.
-    assert_eq!(parent_schema.inlines().count(), 3);
+    // Should find (1) the optional from the `inline_obj` field; (2) the inline struct;
+    // (3) the optional for `nested_field` within the inline struct; and (4) the
+    // `string` primitive for `nested_field`.
+    assert_eq!(parent_schema.inlines().count(), 4);
 }
 
 #[test]
@@ -1076,9 +1073,9 @@ fn test_inlines_finds_inline_types_in_nested_arrays() {
     let container_schema = graph.schemas().next().unwrap();
 
     // Should find (1) the optional for the `items` field; (2) the array;
-    // (3) the inline struct inside the array; and (4) the optional for `item`
-    // within the struct.
-    assert_eq!(container_schema.inlines().count(), 4);
+    // (3) the inline struct inside the array; (4) the optional for `item`
+    // within the struct; and (5) the `string` primitive for `item`.
+    assert_eq!(container_schema.inlines().count(), 5);
 }
 
 #[test]
@@ -1287,7 +1284,7 @@ fn test_array_view_provides_access_to_item_type() {
         IrTypeView::Inline(InlineIrTypeView::Container(_, ContainerView::Array(inner)))
             if matches!(
                 inner.ty(),
-                IrTypeView::Primitive(p) if p.ty() == PrimitiveIrType::String,
+                IrTypeView::Inline(InlineIrTypeView::Primitive(_, p)) if p.ty() == PrimitiveIrType::String,
             ),
     );
 }
@@ -1333,7 +1330,7 @@ fn test_map_view_provides_access_to_value_type() {
         IrTypeView::Inline(InlineIrTypeView::Container(_, ContainerView::Map(inner)))
             if matches!(
                 inner.ty(),
-                IrTypeView::Primitive(p) if p.ty() == PrimitiveIrType::String,
+                IrTypeView::Inline(InlineIrTypeView::Primitive(_, p)) if p.ty() == PrimitiveIrType::String,
             ),
     );
 }
@@ -2119,10 +2116,11 @@ fn test_operation_view_inlines_with_mixed_types() {
 
     // Should find (1) the inline request body struct; (2) the optional for the `profile` field;
     // (3) the optional for the `metadata` field; (4) the inline `metadata` struct;
-    // (5) the optional for `tags`; (6) the array for `tags`.
+    // (5) the optional for `tags`; (6) the array for `tags`; and (7) the `string`
+    // primitive for `tags` items.
     //
     // `Profile` is a schema reference, and should be excluded.
-    assert_eq!(operation.inlines().count(), 6);
+    assert_eq!(operation.inlines().count(), 7);
 }
 
 #[test]
@@ -2163,7 +2161,7 @@ fn test_operation_parameter_ty() {
     let path_param = operation.path().params().next().unwrap();
     assert_matches!(
         path_param.ty(),
-        IrTypeView::Primitive(p) if p.ty() == PrimitiveIrType::String,
+        IrTypeView::Inline(InlineIrTypeView::Primitive(_, p)) if p.ty() == PrimitiveIrType::String,
     );
 
     // Array-of-strings query parameter.
@@ -2173,7 +2171,7 @@ fn test_operation_parameter_ty() {
         IrTypeView::Inline(InlineIrTypeView::Container(_, ContainerView::Array(inner)))
             if matches!(
                 inner.ty(),
-                IrTypeView::Primitive(p) if p.ty() == PrimitiveIrType::String,
+                IrTypeView::Inline(InlineIrTypeView::Primitive(_, p)) if p.ty() == PrimitiveIrType::String,
             ),
     );
 }
@@ -2430,7 +2428,9 @@ fn test_operation_response_without_schema() {
     // Empty response schema becomes `IrResponse::Json(IrType::Any)`.
     assert_matches!(
         operation.response(),
-        Some(IrResponseView::Json(IrTypeView::Any))
+        Some(IrResponseView::Json(IrTypeView::Inline(
+            InlineIrTypeView::Any(..)
+        )))
     );
 }
 
@@ -2524,11 +2524,13 @@ fn test_operation_view_inlines_finds_inline_types() {
 
     let operation = graph.operations().next().unwrap();
 
-    // `createUser` references 7 inline types: (1) the request body struct,
-    // (2) optional `name`, (3) optional `address`, (4) inline address struct,
-    // (5) optional `street`, (6) optional response body struct, (7) optional `id`.
+    // `createUser` references 10 inline types: (1) the request body struct,
+    // (2) optional `name`, (3) `name` string primitive, (4) optional `address`,
+    // (5) inline address struct, (6) optional `street`, (7) `street` string
+    // primitive, (8) response body struct, (9) optional `id`, (10) `id` string
+    // primitive.
     let inlines = operation.inlines().collect_vec();
-    assert_eq!(inlines.len(), 7);
+    assert_eq!(inlines.len(), 10);
 
     let address = inlines
         .iter()

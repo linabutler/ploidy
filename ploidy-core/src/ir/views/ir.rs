@@ -2,16 +2,11 @@ use petgraph::graph::NodeIndex;
 
 use crate::ir::graph::{IrGraph, IrGraphNode};
 
-use super::{
-    View, container::ContainerView, inline::InlineIrTypeView, primitive::IrPrimitiveView,
-    schema::SchemaIrTypeView,
-};
+use super::{View, container::ContainerView, inline::InlineIrTypeView, schema::SchemaIrTypeView};
 
 /// A graph-aware view of an [`IrType`][crate::ir::IrType].
 #[derive(Debug)]
 pub enum IrTypeView<'a> {
-    Any,
-    Primitive(IrPrimitiveView<'a>),
     Schema(SchemaIrTypeView<'a>),
     Inline(InlineIrTypeView<'a>),
 }
@@ -19,8 +14,6 @@ pub enum IrTypeView<'a> {
 impl<'a> IrTypeView<'a> {
     pub(in crate::ir) fn new(graph: &'a IrGraph<'a>, index: NodeIndex<usize>) -> Self {
         match &graph.g[index] {
-            IrGraphNode::Any => Self::Any,
-            &IrGraphNode::Primitive(ty) => Self::Primitive(IrPrimitiveView::new(graph, index, ty)),
             IrGraphNode::Schema(ty) => Self::Schema(SchemaIrTypeView::new(graph, index, ty)),
             IrGraphNode::Inline(ty) => Self::Inline(InlineIrTypeView::new(graph, index, ty)),
         }
@@ -51,8 +44,6 @@ impl<'a> IrTypeView<'a> {
     #[inline]
     pub fn dependencies(&self) -> impl Iterator<Item = IrTypeView<'a>> + use<'a> {
         either!(match self {
-            Self::Any => std::iter::empty(),
-            Self::Primitive(v) => v.dependencies(),
             Self::Schema(v) => v.dependencies(),
             Self::Inline(v) => v.dependencies(),
         })

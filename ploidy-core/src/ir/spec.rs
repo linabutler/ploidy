@@ -14,8 +14,8 @@ use super::{
     error::IrError,
     transform::transform,
     types::{
-        InlineIrTypePath, InlineIrTypePathRoot, InlineIrTypePathSegment, IrOperation, IrParameter,
-        IrParameterInfo, IrParameterStyle, IrRequest, IrResponse, IrType, IrTypeName,
+        InlineIrType, InlineIrTypePath, InlineIrTypePathRoot, InlineIrTypePathSegment, IrOperation,
+        IrParameter, IrParameterInfo, IrParameterStyle, IrRequest, IrResponse, IrType, IrTypeName,
     },
 };
 
@@ -84,7 +84,14 @@ impl<'a> IrSpec<'a> {
                                 },
                                 schema,
                             ),
-                            None => IrType::Any,
+                            None => InlineIrType::Any(InlineIrTypePath {
+                                root: InlineIrTypePathRoot::Resource(resource),
+                                segments: vec![
+                                    InlineIrTypePathSegment::Operation(id),
+                                    InlineIrTypePathSegment::Parameter(param.name.as_str()),
+                                ],
+                            })
+                            .into(),
                         };
                         let style = match (param.style, param.explode) {
                             (Some(ParameterStyle::DeepObject), Some(true) | None) => {
@@ -163,7 +170,16 @@ impl<'a> IrSpec<'a> {
                                 schema,
                             ))
                         }
-                        RequestContent::Any => IrRequest::Json(IrType::Any),
+                        RequestContent::Any => IrRequest::Json(
+                            InlineIrType::Any(InlineIrTypePath {
+                                root: InlineIrTypePathRoot::Resource(resource),
+                                segments: vec![
+                                    InlineIrTypePathSegment::Operation(id),
+                                    InlineIrTypePathSegment::Request,
+                                ],
+                            })
+                            .into(),
+                        ),
                     });
 
                 let response = {
@@ -221,7 +237,16 @@ impl<'a> IrSpec<'a> {
                                     schema,
                                 ))
                             }
-                            ResponseContent::Any => IrResponse::Json(IrType::Any),
+                            ResponseContent::Any => IrResponse::Json(
+                                InlineIrType::Any(InlineIrTypePath {
+                                    root: InlineIrTypePathRoot::Resource(resource),
+                                    segments: vec![
+                                        InlineIrTypePathSegment::Operation(id),
+                                        InlineIrTypePathSegment::Response,
+                                    ],
+                                })
+                                .into(),
+                            ),
                         })
                 };
 

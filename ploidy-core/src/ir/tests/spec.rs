@@ -7,8 +7,8 @@ use crate::{
         IrParameterInfo,
         spec::IrSpec,
         types::{
-            IrOperation, IrParameter, IrParameterStyle, IrRequest, IrResponse, IrType,
-            PrimitiveIrType,
+            InlineIrType, IrOperation, IrParameter, IrParameterStyle, IrRequest, IrResponse,
+            IrType, PrimitiveIrType,
         },
     },
     parse::{Document, Method},
@@ -186,7 +186,7 @@ fn test_parses_path_parameter_string_type() {
         [IrParameter::Path(IrParameterInfo {
             name: "id",
             required: true,
-            ty: IrType::Primitive(PrimitiveIrType::String),
+            ty: IrType::Inline(InlineIrType::Primitive(_, PrimitiveIrType::String)),
             ..
         })],
     );
@@ -225,7 +225,7 @@ fn test_parses_path_parameter_integer_type() {
         &**params,
         [IrParameter::Path(IrParameterInfo {
             name: "id",
-            ty: IrType::Primitive(PrimitiveIrType::I64),
+            ty: IrType::Inline(InlineIrType::Primitive(_, PrimitiveIrType::I64)),
             ..
         })],
     );

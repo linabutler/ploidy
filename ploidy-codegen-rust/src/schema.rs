@@ -5,7 +5,8 @@ use quote::{ToTokens, TokenStreamExt, quote};
 
 use super::{
     doc_attrs, enum_::CodegenEnum, inlines::CodegenInlines, naming::CodegenTypeName,
-    ref_::CodegenRef, struct_::CodegenStruct, tagged::CodegenTagged, untagged::CodegenUntagged,
+    primitive::CodegenPrimitive, ref_::CodegenRef, struct_::CodegenStruct, tagged::CodegenTagged,
+    untagged::CodegenUntagged,
 };
 
 /// Generates a module for a named schema type.
@@ -55,6 +56,17 @@ impl ToTokens for CodegenSchemaType<'_> {
                 quote! {
                     #doc_attrs
                     pub type #name = ::std::option::Option<#inner_ref>;
+                }
+            }
+            SchemaIrTypeView::Primitive(_, view) => {
+                let primitive = CodegenPrimitive::new(view);
+                quote! {
+                    pub type #name = #primitive;
+                }
+            }
+            SchemaIrTypeView::Any(_, _) => {
+                quote! {
+                    pub type #name = ::ploidy_util::serde_json::Value;
                 }
             }
         };

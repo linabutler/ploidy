@@ -3,8 +3,9 @@ use petgraph::graph::NodeIndex;
 use crate::ir::{InlineIrTypePath, graph::IrGraph, types::InlineIrType};
 
 use super::{
-    ViewNode, container::ContainerView, enum_::IrEnumView, struct_::IrStructView,
-    tagged::IrTaggedView, untagged::IrUntaggedView,
+    ViewNode, any::AnyView, container::ContainerView, enum_::IrEnumView,
+    primitive::IrPrimitiveView, struct_::IrStructView, tagged::IrTaggedView,
+    untagged::IrUntaggedView,
 };
 
 /// A graph-aware view of an [`InlineIrType`].
@@ -15,6 +16,8 @@ pub enum InlineIrTypeView<'a> {
     Tagged(&'a InlineIrTypePath<'a>, IrTaggedView<'a>),
     Untagged(&'a InlineIrTypePath<'a>, IrUntaggedView<'a>),
     Container(&'a InlineIrTypePath<'a>, ContainerView<'a>),
+    Primitive(&'a InlineIrTypePath<'a>, IrPrimitiveView<'a>),
+    Any(&'a InlineIrTypePath<'a>, AnyView<'a>),
 }
 
 impl<'a> InlineIrTypeView<'a> {
@@ -37,6 +40,10 @@ impl<'a> InlineIrTypeView<'a> {
             InlineIrType::Container(path, container) => {
                 Self::Container(path, ContainerView::new(graph, index, container))
             }
+            InlineIrType::Primitive(path, p) => {
+                Self::Primitive(path, IrPrimitiveView::new(graph, index, *p))
+            }
+            InlineIrType::Any(path) => Self::Any(path, AnyView::new(graph, index)),
         }
     }
 
@@ -46,7 +53,9 @@ impl<'a> InlineIrTypeView<'a> {
         | Self::Struct(path, _)
         | Self::Tagged(path, _)
         | Self::Untagged(path, _)
-        | Self::Container(path, _)) = self;
+        | Self::Container(path, _)
+        | Self::Primitive(path, _)
+        | Self::Any(path, _)) = self;
         path
     }
 }
@@ -60,6 +69,8 @@ impl<'a> ViewNode<'a> for InlineIrTypeView<'a> {
             Self::Tagged(_, view) => view.graph(),
             Self::Untagged(_, view) => view.graph(),
             Self::Container(_, view) => view.graph(),
+            Self::Primitive(_, view) => view.graph(),
+            Self::Any(_, view) => view.graph(),
         }
     }
 
@@ -70,6 +81,8 @@ impl<'a> ViewNode<'a> for InlineIrTypeView<'a> {
             Self::Tagged(_, view) => view.index(),
             Self::Untagged(_, view) => view.index(),
             Self::Container(_, view) => view.index(),
+            Self::Primitive(_, view) => view.index(),
+            Self::Any(_, view) => view.index(),
         }
     }
 }

@@ -21,10 +21,7 @@ use rustc_hash::{FxHashMap, FxHashSet};
 
 use super::{
     spec::IrSpec,
-    types::{
-        InlineIrType, IrOperation, IrType, IrTypeRef, IrUntaggedVariant, PrimitiveIrType,
-        SchemaIrType,
-    },
+    types::{InlineIrType, IrOperation, IrType, IrTypeRef, IrUntaggedVariant, SchemaIrType},
     views::{operation::IrOperationView, primitive::IrPrimitiveView, schema::SchemaIrTypeView},
 };
 
@@ -216,14 +213,16 @@ impl<'a> IrGraph<'a> {
             })
     }
 
-    /// Returns an iterator over all the primitive types in this graph. Note that
-    /// a graph contains at most one instance of each primitive type.
+    /// Returns an iterator over all primitive type nodes in this graph.
     #[inline]
     pub fn primitives(&self) -> impl Iterator<Item = IrPrimitiveView<'_>> {
         self.g
             .node_indices()
             .filter_map(|index| match self.g[index] {
-                IrGraphNode::Primitive(ty) => Some(IrPrimitiveView::new(self, index, ty)),
+                IrGraphNode::Schema(SchemaIrType::Primitive(_, p))
+                | IrGraphNode::Inline(InlineIrType::Primitive(_, p)) => {
+                    Some(IrPrimitiveView::new(self, index, *p))
+                }
                 _ => None,
             })
     }
@@ -248,8 +247,6 @@ impl<'a> IrGraph<'a> {
 pub enum IrGraphNode<'a> {
     Schema(&'a SchemaIrType<'a>),
     Inline(&'a InlineIrType<'a>),
-    Primitive(PrimitiveIrType),
-    Any,
 }
 
 impl<'a> IrGraphNode<'a> {
@@ -260,8 +257,6 @@ impl<'a> IrGraphNode<'a> {
             IrTypeRef::Schema(ty) => IrGraphNode::Schema(ty),
             IrTypeRef::Inline(ty) => IrGraphNode::Inline(ty),
             IrTypeRef::Ref(r) => Self::from_ref(spec, spec.schemas[r.name()].as_ref()),
-            IrTypeRef::Primitive(ty) => IrGraphNode::Primitive(ty),
-            IrTypeRef::Any => IrGraphNode::Any,
         }
     }
 }
@@ -382,9 +377,12 @@ impl<'a> Iterator for IrTypeVisitor<'a> {
                 self.stack
                     .push((Some(top), EdgeKind::Reference, &container.inner().ty));
             }
-            IrType::Schema(SchemaIrType::Enum(..)) | IrType::Inline(InlineIrType::Enum(..)) => (),
-            IrType::Any => (),
-            IrType::Primitive(_) => (),
+            IrType::Schema(
+                SchemaIrType::Enum(..) | SchemaIrType::Primitive(..) | SchemaIrType::Any(_),
+            )
+            | IrType::Inline(
+                InlineIrType::Enum(..) | InlineIrType::Primitive(..) | InlineIrType::Any(_),
+            ) => (),
             IrType::Ref(_) => (),
         }
         Some((parent, kind, top))

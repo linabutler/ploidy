@@ -24,13 +24,9 @@ impl<'a> CodegenRef<'a> {
 impl ToTokens for CodegenRef<'_> {
     fn to_tokens(&self, tokens: &mut TokenStream) {
         tokens.append_all(match self.ty {
-            IrTypeView::Primitive(ty) => {
-                let ty = CodegenPrimitive::new(ty);
-                quote!(#ty)
-            }
-            IrTypeView::Any => quote! { ::ploidy_util::serde_json::Value },
-            // Emit inline container types directly. (Note that we only do this for inlines;
-            // named schema containers are always emitted as references).
+            // Emit inline container types, primitive types, and
+            // untyped values directly. Note that we only do this for inlines;
+            // named schema containers are always emitted as references.
             IrTypeView::Inline(InlineIrTypeView::Container(_, ContainerView::Array(inner))) => {
                 let inner_ty = inner.ty();
                 let inner_ref = CodegenRef::new(&inner_ty);
@@ -45,6 +41,13 @@ impl ToTokens for CodegenRef<'_> {
                 let inner_ty = inner.ty();
                 let inner_ref = CodegenRef::new(&inner_ty);
                 quote! { ::std::option::Option<#inner_ref> }
+            }
+            IrTypeView::Inline(InlineIrTypeView::Primitive(_, view)) => {
+                let ty = CodegenPrimitive::new(view);
+                quote!(#ty)
+            }
+            IrTypeView::Inline(InlineIrTypeView::Any(_, _)) => {
+                quote! { ::ploidy_util::serde_json::Value }
             }
             IrTypeView::Inline(ty) => {
                 let path = ty.path();
@@ -91,7 +94,38 @@ mod tests {
 
     #[test]
     fn test_codegen_ref_any() {
-        let ty = IrTypeView::Any;
+        let doc = Document::from_yaml(indoc::indoc! {"
+            openapi: 3.0.0
+            info:
+              title: Test API
+              version: 1.0.0
+            paths: {}
+            components:
+              schemas:
+                Container:
+                  type: object
+                  required:
+                    - data
+                  properties:
+                    data: {}
+        "})
+        .unwrap();
+
+        let spec = IrSpec::from_doc(&doc).unwrap();
+        let ir = IrGraph::new(&spec);
+        let graph = CodegenGraph::new(ir);
+
+        let schema = graph.schemas().find(|s| s.name() == "Container");
+        let Some(SchemaIrTypeView::Struct(_, struct_view)) = &schema else {
+            panic!("expected struct `Container`; got `{schema:?}`");
+        };
+        let field = struct_view
+            .fields()
+            .find(|f| matches!(f.name(), IrStructFieldName::Name("data")))
+            .unwrap();
+        let ty = field.ty();
+        assert_matches!(ty, IrTypeView::Inline(InlineIrTypeView::Any(_, _)));
+
         let ref_ = CodegenRef::new(&ty);
         let actual: syn::Type = parse_quote!(#ref_);
         let expected: syn::Type = parse_quote!(::ploidy_util::serde_json::Value);

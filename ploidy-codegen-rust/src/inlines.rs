@@ -64,9 +64,11 @@ where
                 InlineIrTypeView::Untagged(_, view) => {
                     CodegenUntagged::new(name, view).into_token_stream()
                 }
-                InlineIrTypeView::Container(..) => {
-                    // We emit inline container types directly,
-                    // so they don't need type aliases.
+                InlineIrTypeView::Container(..)
+                | InlineIrTypeView::Primitive(..)
+                | InlineIrTypeView::Any(..) => {
+                    // Container types, primitive types, and untyped values
+                    // are emitted directly; they don't need type aliases.
                     return None;
                 }
             };

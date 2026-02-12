@@ -1,7 +1,7 @@
 use itertools::Itertools;
 use ploidy_core::{
     codegen::UniqueNames,
-    ir::{IrTaggedView, IrTypeView, PrimitiveIrType},
+    ir::{InlineIrTypeView, IrTaggedView, IrTypeView, PrimitiveIrType, SchemaIrTypeView},
 };
 use proc_macro2::TokenStream;
 use quote::{ToTokens, TokenStreamExt, quote};
@@ -32,14 +32,12 @@ impl ToTokens for CodegenTagged<'_> {
                 .ty()
                 .dependencies()
                 .chain(std::iter::once(variant.ty()))
-                .all(|view| {
-                    if let IrTypeView::Primitive(p) = &view
-                        && let PrimitiveIrType::F32 | PrimitiveIrType::F64 = p.ty()
-                    {
-                        false
-                    } else {
-                        true
+                .all(|view| match view {
+                    IrTypeView::Inline(InlineIrTypeView::Primitive(_, view))
+                    | IrTypeView::Schema(SchemaIrTypeView::Primitive(_, view)) => {
+                        !matches!(view.ty(), PrimitiveIrType::F32 | PrimitiveIrType::F64)
                     }
+                    _ => true,
                 })
         });
         if is_hashable {
