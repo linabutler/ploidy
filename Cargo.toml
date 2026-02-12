@@ -2,6 +2,7 @@
 members = [
     "ploidy",
     "ploidy-codegen-rust",
+    "ploidy-codegen-typescript",
     "ploidy-core",
     "ploidy-pointer",
     "ploidy-pointer-derive",
@@ -21,6 +22,7 @@ rust-version = "1.89"
 either = "1"
 indoc = "2"
 ploidy-codegen-rust = { path = "ploidy-codegen-rust", version = "0.9.0" }
+ploidy-codegen-typescript = { path = "ploidy-codegen-typescript", version = "0.9.0" }
 ploidy-core = { path = "ploidy-core", version = "0.9.0" }
 ploidy-pointer = { path = "ploidy-pointer", version = "0.9.0" }
 ploidy-pointer-derive = { path = "ploidy-pointer-derive", version = "0.9.0" }

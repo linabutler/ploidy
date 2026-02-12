@@ -46,7 +46,8 @@ pub struct CodegenCommand {
 
 #[derive(Debug)]
 pub enum CodegenCommandLanguage {
-    Rust(RustCodegenCommand),
+    Rust(Box<RustCodegenCommand>),
+    TypeScript,
 }
 
 #[derive(Debug)]
@@ -117,10 +118,10 @@ impl CodegenCommandArgs {
                             })?;
                             package.version.set(bump_version(&base, bump).to_string());
                         }
-                        CodegenCommandLanguage::Rust(RustCodegenCommand {
+                        CodegenCommandLanguage::Rust(Box::new(RustCodegenCommand {
                             manifest,
                             check: args.check,
-                        })
+                        }))
                     }
                     Err(cargo_toml::Error::Io(err)) if err.kind() == IoErrorKind::NotFound => {
                         let name = args
@@ -142,10 +143,10 @@ impl CodegenCommandArgs {
                             package: Some(Package::new(name, DEFAULT_VERSION.to_string())),
                             ..Default::default()
                         };
-                        CodegenCommandLanguage::Rust(RustCodegenCommand {
+                        CodegenCommandLanguage::Rust(Box::new(RustCodegenCommand {
                             manifest,
                             check: args.check,
-                        })
+                        }))
                     }
                     Err(err) => {
                         return Err(ClapError::raw(
@@ -155,6 +156,7 @@ impl CodegenCommandArgs {
                     }
                 }
             }
+            CodegenCommandLanguageArgs::TypeScript => CodegenCommandLanguage::TypeScript,
         };
         Ok(CodegenCommand {
             input: self.input,
@@ -168,6 +170,9 @@ impl CodegenCommandArgs {
 enum CodegenCommandLanguageArgs {
     /// Generate a Rust package.
     Rust(RustCodegenCommandArgs),
+    /// Generate TypeScript type declarations.
+    #[clap(name = "typescript", alias = "ts")]
+    TypeScript,
 }
 
 #[derive(Debug, Default, clap::Args)]

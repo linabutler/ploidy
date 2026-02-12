@@ -1,6 +1,6 @@
 use itertools::Itertools;
 use miette::{Context, IntoDiagnostic, Result};
-use ploidy_codegen_rust::{CodegenCargoManifest, CodegenErrorModule, CodegenGraph, CodegenLibrary};
+use ploidy_codegen_rust::{CodegenCargoManifest, CodegenErrorModule, CodegenLibrary};
 use ploidy_core::{codegen::write_to_disk, ir::Ir, parse::Document};
 
 mod config;
@@ -41,8 +41,8 @@ fn main() -> Result<()> {
             let graph = {
                 let graph = raw.finalize();
                 match config {
-                    Some(config) => CodegenGraph::with_config(graph, config),
-                    None => CodegenGraph::new(graph),
+                    Some(config) => ploidy_codegen_rust::CodegenGraph::with_config(graph, config),
+                    None => ploidy_codegen_rust::CodegenGraph::new(graph),
                 }
             };
 
@@ -89,6 +89,30 @@ fn main() -> Result<()> {
                     miette::bail!("`cargo check` exited with status {status}");
                 }
             }
+        }
+        Command::Codegen(CodegenCommand {
+            input,
+            output,
+            language: CodegenCommandLanguage::TypeScript,
+        }) => {
+            let source = std::fs::read_to_string(&input)
+                .into_diagnostic()
+                .with_context(|| format!("Failed to read `{}`", input.display()))?;
+
+            let doc = Document::from_yaml(&source)
+                .into_diagnostic()
+                .context("Failed to parse OpenAPI document")?;
+
+            println!("OpenAPI: {} (version {})", doc.info.title, doc.info.version);
+
+            let ir = Ir::from_doc(&doc).into_diagnostic()?;
+            let graph = ploidy_codegen_typescript::CodegenGraph::new(ir.graph().finalize());
+
+            println!("Writing generated code to `{}`...", output.display());
+            println!("Generating {} types...", graph.schemas().count());
+            ploidy_codegen_typescript::write_types_to_disk(&output, &graph)?;
+
+            println!("Generation complete");
         }
     }
 
