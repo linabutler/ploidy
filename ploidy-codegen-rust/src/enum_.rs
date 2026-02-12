@@ -156,7 +156,7 @@ mod tests {
     use super::*;
 
     use ploidy_core::{
-        ir::{IrGraph, IrSpec, SchemaIrTypeView},
+        ir::{Ir, SchemaIrTypeView},
         parse::Document,
     };
     use pretty_assertions::assert_eq;
@@ -185,9 +185,8 @@ mod tests {
         "})
         .unwrap();
 
-        let spec = IrSpec::from_doc(&doc).unwrap();
-        let ir = IrGraph::new(&spec);
-        let graph = CodegenGraph::new(ir);
+        let ir = Ir::from_doc(&doc).unwrap();
+        let graph = CodegenGraph::new(ir.graph().finalize());
 
         let schema = graph.schemas().find(|s| s.name() == "Status");
         let Some(schema @ SchemaIrTypeView::Enum(_, enum_view)) = &schema else {
@@ -301,9 +300,8 @@ mod tests {
         "})
         .unwrap();
 
-        let spec = IrSpec::from_doc(&doc).unwrap();
-        let ir = IrGraph::new(&spec);
-        let graph = CodegenGraph::new(ir);
+        let ir = Ir::from_doc(&doc).unwrap();
+        let graph = CodegenGraph::new(ir.graph().finalize());
 
         let schema = graph.schemas().find(|s| s.name() == "Priority");
         let Some(schema @ SchemaIrTypeView::Enum(_, view)) = &schema else {

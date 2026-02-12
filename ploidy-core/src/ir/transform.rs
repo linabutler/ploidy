@@ -319,11 +319,6 @@ impl<'context, 'a> IrTransformer<'context, 'a> {
             description: self.schema.description.as_deref(),
             fields: all_fields,
             parents,
-            discriminator: self
-                .schema
-                .discriminator
-                .as_ref()
-                .map(|d| d.property_name.as_str()),
         };
 
         Ok(match self.name {
@@ -369,11 +364,6 @@ impl<'context, 'a> IrTransformer<'context, 'a> {
             description: self.schema.description.as_deref(),
             fields,
             parents,
-            discriminator: self
-                .schema
-                .discriminator
-                .as_ref()
-                .map(|d| d.property_name.as_str()),
         };
         Ok(match self.name {
             IrTypeName::Schema(info) => SchemaIrType::Struct(info, ty).into(),

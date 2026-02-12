@@ -82,8 +82,7 @@ mod tests {
 
     use ploidy_core::{
         ir::{
-            ContainerView, InlineIrTypeView, IrGraph, IrSpec, IrStructFieldName, IrTypeView,
-            SchemaIrTypeView,
+            ContainerView, InlineIrTypeView, Ir, IrStructFieldName, IrTypeView, SchemaIrTypeView,
         },
         parse::Document,
     };
@@ -111,9 +110,8 @@ mod tests {
         "})
         .unwrap();
 
-        let spec = IrSpec::from_doc(&doc).unwrap();
-        let ir = IrGraph::new(&spec);
-        let graph = CodegenGraph::new(ir);
+        let ir = Ir::from_doc(&doc).unwrap();
+        let graph = CodegenGraph::new(ir.graph().finalize());
 
         let schema = graph.schemas().find(|s| s.name() == "Container");
         let Some(SchemaIrTypeView::Struct(_, struct_view)) = &schema else {
@@ -156,9 +154,8 @@ mod tests {
         "})
         .unwrap();
 
-        let spec = IrSpec::from_doc(&doc).unwrap();
-        let ir = IrGraph::new(&spec);
-        let graph = CodegenGraph::new(ir);
+        let ir = Ir::from_doc(&doc).unwrap();
+        let graph = CodegenGraph::new(ir.graph().finalize());
 
         let schema = graph.schemas().find(|s| s.name() == "Container");
         let Some(SchemaIrTypeView::Struct(_, struct_view)) = &schema else {
@@ -198,9 +195,8 @@ mod tests {
         "})
         .unwrap();
 
-        let spec = IrSpec::from_doc(&doc).unwrap();
-        let ir = IrGraph::new(&spec);
-        let graph = CodegenGraph::new(ir);
+        let ir = Ir::from_doc(&doc).unwrap();
+        let graph = CodegenGraph::new(ir.graph().finalize());
 
         let schema = graph.schemas().find(|s| s.name() == "Container");
         let Some(SchemaIrTypeView::Struct(_, struct_view)) = &schema else {
@@ -239,9 +235,8 @@ mod tests {
         "})
         .unwrap();
 
-        let spec = IrSpec::from_doc(&doc).unwrap();
-        let ir = IrGraph::new(&spec);
-        let graph = CodegenGraph::new(ir);
+        let ir = Ir::from_doc(&doc).unwrap();
+        let graph = CodegenGraph::new(ir.graph().finalize());
 
         let schema = graph.schemas().find(|s| s.name() == "Container");
         let Some(SchemaIrTypeView::Struct(_, struct_view)) = &schema else {
@@ -283,9 +278,8 @@ mod tests {
         "})
         .unwrap();
 
-        let spec = IrSpec::from_doc(&doc).unwrap();
-        let ir = IrGraph::new(&spec);
-        let graph = CodegenGraph::new(ir);
+        let ir = Ir::from_doc(&doc).unwrap();
+        let graph = CodegenGraph::new(ir.graph().finalize());
 
         let schema = graph.schemas().find(|s| s.name() == "Container");
         let Some(SchemaIrTypeView::Struct(_, struct_view)) = &schema else {
@@ -323,9 +317,8 @@ mod tests {
         "})
         .unwrap();
 
-        let spec = IrSpec::from_doc(&doc).unwrap();
-        let ir = IrGraph::new(&spec);
-        let graph = CodegenGraph::new(ir);
+        let ir = Ir::from_doc(&doc).unwrap();
+        let graph = CodegenGraph::new(ir.graph().finalize());
 
         let schema = graph.schemas().find(|s| s.name() == "Container");
         let Some(SchemaIrTypeView::Struct(_, struct_view)) = &schema else {
@@ -367,9 +360,8 @@ mod tests {
         "})
         .unwrap();
 
-        let spec = IrSpec::from_doc(&doc).unwrap();
-        let ir = IrGraph::new(&spec);
-        let graph = CodegenGraph::new(ir);
+        let ir = Ir::from_doc(&doc).unwrap();
+        let graph = CodegenGraph::new(ir.graph().finalize());
 
         let schema = graph.schemas().find(|s| s.name() == "Container");
         let Some(SchemaIrTypeView::Struct(_, struct_view)) = &schema else {
@@ -417,9 +409,8 @@ mod tests {
         "})
         .unwrap();
 
-        let spec = IrSpec::from_doc(&doc).unwrap();
-        let ir = IrGraph::new(&spec);
-        let graph = CodegenGraph::new(ir);
+        let ir = Ir::from_doc(&doc).unwrap();
+        let graph = CodegenGraph::new(ir.graph().finalize());
 
         let schema = graph.schemas().find(|s| s.name() == "Container");
         let Some(SchemaIrTypeView::Struct(_, struct_view)) = &schema else {
@@ -460,9 +451,8 @@ mod tests {
         "})
         .unwrap();
 
-        let spec = IrSpec::from_doc(&doc).unwrap();
-        let ir = IrGraph::new(&spec);
-        let graph = CodegenGraph::new(ir);
+        let ir = Ir::from_doc(&doc).unwrap();
+        let graph = CodegenGraph::new(ir.graph().finalize());
 
         let schema = graph.schemas().find(|s| s.name() == "Container");
         let Some(SchemaIrTypeView::Struct(_, struct_view)) = &schema else {
@@ -509,9 +499,8 @@ mod tests {
         "})
         .unwrap();
 
-        let spec = IrSpec::from_doc(&doc).unwrap();
-        let ir = IrGraph::new(&spec);
-        let graph = CodegenGraph::new(ir);
+        let ir = Ir::from_doc(&doc).unwrap();
+        let graph = CodegenGraph::new(ir.graph().finalize());
 
         let schema = graph.schemas().find(|s| s.name() == "Container");
         let Some(SchemaIrTypeView::Struct(_, struct_view)) = &schema else {
@@ -551,9 +540,8 @@ mod tests {
         "})
         .unwrap();
 
-        let spec = IrSpec::from_doc(&doc).unwrap();
-        let ir = IrGraph::new(&spec);
-        let graph = CodegenGraph::new(ir);
+        let ir = Ir::from_doc(&doc).unwrap();
+        let graph = CodegenGraph::new(ir.graph().finalize());
 
         let schema = graph
             .schemas()
@@ -592,9 +580,8 @@ mod tests {
         "})
         .unwrap();
 
-        let spec = IrSpec::from_doc(&doc).unwrap();
-        let ir = IrGraph::new(&spec);
-        let graph = CodegenGraph::new(ir);
+        let ir = Ir::from_doc(&doc).unwrap();
+        let graph = CodegenGraph::new(ir.graph().finalize());
 
         let schema = graph.schemas().find(|s| s.name() == "Container");
         let Some(SchemaIrTypeView::Struct(_, struct_view)) = &schema else {
@@ -634,9 +621,8 @@ mod tests {
         "})
         .unwrap();
 
-        let spec = IrSpec::from_doc(&doc).unwrap();
-        let ir = IrGraph::new(&spec);
-        let graph = CodegenGraph::new(ir);
+        let ir = Ir::from_doc(&doc).unwrap();
+        let graph = CodegenGraph::new(ir.graph().finalize());
 
         let schema = graph
             .schemas()
@@ -674,9 +660,8 @@ mod tests {
         "})
         .unwrap();
 
-        let spec = IrSpec::from_doc(&doc).unwrap();
-        let ir = IrGraph::new(&spec);
-        let graph = CodegenGraph::new(ir);
+        let ir = Ir::from_doc(&doc).unwrap();
+        let graph = CodegenGraph::new(ir.graph().finalize());
 
         let schema = graph.schemas().find(|s| s.name() == "Container");
         let Some(SchemaIrTypeView::Struct(_, struct_view)) = &schema else {
@@ -722,9 +707,8 @@ mod tests {
         "})
         .unwrap();
 
-        let spec = IrSpec::from_doc(&doc).unwrap();
-        let ir = IrGraph::new(&spec);
-        let graph = CodegenGraph::new(ir);
+        let ir = Ir::from_doc(&doc).unwrap();
+        let graph = CodegenGraph::new(ir.graph().finalize());
 
         let op = graph
             .operations()
@@ -770,9 +754,8 @@ mod tests {
         "})
         .unwrap();
 
-        let spec = IrSpec::from_doc(&doc).unwrap();
-        let ir = IrGraph::new(&spec);
-        let graph = CodegenGraph::new(ir);
+        let ir = Ir::from_doc(&doc).unwrap();
+        let graph = CodegenGraph::new(ir.graph().finalize());
 
         let op = graph
             .operations()

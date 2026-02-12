@@ -434,6 +434,7 @@ impl<'a> CodegenTypePathSegment<'a> {
                     ArrayItem => f.write_str("Item"),
                     Variant(index) => write!(f, "V{index}"),
                     Parent(index) => write!(f, "P{index}"),
+                    TaggedVariant(name) => write!(f, "{}", AsPascalCase(clean(name))),
                 }
             }
         }

@@ -67,7 +67,7 @@ impl<'a> IrOperationView<'a> {
     pub fn request(&self) -> Option<IrRequestView<'a>> {
         self.op.request.as_ref().map(|ty| match ty {
             IrRequest::Json(ty) => {
-                let node = IrGraphNode::from_ref(self.graph.spec, ty.as_ref());
+                let node = self.graph.resolve_type(ty.as_ref());
                 IrRequestView::Json(IrTypeView::new(self.graph, self.graph.indices[&node]))
             }
             IrRequest::Multipart => IrRequestView::Multipart,
@@ -79,7 +79,7 @@ impl<'a> IrOperationView<'a> {
     pub fn response(&self) -> Option<IrResponseView<'a>> {
         self.op.response.as_ref().map(|ty| match ty {
             IrResponse::Json(ty) => {
-                let node = IrGraphNode::from_ref(self.graph.spec, ty.as_ref());
+                let node = self.graph.resolve_type(ty.as_ref());
                 IrResponseView::Json(IrTypeView::new(self.graph, self.graph.indices[&node]))
             }
         })
@@ -239,7 +239,7 @@ impl<'a, T> IrParameterView<'a, T> {
     #[inline]
     pub fn ty(&self) -> IrTypeView<'a> {
         let graph = self.graph;
-        let node = IrGraphNode::from_ref(graph.spec, self.info.ty.as_ref());
+        let node = graph.resolve_type(self.info.ty.as_ref());
         IrTypeView::new(graph, graph.indices[&node])
     }
 

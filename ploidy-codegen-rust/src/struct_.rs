@@ -306,7 +306,7 @@ mod tests {
     use super::*;
 
     use ploidy_core::{
-        ir::{IrGraph, IrSpec, SchemaIrTypeView},
+        ir::{Ir, SchemaIrTypeView},
         parse::Document,
     };
     use pretty_assertions::assert_eq;
@@ -337,9 +337,8 @@ mod tests {
         "})
         .unwrap();
 
-        let spec = IrSpec::from_doc(&doc).unwrap();
-        let ir = IrGraph::new(&spec);
-        let graph = CodegenGraph::new(ir);
+        let ir = Ir::from_doc(&doc).unwrap();
+        let graph = CodegenGraph::new(ir.graph().finalize());
 
         let schema = graph.schemas().find(|s| s.name() == "Pet");
         let Some(schema @ SchemaIrTypeView::Struct(_, struct_view)) = &schema else {
@@ -366,6 +365,8 @@ mod tests {
 
     #[test]
     fn test_struct_excludes_discriminator_fields() {
+        // `Animal` is only used inside the `Pet` tagged union, so it's
+        // non-standalone and the discriminator field (`type`) is excluded.
         let doc = Document::from_yaml(indoc::indoc! {"
             openapi: 3.0.0
             info:
@@ -384,14 +385,18 @@ mod tests {
                   required:
                     - type
                     - name
+                Pet:
+                  oneOf:
+                    - $ref: '#/components/schemas/Animal'
                   discriminator:
                     propertyName: type
+                    mapping:
+                      animal: '#/components/schemas/Animal'
         "})
         .unwrap();
 
-        let spec = IrSpec::from_doc(&doc).unwrap();
-        let ir = IrGraph::new(&spec);
-        let graph = CodegenGraph::new(ir);
+        let ir = Ir::from_doc(&doc).unwrap();
+        let graph = CodegenGraph::new(ir.graph().finalize());
 
         let schema = graph.schemas().find(|s| s.name() == "Animal");
         let Some(schema @ SchemaIrTypeView::Struct(_, struct_view)) = &schema else {
@@ -439,9 +444,8 @@ mod tests {
         "})
         .unwrap();
 
-        let spec = IrSpec::from_doc(&doc).unwrap();
-        let ir = IrGraph::new(&spec);
-        let graph = CodegenGraph::new(ir);
+        let ir = Ir::from_doc(&doc).unwrap();
+        let graph = CodegenGraph::new(ir.graph().finalize());
 
         let schema = graph.schemas().find(|s| s.name() == "Record");
         let Some(schema @ SchemaIrTypeView::Struct(_, struct_view)) = &schema else {
@@ -490,9 +494,8 @@ mod tests {
         "})
         .unwrap();
 
-        let spec = IrSpec::from_doc(&doc).unwrap();
-        let ir = IrGraph::new(&spec);
-        let graph = CodegenGraph::new(ir);
+        let ir = Ir::from_doc(&doc).unwrap();
+        let graph = CodegenGraph::new(ir.graph().finalize());
 
         let schema = graph.schemas().find(|s| s.name() == "Record");
         let Some(schema @ SchemaIrTypeView::Struct(_, struct_view)) = &schema else {
@@ -542,9 +545,8 @@ mod tests {
         "})
         .unwrap();
 
-        let spec = IrSpec::from_doc(&doc).unwrap();
-        let ir = IrGraph::new(&spec);
-        let graph = CodegenGraph::new(ir);
+        let ir = Ir::from_doc(&doc).unwrap();
+        let graph = CodegenGraph::new(ir.graph().finalize());
 
         let schema = graph.schemas().find(|s| s.name() == "Record");
         let Some(schema @ SchemaIrTypeView::Struct(_, struct_view)) = &schema else {
@@ -595,9 +597,8 @@ mod tests {
         "})
         .unwrap();
 
-        let spec = IrSpec::from_doc(&doc).unwrap();
-        let ir = IrGraph::new(&spec);
-        let graph = CodegenGraph::new(ir);
+        let ir = Ir::from_doc(&doc).unwrap();
+        let graph = CodegenGraph::new(ir.graph().finalize());
 
         let schema = graph.schemas().find(|s| s.name() == "Record");
         let Some(schema @ SchemaIrTypeView::Struct(_, struct_view)) = &schema else {
@@ -645,9 +646,8 @@ mod tests {
         "})
         .unwrap();
 
-        let spec = IrSpec::from_doc(&doc).unwrap();
-        let ir = IrGraph::new(&spec);
-        let graph = CodegenGraph::new(ir);
+        let ir = Ir::from_doc(&doc).unwrap();
+        let graph = CodegenGraph::new(ir.graph().finalize());
 
         let schema = graph.schemas().find(|s| s.name() == "User");
         let Some(schema @ SchemaIrTypeView::Struct(_, struct_view)) = &schema else {
@@ -696,9 +696,8 @@ mod tests {
         "})
         .unwrap();
 
-        let spec = IrSpec::from_doc(&doc).unwrap();
-        let ir = IrGraph::new(&spec);
-        let graph = CodegenGraph::new(ir);
+        let ir = Ir::from_doc(&doc).unwrap();
+        let graph = CodegenGraph::new(ir.graph().finalize());
 
         let schema = graph.schemas().find(|s| s.name() == "Measurement");
         let Some(schema @ SchemaIrTypeView::Struct(_, struct_view)) = &schema else {
@@ -745,9 +744,8 @@ mod tests {
         "})
         .unwrap();
 
-        let spec = IrSpec::from_doc(&doc).unwrap();
-        let ir = IrGraph::new(&spec);
-        let graph = CodegenGraph::new(ir);
+        let ir = Ir::from_doc(&doc).unwrap();
+        let graph = CodegenGraph::new(ir.graph().finalize());
 
         let schema = graph.schemas().find(|s| s.name() == "Options");
         let Some(schema @ SchemaIrTypeView::Struct(_, struct_view)) = &schema else {
@@ -794,9 +792,8 @@ mod tests {
         "})
         .unwrap();
 
-        let spec = IrSpec::from_doc(&doc).unwrap();
-        let ir = IrGraph::new(&spec);
-        let graph = CodegenGraph::new(ir);
+        let ir = Ir::from_doc(&doc).unwrap();
+        let graph = CodegenGraph::new(ir.graph().finalize());
 
         let schema = graph.schemas().find(|s| s.name() == "Outer");
         let Some(schema @ SchemaIrTypeView::Struct(_, struct_view)) = &schema else {
@@ -847,9 +844,8 @@ mod tests {
         "})
         .unwrap();
 
-        let spec = IrSpec::from_doc(&doc).unwrap();
-        let ir = IrGraph::new(&spec);
-        let graph = CodegenGraph::new(ir);
+        let ir = Ir::from_doc(&doc).unwrap();
+        let graph = CodegenGraph::new(ir.graph().finalize());
 
         let schema = graph.schemas().find(|s| s.name() == "Outer");
         let Some(schema @ SchemaIrTypeView::Struct(_, struct_view)) = &schema else {
@@ -910,9 +906,8 @@ mod tests {
         "})
         .unwrap();
 
-        let spec = IrSpec::from_doc(&doc).unwrap();
-        let ir = IrGraph::new(&spec);
-        let graph = CodegenGraph::new(ir);
+        let ir = Ir::from_doc(&doc).unwrap();
+        let graph = CodegenGraph::new(ir.graph().finalize());
 
         let schema = graph.schemas().find(|s| s.name() == "Owner");
         let Some(schema @ SchemaIrTypeView::Struct(_, struct_view)) = &schema else {
@@ -959,9 +954,8 @@ mod tests {
         "})
         .unwrap();
 
-        let spec = IrSpec::from_doc(&doc).unwrap();
-        let ir = IrGraph::new(&spec);
-        let graph = CodegenGraph::new(ir);
+        let ir = Ir::from_doc(&doc).unwrap();
+        let graph = CodegenGraph::new(ir.graph().finalize());
 
         let schema = graph.schemas().find(|s| s.name() == "Container");
         let Some(schema @ SchemaIrTypeView::Struct(_, struct_view)) = &schema else {
@@ -1024,9 +1018,8 @@ mod tests {
         "})
         .unwrap();
 
-        let spec = IrSpec::from_doc(&doc).unwrap();
-        let ir = IrGraph::new(&spec);
-        let graph = CodegenGraph::new(ir);
+        let ir = Ir::from_doc(&doc).unwrap();
+        let graph = CodegenGraph::new(ir.graph().finalize());
 
         let schema = graph.schemas().find(|s| s.name() == "Owner");
         let Some(schema @ SchemaIrTypeView::Struct(_, struct_view)) = &schema else {
@@ -1073,9 +1066,8 @@ mod tests {
         "})
         .unwrap();
 
-        let spec = IrSpec::from_doc(&doc).unwrap();
-        let ir = IrGraph::new(&spec);
-        let graph = CodegenGraph::new(ir);
+        let ir = Ir::from_doc(&doc).unwrap();
+        let graph = CodegenGraph::new(ir.graph().finalize());
 
         let schema = graph.schemas().find(|s| s.name() == "Outer");
         let Some(schema @ SchemaIrTypeView::Struct(_, struct_view)) = &schema else {
@@ -1118,9 +1110,8 @@ mod tests {
         "})
         .unwrap();
 
-        let spec = IrSpec::from_doc(&doc).unwrap();
-        let ir = IrGraph::new(&spec);
-        let graph = CodegenGraph::new(ir);
+        let ir = Ir::from_doc(&doc).unwrap();
+        let graph = CodegenGraph::new(ir.graph().finalize());
 
         let schema = graph.schemas().find(|s| s.name() == "Container");
         let Some(schema @ SchemaIrTypeView::Struct(_, struct_view)) = &schema else {
@@ -1170,9 +1161,8 @@ mod tests {
         "})
         .unwrap();
 
-        let spec = IrSpec::from_doc(&doc).unwrap();
-        let ir = IrGraph::new(&spec);
-        let graph = CodegenGraph::new(ir);
+        let ir = Ir::from_doc(&doc).unwrap();
+        let graph = CodegenGraph::new(ir.graph().finalize());
 
         let schema = graph.schemas().find(|s| s.name() == "Defaults");
         let Some(schema @ SchemaIrTypeView::Struct(_, struct_view)) = &schema else {
@@ -1218,9 +1208,8 @@ mod tests {
         "})
         .unwrap();
 
-        let spec = IrSpec::from_doc(&doc).unwrap();
-        let ir = IrGraph::new(&spec);
-        let graph = CodegenGraph::new(ir);
+        let ir = Ir::from_doc(&doc).unwrap();
+        let graph = CodegenGraph::new(ir.graph().finalize());
 
         let schema = graph.schemas().find(|s| s.name() == "Resource");
         let Some(schema @ SchemaIrTypeView::Struct(_, struct_view)) = &schema else {
@@ -1268,9 +1257,8 @@ mod tests {
         "})
         .unwrap();
 
-        let spec = IrSpec::from_doc(&doc).unwrap();
-        let ir = IrGraph::new(&spec);
-        let graph = CodegenGraph::new(ir);
+        let ir = Ir::from_doc(&doc).unwrap();
+        let graph = CodegenGraph::new(ir.graph().finalize());
 
         let schema = graph.schemas().find(|s| s.name() == "Container");
         let Some(schema @ SchemaIrTypeView::Struct(_, struct_view)) = &schema else {
@@ -1337,9 +1325,8 @@ mod tests {
         "})
         .unwrap();
 
-        let spec = IrSpec::from_doc(&doc).unwrap();
-        let ir = IrGraph::new(&spec);
-        let graph = CodegenGraph::new(ir);
+        let ir = Ir::from_doc(&doc).unwrap();
+        let graph = CodegenGraph::new(ir.graph().finalize());
 
         let schema = graph.schemas().find(|s| s.name() == "Corgi");
         let Some(schema @ SchemaIrTypeView::Struct(_, struct_view)) = &schema else {
@@ -1390,9 +1377,8 @@ mod tests {
         "})
         .unwrap();
 
-        let spec = IrSpec::from_doc(&doc).unwrap();
-        let ir = IrGraph::new(&spec);
-        let graph = CodegenGraph::new(ir);
+        let ir = Ir::from_doc(&doc).unwrap();
+        let graph = CodegenGraph::new(ir.graph().finalize());
 
         let schema = graph.schemas().find(|s| s.name() == "Node");
         let Some(schema @ SchemaIrTypeView::Struct(_, struct_view)) = &schema else {
@@ -1438,9 +1424,8 @@ mod tests {
         "})
         .unwrap();
 
-        let spec = IrSpec::from_doc(&doc).unwrap();
-        let ir = IrGraph::new(&spec);
-        let graph = CodegenGraph::new(ir);
+        let ir = Ir::from_doc(&doc).unwrap();
+        let graph = CodegenGraph::new(ir.graph().finalize());
 
         let schema = graph.schemas().find(|s| s.name() == "Node");
         let Some(schema @ SchemaIrTypeView::Struct(_, struct_view)) = &schema else {
@@ -1491,9 +1476,8 @@ mod tests {
         "})
         .unwrap();
 
-        let spec = IrSpec::from_doc(&doc).unwrap();
-        let ir = IrGraph::new(&spec);
-        let graph = CodegenGraph::new(ir);
+        let ir = Ir::from_doc(&doc).unwrap();
+        let graph = CodegenGraph::new(ir.graph().finalize());
 
         let schema = graph.schemas().find(|s| s.name() == "Node");
         let Some(schema @ SchemaIrTypeView::Struct(_, struct_view)) = &schema else {
@@ -1542,9 +1526,8 @@ mod tests {
         "})
         .unwrap();
 
-        let spec = IrSpec::from_doc(&doc).unwrap();
-        let ir = IrGraph::new(&spec);
-        let graph = CodegenGraph::new(ir);
+        let ir = Ir::from_doc(&doc).unwrap();
+        let graph = CodegenGraph::new(ir.graph().finalize());
 
         let schema = graph.schemas().find(|s| s.name() == "Node");
         let Some(schema @ SchemaIrTypeView::Struct(_, struct_view)) = &schema else {
@@ -1606,9 +1589,8 @@ mod tests {
         "})
         .unwrap();
 
-        let spec = IrSpec::from_doc(&doc).unwrap();
-        let ir = IrGraph::new(&spec);
-        let graph = CodegenGraph::new(ir);
+        let ir = Ir::from_doc(&doc).unwrap();
+        let graph = CodegenGraph::new(ir.graph().finalize());
 
         let schema = graph.schemas().find(|s| s.name() == "Person");
         let Some(schema @ SchemaIrTypeView::Struct(_, struct_view)) = &schema else {
@@ -1657,9 +1639,8 @@ mod tests {
         "})
         .unwrap();
 
-        let spec = IrSpec::from_doc(&doc).unwrap();
-        let ir = IrGraph::new(&spec);
-        let graph = CodegenGraph::new(ir);
+        let ir = Ir::from_doc(&doc).unwrap();
+        let graph = CodegenGraph::new(ir.graph().finalize());
 
         let schema = graph.schemas().find(|s| s.name() == "Config");
         let Some(schema @ SchemaIrTypeView::Struct(_, struct_view)) = &schema else {
@@ -1677,6 +1658,74 @@ mod tests {
                 pub name: ::std::string::String,
                 #[serde(flatten,)]
                 pub additional_properties: ::std::collections::BTreeMap<::std::string::String, ::std::string::String>,
+            }
+        };
+        assert_eq!(actual, expected);
+    }
+
+    // MARK: Standalone discriminator
+
+    #[test]
+    fn test_standalone_struct_includes_discriminator() {
+        // `Dog` is both a variant of `Pet` tagged union AND referenced by
+        // `Owner.dog`, making it standalone. The discriminator field `kind`
+        // should be included as a regular field on the struct.
+        let doc = Document::from_yaml(indoc::indoc! {"
+            openapi: 3.0.0
+            info:
+              title: Test API
+              version: 1.0.0
+            paths: {}
+            components:
+              schemas:
+                Dog:
+                  type: object
+                  properties:
+                    kind:
+                      type: string
+                    bark:
+                      type: string
+                  required:
+                    - kind
+                    - bark
+                Pet:
+                  oneOf:
+                    - $ref: '#/components/schemas/Dog'
+                  discriminator:
+                    propertyName: kind
+                    mapping:
+                      dog: '#/components/schemas/Dog'
+                Owner:
+                  type: object
+                  properties:
+                    dog:
+                      $ref: '#/components/schemas/Dog'
+        "})
+        .unwrap();
+
+        let ir = Ir::from_doc(&doc).unwrap();
+        let mut raw = ir.graph();
+        raw.lower_tagged_variants();
+        let graph = CodegenGraph::new(raw.finalize());
+
+        let schema = graph.schemas().find(|s| s.name() == "Dog");
+        let Some(schema @ SchemaIrTypeView::Struct(_, struct_view)) = &schema else {
+            panic!("expected struct `Dog`; got `{schema:?}`");
+        };
+
+        let name = CodegenTypeName::Schema(schema);
+        let codegen = CodegenStruct::new(name, struct_view);
+
+        let actual: syn::ItemStruct = parse_quote!(#codegen);
+        // Both `kind` and `bark` should be present. After lowering, the
+        // tagged union no longer references `Dog` directly, so `kind`
+        // is not treated as a discriminator.
+        let expected: syn::ItemStruct = parse_quote! {
+            #[derive(Debug, Clone, PartialEq, Eq, Hash, Default, ::ploidy_util::serde::Serialize, ::ploidy_util::serde::Deserialize)]
+            #[serde(crate = "::ploidy_util::serde")]
+            pub struct Dog {
+                pub kind: ::std::string::String,
+                pub bark: ::std::string::String,
             }
         };
         assert_eq!(actual, expected);
