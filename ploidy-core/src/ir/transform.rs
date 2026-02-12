@@ -689,10 +689,17 @@ impl<'context, 'a> IrTransformer<'context, 'a> {
                     }
                     _ => false,
                 };
-                // Wrap the type in `Optional` if the field is either
-                // explicitly nullable, or implicitly optional. The `required`
-                // flag distinguishes between the two for codegen.
-                let ty = if nullable || !required {
+                // Wrap nullable and non-required fields in `Optional`.
+                //
+                // These are applied as two independent layers so that
+                // codegen backends can distinguish "absent" from "null":
+                // - Inner `Optional` = nullable (value can be `null`)
+                // - Outer `Optional` = non-required (field can be absent)
+                //
+                // OpenAPI 3.1 `type: [T, "null"]` already produces an
+                // inner `Optional` from `other()`, so the `nullable`
+                // wrap is skipped to avoid triple-wrapping.
+                let wrap_optional = |description, ty: IrType<'a>| -> IrType<'a> {
                     let path = match &self.name {
                         IrTypeName::Schema(info) => InlineIrTypePath {
                             root: InlineIrTypePathRoot::Type(info.name),
@@ -716,6 +723,23 @@ impl<'context, 'a> IrTransformer<'context, 'a> {
                         }),
                     )
                     .into()
+                };
+                let is_already_optional = matches!(
+                    ty,
+                    IrType::Inline(InlineIrType::Container(_, Container::Optional(_)))
+                        | IrType::Schema(SchemaIrType::Container(_, Container::Optional(_)))
+                );
+                // The nullable layer carries the field description. If
+                // there's no nullable layer, the non-required layer
+                // carries it instead.
+                let (ty, desc_consumed) = if nullable && !is_already_optional {
+                    (wrap_optional(description, ty), true)
+                } else {
+                    (ty, false)
+                };
+                let ty = if !required {
+                    let desc = if desc_consumed { None } else { description };
+                    wrap_optional(desc, ty)
                 } else {
                     ty
                 };

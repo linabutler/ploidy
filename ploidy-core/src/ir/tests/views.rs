@@ -1370,14 +1370,22 @@ fn test_nullable_view_provides_access_to_inner_type() {
         .find(|f| matches!(f.name(), IrStructFieldName::Name("nullable_field")))
         .unwrap();
 
-    // Verify the optional's inner type is accessible, and is an inline struct.
+    // The field is nullable + non-required, so it has two `Optional`
+    // layers: outer for absence, inner for nullability. The inner
+    // `Optional` wraps the inline struct.
+    let IrTypeView::Inline(InlineIrTypeView::Container(_, ContainerView::Optional(outer))) =
+        nullable_field.ty()
+    else {
+        panic!("expected outer Optional; got `{:?}`", nullable_field.ty());
+    };
+    let IrTypeView::Inline(InlineIrTypeView::Container(_, ContainerView::Optional(inner))) =
+        outer.ty()
+    else {
+        panic!("expected inner Optional; got `{:?}`", outer.ty());
+    };
     assert_matches!(
-        nullable_field.ty(),
-        IrTypeView::Inline(InlineIrTypeView::Container(_, ContainerView::Optional(inner)))
-            if matches!(
-                inner.ty(),
-                IrTypeView::Inline(InlineIrTypeView::Struct(_, _)),
-            ),
+        inner.ty(),
+        IrTypeView::Inline(InlineIrTypeView::Struct(_, _))
     );
 }
 

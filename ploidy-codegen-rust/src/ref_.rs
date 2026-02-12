@@ -310,6 +310,8 @@ mod tests {
               schemas:
                 Container:
                   type: object
+                  required:
+                    - value
                   properties:
                     value:
                       type: string
@@ -352,6 +354,8 @@ mod tests {
               schemas:
                 Container:
                   type: object
+                  required:
+                    - count
                   properties:
                     count:
                       type: integer
@@ -442,6 +446,8 @@ mod tests {
               schemas:
                 Container:
                   type: object
+                  required:
+                    - items
                   properties:
                     items:
                       type: array

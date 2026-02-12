@@ -756,16 +756,27 @@ fn test_struct_with_nullable_field_ref() {
         )) => struct_,
         other => panic!("expected struct `Container`; got `{other:?}`"),
     };
+    // The field is nullable (3.0 `nullable: true`) and non-required,
+    // so it gets two `Optional` layers: outer for absence, inner for
+    // nullability.
     let [
         IrStructField {
             name: IrStructFieldName::Name("value"),
             ty:
-                IrType::Inline(InlineIrType::Container(_, Container::Optional(Inner { ty: inner, .. }))),
+                IrType::Inline(InlineIrType::Container(_, Container::Optional(Inner { ty: outer, .. }))),
             ..
         },
     ] = &*struct_.fields
     else {
-        panic!("expected single nullable field; got `{:?}`", struct_.fields);
+        panic!(
+            "expected double-wrapped nullable field; got `{:?}`",
+            struct_.fields
+        );
+    };
+    let IrType::Inline(InlineIrType::Container(_, Container::Optional(Inner { ty: inner, .. }))) =
+        &**outer
+    else {
+        panic!("expected inner Optional; got `{outer:?}`");
     };
     assert_matches!(&**inner, IrType::Ref(_));
 }
@@ -799,16 +810,26 @@ fn test_struct_with_nullable_field_inline() {
         )) => struct_,
         other => panic!("expected struct `Container`; got `{other:?}`"),
     };
+    // The field is nullable (3.0 `nullable: true`) and non-required,
+    // so it gets two `Optional` layers.
     let [
         IrStructField {
             name: IrStructFieldName::Name("value"),
             ty:
-                IrType::Inline(InlineIrType::Container(_, Container::Optional(Inner { ty: inner, .. }))),
+                IrType::Inline(InlineIrType::Container(_, Container::Optional(Inner { ty: outer, .. }))),
             ..
         },
     ] = &*struct_.fields
     else {
-        panic!("expected single nullable field; got `{:?}`", struct_.fields);
+        panic!(
+            "expected double-wrapped nullable field; got `{:?}`",
+            struct_.fields
+        );
+    };
+    let IrType::Inline(InlineIrType::Container(_, Container::Optional(Inner { ty: inner, .. }))) =
+        &**outer
+    else {
+        panic!("expected inner Optional; got `{outer:?}`");
     };
     assert_matches!(
         &**inner,
