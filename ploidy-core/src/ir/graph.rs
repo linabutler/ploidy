@@ -15,7 +15,7 @@ use petgraph::{
     algo::{TarjanScc, tred},
     data::Build,
     graph::{DiGraph, NodeIndex},
-    visit::{EdgeFiltered, EdgeRef, IntoNeighbors, NodeCount, VisitMap, Visitable},
+    visit::{EdgeFiltered, EdgeRef, IntoNeighbors, VisitMap, Visitable},
 };
 use rustc_hash::{FxHashMap, FxHashSet};
 
@@ -120,48 +120,43 @@ impl<'a> IrGraph<'a> {
                 // Compute the transitive closure; discard the reduction.
                 let (_, closure) = tred::dag_transitive_reduction_closure(&condensation);
 
-                // Expand SCC-level dependencies to node-level: for each SCC,
-                // form a union of all nodes from all the SCCs it depends on.
-                let mut deps_by_scc =
-                    vec![FixedBitSet::with_capacity(g.node_count()); condensation.node_count()];
-                for scc_index in condensation.node_indices() {
-                    for dep_scc_index in closure.neighbors(scc_index) {
-                        deps_by_scc[scc_index].union_with(sccs.members(dep_scc_index));
-                    }
-                    // Include the other members of this SCC; these depend on
-                    // each other because they're in a cycle.
-                    deps_by_scc[scc_index].union_with(sccs.members(scc_index));
+                // Compute dependencies between SCCs.
+                let mut scc_deps =
+                    vec![FixedBitSet::with_capacity(g.node_count()); sccs.scc_count()];
+                for (scc, deps) in scc_deps.iter_mut().enumerate() {
+                    // Include the SCC itself, so that cycle members appear
+                    // in each other's dependencies; and its
+                    // transitive neighbors.
+                    deps.extend(
+                        std::iter::once(scc)
+                            .chain(closure.neighbors(scc))
+                            .flat_map(|scc| sccs.sccs[scc].ones()),
+                    );
                 }
 
+                // Expand SCC dependencies to node dependencies, and
+                // transpose dependencies to build dependents.
+                let mut node_dependents =
+                    vec![FixedBitSet::with_capacity(g.node_count()); g.node_count()];
                 for node in g.node_indices() {
-                    let topo_index = sccs.topo_index(node);
-                    let mut deps = deps_by_scc[topo_index].clone();
-
-                    // Exclude ourselves from our dependencies and dependents.
-                    deps.remove(node.index());
-
+                    let mut deps = scc_deps[sccs.topo_index(node)].clone();
+                    deps.remove(node.index()); // We don't depend on ourselves.
+                    for dep in deps.ones() {
+                        node_dependents[dep].insert(node.index());
+                    }
+                    metadata.schemas.entry(node).or_default().dependencies = deps;
+                }
+                for (index, dependents) in node_dependents.into_iter().enumerate() {
                     metadata
                         .schemas
-                        .entry(node)
+                        .entry(NodeIndex::new(index))
                         .or_default()
-                        .dependencies
-                        .union_with(&deps);
-
-                    // Add ourselves to the dependents of all the types
-                    // that we depend on.
-                    for index in deps.into_ones().map(NodeIndex::new) {
-                        metadata
-                            .schemas
-                            .entry(index)
-                            .or_default()
-                            .dependents
-                            .grow_and_insert(node.index());
-                    }
+                        .dependents = dependents;
                 }
             }
 
-            // Backward propagation: propagate each operation to all the types
-            // that it uses, directly and transitively.
+            // Backward propagation: propagate each operation to all the
+            // types that it uses, directly and transitively.
             for op in &spec.operations {
                 let meta = &metadata.operations[&ByAddress(op)];
 
@@ -175,10 +170,10 @@ impl<'a> IrGraph<'a> {
                 }
 
                 // Mark each type as being used by this operation.
-                for index in transitive_deps.ones().map(NodeIndex::new) {
+                for node in transitive_deps.ones().map(NodeIndex::new) {
                     metadata
                         .schemas
-                        .entry(index)
+                        .entry(node)
                         .or_default()
                         .used_by
                         .insert(ByAddress(op));
@@ -439,18 +434,17 @@ impl<'a, N, E> TopoSccs<'a, N, E> {
         }
     }
 
+    #[inline]
+    fn scc_count(&self) -> usize {
+        self.sccs.len()
+    }
+
     /// Returns the topological index of the SCC that contains the given node.
     #[inline]
     fn topo_index(&self, node: NodeIndex<usize>) -> usize {
         // Tarjan's algorithm returns indices in reverse topological order;
         // inverting the component index gets us the topological index.
         self.sccs.len() - 1 - self.tarjan.node_component_index(self.graph, node)
-    }
-
-    /// Returns the members of the SCC at the given topological index.
-    #[inline]
-    fn members(&self, index: usize) -> &FixedBitSet {
-        &self.sccs[index]
     }
 
     /// Iterates over the SCCs in topological order.
@@ -466,9 +460,8 @@ impl<'a, N, E> TopoSccs<'a, N, E> {
     /// topological order. This specific ordering is required by
     /// [`tred::dag_transitive_reduction_closure`].
     fn condensation(&self) -> UnweightedList<usize> {
-        let scc_count = self.sccs.len();
-        let mut dag = UnweightedList::with_capacity(scc_count);
-        for to in 0..scc_count {
+        let mut dag = UnweightedList::with_capacity(self.scc_count());
+        for to in 0..self.scc_count() {
             dag.add_node();
             for index in self.sccs[to].ones().map(NodeIndex::new) {
                 for neighbor in self.graph.neighbors_directed(index, Direction::Incoming) {
@@ -609,6 +602,8 @@ fn neighbors(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    use petgraph::visit::NodeCount;
 
     use crate::tests::assert_matches;
 
