@@ -112,6 +112,8 @@ fn main() -> Result<()> {
             println!("Generating {} types...", graph.schemas().count());
             ploidy_codegen_typescript::write_types_to_disk(&output, &graph)?;
 
+            ploidy_codegen_typescript::write_client_to_disk(&output, &graph)?;
+
             println!("Generation complete");
         }
     }

@@ -1,4 +1,5 @@
 use ploidy_core::ir::IrTaggedView;
+use swc_common::DUMMY_SP;
 use swc_ecma_ast::Decl;
 
 use super::{
@@ -23,7 +24,12 @@ pub fn ts_tagged(name: &str, ty: &IrTaggedView<'_>) -> Decl {
         let discriminator_value = variant.aliases().first().copied().unwrap_or(variant.name());
 
         // Build `{ tag: 'value' } & VariantRef`.
-        let tag_object = type_lit(vec![property_sig(tag, false, lit_str(discriminator_value))]);
+        let tag_object = type_lit(vec![property_sig(
+            tag,
+            false,
+            lit_str(discriminator_value),
+            DUMMY_SP,
+        )]);
 
         members.push(intersection(vec![tag_object, variant_ref]));
     }

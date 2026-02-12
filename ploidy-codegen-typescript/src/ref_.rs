@@ -38,8 +38,9 @@ pub fn ts_type_ref(ty: &IrTypeView<'_>) -> Box<TsType> {
             let schema_name = match path.root {
                 InlineIrTypePathRoot::Type(name) => CodegenIdent::new(name).to_type_name(),
                 InlineIrTypePathRoot::Resource(_) => {
-                    // TypeScript codegen doesn't generate operations/clients,
-                    // so resource-rooted inlines shouldn't appear.
+                    // Resource-rooted inlines come from operation
+                    // request/response bodies. Use the bare inline name
+                    // without a namespace prefix.
                     let inline_name = CodegenTypeName::Inline(ty).type_name();
                     return type_ref(&inline_name);
                 }

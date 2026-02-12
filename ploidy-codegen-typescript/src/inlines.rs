@@ -4,7 +4,7 @@ use swc_common::DUMMY_SP;
 use swc_ecma_ast::Decl;
 
 use super::{
-    emit::{export_decl, namespace_decl},
+    emit::{TsComments, export_decl, namespace_decl},
     enum_::ts_enum,
     naming::{CodegenTypeName, CodegenTypeNameSortKey},
     struct_::ts_struct,
@@ -16,7 +16,7 @@ use super::{
 /// `namespace`.
 ///
 /// Returns `None` if there are no inline types to emit.
-pub fn ts_inlines(schema: &SchemaIrTypeView<'_>) -> Option<Decl> {
+pub fn ts_inlines(schema: &SchemaIrTypeView<'_>, comments: &TsComments) -> Option<Decl> {
     let mut inlines = schema.inlines().collect_vec();
     inlines.sort_by(|a, b| {
         CodegenTypeNameSortKey::for_inline(a).cmp(&CodegenTypeNameSortKey::for_inline(b))
@@ -28,7 +28,7 @@ pub fn ts_inlines(schema: &SchemaIrTypeView<'_>) -> Option<Decl> {
             let name = CodegenTypeName::Inline(&view).type_name();
             match &view {
                 InlineIrTypeView::Enum(_, view) => Some(ts_enum(&name, view)),
-                InlineIrTypeView::Struct(_, view) => Some(ts_struct(&name, view)),
+                InlineIrTypeView::Struct(_, view) => Some(ts_struct(&name, view, comments)),
                 InlineIrTypeView::Tagged(_, view) => Some(ts_tagged(&name, view)),
                 InlineIrTypeView::Untagged(_, view) => Some(ts_untagged(&name, view)),
                 // Container types, primitive types, and untyped values
@@ -98,8 +98,8 @@ mod tests {
             panic!("expected struct `Container`; got `{schema:?}`");
         };
 
-        let ns = ts_inlines(schema).expect("expected inline types");
         let comments = TsComments::new();
+        let ns = ts_inlines(schema, &comments).expect("expected inline types");
         // Inline types should be sorted alphabetically: Apple, Zebra.
         let items = vec![export_decl(ns, DUMMY_SP)];
         assert_eq!(
@@ -143,7 +143,8 @@ mod tests {
             panic!("expected struct `Pet`; got `{schema:?}`");
         };
 
-        assert!(ts_inlines(schema).is_none());
+        let comments = TsComments::new();
+        assert!(ts_inlines(schema, &comments).is_none());
     }
 
     #[test]
@@ -178,6 +179,7 @@ mod tests {
         };
 
         // Container and primitive inlines should be skipped.
-        assert!(ts_inlines(schema).is_none());
+        let comments = TsComments::new();
+        assert!(ts_inlines(schema, &comments).is_none());
     }
 }

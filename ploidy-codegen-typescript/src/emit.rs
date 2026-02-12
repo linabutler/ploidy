@@ -214,9 +214,9 @@ fn parse_entity_name(name: &str) -> TsEntityName {
 // MARK: Property helper
 
 /// Creates a property signature for an interface or type literal.
-pub fn property_sig(name: &str, optional: bool, ty: Box<TsType>) -> TsTypeElement {
+pub fn property_sig(name: &str, optional: bool, ty: Box<TsType>, span: Span) -> TsTypeElement {
     TsTypeElement::TsPropertySignature(TsPropertySignature {
-        span: DUMMY_SP,
+        span,
         readonly: false,
         key: Box::new(Expr::Ident(ident(name))),
         computed: false,
@@ -339,6 +339,31 @@ pub fn reexport_type(names: &[String], module: &str) -> ModuleItem {
 }
 
 // MARK: Emitter
+
+/// Renders a [`TsType`] as a formatted TypeScript string.
+///
+/// Emits a `type __T = <ty>;` module via [`emit_module`], then strips
+/// the wrapper to extract the bare type text.
+pub fn emit_type_to_string(ty: Box<TsType>) -> String {
+    let comments = TsComments::new();
+    let items = vec![ModuleItem::ModuleDecl(ModuleDecl::ExportDecl(ExportDecl {
+        span: DUMMY_SP,
+        decl: Decl::TsTypeAlias(Box::new(TsTypeAliasDecl {
+            span: DUMMY_SP,
+            declare: false,
+            id: ident("__T"),
+            type_params: None,
+            type_ann: ty,
+        })),
+    }))];
+    let output = emit_module(items, &comments);
+    // Strip `export type __T = ` prefix and `;\n` suffix.
+    output
+        .strip_prefix("export type __T = ")
+        .and_then(|s| s.strip_suffix(";\n"))
+        .unwrap_or(&output)
+        .to_owned()
+}
 
 /// Emits a list of module items as a formatted TypeScript string.
 pub fn emit_module(body: Vec<ModuleItem>, comments: &TsComments) -> String {
@@ -528,8 +553,8 @@ mod tests {
             "Pet",
             &[],
             vec![
-                property_sig("name", false, kw(TsStringKeyword)),
-                property_sig("age", true, kw(TsNumberKeyword)),
+                property_sig("name", false, kw(TsStringKeyword), DUMMY_SP),
+                property_sig("age", true, kw(TsNumberKeyword), DUMMY_SP),
             ],
         );
         let items = vec![export_decl(decl, DUMMY_SP)];
@@ -553,7 +578,7 @@ mod tests {
                 interface_decl(
                     "Pet",
                     &["Base".to_owned()],
-                    vec![property_sig("name", false, kw(TsStringKeyword))],
+                    vec![property_sig("name", false, kw(TsStringKeyword), DUMMY_SP)],
                 ),
                 DUMMY_SP,
             ),
@@ -605,7 +630,12 @@ mod tests {
         let iface = interface_decl(
             "Order",
             &[],
-            vec![property_sig("status", true, type_ref("Order.Status"))],
+            vec![property_sig(
+                "status",
+                true,
+                type_ref("Order.Status"),
+                DUMMY_SP,
+            )],
         );
         let ns = namespace_decl(
             "Order",

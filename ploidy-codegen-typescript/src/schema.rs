@@ -64,7 +64,7 @@ impl<'a> CodegenSchemaType<'a> {
         let (main_decl, description) = match self.ty {
             SchemaIrTypeView::Struct(_, view) => {
                 let desc = view.description().map(|s| s.to_owned());
-                (ts_struct(&type_name, view), desc)
+                (ts_struct(&type_name, view, &comments), desc)
             }
             SchemaIrTypeView::Enum(_, view) => {
                 let desc = view.description().map(|s| s.to_owned());
@@ -125,7 +125,7 @@ impl<'a> CodegenSchemaType<'a> {
         items.push(export_decl(main_decl, span));
 
         // Add inline types as a namespace.
-        if let Some(ns) = ts_inlines(self.ty) {
+        if let Some(ns) = ts_inlines(self.ty, &comments) {
             items.push(export_decl(ns, DUMMY_SP));
         }
 

@@ -4,7 +4,9 @@ use ploidy_core::ir::{
 use swc_ecma_ast::{Decl, TsTypeElement};
 
 use super::{
-    emit::{interface_decl, intersection, nullable, property_sig, type_alias_decl, type_lit},
+    emit::{
+        TsComments, interface_decl, intersection, nullable, property_sig, type_alias_decl, type_lit,
+    },
     naming::{ts_field_name, ts_struct_field_hint_name},
     ref_::ts_type_ref,
 };
@@ -18,7 +20,7 @@ use super::{
 ///    `export interface Foo extends Bar { ... }` (own fields only)
 /// 3. Flattened fields or mixed parents ->
 ///    `export type Foo = Bar & Baz & { ... }`
-pub fn ts_struct(name: &str, ty: &IrStructView<'_>) -> Decl {
+pub fn ts_struct(name: &str, ty: &IrStructView<'_>, comments: &TsComments) -> Decl {
     let parents: Vec<_> = ty.parents().collect();
     let has_flattened = ty.own_fields().any(|f| f.flattened());
 
@@ -38,7 +40,7 @@ pub fn ts_struct(name: &str, ty: &IrStructView<'_>) -> Decl {
     if all_parents_are_inline && !has_flattened {
         // Case 1: No named schema parents. Inline parents are
         // linearized into `fields()`, so emit a simple interface.
-        ts_struct_interface(name, ty, &[], true)
+        ts_struct_interface(name, ty, &[], true, comments)
     } else if all_parents_are_schema_structs && !has_flattened {
         // Case 2: Interface with extends.
         let extends: Vec<String> = parents
@@ -51,10 +53,10 @@ pub fn ts_struct(name: &str, ty: &IrStructView<'_>) -> Decl {
                 }
             })
             .collect();
-        ts_struct_interface(name, ty, &extends, false)
+        ts_struct_interface(name, ty, &extends, false, comments)
     } else {
         // Case 3: Intersection type.
-        ts_struct_intersection(name, ty, &parents)
+        ts_struct_intersection(name, ty, &parents, comments)
     }
 }
 
@@ -64,14 +66,15 @@ fn ts_struct_interface(
     ty: &IrStructView<'_>,
     extends: &[String],
     include_inherited: bool,
+    comments: &TsComments,
 ) -> Decl {
     let members: Vec<TsTypeElement> = if include_inherited {
         ty.fields()
-            .map(|field| ts_property_for_field(&field))
+            .map(|field| ts_property_for_field(&field, comments))
             .collect()
     } else {
         ty.own_fields()
-            .map(|field| ts_property_for_field(&field))
+            .map(|field| ts_property_for_field(&field, comments))
             .collect()
     };
 
@@ -79,7 +82,12 @@ fn ts_struct_interface(
 }
 
 /// Emits `type Name = Parent1 & Parent2 & { own fields }`.
-fn ts_struct_intersection(name: &str, ty: &IrStructView<'_>, parents: &[IrTypeView<'_>]) -> Decl {
+fn ts_struct_intersection(
+    name: &str,
+    ty: &IrStructView<'_>,
+    parents: &[IrTypeView<'_>],
+    comments: &TsComments,
+) -> Decl {
     let mut parts = Vec::new();
 
     // Add parent types.
@@ -91,7 +99,7 @@ fn ts_struct_intersection(name: &str, ty: &IrStructView<'_>, parents: &[IrTypeVi
     let own_members: Vec<TsTypeElement> = ty
         .own_fields()
         .filter(|f| !f.flattened())
-        .map(|field| ts_property_for_field(&field))
+        .map(|field| ts_property_for_field(&field, comments))
         .collect();
 
     // Add flattened fields as individual intersection members.
@@ -114,7 +122,10 @@ fn ts_struct_intersection(name: &str, ty: &IrStructView<'_>, parents: &[IrTypeVi
 }
 
 /// Converts a struct field to a TypeScript property signature.
-fn ts_property_for_field(field: &ploidy_core::ir::IrStructFieldView<'_, '_>) -> TsTypeElement {
+fn ts_property_for_field(
+    field: &ploidy_core::ir::IrStructFieldView<'_, '_>,
+    comments: &TsComments,
+) -> TsTypeElement {
     let name = match field.name() {
         IrStructFieldName::Name(n) => ts_field_name(n),
         IrStructFieldName::Hint(hint) => ts_struct_field_hint_name(hint),
@@ -157,7 +168,8 @@ fn ts_property_for_field(field: &ploidy_core::ir::IrStructFieldView<'_, '_>) -> 
         }
     };
 
-    property_sig(&name, optional, final_ty)
+    let span = comments.span_with_jsdoc(field.description());
+    property_sig(&name, optional, final_ty, span)
 }
 
 /// Peels away `Optional` container layers, returning the inner type
@@ -226,8 +238,8 @@ mod tests {
         };
 
         let name = CodegenTypeName::Schema(schema).type_name();
-        let decl = ts_struct(&name, struct_view);
         let comments = TsComments::new();
+        let decl = ts_struct(&name, struct_view, &comments);
         let items = vec![export_decl(decl, DUMMY_SP)];
         assert_eq!(
             emit_module(items, &comments),
@@ -274,8 +286,8 @@ mod tests {
         };
 
         let name = CodegenTypeName::Schema(schema).type_name();
-        let decl = ts_struct(&name, struct_view);
         let comments = TsComments::new();
+        let decl = ts_struct(&name, struct_view, &comments);
         let items = vec![export_decl(decl, DUMMY_SP)];
         assert_eq!(
             emit_module(items, &comments),
@@ -321,8 +333,8 @@ mod tests {
         };
 
         let name = CodegenTypeName::Schema(schema).type_name();
-        let decl = ts_struct(&name, struct_view);
         let comments = TsComments::new();
+        let decl = ts_struct(&name, struct_view, &comments);
         let items = vec![export_decl(decl, DUMMY_SP)];
         assert_eq!(
             emit_module(items, &comments),
@@ -365,17 +377,65 @@ mod tests {
         };
 
         let name = CodegenTypeName::Schema(schema).type_name();
-        let decl = ts_struct(&name, struct_view);
+        let comments = TsComments::new();
+        let decl = ts_struct(&name, struct_view, &comments);
 
         // Description is handled by the caller (schema.rs) via TsComments.
         // Here we just verify the decl itself produces correct output.
-        let comments = TsComments::new();
         let items = vec![export_decl(decl, DUMMY_SP)];
         assert_eq!(
             emit_module(items, &comments),
             indoc::indoc! {"
                 export interface Pet {
                   name: string;
+                }
+            "}
+        );
+    }
+
+    #[test]
+    fn test_struct_field_descriptions() {
+        let doc = Document::from_yaml(indoc::indoc! {"
+            openapi: 3.0.0
+            info:
+              title: Test API
+              version: 1.0.0
+            paths: {}
+            components:
+              schemas:
+                Pet:
+                  type: object
+                  properties:
+                    name:
+                      type: string
+                      description: The pet's name.
+                    age:
+                      type: integer
+                      format: int32
+                      description: Age in years.
+                  required:
+                    - name
+        "})
+        .unwrap();
+
+        let ir = Ir::from_doc(&doc).unwrap();
+        let graph = CodegenGraph::new(ir.graph().finalize());
+
+        let schema = graph.schemas().find(|s| s.name() == "Pet");
+        let Some(schema @ SchemaIrTypeView::Struct(_, struct_view)) = &schema else {
+            panic!("expected struct `Pet`; got `{schema:?}`");
+        };
+
+        let name = CodegenTypeName::Schema(schema).type_name();
+        let comments = TsComments::new();
+        let decl = ts_struct(&name, struct_view, &comments);
+        let items = vec![export_decl(decl, DUMMY_SP)];
+        assert_eq!(
+            emit_module(items, &comments),
+            indoc::indoc! {"
+                export interface Pet {
+                  /** The pet's name. */ name: string;
+                  /** Age in years. */ age?: number;
                 }
             "}
         );
@@ -423,8 +483,8 @@ mod tests {
         };
 
         let name = CodegenTypeName::Schema(schema).type_name();
-        let decl = ts_struct(&name, struct_view);
         let comments = TsComments::new();
+        let decl = ts_struct(&name, struct_view, &comments);
         let items = vec![export_decl(decl, DUMMY_SP)];
         assert_eq!(
             emit_module(items, &comments),
