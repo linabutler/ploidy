@@ -1,7 +1,8 @@
 use itertools::Itertools;
+use oxc_ast::AstBuilder;
+use oxc_ast::ast::Declaration;
+use oxc_span::SPAN;
 use ploidy_core::ir::{InlineIrTypeView, SchemaIrTypeView, View};
-use swc_common::DUMMY_SP;
-use swc_ecma_ast::Decl;
 
 use super::{
     emit::{TsComments, export_decl, namespace_decl},
@@ -16,43 +17,51 @@ use super::{
 /// `namespace`.
 ///
 /// Returns `None` if there are no inline types to emit.
-pub fn ts_inlines(schema: &SchemaIrTypeView<'_>, comments: &TsComments) -> Option<Decl> {
+pub fn ts_inlines<'a>(
+    ast: &AstBuilder<'a>,
+    schema: &SchemaIrTypeView<'_>,
+    comments: &TsComments,
+) -> Option<Declaration<'a>> {
     let mut inlines = schema.inlines().collect_vec();
     inlines.sort_by(|a, b| {
         CodegenTypeNameSortKey::for_inline(a).cmp(&CodegenTypeNameSortKey::for_inline(b))
     });
 
-    let body = inlines
-        .into_iter()
-        .filter_map(|view| {
-            let name = CodegenTypeName::Inline(&view).type_name();
-            match &view {
-                InlineIrTypeView::Enum(_, view) => Some(ts_enum(&name, view)),
-                InlineIrTypeView::Struct(_, view) => Some(ts_struct(&name, view, comments)),
-                InlineIrTypeView::Tagged(_, view) => Some(ts_tagged(&name, view)),
-                InlineIrTypeView::Untagged(_, view) => Some(ts_untagged(&name, view)),
-                // Container types, primitive types, and untyped values
-                // are emitted directly; they don't need type aliases.
-                InlineIrTypeView::Container(..)
-                | InlineIrTypeView::Primitive(..)
-                | InlineIrTypeView::Any(..) => None,
-            }
-        })
-        .map(|decl| export_decl(decl, DUMMY_SP))
-        .collect::<Vec<_>>();
+    let body = ast.vec_from_iter(
+        inlines
+            .into_iter()
+            .filter_map(|view| {
+                let name = CodegenTypeName::Inline(&view).type_name();
+                match &view {
+                    InlineIrTypeView::Enum(_, view) => Some(ts_enum(ast, &name, view)),
+                    InlineIrTypeView::Struct(_, view) => {
+                        Some(ts_struct(ast, &name, view, comments))
+                    }
+                    InlineIrTypeView::Tagged(_, view) => Some(ts_tagged(ast, &name, view)),
+                    InlineIrTypeView::Untagged(_, view) => Some(ts_untagged(ast, &name, view)),
+                    // Container types, primitive types, and untyped values
+                    // are emitted directly; they don't need type aliases.
+                    InlineIrTypeView::Container(..)
+                    | InlineIrTypeView::Primitive(..)
+                    | InlineIrTypeView::Any(..) => None,
+                }
+            })
+            .map(|decl| export_decl(ast, decl, SPAN)),
+    );
 
     if body.is_empty() {
         return None;
     }
 
     let schema_name = CodegenTypeName::Schema(schema).type_name();
-    Some(namespace_decl(&schema_name, body))
+    Some(namespace_decl(ast, &schema_name, body))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
+    use oxc_allocator::Allocator;
     use ploidy_core::{
         ir::{Ir, SchemaIrTypeView},
         parse::Document,
@@ -98,12 +107,14 @@ mod tests {
             panic!("expected struct `Container`; got `{schema:?}`");
         };
 
+        let allocator = Allocator::default();
+        let ast = AstBuilder::new(&allocator);
         let comments = TsComments::new();
-        let ns = ts_inlines(schema, &comments).expect("expected inline types");
+        let ns = ts_inlines(&ast, schema, &comments).expect("expected inline types");
         // Inline types should be sorted alphabetically: Apple, Zebra.
-        let items = vec![export_decl(ns, DUMMY_SP)];
+        let items = ast.vec1(export_decl(&ast, ns, SPAN));
         assert_eq!(
-            emit_module(items, &comments),
+            emit_module(&allocator, &ast, items, &comments),
             indoc::indoc! {"
                 export namespace Container {
                   export interface Apple {
@@ -143,8 +154,10 @@ mod tests {
             panic!("expected struct `Pet`; got `{schema:?}`");
         };
 
+        let allocator = Allocator::default();
+        let ast = AstBuilder::new(&allocator);
         let comments = TsComments::new();
-        assert!(ts_inlines(schema, &comments).is_none());
+        assert!(ts_inlines(&ast, schema, &comments).is_none());
     }
 
     #[test]
@@ -179,7 +192,9 @@ mod tests {
         };
 
         // Container and primitive inlines should be skipped.
+        let allocator = Allocator::default();
+        let ast = AstBuilder::new(&allocator);
         let comments = TsComments::new();
-        assert!(ts_inlines(schema, &comments).is_none());
+        assert!(ts_inlines(&ast, schema, &comments).is_none());
     }
 }

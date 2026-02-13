@@ -1,36 +1,38 @@
+use oxc_ast::AstBuilder;
+use oxc_ast::ast::TSType;
+use oxc_span::SPAN;
 use ploidy_core::ir::{
     ContainerView, ExtendableView, InlineIrTypePathRoot, InlineIrTypeView, IrTypeView,
 };
-use swc_ecma_ast::{TsKeywordTypeKind, TsType};
 
 use super::{
-    emit::{array, kw, nullable, record, type_ref},
+    emit::{array, nullable, record, type_ref},
     naming::{CodegenIdent, CodegenTypeName},
     primitive::ts_primitive,
 };
 
 /// Resolves an [`IrTypeView`] to a TypeScript type expression.
-pub fn ts_type_ref(ty: &IrTypeView<'_>) -> Box<TsType> {
+pub fn ts_type_ref<'a>(ast: &AstBuilder<'a>, ty: &IrTypeView<'_>) -> TSType<'a> {
     match ty {
         // Inline containers are emitted directly.
         IrTypeView::Inline(InlineIrTypeView::Container(_, ContainerView::Array(inner))) => {
             let inner_ty = inner.ty();
-            array(ts_type_ref(&inner_ty))
+            array(ast, ts_type_ref(ast, &inner_ty))
         }
         IrTypeView::Inline(InlineIrTypeView::Container(_, ContainerView::Map(inner))) => {
             let inner_ty = inner.ty();
-            record(ts_type_ref(&inner_ty))
+            record(ast, ts_type_ref(ast, &inner_ty))
         }
         IrTypeView::Inline(InlineIrTypeView::Container(_, ContainerView::Optional(inner))) => {
             let inner_ty = inner.ty();
-            nullable(ts_type_ref(&inner_ty))
+            nullable(ast, ts_type_ref(ast, &inner_ty))
         }
 
         // Inline primitives are emitted directly.
-        IrTypeView::Inline(InlineIrTypeView::Primitive(_, view)) => ts_primitive(view.ty()),
+        IrTypeView::Inline(InlineIrTypeView::Primitive(_, view)) => ts_primitive(ast, view.ty()),
 
         // Inline `Any` becomes `unknown`.
-        IrTypeView::Inline(InlineIrTypeView::Any(_, _)) => kw(TsKeywordTypeKind::TsUnknownKeyword),
+        IrTypeView::Inline(InlineIrTypeView::Any(_, _)) => ast.ts_type_unknown_keyword(SPAN),
 
         // Inline structured types use namespace-qualified names.
         IrTypeView::Inline(ty) => {
@@ -42,18 +44,18 @@ pub fn ts_type_ref(ty: &IrTypeView<'_>) -> Box<TsType> {
                     // request/response bodies. Use the bare inline name
                     // without a namespace prefix.
                     let inline_name = CodegenTypeName::Inline(ty).type_name();
-                    return type_ref(&inline_name);
+                    return type_ref(ast, &inline_name);
                 }
             };
             let inline_name = CodegenTypeName::Inline(ty).type_name();
-            type_ref(&format!("{schema_name}.{inline_name}"))
+            type_ref(ast, &format!("{schema_name}.{inline_name}"))
         }
 
         // Schema types are bare references.
         IrTypeView::Schema(ty) => {
             let ext = ty.extensions();
             let ident = ext.get::<CodegenIdent>().unwrap();
-            type_ref(&ident.to_type_name())
+            type_ref(ast, &ident.to_type_name())
         }
     }
 }
@@ -62,12 +64,12 @@ pub fn ts_type_ref(ty: &IrTypeView<'_>) -> Box<TsType> {
 mod tests {
     use super::*;
 
+    use oxc_allocator::Allocator;
     use ploidy_core::{
         ir::{Ir, IrStructFieldName, SchemaIrTypeView},
         parse::Document,
     };
     use pretty_assertions::assert_eq;
-    use swc_common::DUMMY_SP;
 
     use crate::{
         CodegenGraph,
@@ -75,10 +77,13 @@ mod tests {
     };
 
     /// Emits a type as `export type T = <ty>;` and returns the output string.
-    fn emit_ty(ty: Box<TsType>) -> String {
+    fn emit_ty(ty_fn: impl for<'a> FnOnce(&'a AstBuilder<'a>) -> TSType<'a>) -> String {
+        let allocator = Allocator::default();
+        let ast = AstBuilder::new(&allocator);
         let comments = TsComments::new();
-        let items = vec![export_decl(type_alias_decl("T", ty), DUMMY_SP)];
-        emit_module(items, &comments)
+        let ty = ty_fn(&ast);
+        let items = ast.vec1(export_decl(&ast, type_alias_decl(&ast, "T", ty), SPAN));
+        emit_module(&allocator, &ast, items, &comments)
     }
 
     #[test]
@@ -107,8 +112,10 @@ mod tests {
             .find(|s| s.name() == "Pet")
             .expect("expected schema `Pet`");
         let ty = IrTypeView::Schema(schema);
-        let ts = ts_type_ref(&ty);
-        assert_eq!(emit_ty(ts), "export type T = Pet;\n");
+        assert_eq!(
+            emit_ty(|ast| ts_type_ref(ast, &ty)),
+            "export type T = Pet;\n"
+        );
     }
 
     #[test]
@@ -145,8 +152,10 @@ mod tests {
             .find(|f| matches!(f.name(), IrStructFieldName::Name("items")))
             .unwrap();
         let ty = field.ty();
-        let ts = ts_type_ref(&ty);
-        assert_eq!(emit_ty(ts), "export type T = string[];\n");
+        assert_eq!(
+            emit_ty(|ast| ts_type_ref(ast, &ty)),
+            "export type T = string[];\n"
+        );
     }
 
     #[test]
@@ -183,8 +192,10 @@ mod tests {
             .find(|f| matches!(f.name(), IrStructFieldName::Name("metadata")))
             .unwrap();
         let ty = field.ty();
-        let ts = ts_type_ref(&ty);
-        assert_eq!(emit_ty(ts), "export type T = Record<string, string>;\n");
+        assert_eq!(
+            emit_ty(|ast| ts_type_ref(ast, &ty)),
+            "export type T = Record<string, string>;\n"
+        );
     }
 
     #[test]
@@ -218,8 +229,10 @@ mod tests {
             .find(|f| matches!(f.name(), IrStructFieldName::Name("value")))
             .unwrap();
         let ty = field.ty();
-        let ts = ts_type_ref(&ty);
-        assert_eq!(emit_ty(ts), "export type T = string | null;\n");
+        assert_eq!(
+            emit_ty(|ast| ts_type_ref(ast, &ty)),
+            "export type T = string | null;\n"
+        );
     }
 
     #[test]
@@ -253,8 +266,10 @@ mod tests {
             .find(|f| matches!(f.name(), IrStructFieldName::Name("data")))
             .unwrap();
         let ty = field.ty();
-        let ts = ts_type_ref(&ty);
-        assert_eq!(emit_ty(ts), "export type T = unknown;\n");
+        assert_eq!(
+            emit_ty(|ast| ts_type_ref(ast, &ty)),
+            "export type T = unknown;\n"
+        );
     }
 
     #[test]
@@ -292,7 +307,9 @@ mod tests {
             .find(|f| matches!(f.name(), IrStructFieldName::Name("nested")))
             .unwrap();
         let ty = field.ty();
-        let ts = ts_type_ref(&ty);
-        assert_eq!(emit_ty(ts), "export type T = Container.Nested;\n");
+        assert_eq!(
+            emit_ty(|ast| ts_type_ref(ast, &ty)),
+            "export type T = Container.Nested;\n"
+        );
     }
 }

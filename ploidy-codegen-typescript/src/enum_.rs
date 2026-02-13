@@ -1,10 +1,12 @@
+use oxc_ast::AstBuilder;
+use oxc_ast::ast::Declaration;
+use oxc_span::SPAN;
 use ploidy_core::ir::{IrEnumVariant, IrEnumView};
-use swc_ecma_ast::{Decl, TsKeywordTypeKind};
 
-use super::emit::{kw, lit_bool, lit_num, lit_str, type_alias_decl, union};
+use super::emit::{lit_bool, lit_num, lit_str, type_alias_decl, union};
 
 /// Generates a TypeScript literal union type from an enum.
-pub fn ts_enum(name: &str, ty: &IrEnumView<'_>) -> Decl {
+pub fn ts_enum<'a>(ast: &AstBuilder<'a>, name: &str, ty: &IrEnumView<'_>) -> Declaration<'a> {
     let has_unrepresentable = ty.variants().iter().any(|variant| match variant {
         IrEnumVariant::Number(_) | IrEnumVariant::Bool(_) => true,
         IrEnumVariant::String(s) => s.chars().all(|c| !unicode_ident::is_xid_continue(c)),
@@ -12,32 +14,28 @@ pub fn ts_enum(name: &str, ty: &IrEnumView<'_>) -> Decl {
 
     if has_unrepresentable {
         // Fall back to `string` for enums with unrepresentable variants.
-        return type_alias_decl(name, kw(TsKeywordTypeKind::TsStringKeyword));
+        return type_alias_decl(ast, name, ast.ts_type_string_keyword(SPAN));
     }
 
-    let variants = ty
-        .variants()
-        .iter()
-        .map(|variant| match variant {
-            IrEnumVariant::String(s) => lit_str(s),
-            IrEnumVariant::Number(n) => lit_num(&n.to_string()),
-            IrEnumVariant::Bool(b) => lit_bool(*b),
-        })
-        .collect();
+    let variants = ast.vec_from_iter(ty.variants().iter().map(|variant| match variant {
+        IrEnumVariant::String(s) => lit_str(ast, s),
+        IrEnumVariant::Number(n) => lit_num(ast, &n.to_string()),
+        IrEnumVariant::Bool(b) => lit_bool(ast, *b),
+    }));
 
-    type_alias_decl(name, union(variants))
+    type_alias_decl(ast, name, union(ast, variants))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
+    use oxc_allocator::Allocator;
     use ploidy_core::{
         ir::{Ir, SchemaIrTypeView},
         parse::Document,
     };
     use pretty_assertions::assert_eq;
-    use swc_common::DUMMY_SP;
 
     use crate::{
         CodegenGraph,
@@ -72,12 +70,14 @@ mod tests {
             panic!("expected enum `Status`; got `{schema:?}`");
         };
 
+        let allocator = Allocator::default();
+        let ast = AstBuilder::new(&allocator);
         let name = CodegenTypeName::Schema(schema).type_name();
-        let decl = ts_enum(&name, enum_view);
+        let decl = ts_enum(&ast, &name, enum_view);
         let comments = TsComments::new();
-        let items = vec![export_decl(decl, DUMMY_SP)];
+        let items = ast.vec1(export_decl(&ast, decl, SPAN));
         assert_eq!(
-            emit_module(items, &comments),
+            emit_module(&allocator, &ast, items, &comments),
             "export type Status = \"active\" | \"inactive\" | \"pending\";\n"
         );
     }
@@ -109,14 +109,16 @@ mod tests {
             panic!("expected enum `Status`; got `{schema:?}`");
         };
 
+        let allocator = Allocator::default();
+        let ast = AstBuilder::new(&allocator);
         let name = CodegenTypeName::Schema(schema).type_name();
-        let decl = ts_enum(&name, enum_view);
+        let decl = ts_enum(&ast, &name, enum_view);
 
         // Description is handled by the caller (schema.rs) via TsComments.
         let comments = TsComments::new();
-        let items = vec![export_decl(decl, DUMMY_SP)];
+        let items = ast.vec1(export_decl(&ast, decl, SPAN));
         assert_eq!(
-            emit_module(items, &comments),
+            emit_module(&allocator, &ast, items, &comments),
             "export type Status = \"active\" | \"inactive\";\n"
         );
     }
@@ -148,12 +150,14 @@ mod tests {
             panic!("expected enum `Priority`; got `{schema:?}`");
         };
 
+        let allocator = Allocator::default();
+        let ast = AstBuilder::new(&allocator);
         let name = CodegenTypeName::Schema(schema).type_name();
-        let decl = ts_enum(&name, enum_view);
+        let decl = ts_enum(&ast, &name, enum_view);
         let comments = TsComments::new();
-        let items = vec![export_decl(decl, DUMMY_SP)];
+        let items = ast.vec1(export_decl(&ast, decl, SPAN));
         assert_eq!(
-            emit_module(items, &comments),
+            emit_module(&allocator, &ast, items, &comments),
             "export type Priority = string;\n"
         );
     }

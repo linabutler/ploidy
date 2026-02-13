@@ -1,4 +1,6 @@
 use itertools::Itertools;
+use oxc_allocator::Allocator;
+use oxc_ast::AstBuilder;
 use ploidy_core::codegen::Code;
 
 use super::{
@@ -25,23 +27,23 @@ impl Code for CodegenTypesModule<'_> {
     }
 
     fn into_string(self) -> miette::Result<String> {
+        let allocator = Allocator::default();
+        let ast = AstBuilder::new(&allocator);
+
         let mut tys = self.graph.schemas().collect_vec();
         tys.sort_by(|a, b| {
             CodegenTypeNameSortKey::for_schema(a).cmp(&CodegenTypeNameSortKey::for_schema(b))
         });
 
         let comments = TsComments::new();
-        let items = tys
-            .iter()
-            .map(|ty| {
-                let name = CodegenTypeName::Schema(ty);
-                let type_name = name.type_name();
-                let file_name = name.display_file_name();
-                reexport_type(&[type_name], &format!("./{file_name}"))
-            })
-            .collect();
+        let items = ast.vec_from_iter(tys.iter().map(|ty| {
+            let name = CodegenTypeName::Schema(ty);
+            let type_name = name.type_name();
+            let file_name = name.display_file_name();
+            reexport_type(&ast, &[type_name], &format!("./{file_name}"))
+        }));
 
-        Ok(emit_module(items, &comments))
+        Ok(emit_module(&allocator, &ast, items, &comments))
     }
 }
 

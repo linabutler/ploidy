@@ -1,39 +1,37 @@
+use oxc_ast::AstBuilder;
+use oxc_ast::ast::Declaration;
+use oxc_span::SPAN;
 use ploidy_core::ir::IrUntaggedView;
-use swc_ecma_ast::{Decl, TsKeywordTypeKind};
 
 use super::{
-    emit::{kw, type_alias_decl, union},
+    emit::{type_alias_decl, union},
     ref_::ts_type_ref,
 };
 
 /// Generates a TypeScript union type from an untagged union.
-pub fn ts_untagged(name: &str, ty: &IrUntaggedView<'_>) -> Decl {
-    let mut members = Vec::new();
+pub fn ts_untagged<'a>(
+    ast: &AstBuilder<'a>,
+    name: &str,
+    ty: &IrUntaggedView<'_>,
+) -> Declaration<'a> {
+    let members = ast.vec_from_iter(ty.variants().map(|variant| match variant.ty() {
+        Some(variant) => ts_type_ref(ast, &variant.view),
+        None => ast.ts_type_null_keyword(SPAN),
+    }));
 
-    for variant in ty.variants() {
-        match variant.ty() {
-            Some(variant) => {
-                members.push(ts_type_ref(&variant.view));
-            }
-            None => {
-                members.push(kw(TsKeywordTypeKind::TsNullKeyword));
-            }
-        }
-    }
-
-    type_alias_decl(name, union(members))
+    type_alias_decl(ast, name, union(ast, members))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
+    use oxc_allocator::Allocator;
     use ploidy_core::{
         ir::{Ir, SchemaIrTypeView},
         parse::Document,
     };
     use pretty_assertions::assert_eq;
-    use swc_common::DUMMY_SP;
 
     use crate::{
         CodegenGraph,
@@ -67,12 +65,14 @@ mod tests {
             panic!("expected untagged union `StringOrInt`; got `{schema:?}`");
         };
 
+        let allocator = Allocator::default();
+        let ast = AstBuilder::new(&allocator);
         let name = CodegenTypeName::Schema(schema).type_name();
-        let decl = ts_untagged(&name, untagged_view);
+        let decl = ts_untagged(&ast, &name, untagged_view);
         let comments = TsComments::new();
-        let items = vec![export_decl(decl, DUMMY_SP)];
+        let items = ast.vec1(export_decl(&ast, decl, SPAN));
         assert_eq!(
-            emit_module(items, &comments),
+            emit_module(&allocator, &ast, items, &comments),
             "export type StringOrInt = string | number;\n"
         );
     }
@@ -112,12 +112,14 @@ mod tests {
             panic!("expected untagged union `Animal`; got `{schema:?}`");
         };
 
+        let allocator = Allocator::default();
+        let ast = AstBuilder::new(&allocator);
         let name = CodegenTypeName::Schema(schema).type_name();
-        let decl = ts_untagged(&name, untagged_view);
+        let decl = ts_untagged(&ast, &name, untagged_view);
         let comments = TsComments::new();
-        let items = vec![export_decl(decl, DUMMY_SP)];
+        let items = ast.vec1(export_decl(&ast, decl, SPAN));
         assert_eq!(
-            emit_module(items, &comments),
+            emit_module(&allocator, &ast, items, &comments),
             "export type Animal = Dog | Cat;\n"
         );
     }
@@ -149,14 +151,16 @@ mod tests {
             panic!("expected untagged union `StringOrInt`; got `{schema:?}`");
         };
 
+        let allocator = Allocator::default();
+        let ast = AstBuilder::new(&allocator);
         let name = CodegenTypeName::Schema(schema).type_name();
-        let decl = ts_untagged(&name, untagged_view);
+        let decl = ts_untagged(&ast, &name, untagged_view);
 
         // Description is handled by the caller (schema.rs) via TsComments.
         let comments = TsComments::new();
-        let items = vec![export_decl(decl, DUMMY_SP)];
+        let items = ast.vec1(export_decl(&ast, decl, SPAN));
         assert_eq!(
-            emit_module(items, &comments),
+            emit_module(&allocator, &ast, items, &comments),
             "export type StringOrInt = string | number;\n"
         );
     }

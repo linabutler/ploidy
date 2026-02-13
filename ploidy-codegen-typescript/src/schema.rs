@@ -1,15 +1,17 @@
 use std::collections::BTreeSet;
 
+use oxc_allocator::Allocator;
+use oxc_ast::AstBuilder;
+use oxc_ast::ast::Statement;
+use oxc_span::SPAN;
 use ploidy_core::{
     codegen::Code,
     ir::{ContainerView, ExtendableView, InlineIrTypePathRoot, SchemaIrTypeView, View},
 };
-use swc_common::DUMMY_SP;
-use swc_ecma_ast::{ModuleItem, TsKeywordTypeKind};
 
 use super::{
     emit::{
-        TsComments, array, emit_module, export_decl, import_type_decl, kw, nullable, record,
+        TsComments, array, emit_module, export_decl, import_type_decl, nullable, record,
         type_alias_decl,
     },
     enum_::ts_enum,
@@ -56,6 +58,9 @@ impl<'a> CodegenSchemaType<'a> {
 
     /// Generates the TypeScript module and returns it as a [`TsCode`].
     pub fn into_code(self) -> TsCode {
+        let allocator = Allocator::default();
+        let ast = AstBuilder::new(&allocator);
+
         let name = CodegenTypeName::Schema(self.ty);
         let type_name = name.type_name();
         let comments = TsComments::new();
@@ -64,25 +69,25 @@ impl<'a> CodegenSchemaType<'a> {
         let (main_decl, description) = match self.ty {
             SchemaIrTypeView::Struct(_, view) => {
                 let desc = view.description().map(|s| s.to_owned());
-                (ts_struct(&type_name, view, &comments), desc)
+                (ts_struct(&ast, &type_name, view, &comments), desc)
             }
             SchemaIrTypeView::Enum(_, view) => {
                 let desc = view.description().map(|s| s.to_owned());
-                (ts_enum(&type_name, view), desc)
+                (ts_enum(&ast, &type_name, view), desc)
             }
             SchemaIrTypeView::Tagged(_, view) => {
                 let desc = view.description().map(|s| s.to_owned());
-                (ts_tagged(&type_name, view), desc)
+                (ts_tagged(&ast, &type_name, view), desc)
             }
             SchemaIrTypeView::Untagged(_, view) => {
                 let desc = view.description().map(|s| s.to_owned());
-                (ts_untagged(&type_name, view), desc)
+                (ts_untagged(&ast, &type_name, view), desc)
             }
             SchemaIrTypeView::Container(_, ContainerView::Array(inner)) => {
                 let inner_ty = inner.ty();
                 let desc = inner.description().map(|s| s.to_owned());
                 (
-                    type_alias_decl(&type_name, array(ts_type_ref(&inner_ty))),
+                    type_alias_decl(&ast, &type_name, array(&ast, ts_type_ref(&ast, &inner_ty))),
                     desc,
                 )
             }
@@ -90,7 +95,7 @@ impl<'a> CodegenSchemaType<'a> {
                 let inner_ty = inner.ty();
                 let desc = inner.description().map(|s| s.to_owned());
                 (
-                    type_alias_decl(&type_name, record(ts_type_ref(&inner_ty))),
+                    type_alias_decl(&ast, &type_name, record(&ast, ts_type_ref(&ast, &inner_ty))),
                     desc,
                 )
             }
@@ -98,48 +103,54 @@ impl<'a> CodegenSchemaType<'a> {
                 let inner_ty = inner.ty();
                 let desc = inner.description().map(|s| s.to_owned());
                 (
-                    type_alias_decl(&type_name, nullable(ts_type_ref(&inner_ty))),
+                    type_alias_decl(
+                        &ast,
+                        &type_name,
+                        nullable(&ast, ts_type_ref(&ast, &inner_ty)),
+                    ),
                     desc,
                 )
             }
-            SchemaIrTypeView::Primitive(_, view) => {
-                (type_alias_decl(&type_name, ts_primitive(view.ty())), None)
-            }
+            SchemaIrTypeView::Primitive(_, view) => (
+                type_alias_decl(&ast, &type_name, ts_primitive(&ast, view.ty())),
+                None,
+            ),
             SchemaIrTypeView::Any(_, _) => (
-                type_alias_decl(&type_name, kw(TsKeywordTypeKind::TsUnknownKeyword)),
+                type_alias_decl(&ast, &type_name, ast.ts_type_unknown_keyword(SPAN)),
                 None,
             ),
         };
 
         // Build module items: imports, main decl (with JSDoc), then
         // inline namespace.
-        let mut items: Vec<ModuleItem> = Vec::new();
+        let mut items: Vec<Statement<'_>> = Vec::new();
 
         // Collect imports.
-        for import in collect_imports(self.ty) {
+        for import in collect_imports(&ast, self.ty) {
             items.push(import);
         }
 
         // Main declaration with optional JSDoc.
         let span = comments.span_with_jsdoc(description.as_deref());
-        items.push(export_decl(main_decl, span));
+        items.push(export_decl(&ast, main_decl, span));
 
         // Add inline types as a namespace.
-        if let Some(ns) = ts_inlines(self.ty, &comments) {
-            items.push(export_decl(ns, DUMMY_SP));
+        if let Some(ns) = ts_inlines(&ast, self.ty, &comments) {
+            items.push(export_decl(&ast, ns, SPAN));
         }
 
         let file_name = name.display_file_name();
+        let body = ast.vec_from_iter(items);
 
         TsCode {
             path: format!("types/{file_name}.ts"),
-            content: emit_module(items, &comments),
+            content: emit_module(&allocator, &ast, body, &comments),
         }
     }
 }
 
 /// Collects `import type` declarations needed for a schema's file.
-fn collect_imports(schema: &SchemaIrTypeView<'_>) -> Vec<ModuleItem> {
+fn collect_imports<'a>(ast: &AstBuilder<'a>, schema: &SchemaIrTypeView<'_>) -> Vec<Statement<'a>> {
     let current_name = schema.name();
     let mut imported_schemas: BTreeSet<String> = BTreeSet::new();
 
@@ -168,7 +179,7 @@ fn collect_imports(schema: &SchemaIrTypeView<'_>) -> Vec<ModuleItem> {
         .into_iter()
         .map(|name| {
             let file_name = heck::AsSnekCase(&name).to_string();
-            import_type_decl(&[name], &format!("./{file_name}"))
+            import_type_decl(ast, &[name], &format!("./{file_name}"))
         })
         .collect()
 }

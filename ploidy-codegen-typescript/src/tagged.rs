@@ -1,6 +1,7 @@
+use oxc_ast::AstBuilder;
+use oxc_ast::ast::Declaration;
+use oxc_span::SPAN;
 use ploidy_core::ir::IrTaggedView;
-use swc_common::DUMMY_SP;
-use swc_ecma_ast::Decl;
 
 use super::{
     emit::{intersection, lit_str, property_sig, type_alias_decl, type_lit, union},
@@ -12,41 +13,44 @@ use super::{
 /// Each variant becomes `{ <tag>: '<value>' } & VariantRef`, and the
 /// variants are joined with `|`. This enables TypeScript's type narrowing
 /// on the discriminator field.
-pub fn ts_tagged(name: &str, ty: &IrTaggedView<'_>) -> Decl {
+pub fn ts_tagged<'a>(ast: &AstBuilder<'a>, name: &str, ty: &IrTaggedView<'_>) -> Declaration<'a> {
     let tag = ty.tag();
-    let mut members = Vec::new();
-
-    for variant in ty.variants() {
+    let members = ast.vec_from_iter(ty.variants().map(|variant| {
         let view = variant.ty();
-        let variant_ref = ts_type_ref(&view);
+        let variant_ref = ts_type_ref(ast, &view);
 
         // Use the first alias as the discriminator value.
         let discriminator_value = variant.aliases().first().copied().unwrap_or(variant.name());
 
         // Build `{ tag: 'value' } & VariantRef`.
-        let tag_object = type_lit(vec![property_sig(
-            tag,
-            false,
-            lit_str(discriminator_value),
-            DUMMY_SP,
-        )]);
+        let tag_object = type_lit(
+            ast,
+            ast.vec1(property_sig(
+                ast,
+                tag,
+                false,
+                lit_str(ast, discriminator_value),
+                SPAN,
+            )),
+        );
 
-        members.push(intersection(vec![tag_object, variant_ref]));
-    }
+        let parts = ast.vec_from_array([tag_object, variant_ref]);
+        intersection(ast, parts)
+    }));
 
-    type_alias_decl(name, union(members))
+    type_alias_decl(ast, name, union(ast, members))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
+    use oxc_allocator::Allocator;
     use ploidy_core::{
         ir::{Ir, SchemaIrTypeView},
         parse::Document,
     };
     use pretty_assertions::assert_eq;
-    use swc_common::DUMMY_SP;
 
     use crate::{
         CodegenGraph,
@@ -93,12 +97,14 @@ mod tests {
             panic!("expected tagged union `Pet`; got `{schema:?}`");
         };
 
+        let allocator = Allocator::default();
+        let ast = AstBuilder::new(&allocator);
         let name = CodegenTypeName::Schema(schema).type_name();
-        let decl = ts_tagged(&name, tagged);
+        let decl = ts_tagged(&ast, &name, tagged);
         let comments = TsComments::new();
-        let items = vec![export_decl(decl, DUMMY_SP)];
+        let items = ast.vec1(export_decl(&ast, decl, SPAN));
         assert_eq!(
-            emit_module(items, &comments),
+            emit_module(&allocator, &ast, items, &comments),
             indoc::indoc! {r#"
                 export type Pet = {
                   petType: "dog";
@@ -148,12 +154,14 @@ mod tests {
             panic!("expected tagged union `Pet`; got `{schema:?}`");
         };
 
+        let allocator = Allocator::default();
+        let ast = AstBuilder::new(&allocator);
         let name = CodegenTypeName::Schema(schema).type_name();
-        let decl = ts_tagged(&name, tagged);
+        let decl = ts_tagged(&ast, &name, tagged);
         let comments = TsComments::new();
-        let items = vec![export_decl(decl, DUMMY_SP)];
+        let items = ast.vec1(export_decl(&ast, decl, SPAN));
         assert_eq!(
-            emit_module(items, &comments),
+            emit_module(&allocator, &ast, items, &comments),
             indoc::indoc! {r#"
                 export type Pet = {
                   type: "canine";
@@ -204,14 +212,16 @@ mod tests {
             panic!("expected tagged union `Pet`; got `{schema:?}`");
         };
 
+        let allocator = Allocator::default();
+        let ast = AstBuilder::new(&allocator);
         let name = CodegenTypeName::Schema(schema).type_name();
-        let decl = ts_tagged(&name, tagged);
+        let decl = ts_tagged(&ast, &name, tagged);
 
         // Description is handled by the caller (schema.rs) via TsComments.
         let comments = TsComments::new();
-        let items = vec![export_decl(decl, DUMMY_SP)];
+        let items = ast.vec1(export_decl(&ast, decl, SPAN));
         assert_eq!(
-            emit_module(items, &comments),
+            emit_module(&allocator, &ast, items, &comments),
             indoc::indoc! {r#"
                 export type Pet = {
                   type: "dog";

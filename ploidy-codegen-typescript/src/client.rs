@@ -1,6 +1,22 @@
-use std::{collections::BTreeMap, fmt::Write};
+use std::collections::BTreeMap;
 
-use super::{graph::CodegenGraph, operation::CodegenOperation, schema::TsCode};
+use oxc_allocator::Allocator;
+use oxc_ast::AstBuilder;
+use oxc_ast::NONE;
+use oxc_ast::ast::{
+    ClassElement, ClassType, Expression, FormalParameterKind, FunctionType, MethodDefinitionKind,
+    MethodDefinitionType, PropertyDefinitionType, Statement, TSAccessibility,
+};
+use oxc_span::SPAN;
+use ploidy_core::ir::{ExtendableView, IrTypeView};
+
+use super::{
+    emit::{TsComments, emit_module, import_type_decl},
+    graph::CodegenGraph,
+    naming::CodegenIdent,
+    operation::CodegenOperation,
+    schema::TsCode,
+};
 
 /// Generates a `client.ts` file with a `Client` class containing
 /// async methods for each OpenAPI operation.
@@ -16,58 +32,157 @@ impl<'a> CodegenClient<'a> {
     /// Generates the full `client.ts` content and returns it as a
     /// [`TsCode`].
     pub fn into_code(self) -> TsCode {
-        let mut methods = Vec::new();
+        let allocator = Allocator::default();
+        let ast = AstBuilder::new(&allocator);
+        let comments = TsComments::new();
+
         // `type_name → file_name` — `BTreeMap` for sorted, deduplicated output.
         let mut all_imports: BTreeMap<String, String> = BTreeMap::new();
 
+        // Build class elements.
+        let mut class_elements: Vec<ClassElement<'_>> = Vec::new();
+
+        // `private baseUrl: string;`
+        let base_url_prop = ClassElement::PropertyDefinition(ast.alloc(ast.property_definition(
+            SPAN,
+            PropertyDefinitionType::PropertyDefinition,
+            ast.vec(),
+            ast.property_key_static_identifier(SPAN, ast.atom("baseUrl")),
+            Some(ast.ts_type_annotation(SPAN, ast.ts_type_string_keyword(SPAN))),
+            None, // value
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            Some(TSAccessibility::Private),
+        )));
+        class_elements.push(base_url_prop);
+
+        // Constructor: `constructor(baseUrl: string) { this.baseUrl = baseUrl; }`
+        let ctor_param = {
+            let pattern = ast.binding_pattern_binding_identifier(SPAN, ast.atom("baseUrl"));
+            let type_ann = ast.ts_type_annotation(SPAN, ast.ts_type_string_keyword(SPAN));
+            ast.formal_parameter(
+                SPAN,
+                ast.vec(),
+                pattern,
+                Some(type_ann),
+                NONE,
+                false,
+                None,
+                false,
+                false,
+            )
+        };
+        let ctor_params = ast.formal_parameters(
+            SPAN,
+            FormalParameterKind::FormalParameter,
+            ast.vec1(ctor_param),
+            NONE,
+        );
+
+        // `this.baseUrl = baseUrl`
+        let this_base_url = oxc_ast::ast::AssignmentTarget::from(ast.member_expression_static(
+            SPAN,
+            ast.expression_this(SPAN),
+            ast.identifier_name(SPAN, ast.atom("baseUrl")),
+            false,
+        ));
+        let assign = ast.expression_assignment(
+            SPAN,
+            oxc_ast::ast::AssignmentOperator::Assign,
+            this_base_url,
+            ast.expression_identifier(SPAN, ast.atom("baseUrl")),
+        );
+        let ctor_func_body = ast.function_body(
+            SPAN,
+            ast.vec(),
+            ast.vec1(ast.statement_expression(SPAN, assign)),
+        );
+        let ctor_func = ast.function(
+            SPAN,
+            FunctionType::FunctionExpression,
+            None,
+            false,
+            false,
+            false,
+            NONE,
+            NONE,
+            ctor_params,
+            NONE,
+            Some(ctor_func_body),
+        );
+        let ctor = ClassElement::MethodDefinition(ast.alloc(ast.method_definition(
+            SPAN,
+            MethodDefinitionType::MethodDefinition,
+            ast.vec(),
+            ast.property_key_static_identifier(SPAN, ast.atom("constructor")),
+            ctor_func,
+            MethodDefinitionKind::Constructor,
+            false,
+            false,
+            false,
+            false,
+            None,
+        )));
+        class_elements.push(ctor);
+
+        // Operation methods.
         for op in self.graph.operations() {
-            let codegen = CodegenOperation::new(&op);
-            let (method_code, imports) = codegen.emit();
-            methods.push(method_code);
-            for (type_name, file_name) in imports.types {
+            // Collect imports by walking IR type dependencies.
+            let views = op.types().filter_map(|view| match view {
+                IrTypeView::Schema(ty) => Some(ty),
+                IrTypeView::Inline(_) => None,
+            });
+            for view in views {
+                let ext = view.extensions();
+                let ident = ext.get::<CodegenIdent>().unwrap();
+                let type_name = ident.to_type_name();
+                let file_name = heck::AsSnekCase(&type_name).to_string();
                 all_imports.entry(type_name).or_insert(file_name);
             }
+
+            let codegen = CodegenOperation::new(&op);
+            class_elements.push(codegen.emit(&ast, &comments));
         }
 
-        let mut content = String::new();
+        // Build class declaration.
+        let class_body = ast.class_body(SPAN, ast.vec_from_iter(class_elements));
+        let class = ast.class(
+            SPAN,
+            ClassType::ClassDeclaration,
+            ast.vec(),
+            Some(ast.binding_identifier(SPAN, ast.atom("Client"))),
+            NONE,
+            None::<Expression<'_>>,
+            NONE,
+            ast.vec(),
+            class_body,
+            false,
+            false,
+        );
+        let class_decl = oxc_ast::ast::Declaration::ClassDeclaration(ast.alloc(class));
+        let class_stmt = super::emit::export_decl(&ast, class_decl, SPAN);
 
-        // Emit imports (already sorted by `BTreeMap`).
+        // Build import statements.
+        let mut items: Vec<Statement<'_>> = Vec::new();
         for (type_name, file_name) in &all_imports {
-            writeln!(
-                content,
-                "import type {{ {type_name} }} from \"./types/{file_name}\";"
-            )
-            .unwrap();
+            items.push(import_type_decl(
+                &ast,
+                std::slice::from_ref(type_name),
+                &format!("./types/{file_name}"),
+            ));
         }
-        if !all_imports.is_empty() {
-            content.push('\n');
-        }
+        items.push(class_stmt);
 
-        // Class header.
-        writeln!(content, "export class Client {{").unwrap();
-        writeln!(content, "  private baseUrl: string;").unwrap();
-        content.push('\n');
-        writeln!(content, "  constructor(baseUrl: string) {{").unwrap();
-        writeln!(content, "    this.baseUrl = baseUrl;").unwrap();
-        writeln!(content, "  }}").unwrap();
-
-        // Methods (indented by 2 spaces for the class body).
-        for method in &methods {
-            content.push('\n');
-            for line in method.lines() {
-                if line.is_empty() {
-                    content.push('\n');
-                } else {
-                    content.push_str("  ");
-                    content.push_str(line);
-                    content.push('\n');
-                }
-            }
-        }
-
-        writeln!(content, "}}").unwrap();
-
-        TsCode::new("client.ts".to_owned(), content)
+        let body = ast.vec_from_iter(items);
+        TsCode::new(
+            "client.ts".to_owned(),
+            emit_module(&allocator, &ast, body, &comments),
+        )
     }
 }
 
@@ -172,40 +287,36 @@ mod tests {
             indoc::indoc! {r#"
                 import type { CreatePetRequest } from "./types/create_pet_request";
                 import type { Pet } from "./types/pet";
-
                 export class Client {
                   private baseUrl: string;
-
                   constructor(baseUrl: string) {
                     this.baseUrl = baseUrl;
                   }
-
-                  async listPets(query?: { limit?: string; }): Promise<Pet[]> {
+                  async listPets(query?: {
+                    limit?: string;
+                  }): Promise<Pet[]> {
                     const url = new URL("/pets", this.baseUrl);
                     if (query?.limit !== undefined) url.searchParams.set("limit", query.limit);
                     const response = await fetch(url, { method: "GET" });
                     if (!response.ok) throw new Error(`${response.status} ${response.statusText}`);
                     return await response.json();
                   }
-
                   async createPet(request: CreatePetRequest): Promise<Pet> {
                     const url = new URL("/pets", this.baseUrl);
                     const response = await fetch(url, {
                       method: "POST",
                       headers: { "Content-Type": "application/json" },
-                      body: JSON.stringify(request),
+                      body: JSON.stringify(request)
                     });
                     if (!response.ok) throw new Error(`${response.status} ${response.statusText}`);
                     return await response.json();
                   }
-
                   async getPet(petId: string): Promise<Pet> {
                     const url = new URL(`/pets/${encodeURIComponent(petId)}`, this.baseUrl);
                     const response = await fetch(url, { method: "GET" });
                     if (!response.ok) throw new Error(`${response.status} ${response.statusText}`);
                     return await response.json();
                   }
-
                   async deletePet(petId: string): Promise<void> {
                     const url = new URL(`/pets/${encodeURIComponent(petId)}`, this.baseUrl);
                     const response = await fetch(url, { method: "DELETE" });

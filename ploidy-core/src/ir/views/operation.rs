@@ -91,6 +91,15 @@ impl<'a> IrOperationView<'a> {
     pub fn resource(&self) -> Option<&'a str> {
         self.op.resource
     }
+
+    #[inline]
+    pub fn types(&self) -> impl Iterator<Item = IrTypeView<'a>> + use<'a> {
+        self.graph.metadata.operations[&ByAddress(self.op)]
+            .types
+            .ones()
+            .map(NodeIndex::new)
+            .map(|index| IrTypeView::new(self.graph, index))
+    }
 }
 
 impl<'a> View<'a> for IrOperationView<'a> {

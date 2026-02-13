@@ -1,10 +1,10 @@
+use oxc_ast::AstBuilder;
+use oxc_ast::ast::TSType;
+use oxc_span::SPAN;
 use ploidy_core::ir::PrimitiveIrType;
-use swc_ecma_ast::{TsKeywordTypeKind, TsType};
-
-use super::emit::kw;
 
 /// Maps a primitive IR type to a TypeScript type.
-pub fn ts_primitive(ty: PrimitiveIrType) -> Box<TsType> {
+pub fn ts_primitive<'a>(ast: &AstBuilder<'a>, ty: PrimitiveIrType) -> TSType<'a> {
     match ty {
         PrimitiveIrType::String
         | PrimitiveIrType::DateTime
@@ -13,7 +13,7 @@ pub fn ts_primitive(ty: PrimitiveIrType) -> Box<TsType> {
         | PrimitiveIrType::Url
         | PrimitiveIrType::Uuid
         | PrimitiveIrType::Bytes
-        | PrimitiveIrType::Binary => kw(TsKeywordTypeKind::TsStringKeyword),
+        | PrimitiveIrType::Binary => ast.ts_type_string_keyword(SPAN),
 
         PrimitiveIrType::I8
         | PrimitiveIrType::U8
@@ -24,9 +24,9 @@ pub fn ts_primitive(ty: PrimitiveIrType) -> Box<TsType> {
         | PrimitiveIrType::I64
         | PrimitiveIrType::U64
         | PrimitiveIrType::F32
-        | PrimitiveIrType::F64 => kw(TsKeywordTypeKind::TsNumberKeyword),
+        | PrimitiveIrType::F64 => ast.ts_type_number_keyword(SPAN),
 
-        PrimitiveIrType::Bool => kw(TsKeywordTypeKind::TsBooleanKeyword),
+        PrimitiveIrType::Bool => ast.ts_type_boolean_keyword(SPAN),
     }
 }
 
@@ -34,20 +34,23 @@ pub fn ts_primitive(ty: PrimitiveIrType) -> Box<TsType> {
 mod tests {
     use super::*;
 
+    use oxc_allocator::Allocator;
     use pretty_assertions::assert_eq;
-    use swc_common::DUMMY_SP;
 
     use crate::emit::{TsComments, emit_module, export_decl, type_alias_decl};
 
     /// Emits a primitive as `export type T = <prim>;` and returns the
     /// output string.
     fn emit_prim(ty: PrimitiveIrType) -> String {
+        let allocator = Allocator::default();
+        let ast = AstBuilder::new(&allocator);
         let comments = TsComments::new();
-        let items = vec![export_decl(
-            type_alias_decl("T", ts_primitive(ty)),
-            DUMMY_SP,
-        )];
-        emit_module(items, &comments)
+        let items = ast.vec1(export_decl(
+            &ast,
+            type_alias_decl(&ast, "T", ts_primitive(&ast, ty)),
+            SPAN,
+        ));
+        emit_module(&allocator, &ast, items, &comments)
     }
 
     #[test]

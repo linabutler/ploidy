@@ -13,11 +13,12 @@ rust-version.workspace = true
 heck = "0.5"
 itertools = "0.14"
 miette = "7"
+oxc_allocator = { workspace = true }
+oxc_ast = { workspace = true }
+oxc_codegen = { workspace = true }
+oxc_span = { workspace = true }
 ploidy-core = { workspace = true }
 ref-cast = { workspace = true }
-swc_common = { version = "18", features = ["tty-emitter"] }
-swc_ecma_ast = "20"
-swc_ecma_codegen = "23"
 thiserror = "2"
 unicode-ident = "1"
 
