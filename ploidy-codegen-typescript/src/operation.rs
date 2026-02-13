@@ -34,14 +34,15 @@ impl<'a> CodegenOperation<'a> {
     }
 
     /// Generates the method as a [`ClassElement::MethodDefinition`].
+    #[allow(clippy::too_many_lines)]
     pub fn emit<'b>(&self, ast: &AstBuilder<'b>, comments: &TsComments) -> ClassElement<'b> {
         let method_name = self.method_name();
 
         // Build formal parameters.
-        let params = self.build_params(ast);
+        let params = self.build_params(ast, comments);
 
         // Build return type annotation: `Promise<T>` or `Promise<void>`.
-        let return_type = self.build_return_type(ast);
+        let return_type = self.build_return_type(ast, comments);
         let return_annotation = ast.ts_type_annotation(SPAN, return_type);
 
         // Build body statements.
@@ -86,7 +87,11 @@ impl<'a> CodegenOperation<'a> {
     }
 
     /// Builds formal parameters for the method signature.
-    fn build_params<'b>(&self, ast: &AstBuilder<'b>) -> oxc_ast::ast::FormalParameters<'b> {
+    fn build_params<'b>(
+        &self,
+        ast: &AstBuilder<'b>,
+        comments: &TsComments,
+    ) -> oxc_ast::ast::FormalParameters<'b> {
         let mut items: Vec<oxc_ast::ast::FormalParameter<'b>> = Vec::new();
 
         // Path parameters, in order.
@@ -114,7 +119,7 @@ impl<'a> CodegenOperation<'a> {
 
             let members = ast.vec_from_iter(query_params.iter().map(|p| {
                 let key = ast.property_key_static_identifier(SPAN, ast.atom(p.name()));
-                let type_ann = ast.ts_type_annotation(SPAN, ts_type_ref(ast, &p.ty()));
+                let type_ann = ast.ts_type_annotation(SPAN, ts_type_ref(ast, &p.ty(), comments));
                 oxc_ast::ast::TSSignature::TSPropertySignature(ast.alloc(
                     ast.ts_property_signature(
                         SPAN,
@@ -145,7 +150,7 @@ impl<'a> CodegenOperation<'a> {
 
         // Request body (JSON only).
         if let Some(IrRequestView::Json(ty)) = self.op.request() {
-            let ts_ty = ts_type_ref(ast, &ty);
+            let ts_ty = ts_type_ref(ast, &ty, comments);
             let pattern = ast.binding_pattern_binding_identifier(SPAN, ast.atom("request"));
             let type_ann = ast.ts_type_annotation(SPAN, ts_ty);
             items.push(ast.formal_parameter(
@@ -170,9 +175,9 @@ impl<'a> CodegenOperation<'a> {
     }
 
     /// Builds the return type (`Promise<T>` or `Promise<void>`).
-    fn build_return_type<'b>(&self, ast: &AstBuilder<'b>) -> TSType<'b> {
+    fn build_return_type<'b>(&self, ast: &AstBuilder<'b>, comments: &TsComments) -> TSType<'b> {
         let inner = match self.op.response() {
-            Some(IrResponseView::Json(ty)) => ts_type_ref(ast, &ty),
+            Some(IrResponseView::Json(ty)) => ts_type_ref(ast, &ty, comments),
             None => ast.ts_type_void_keyword(SPAN),
         };
         let type_name = TSTypeName::IdentifierReference(

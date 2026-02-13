@@ -6,7 +6,6 @@ mod client;
 mod emit;
 mod enum_;
 mod graph;
-mod inlines;
 mod naming;
 mod operation;
 mod primitive;

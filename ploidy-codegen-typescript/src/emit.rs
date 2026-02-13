@@ -6,7 +6,7 @@ use oxc_ast::NONE;
 use oxc_ast::ast::{
     Comment, CommentContent, CommentKind, CommentNewlines, CommentPosition, Declaration,
     ExportSpecifier, Expression, ImportDeclarationSpecifier, ImportOrExportKind, NumberBase,
-    Statement, TSModuleDeclarationBody, TSModuleDeclarationKind, TSSignature, TSType, TSTypeName,
+    Statement, TSSignature, TSType, TSTypeName,
 };
 use oxc_codegen::{Codegen, CodegenOptions, IndentChar};
 use oxc_span::{SPAN, SourceType, Span};
@@ -238,24 +238,6 @@ pub fn type_alias_decl<'a>(ast: &AstBuilder<'a>, name: &str, ty: TSType<'a>) -> 
     Declaration::TSTypeAliasDeclaration(
         ast.alloc(ast.ts_type_alias_declaration(SPAN, id, NONE, ty, false)),
     )
-}
-
-/// Creates a `namespace Name { body }` declaration.
-pub fn namespace_decl<'a>(
-    ast: &AstBuilder<'a>,
-    name: &str,
-    body: oxc_allocator::Vec<'a, Statement<'a>>,
-) -> Declaration<'a> {
-    let id = ast.ts_module_declaration_name_identifier(SPAN, ast.atom(name));
-    let block = ast.ts_module_block(SPAN, ast.vec(), body);
-    let module_body = Some(TSModuleDeclarationBody::TSModuleBlock(ast.alloc(block)));
-    Declaration::TSModuleDeclaration(ast.alloc(ast.ts_module_declaration(
-        SPAN,
-        id,
-        module_body,
-        TSModuleDeclarationKind::Namespace,
-        false,
-    )))
 }
 
 // MARK: Statement helpers
@@ -623,48 +605,6 @@ mod tests {
         assert_eq!(
             emit_module(&allocator, &ast, items, &comments),
             "/** The status of a resource. */\nexport type Status = string;\n"
-        );
-    }
-
-    #[test]
-    fn test_module_with_namespace() {
-        let allocator = Allocator::default();
-        let ast = AstBuilder::new(&allocator);
-        let comments = TsComments::new();
-        let iface = interface_decl(
-            &ast,
-            "Order",
-            &[],
-            ast.vec1(property_sig(
-                &ast,
-                "status",
-                true,
-                type_ref(&ast, "Order.Status"),
-                SPAN,
-            )),
-        );
-        let ns_types = ast.vec_from_array([lit_str(&ast, "placed"), lit_str(&ast, "approved")]);
-        let ns = namespace_decl(
-            &ast,
-            "Order",
-            ast.vec1(export_decl(
-                &ast,
-                type_alias_decl(&ast, "Status", union(&ast, ns_types)),
-                SPAN,
-            )),
-        );
-        let items =
-            ast.vec_from_array([export_decl(&ast, iface, SPAN), export_decl(&ast, ns, SPAN)]);
-        assert_eq!(
-            emit_module(&allocator, &ast, items, &comments),
-            indoc::indoc! {r#"
-                export interface Order {
-                  status?: Order.Status;
-                }
-                export namespace Order {
-                  export type Status = "placed" | "approved";
-                }
-            "#}
         );
     }
 

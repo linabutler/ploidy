@@ -1,28 +1,27 @@
 use oxc_ast::AstBuilder;
-use oxc_ast::ast::Declaration;
+use oxc_ast::ast::{Declaration, TSType};
 use oxc_span::SPAN;
 use ploidy_core::ir::IrTaggedView;
 
 use super::{
-    emit::{intersection, lit_str, property_sig, type_alias_decl, type_lit, union},
+    emit::{TsComments, intersection, lit_str, property_sig, type_alias_decl, type_lit, union},
     ref_::ts_type_ref,
 };
 
-/// Generates a TypeScript discriminated union from a tagged union.
-///
-/// Each variant becomes `{ <tag>: '<value>' } & VariantRef`, and the
-/// variants are joined with `|`. This enables TypeScript's type narrowing
-/// on the discriminator field.
-pub fn ts_tagged<'a>(ast: &AstBuilder<'a>, name: &str, ty: &IrTaggedView<'_>) -> Declaration<'a> {
+/// Resolves a tagged union to a TypeScript type expression (a union
+/// of `{ tag: 'value' } & VariantRef` intersections).
+pub fn ts_tagged_type<'a>(
+    ast: &AstBuilder<'a>,
+    ty: &IrTaggedView<'_>,
+    comments: &TsComments,
+) -> TSType<'a> {
     let tag = ty.tag();
     let members = ast.vec_from_iter(ty.variants().map(|variant| {
         let view = variant.ty();
-        let variant_ref = ts_type_ref(ast, &view);
+        let variant_ref = ts_type_ref(ast, &view, comments);
 
-        // Use the first alias as the discriminator value.
         let discriminator_value = variant.aliases().first().copied().unwrap_or(variant.name());
 
-        // Build `{ tag: 'value' } & VariantRef`.
         let tag_object = type_lit(
             ast,
             ast.vec1(property_sig(
@@ -38,7 +37,22 @@ pub fn ts_tagged<'a>(ast: &AstBuilder<'a>, name: &str, ty: &IrTaggedView<'_>) ->
         intersection(ast, parts)
     }));
 
-    type_alias_decl(ast, name, union(ast, members))
+    union(ast, members)
+}
+
+/// Generates a TypeScript discriminated union type alias from a
+/// tagged union.
+///
+/// Each variant becomes `{ <tag>: '<value>' } & VariantRef`, and the
+/// variants are joined with `|`. This enables TypeScript's type
+/// narrowing on the discriminator field.
+pub fn ts_tagged<'a>(
+    ast: &AstBuilder<'a>,
+    name: &str,
+    ty: &IrTaggedView<'_>,
+    comments: &TsComments,
+) -> Declaration<'a> {
+    type_alias_decl(ast, name, ts_tagged_type(ast, ty, comments))
 }
 
 #[cfg(test)]
@@ -100,8 +114,8 @@ mod tests {
         let allocator = Allocator::default();
         let ast = AstBuilder::new(&allocator);
         let name = CodegenTypeName::Schema(schema).type_name();
-        let decl = ts_tagged(&ast, &name, tagged);
         let comments = TsComments::new();
+        let decl = ts_tagged(&ast, &name, tagged, &comments);
         let items = ast.vec1(export_decl(&ast, decl, SPAN));
         assert_eq!(
             emit_module(&allocator, &ast, items, &comments),
@@ -157,8 +171,8 @@ mod tests {
         let allocator = Allocator::default();
         let ast = AstBuilder::new(&allocator);
         let name = CodegenTypeName::Schema(schema).type_name();
-        let decl = ts_tagged(&ast, &name, tagged);
         let comments = TsComments::new();
+        let decl = ts_tagged(&ast, &name, tagged, &comments);
         let items = ast.vec1(export_decl(&ast, decl, SPAN));
         assert_eq!(
             emit_module(&allocator, &ast, items, &comments),
@@ -215,10 +229,10 @@ mod tests {
         let allocator = Allocator::default();
         let ast = AstBuilder::new(&allocator);
         let name = CodegenTypeName::Schema(schema).type_name();
-        let decl = ts_tagged(&ast, &name, tagged);
 
         // Description is handled by the caller (schema.rs) via TsComments.
         let comments = TsComments::new();
+        let decl = ts_tagged(&ast, &name, tagged, &comments);
         let items = ast.vec1(export_decl(&ast, decl, SPAN));
         assert_eq!(
             emit_module(&allocator, &ast, items, &comments),

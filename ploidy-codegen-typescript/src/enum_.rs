@@ -1,20 +1,20 @@
 use oxc_ast::AstBuilder;
-use oxc_ast::ast::Declaration;
+use oxc_ast::ast::{Declaration, TSType};
 use oxc_span::SPAN;
 use ploidy_core::ir::{IrEnumVariant, IrEnumView};
 
 use super::emit::{lit_bool, lit_num, lit_str, type_alias_decl, union};
 
-/// Generates a TypeScript literal union type from an enum.
-pub fn ts_enum<'a>(ast: &AstBuilder<'a>, name: &str, ty: &IrEnumView<'_>) -> Declaration<'a> {
+/// Resolves an enum to a TypeScript type expression (a union of
+/// literals, or `string` for unrepresentable variants).
+pub fn ts_enum_type<'a>(ast: &AstBuilder<'a>, ty: &IrEnumView<'_>) -> TSType<'a> {
     let has_unrepresentable = ty.variants().iter().any(|variant| match variant {
         IrEnumVariant::Number(_) | IrEnumVariant::Bool(_) => true,
         IrEnumVariant::String(s) => s.chars().all(|c| !unicode_ident::is_xid_continue(c)),
     });
 
     if has_unrepresentable {
-        // Fall back to `string` for enums with unrepresentable variants.
-        return type_alias_decl(ast, name, ast.ts_type_string_keyword(SPAN));
+        return ast.ts_type_string_keyword(SPAN);
     }
 
     let variants = ast.vec_from_iter(ty.variants().iter().map(|variant| match variant {
@@ -23,7 +23,12 @@ pub fn ts_enum<'a>(ast: &AstBuilder<'a>, name: &str, ty: &IrEnumView<'_>) -> Dec
         IrEnumVariant::Bool(b) => lit_bool(ast, *b),
     }));
 
-    type_alias_decl(ast, name, union(ast, variants))
+    union(ast, variants)
+}
+
+/// Generates a TypeScript literal union type alias from an enum.
+pub fn ts_enum<'a>(ast: &AstBuilder<'a>, name: &str, ty: &IrEnumView<'_>) -> Declaration<'a> {
+    type_alias_decl(ast, name, ts_enum_type(ast, ty))
 }
 
 #[cfg(test)]

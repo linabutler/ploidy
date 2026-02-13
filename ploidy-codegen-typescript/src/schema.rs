@@ -6,7 +6,7 @@ use oxc_ast::ast::Statement;
 use oxc_span::SPAN;
 use ploidy_core::{
     codegen::Code,
-    ir::{ContainerView, ExtendableView, InlineIrTypePathRoot, SchemaIrTypeView, View},
+    ir::{ContainerView, ExtendableView, SchemaIrTypeView, View},
 };
 
 use super::{
@@ -15,7 +15,6 @@ use super::{
         type_alias_decl,
     },
     enum_::ts_enum,
-    inlines::ts_inlines,
     naming::{CodegenIdent, CodegenTypeName},
     primitive::ts_primitive,
     ref_::ts_type_ref,
@@ -77,17 +76,21 @@ impl<'a> CodegenSchemaType<'a> {
             }
             SchemaIrTypeView::Tagged(_, view) => {
                 let desc = view.description().map(|s| s.to_owned());
-                (ts_tagged(&ast, &type_name, view), desc)
+                (ts_tagged(&ast, &type_name, view, &comments), desc)
             }
             SchemaIrTypeView::Untagged(_, view) => {
                 let desc = view.description().map(|s| s.to_owned());
-                (ts_untagged(&ast, &type_name, view), desc)
+                (ts_untagged(&ast, &type_name, view, &comments), desc)
             }
             SchemaIrTypeView::Container(_, ContainerView::Array(inner)) => {
                 let inner_ty = inner.ty();
                 let desc = inner.description().map(|s| s.to_owned());
                 (
-                    type_alias_decl(&ast, &type_name, array(&ast, ts_type_ref(&ast, &inner_ty))),
+                    type_alias_decl(
+                        &ast,
+                        &type_name,
+                        array(&ast, ts_type_ref(&ast, &inner_ty, &comments)),
+                    ),
                     desc,
                 )
             }
@@ -95,7 +98,11 @@ impl<'a> CodegenSchemaType<'a> {
                 let inner_ty = inner.ty();
                 let desc = inner.description().map(|s| s.to_owned());
                 (
-                    type_alias_decl(&ast, &type_name, record(&ast, ts_type_ref(&ast, &inner_ty))),
+                    type_alias_decl(
+                        &ast,
+                        &type_name,
+                        record(&ast, ts_type_ref(&ast, &inner_ty, &comments)),
+                    ),
                     desc,
                 )
             }
@@ -106,7 +113,7 @@ impl<'a> CodegenSchemaType<'a> {
                     type_alias_decl(
                         &ast,
                         &type_name,
-                        nullable(&ast, ts_type_ref(&ast, &inner_ty)),
+                        nullable(&ast, ts_type_ref(&ast, &inner_ty, &comments)),
                     ),
                     desc,
                 )
@@ -121,8 +128,7 @@ impl<'a> CodegenSchemaType<'a> {
             ),
         };
 
-        // Build module items: imports, main decl (with JSDoc), then
-        // inline namespace.
+        // Build module items: imports then main decl (with JSDoc).
         let mut items: Vec<Statement<'_>> = Vec::new();
 
         // Collect imports.
@@ -133,11 +139,6 @@ impl<'a> CodegenSchemaType<'a> {
         // Main declaration with optional JSDoc.
         let span = comments.span_with_jsdoc(description.as_deref());
         items.push(export_decl(&ast, main_decl, span));
-
-        // Add inline types as a namespace.
-        if let Some(ns) = ts_inlines(&ast, self.ty, &comments) {
-            items.push(export_decl(&ast, ns, SPAN));
-        }
 
         let file_name = name.display_file_name();
         let body = ast.vec_from_iter(items);
@@ -156,22 +157,12 @@ fn collect_imports<'a>(ast: &AstBuilder<'a>, schema: &SchemaIrTypeView<'_>) -> V
 
     // Walk all type dependencies to find referenced schemas.
     for dep in schema.dependencies() {
-        match &dep {
-            ploidy_core::ir::IrTypeView::Schema(view) => {
-                if view.name() != current_name {
-                    let ext = view.extensions();
-                    let ident = ext.get::<CodegenIdent>().unwrap();
-                    imported_schemas.insert(ident.to_type_name());
-                }
-            }
-            ploidy_core::ir::IrTypeView::Inline(view) => {
-                let path = view.path();
-                if let InlineIrTypePathRoot::Type(name) = path.root
-                    && name != current_name
-                {
-                    imported_schemas.insert(CodegenIdent::new(name).to_type_name());
-                }
-            }
+        if let ploidy_core::ir::IrTypeView::Schema(view) = &dep
+            && view.name() != current_name
+        {
+            let ext = view.extensions();
+            let ident = ext.get::<CodegenIdent>().unwrap();
+            imported_schemas.insert(ident.to_type_name());
         }
     }
 
@@ -433,12 +424,9 @@ mod tests {
             code.content,
             indoc::indoc! {"
                 export interface Container {
-                  nested?: Container.Nested;
-                }
-                export namespace Container {
-                  export interface Nested {
+                  nested?: {
                     value?: string;
-                  }
+                  };
                 }
             "}
         );

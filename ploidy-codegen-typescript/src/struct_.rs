@@ -1,5 +1,5 @@
 use oxc_ast::AstBuilder;
-use oxc_ast::ast::{Declaration, TSSignature};
+use oxc_ast::ast::{Declaration, TSSignature, TSType};
 use ploidy_core::ir::{
     ContainerView, InlineIrTypeView, IrStructFieldName, IrStructView, IrTypeView, SchemaIrTypeView,
 };
@@ -11,6 +11,37 @@ use super::{
     naming::{ts_field_name, ts_struct_field_hint_name},
     ref_::ts_type_ref,
 };
+
+/// Resolves a struct to a TypeScript type expression (an object
+/// literal type or an intersection of parent refs and own members).
+pub fn ts_struct_type<'a>(
+    ast: &AstBuilder<'a>,
+    ty: &IrStructView<'_>,
+    comments: &TsComments,
+) -> TSType<'a> {
+    let parents: Vec<_> = ty.parents().collect();
+    let has_flattened = ty.own_fields().any(|f| f.flattened());
+
+    let schema_parents: Vec<_> = parents
+        .iter()
+        .filter(|p| matches!(p, IrTypeView::Schema(_)))
+        .collect();
+    let all_parents_are_inline = schema_parents.is_empty();
+
+    if all_parents_are_inline && !has_flattened {
+        // No named schema parents; all fields (including inherited)
+        // are emitted in a single object literal.
+        let members = ast.vec_from_iter(
+            ty.fields()
+                .map(|field| ts_property_for_field(ast, &field, comments)),
+        );
+        type_lit(ast, members)
+    } else {
+        // Intersection: parent refs + own non-flattened fields +
+        // flattened fields.
+        ts_struct_intersection_type(ast, ty, &parents, comments)
+    }
+}
 
 /// Generates a TypeScript interface or intersection type from a struct.
 ///
@@ -30,9 +61,6 @@ pub fn ts_struct<'a>(
     let parents: Vec<_> = ty.parents().collect();
     let has_flattened = ty.own_fields().any(|f| f.flattened());
 
-    // Partition parents into named schema types and inline types.
-    // Inline parents are already linearized into `fields()`, so
-    // they don't need special handling.
     let schema_parents: Vec<_> = parents
         .iter()
         .filter(|p| matches!(p, IrTypeView::Schema(_)))
@@ -90,6 +118,42 @@ fn ts_struct_interface<'a>(
     interface_decl(ast, name, extends, members)
 }
 
+/// Builds an intersection type from parents and own fields,
+/// returning the raw `TSType`.
+fn ts_struct_intersection_type<'a>(
+    ast: &AstBuilder<'a>,
+    ty: &IrStructView<'_>,
+    parents: &[IrTypeView<'_>],
+    comments: &TsComments,
+) -> TSType<'a> {
+    let mut parts: Vec<_> = Vec::new();
+
+    for parent in parents {
+        parts.push(ts_type_ref(ast, parent, comments));
+    }
+
+    let own_members: oxc_allocator::Vec<'a, TSSignature<'a>> = ast.vec_from_iter(
+        ty.own_fields()
+            .filter(|f| !f.flattened())
+            .map(|field| ts_property_for_field(ast, &field, comments)),
+    );
+
+    for field in ty.own_fields().filter(|f| f.flattened()) {
+        let ty = field.ty();
+        parts.push(ts_type_ref(ast, &ty, comments));
+    }
+
+    if !own_members.is_empty() {
+        parts.push(type_lit(ast, own_members));
+    }
+
+    if parts.len() == 1 {
+        parts.into_iter().next().unwrap()
+    } else {
+        intersection(ast, ast.vec_from_iter(parts))
+    }
+}
+
 /// Emits `type Name = Parent1 & Parent2 & { own fields }`.
 fn ts_struct_intersection<'a>(
     ast: &AstBuilder<'a>,
@@ -98,37 +162,11 @@ fn ts_struct_intersection<'a>(
     parents: &[IrTypeView<'_>],
     comments: &TsComments,
 ) -> Declaration<'a> {
-    let mut parts: Vec<_> = Vec::new();
-
-    // Add parent types.
-    for parent in parents {
-        parts.push(ts_type_ref(ast, parent));
-    }
-
-    // Add own non-flattened fields as an anonymous object type.
-    let own_members: oxc_allocator::Vec<'a, TSSignature<'a>> = ast.vec_from_iter(
-        ty.own_fields()
-            .filter(|f| !f.flattened())
-            .map(|field| ts_property_for_field(ast, &field, comments)),
-    );
-
-    // Add flattened fields as individual intersection members.
-    for field in ty.own_fields().filter(|f| f.flattened()) {
-        let ty = field.ty();
-        parts.push(ts_type_ref(ast, &ty));
-    }
-
-    if !own_members.is_empty() {
-        parts.push(type_lit(ast, own_members));
-    }
-
-    let result_ty = if parts.len() == 1 {
-        parts.into_iter().next().unwrap()
-    } else {
-        intersection(ast, ast.vec_from_iter(parts))
-    };
-
-    type_alias_decl(ast, name, result_ty)
+    type_alias_decl(
+        ast,
+        name,
+        ts_struct_intersection_type(ast, ty, parents, comments),
+    )
 }
 
 /// Converts a struct field to a TypeScript property signature.
@@ -154,7 +192,7 @@ fn ts_property_for_field<'a>(
     let field_ty = field.ty();
     let (inner_ty, depth) = peel_optional(field_ty);
 
-    let ts_ty = ts_type_ref(ast, &inner_ty);
+    let ts_ty = ts_type_ref(ast, &inner_ty, comments);
 
     // Determine optionality and nullability:
     // - Required field with depth >= 1: `prop: T | null`

@@ -1,25 +1,35 @@
 use oxc_ast::AstBuilder;
-use oxc_ast::ast::Declaration;
+use oxc_ast::ast::{Declaration, TSType};
 use oxc_span::SPAN;
 use ploidy_core::ir::IrUntaggedView;
 
 use super::{
-    emit::{type_alias_decl, union},
+    emit::{TsComments, type_alias_decl, union},
     ref_::ts_type_ref,
 };
 
-/// Generates a TypeScript union type from an untagged union.
+/// Resolves an untagged union to a TypeScript union type expression.
+pub fn ts_untagged_type<'a>(
+    ast: &AstBuilder<'a>,
+    ty: &IrUntaggedView<'_>,
+    comments: &TsComments,
+) -> TSType<'a> {
+    let members = ast.vec_from_iter(ty.variants().map(|variant| match variant.ty() {
+        Some(variant) => ts_type_ref(ast, &variant.view, comments),
+        None => ast.ts_type_null_keyword(SPAN),
+    }));
+
+    union(ast, members)
+}
+
+/// Generates a TypeScript union type alias from an untagged union.
 pub fn ts_untagged<'a>(
     ast: &AstBuilder<'a>,
     name: &str,
     ty: &IrUntaggedView<'_>,
+    comments: &TsComments,
 ) -> Declaration<'a> {
-    let members = ast.vec_from_iter(ty.variants().map(|variant| match variant.ty() {
-        Some(variant) => ts_type_ref(ast, &variant.view),
-        None => ast.ts_type_null_keyword(SPAN),
-    }));
-
-    type_alias_decl(ast, name, union(ast, members))
+    type_alias_decl(ast, name, ts_untagged_type(ast, ty, comments))
 }
 
 #[cfg(test)]
@@ -68,8 +78,8 @@ mod tests {
         let allocator = Allocator::default();
         let ast = AstBuilder::new(&allocator);
         let name = CodegenTypeName::Schema(schema).type_name();
-        let decl = ts_untagged(&ast, &name, untagged_view);
         let comments = TsComments::new();
+        let decl = ts_untagged(&ast, &name, untagged_view, &comments);
         let items = ast.vec1(export_decl(&ast, decl, SPAN));
         assert_eq!(
             emit_module(&allocator, &ast, items, &comments),
@@ -115,8 +125,8 @@ mod tests {
         let allocator = Allocator::default();
         let ast = AstBuilder::new(&allocator);
         let name = CodegenTypeName::Schema(schema).type_name();
-        let decl = ts_untagged(&ast, &name, untagged_view);
         let comments = TsComments::new();
+        let decl = ts_untagged(&ast, &name, untagged_view, &comments);
         let items = ast.vec1(export_decl(&ast, decl, SPAN));
         assert_eq!(
             emit_module(&allocator, &ast, items, &comments),
@@ -154,10 +164,10 @@ mod tests {
         let allocator = Allocator::default();
         let ast = AstBuilder::new(&allocator);
         let name = CodegenTypeName::Schema(schema).type_name();
-        let decl = ts_untagged(&ast, &name, untagged_view);
 
         // Description is handled by the caller (schema.rs) via TsComments.
         let comments = TsComments::new();
+        let decl = ts_untagged(&ast, &name, untagged_view, &comments);
         let items = ast.vec1(export_decl(&ast, decl, SPAN));
         assert_eq!(
             emit_module(&allocator, &ast, items, &comments),

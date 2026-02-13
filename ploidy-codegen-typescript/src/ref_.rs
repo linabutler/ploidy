@@ -1,31 +1,37 @@
 use oxc_ast::AstBuilder;
 use oxc_ast::ast::TSType;
 use oxc_span::SPAN;
-use ploidy_core::ir::{
-    ContainerView, ExtendableView, InlineIrTypePathRoot, InlineIrTypeView, IrTypeView,
-};
+use ploidy_core::ir::{ContainerView, ExtendableView, InlineIrTypeView, IrTypeView};
 
 use super::{
-    emit::{array, nullable, record, type_ref},
-    naming::{CodegenIdent, CodegenTypeName},
+    emit::{TsComments, array, nullable, record, type_ref},
+    enum_::ts_enum_type,
+    naming::CodegenIdent,
     primitive::ts_primitive,
+    struct_::ts_struct_type,
+    tagged::ts_tagged_type,
+    untagged::ts_untagged_type,
 };
 
 /// Resolves an [`IrTypeView`] to a TypeScript type expression.
-pub fn ts_type_ref<'a>(ast: &AstBuilder<'a>, ty: &IrTypeView<'_>) -> TSType<'a> {
+pub fn ts_type_ref<'a>(
+    ast: &AstBuilder<'a>,
+    ty: &IrTypeView<'_>,
+    comments: &TsComments,
+) -> TSType<'a> {
     match ty {
         // Inline containers are emitted directly.
         IrTypeView::Inline(InlineIrTypeView::Container(_, ContainerView::Array(inner))) => {
             let inner_ty = inner.ty();
-            array(ast, ts_type_ref(ast, &inner_ty))
+            array(ast, ts_type_ref(ast, &inner_ty, comments))
         }
         IrTypeView::Inline(InlineIrTypeView::Container(_, ContainerView::Map(inner))) => {
             let inner_ty = inner.ty();
-            record(ast, ts_type_ref(ast, &inner_ty))
+            record(ast, ts_type_ref(ast, &inner_ty, comments))
         }
         IrTypeView::Inline(InlineIrTypeView::Container(_, ContainerView::Optional(inner))) => {
             let inner_ty = inner.ty();
-            nullable(ast, ts_type_ref(ast, &inner_ty))
+            nullable(ast, ts_type_ref(ast, &inner_ty, comments))
         }
 
         // Inline primitives are emitted directly.
@@ -34,21 +40,16 @@ pub fn ts_type_ref<'a>(ast: &AstBuilder<'a>, ty: &IrTypeView<'_>) -> TSType<'a> 
         // Inline `Any` becomes `unknown`.
         IrTypeView::Inline(InlineIrTypeView::Any(_, _)) => ast.ts_type_unknown_keyword(SPAN),
 
-        // Inline structured types use namespace-qualified names.
-        IrTypeView::Inline(ty) => {
-            let path = ty.path();
-            let schema_name = match path.root {
-                InlineIrTypePathRoot::Type(name) => CodegenIdent::new(name).to_type_name(),
-                InlineIrTypePathRoot::Resource(_) => {
-                    // Resource-rooted inlines come from operation
-                    // request/response bodies. Use the bare inline name
-                    // without a namespace prefix.
-                    let inline_name = CodegenTypeName::Inline(ty).type_name();
-                    return type_ref(ast, &inline_name);
-                }
-            };
-            let inline_name = CodegenTypeName::Inline(ty).type_name();
-            type_ref(ast, &format!("{schema_name}.{inline_name}"))
+        // Inline structured types are expanded in place.
+        IrTypeView::Inline(InlineIrTypeView::Struct(_, view)) => {
+            ts_struct_type(ast, view, comments)
+        }
+        IrTypeView::Inline(InlineIrTypeView::Enum(_, view)) => ts_enum_type(ast, view),
+        IrTypeView::Inline(InlineIrTypeView::Tagged(_, view)) => {
+            ts_tagged_type(ast, view, comments)
+        }
+        IrTypeView::Inline(InlineIrTypeView::Untagged(_, view)) => {
+            ts_untagged_type(ast, view, comments)
         }
 
         // Schema types are bare references.
@@ -77,11 +78,13 @@ mod tests {
     };
 
     /// Emits a type as `export type T = <ty>;` and returns the output string.
-    fn emit_ty(ty_fn: impl for<'a> FnOnce(&'a AstBuilder<'a>) -> TSType<'a>) -> String {
+    fn emit_ty(
+        ty_fn: impl for<'a> FnOnce(&'a AstBuilder<'a>, &TsComments) -> TSType<'a>,
+    ) -> String {
         let allocator = Allocator::default();
         let ast = AstBuilder::new(&allocator);
         let comments = TsComments::new();
-        let ty = ty_fn(&ast);
+        let ty = ty_fn(&ast, &comments);
         let items = ast.vec1(export_decl(&ast, type_alias_decl(&ast, "T", ty), SPAN));
         emit_module(&allocator, &ast, items, &comments)
     }
@@ -113,7 +116,7 @@ mod tests {
             .expect("expected schema `Pet`");
         let ty = IrTypeView::Schema(schema);
         assert_eq!(
-            emit_ty(|ast| ts_type_ref(ast, &ty)),
+            emit_ty(|ast, comments| ts_type_ref(ast, &ty, comments)),
             "export type T = Pet;\n"
         );
     }
@@ -153,7 +156,7 @@ mod tests {
             .unwrap();
         let ty = field.ty();
         assert_eq!(
-            emit_ty(|ast| ts_type_ref(ast, &ty)),
+            emit_ty(|ast, comments| ts_type_ref(ast, &ty, comments)),
             "export type T = string[];\n"
         );
     }
@@ -193,7 +196,7 @@ mod tests {
             .unwrap();
         let ty = field.ty();
         assert_eq!(
-            emit_ty(|ast| ts_type_ref(ast, &ty)),
+            emit_ty(|ast, comments| ts_type_ref(ast, &ty, comments)),
             "export type T = Record<string, string>;\n"
         );
     }
@@ -230,7 +233,7 @@ mod tests {
             .unwrap();
         let ty = field.ty();
         assert_eq!(
-            emit_ty(|ast| ts_type_ref(ast, &ty)),
+            emit_ty(|ast, comments| ts_type_ref(ast, &ty, comments)),
             "export type T = string | null;\n"
         );
     }
@@ -267,7 +270,7 @@ mod tests {
             .unwrap();
         let ty = field.ty();
         assert_eq!(
-            emit_ty(|ast| ts_type_ref(ast, &ty)),
+            emit_ty(|ast, comments| ts_type_ref(ast, &ty, comments)),
             "export type T = unknown;\n"
         );
     }
@@ -308,8 +311,8 @@ mod tests {
             .unwrap();
         let ty = field.ty();
         assert_eq!(
-            emit_ty(|ast| ts_type_ref(ast, &ty)),
-            "export type T = Container.Nested;\n"
+            emit_ty(|ast, comments| ts_type_ref(ast, &ty, comments)),
+            "export type T = {\n  value?: string;\n};\n"
         );
     }
 }
