@@ -208,7 +208,7 @@ impl<'a> CodegenClient<'a> {
         // Operation methods.
         for op in self.graph.operations() {
             // Collect imports by walking IR type dependencies.
-            let views = op.types().filter_map(|view| match view {
+            let views = op.dependencies().filter_map(|view| match view {
                 IrTypeView::Schema(ty) => Some(ty),
                 IrTypeView::Inline(_) => None,
             });
