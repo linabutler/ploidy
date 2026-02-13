@@ -14,7 +14,8 @@ use ploidy_core::ir::{
 use ploidy_core::parse::path::PathFragment;
 
 use super::{
-    emit::{TsComments, member_expr},
+    emit::{TsComments, is_valid_js_identifier, member_expr, member_expr_auto},
+    naming::ts_param_name,
     ref_::ts_type_ref,
 };
 
@@ -96,8 +97,8 @@ impl<'a> CodegenOperation<'a> {
 
         // Path parameters, in order.
         for param in self.op.path().params() {
-            let name = param.name();
-            let pattern = ast.binding_pattern_binding_identifier(SPAN, ast.atom(name));
+            let name = ts_param_name(param.name());
+            let pattern = ast.binding_pattern_binding_identifier(SPAN, ast.atom(&name));
             let type_ann = ast.ts_type_annotation(SPAN, ast.ts_type_string_keyword(SPAN));
             items.push(ast.formal_parameter(
                 SPAN,
@@ -112,13 +113,25 @@ impl<'a> CodegenOperation<'a> {
             ));
         }
 
-        // Query parameters, bundled in an optional object.
-        let query_params: Vec<_> = self.op.query().collect();
-        if !query_params.is_empty() {
-            let any_required = query_params.iter().any(|p| p.required());
+        // Collect query parameters and check if any are required.
+        let mut query_params: Vec<_> = self.op.query().collect();
+        query_params.sort_by_key(|p| !p.required());
+        let query_required = query_params.iter().any(|p| p.required());
+        let has_query = !query_params.is_empty();
 
+        // Helper to build query param.
+        let build_query_param = |ast: &AstBuilder<'b>| {
             let members = ast.vec_from_iter(query_params.iter().map(|p| {
-                let key = ast.property_key_static_identifier(SPAN, ast.atom(p.name()));
+                let name = p.name();
+                let key = if is_valid_js_identifier(name) {
+                    ast.property_key_static_identifier(SPAN, ast.atom(name))
+                } else {
+                    oxc_ast::ast::PropertyKey::StringLiteral(ast.alloc(ast.string_literal(
+                        SPAN,
+                        ast.atom(name),
+                        None,
+                    )))
+                };
                 let type_ann = ast.ts_type_annotation(SPAN, ts_type_ref(ast, &p.ty(), comments));
                 oxc_ast::ast::TSSignature::TSPropertySignature(ast.alloc(
                     ast.ts_property_signature(
@@ -135,17 +148,22 @@ impl<'a> CodegenOperation<'a> {
             let obj_type = ast.ts_type_type_literal(SPAN, members);
             let pattern = ast.binding_pattern_binding_identifier(SPAN, ast.atom("query"));
             let type_ann = ast.ts_type_annotation(SPAN, obj_type);
-            items.push(ast.formal_parameter(
+            ast.formal_parameter(
                 SPAN,
                 ast.vec(),
                 pattern,
                 Some(type_ann),
                 NONE,
-                !any_required, // optional
+                !query_required, // optional
                 None,
                 false,
                 false,
-            ));
+            )
+        };
+
+        // If query is required, add it now (before request body).
+        if has_query && query_required {
+            items.push(build_query_param(ast));
         }
 
         // Request body (JSON only).
@@ -164,6 +182,11 @@ impl<'a> CodegenOperation<'a> {
                 false,
                 false,
             ));
+        }
+
+        // If query is optional, add it last (after request body).
+        if has_query && !query_required {
+            items.push(build_query_param(ast));
         }
 
         ast.formal_parameters(
@@ -198,70 +221,76 @@ impl<'a> CodegenOperation<'a> {
         });
 
         // Build the path argument as either a string literal or template
-        // literal.
-        let path_arg: Expression<'b> =
-            if has_params {
-                // Template literal: `/pets/${encodeURIComponent(petId)}`
-                let mut quasis: Vec<TemplateElementValue<'b>> = Vec::new();
-                let mut expressions: Vec<Expression<'b>> = Vec::new();
-                let mut current_str = String::new();
+        // literal. Paths are relative (no leading `/`) to append to baseUrl.
+        let path_arg: Expression<'b> = if has_params {
+            // Template literal: `pets/${encodeURIComponent(petId)}`
+            let mut quasis: Vec<TemplateElementValue<'b>> = Vec::new();
+            let mut expressions: Vec<Expression<'b>> = Vec::new();
+            let mut current_str = String::new();
 
-                for segment in &segments {
+            for (i, segment) in segments.iter().enumerate() {
+                if i > 0 {
                     current_str.push('/');
-                    for fragment in segment.fragments() {
-                        match fragment {
-                            PathFragment::Literal(text) => current_str.push_str(text),
-                            PathFragment::Param(name) => {
-                                quasis.push(TemplateElementValue {
-                                    raw: ast.atom(&current_str),
-                                    cooked: Some(ast.atom(&current_str)),
-                                });
-                                current_str.clear();
+                }
+                for fragment in segment.fragments() {
+                    match fragment {
+                        PathFragment::Literal(text) => current_str.push_str(text),
+                        PathFragment::Param(name) => {
+                            quasis.push(TemplateElementValue {
+                                raw: ast.atom(&current_str),
+                                cooked: Some(ast.atom(&current_str)),
+                            });
+                            current_str.clear();
 
-                                // `encodeURIComponent(name)`
-                                let callee =
-                                    ast.expression_identifier(SPAN, ast.atom("encodeURIComponent"));
-                                let arg = ast.expression_identifier(SPAN, ast.atom(name));
-                                let call = ast.expression_call(
-                                    SPAN,
-                                    callee,
-                                    NONE,
-                                    ast.vec1(Argument::from(arg)),
-                                    false,
-                                );
-                                expressions.push(call);
-                            }
+                            // `encodeURIComponent(normalizedName)`
+                            let normalized_name = ts_param_name(name);
+                            let callee =
+                                ast.expression_identifier(SPAN, ast.atom("encodeURIComponent"));
+                            let arg = ast.expression_identifier(SPAN, ast.atom(&normalized_name));
+                            let call = ast.expression_call(
+                                SPAN,
+                                callee,
+                                NONE,
+                                ast.vec1(Argument::from(arg)),
+                                false,
+                            );
+                            expressions.push(call);
                         }
                     }
                 }
+            }
 
-                // Final quasi (tail).
-                quasis.push(TemplateElementValue {
-                    raw: ast.atom(&current_str),
-                    cooked: Some(ast.atom(&current_str)),
-                });
+            // Final quasi (tail).
+            quasis.push(TemplateElementValue {
+                raw: ast.atom(&current_str),
+                cooked: Some(ast.atom(&current_str)),
+            });
 
-                let expr_count = expressions.len();
-                let template_elements =
-                    ast.vec_from_iter(quasis.into_iter().enumerate().map(|(i, value)| {
-                        ast.template_element(SPAN, value, i == expr_count, false)
-                    }));
-                let template =
-                    ast.template_literal(SPAN, template_elements, ast.vec_from_iter(expressions));
-                Expression::TemplateLiteral(ast.alloc(template))
-            } else {
-                // Plain string: build path from segments.
-                let mut path = String::new();
-                for segment in &segments {
+            let expr_count = expressions.len();
+            let template_elements = ast.vec_from_iter(
+                quasis
+                    .into_iter()
+                    .enumerate()
+                    .map(|(i, value)| ast.template_element(SPAN, value, i == expr_count, false)),
+            );
+            let template =
+                ast.template_literal(SPAN, template_elements, ast.vec_from_iter(expressions));
+            Expression::TemplateLiteral(ast.alloc(template))
+        } else {
+            // Plain string: build path from segments (relative, no leading `/`).
+            let mut path = String::new();
+            for (i, segment) in segments.iter().enumerate() {
+                if i > 0 {
                     path.push('/');
-                    for fragment in segment.fragments() {
-                        if let PathFragment::Literal(text) = fragment {
-                            path.push_str(text);
-                        }
+                }
+                for fragment in segment.fragments() {
+                    if let PathFragment::Literal(text) = fragment {
+                        path.push_str(text);
                     }
                 }
-                ast.expression_string_literal(SPAN, ast.atom(&path), None)
-            };
+            }
+            ast.expression_string_literal(SPAN, ast.atom(&path), None)
+        };
 
         // `this.baseUrl`
         let this_base_url = member_expr(ast, ast.expression_this(SPAN), "baseUrl");
@@ -304,15 +333,27 @@ impl<'a> CodegenOperation<'a> {
             if param.required() {
                 stmts.push(body);
             } else {
-                // `if (query?.name !== undefined) <body>`
+                // `if (query?.name !== undefined) <body>` or
+                // `if (query?.["name"] !== undefined) <body>`
                 let name = param.name();
-                let chain_member =
+                let chain_member = if is_valid_js_identifier(name) {
                     ChainElement::StaticMemberExpression(ast.alloc(ast.static_member_expression(
                         SPAN,
                         ast.expression_identifier(SPAN, ast.atom("query")),
                         ast.identifier_name(SPAN, ast.atom(name)),
                         true, // optional
-                    )));
+                    )))
+                } else {
+                    let prop = ast.expression_string_literal(SPAN, ast.atom(name), None);
+                    ChainElement::ComputedMemberExpression(ast.alloc(
+                        ast.computed_member_expression(
+                            SPAN,
+                            ast.expression_identifier(SPAN, ast.atom("query")),
+                            prop,
+                            true, // optional
+                        ),
+                    ))
+                };
                 let chain_expr = ast.expression_chain(SPAN, chain_member);
 
                 let test = ast.expression_binary(
@@ -345,6 +386,10 @@ impl<'a> CodegenOperation<'a> {
         );
 
         let fetch_opts: Expression<'b> = if has_body {
+            // `{ ...this.headers, "Content-Type": "application/json" }`
+            let spread = oxc_ast::ast::ObjectPropertyKind::SpreadProperty(ast.alloc(
+                ast.spread_element(SPAN, member_expr(ast, ast.expression_this(SPAN), "headers")),
+            ));
             let content_type_prop = ast.object_property_kind_object_property(
                 SPAN,
                 PropertyKind::Init,
@@ -358,7 +403,8 @@ impl<'a> CodegenOperation<'a> {
                 false,
                 false,
             );
-            let headers_obj = ast.expression_object(SPAN, ast.vec1(content_type_prop));
+            let headers_obj =
+                ast.expression_object(SPAN, ast.vec_from_array([spread, content_type_prop]));
             let headers_prop = ast.object_property_kind_object_property(
                 SPAN,
                 PropertyKind::Init,
@@ -399,7 +445,17 @@ impl<'a> CodegenOperation<'a> {
                 ast.vec_from_array([method_prop, headers_prop, body_prop]),
             )
         } else {
-            ast.expression_object(SPAN, ast.vec1(method_prop))
+            // For requests without body, still include headers
+            let headers_prop = ast.object_property_kind_object_property(
+                SPAN,
+                PropertyKind::Init,
+                ast.property_key_static_identifier(SPAN, ast.atom("headers")),
+                member_expr(ast, ast.expression_this(SPAN), "headers"),
+                false,
+                false,
+                false,
+            );
+            ast.expression_object(SPAN, ast.vec_from_array([method_prop, headers_prop]))
         };
 
         // `await fetch(url, opts)`
@@ -577,7 +633,7 @@ fn emit_query_param_body<'b>(
 
     // Scalar: `url.searchParams.set("name", value)` with optional
     // `String()` wrapping for non-string types.
-    let query_field = member_expr(
+    let query_field = member_expr_auto(
         ast,
         ast.expression_identifier(SPAN, ast.atom("query")),
         name,
@@ -594,7 +650,7 @@ fn emit_array_query_param<'b>(
     inner_ty: &IrTypeView<'_>,
 ) -> Statement<'b> {
     let query_field = || {
-        member_expr(
+        member_expr_auto(
             ast,
             ast.expression_identifier(SPAN, ast.atom("query")),
             name,
@@ -820,8 +876,11 @@ mod tests {
             emit_operation(&doc, "listPets"),
             indoc::indoc! {r#"
                 async listPets(): Promise<string[]> {
-                  const url = new URL("/pets", this.baseUrl);
-                  const response = await fetch(url, { method: "GET" });
+                  const url = new URL("pets", this.baseUrl);
+                  const response = await fetch(url, {
+                    method: "GET",
+                    headers: this.headers
+                  });
                   if (!response.ok) throw new Error(`${response.status} ${response.statusText}`);
                   return await response.json();
                 }
@@ -867,8 +926,11 @@ mod tests {
             emit_operation(&doc, "getPet"),
             indoc::indoc! {"
                 async getPet(petId: string): Promise<Pet> {
-                  const url = new URL(`/pets/${encodeURIComponent(petId)}`, this.baseUrl);
-                  const response = await fetch(url, { method: \"GET\" });
+                  const url = new URL(`pets/${encodeURIComponent(petId)}`, this.baseUrl);
+                  const response = await fetch(url, {
+                    method: \"GET\",
+                    headers: this.headers
+                  });
                   if (!response.ok) throw new Error(`${response.status} ${response.statusText}`);
                   return await response.json();
                 }
@@ -917,10 +979,13 @@ mod tests {
                   limit?: string;
                   offset?: string;
                 }): Promise<string[]> {
-                  const url = new URL("/pets", this.baseUrl);
+                  const url = new URL("pets", this.baseUrl);
                   if (query?.limit !== undefined) url.searchParams.set("limit", query.limit);
                   if (query?.offset !== undefined) url.searchParams.set("offset", query.offset);
-                  const response = await fetch(url, { method: "GET" });
+                  const response = await fetch(url, {
+                    method: "GET",
+                    headers: this.headers
+                  });
                   if (!response.ok) throw new Error(`${response.status} ${response.statusText}`);
                   return await response.json();
                 }
@@ -971,10 +1036,13 @@ mod tests {
             emit_operation(&doc, "createPet"),
             indoc::indoc! {r#"
                 async createPet(request: CreatePetRequest): Promise<Pet> {
-                  const url = new URL("/pets", this.baseUrl);
+                  const url = new URL("pets", this.baseUrl);
                   const response = await fetch(url, {
                     method: "POST",
-                    headers: { "Content-Type": "application/json" },
+                    headers: {
+                      ...this.headers,
+                      "Content-Type": "application/json"
+                    },
                     body: JSON.stringify(request)
                   });
                   if (!response.ok) throw new Error(`${response.status} ${response.statusText}`);
@@ -1013,8 +1081,11 @@ mod tests {
             emit_operation(&doc, "deletePet"),
             indoc::indoc! {"
                 async deletePet(petId: string): Promise<void> {
-                  const url = new URL(`/pets/${encodeURIComponent(petId)}`, this.baseUrl);
-                  const response = await fetch(url, { method: \"DELETE\" });
+                  const url = new URL(`pets/${encodeURIComponent(petId)}`, this.baseUrl);
+                  const response = await fetch(url, {
+                    method: \"DELETE\",
+                    headers: this.headers
+                  });
                   if (!response.ok) throw new Error(`${response.status} ${response.statusText}`);
                 }
             "}
@@ -1062,9 +1133,12 @@ mod tests {
                 async listUserPosts(userId: string, query?: {
                   limit?: string;
                 }): Promise<string[]> {
-                  const url = new URL(`/users/${encodeURIComponent(userId)}/posts`, this.baseUrl);
+                  const url = new URL(`users/${encodeURIComponent(userId)}/posts`, this.baseUrl);
                   if (query?.limit !== undefined) url.searchParams.set("limit", query.limit);
-                  const response = await fetch(url, { method: "GET" });
+                  const response = await fetch(url, {
+                    method: "GET",
+                    headers: this.headers
+                  });
                   if (!response.ok) throw new Error(`${response.status} ${response.statusText}`);
                   return await response.json();
                 }
@@ -1116,10 +1190,13 @@ mod tests {
                   limit: number;
                   offset?: number;
                 }): Promise<string[]> {
-                  const url = new URL("/pets", this.baseUrl);
+                  const url = new URL("pets", this.baseUrl);
                   url.searchParams.set("limit", String(query.limit));
                   if (query?.offset !== undefined) url.searchParams.set("offset", String(query.offset));
-                  const response = await fetch(url, { method: "GET" });
+                  const response = await fetch(url, {
+                    method: "GET",
+                    headers: this.headers
+                  });
                   if (!response.ok) throw new Error(`${response.status} ${response.statusText}`);
                   return await response.json();
                 }
@@ -1163,9 +1240,12 @@ mod tests {
                 async listPets(query?: {
                   active?: boolean;
                 }): Promise<string[]> {
-                  const url = new URL("/pets", this.baseUrl);
+                  const url = new URL("pets", this.baseUrl);
                   if (query?.active !== undefined) url.searchParams.set("active", String(query.active));
-                  const response = await fetch(url, { method: "GET" });
+                  const response = await fetch(url, {
+                    method: "GET",
+                    headers: this.headers
+                  });
                   if (!response.ok) throw new Error(`${response.status} ${response.statusText}`);
                   return await response.json();
                 }
@@ -1205,9 +1285,12 @@ mod tests {
                 async listPets(query?: {
                   tags?: string[];
                 }): Promise<void> {
-                  const url = new URL("/pets", this.baseUrl);
+                  const url = new URL("pets", this.baseUrl);
                   if (query?.tags !== undefined) for (const v of query.tags) url.searchParams.append("tags", v);
-                  const response = await fetch(url, { method: "GET" });
+                  const response = await fetch(url, {
+                    method: "GET",
+                    headers: this.headers
+                  });
                   if (!response.ok) throw new Error(`${response.status} ${response.statusText}`);
                 }
             "#}
@@ -1247,9 +1330,12 @@ mod tests {
                 async listPets(query: {
                   ids: number[];
                 }): Promise<void> {
-                  const url = new URL("/pets", this.baseUrl);
+                  const url = new URL("pets", this.baseUrl);
                   for (const v of query.ids) url.searchParams.append("ids", String(v));
-                  const response = await fetch(url, { method: "GET" });
+                  const response = await fetch(url, {
+                    method: "GET",
+                    headers: this.headers
+                  });
                   if (!response.ok) throw new Error(`${response.status} ${response.statusText}`);
                 }
             "#}
@@ -1290,9 +1376,12 @@ mod tests {
                 async listPets(query?: {
                   tags?: string[];
                 }): Promise<void> {
-                  const url = new URL("/pets", this.baseUrl);
+                  const url = new URL("pets", this.baseUrl);
                   if (query?.tags !== undefined) url.searchParams.set("tags", query.tags.join(","));
-                  const response = await fetch(url, { method: "GET" });
+                  const response = await fetch(url, {
+                    method: "GET",
+                    headers: this.headers
+                  });
                   if (!response.ok) throw new Error(`${response.status} ${response.statusText}`);
                 }
             "#}
@@ -1332,9 +1421,12 @@ mod tests {
                 async listPets(query?: {
                   filters?: string[];
                 }): Promise<void> {
-                  const url = new URL("/pets", this.baseUrl);
+                  const url = new URL("pets", this.baseUrl);
                   if (query?.filters !== undefined) url.searchParams.set("filters", query.filters.join("|"));
-                  const response = await fetch(url, { method: "GET" });
+                  const response = await fetch(url, {
+                    method: "GET",
+                    headers: this.headers
+                  });
                   if (!response.ok) throw new Error(`${response.status} ${response.statusText}`);
                 }
             "#}
@@ -1374,9 +1466,12 @@ mod tests {
                 async listPets(query?: {
                   keywords?: string[];
                 }): Promise<void> {
-                  const url = new URL("/pets", this.baseUrl);
+                  const url = new URL("pets", this.baseUrl);
                   if (query?.keywords !== undefined) url.searchParams.set("keywords", query.keywords.join(" "));
-                  const response = await fetch(url, { method: "GET" });
+                  const response = await fetch(url, {
+                    method: "GET",
+                    headers: this.headers
+                  });
                   if (!response.ok) throw new Error(`${response.status} ${response.statusText}`);
                 }
             "#}
@@ -1416,8 +1511,11 @@ mod tests {
             indoc::indoc! {r#"
                 /** Lists all pets in the store. */
                 async listPets(): Promise<string[]> {
-                  const url = new URL("/pets", this.baseUrl);
-                  const response = await fetch(url, { method: "GET" });
+                  const url = new URL("pets", this.baseUrl);
+                  const response = await fetch(url, {
+                    method: "GET",
+                    headers: this.headers
+                  });
                   if (!response.ok) throw new Error(`${response.status} ${response.statusText}`);
                   return await response.json();
                 }

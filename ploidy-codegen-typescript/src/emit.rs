@@ -95,6 +95,27 @@ pub fn member_expr<'a>(ast: &AstBuilder<'a>, obj: Expression<'a>, field: &str) -
     ))
 }
 
+/// Creates a member expression, choosing static (`obj.field`) or
+/// computed (`obj["field"]`) based on whether `field` is a valid
+/// identifier.
+pub fn member_expr_auto<'a>(
+    ast: &AstBuilder<'a>,
+    obj: Expression<'a>,
+    field: &str,
+) -> Expression<'a> {
+    if is_valid_js_identifier(field) {
+        Expression::from(ast.member_expression_static(
+            SPAN,
+            obj,
+            ast.identifier_name(SPAN, ast.atom(field)),
+            false,
+        ))
+    } else {
+        let prop = ast.expression_string_literal(SPAN, ast.atom(field), None);
+        Expression::from(ast.member_expression_computed(SPAN, obj, prop, false))
+    }
+}
+
 // MARK: Type constructors
 
 /// Creates a string literal type like `"active"`.
@@ -191,6 +212,23 @@ fn parse_type_name<'a>(ast: &AstBuilder<'a>, name: &str) -> TSTypeName<'a> {
 
 // MARK: Property helper
 
+/// Returns `true` if the name is a valid unquoted JavaScript
+/// identifier.
+///
+/// A valid identifier starts with a Unicode XID_Start character (or
+/// `_` or `$`) and continues with XID_Continue characters. Reserved
+/// keywords are not checked here.
+pub fn is_valid_js_identifier(name: &str) -> bool {
+    let mut chars = name.chars();
+    let Some(first) = chars.next() else {
+        return false;
+    };
+    if !unicode_ident::is_xid_start(first) && first != '_' && first != '$' {
+        return false;
+    }
+    chars.all(|c| unicode_ident::is_xid_continue(c) || c == '$')
+}
+
 /// Creates a property signature for an interface or type literal.
 pub fn property_sig<'a>(
     ast: &AstBuilder<'a>,
@@ -199,7 +237,15 @@ pub fn property_sig<'a>(
     ty: TSType<'a>,
     span: Span,
 ) -> TSSignature<'a> {
-    let key = ast.property_key_static_identifier(SPAN, ast.atom(name));
+    let key = if is_valid_js_identifier(name) {
+        ast.property_key_static_identifier(SPAN, ast.atom(name))
+    } else {
+        oxc_ast::ast::PropertyKey::StringLiteral(ast.alloc(ast.string_literal(
+            SPAN,
+            ast.atom(name),
+            None,
+        )))
+    };
     let type_ann = ast.ts_type_annotation(SPAN, ty);
     TSSignature::TSPropertySignature(ast.alloc(ast.ts_property_signature(
         span,

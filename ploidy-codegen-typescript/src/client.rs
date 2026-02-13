@@ -8,6 +8,7 @@ use oxc_ast::ast::{
     MethodDefinitionType, PropertyDefinitionType, Statement, TSAccessibility,
 };
 use oxc_span::SPAN;
+use ploidy_core::ir::View;
 use ploidy_core::ir::{ExtendableView, IrTypeView};
 
 use super::{
@@ -61,8 +62,36 @@ impl<'a> CodegenClient<'a> {
         )));
         class_elements.push(base_url_prop);
 
-        // Constructor: `constructor(baseUrl: string) { this.baseUrl = baseUrl; }`
-        let ctor_param = {
+        // `private headers: Record<string, string>;`
+        let headers_type = {
+            let type_name = ast.ts_type_name_identifier_reference(SPAN, ast.atom("Record"));
+            let params = ast.vec_from_array([
+                ast.ts_type_string_keyword(SPAN),
+                ast.ts_type_string_keyword(SPAN),
+            ]);
+            let type_args = ast.ts_type_parameter_instantiation(SPAN, params);
+            ast.ts_type_type_reference(SPAN, type_name, Some(type_args))
+        };
+        let headers_prop = ClassElement::PropertyDefinition(ast.alloc(ast.property_definition(
+            SPAN,
+            PropertyDefinitionType::PropertyDefinition,
+            ast.vec(),
+            ast.property_key_static_identifier(SPAN, ast.atom("headers")),
+            Some(ast.ts_type_annotation(SPAN, headers_type)),
+            None, // value
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            Some(TSAccessibility::Private),
+        )));
+        class_elements.push(headers_prop);
+
+        // Constructor: `constructor(baseUrl: string, headers?: Record<string, string>)`
+        let ctor_param_base_url = {
             let pattern = ast.binding_pattern_binding_identifier(SPAN, ast.atom("baseUrl"));
             let type_ann = ast.ts_type_annotation(SPAN, ast.ts_type_string_keyword(SPAN));
             ast.formal_parameter(
@@ -77,10 +106,32 @@ impl<'a> CodegenClient<'a> {
                 false,
             )
         };
+        let ctor_param_headers = {
+            let pattern = ast.binding_pattern_binding_identifier(SPAN, ast.atom("headers"));
+            let type_name = ast.ts_type_name_identifier_reference(SPAN, ast.atom("Record"));
+            let params = ast.vec_from_array([
+                ast.ts_type_string_keyword(SPAN),
+                ast.ts_type_string_keyword(SPAN),
+            ]);
+            let type_args = ast.ts_type_parameter_instantiation(SPAN, params);
+            let ty = ast.ts_type_type_reference(SPAN, type_name, Some(type_args));
+            let type_ann = ast.ts_type_annotation(SPAN, ty);
+            ast.formal_parameter(
+                SPAN,
+                ast.vec(),
+                pattern,
+                Some(type_ann),
+                NONE,
+                true, // optional
+                None,
+                false,
+                false,
+            )
+        };
         let ctor_params = ast.formal_parameters(
             SPAN,
             FormalParameterKind::FormalParameter,
-            ast.vec1(ctor_param),
+            ast.vec_from_array([ctor_param_base_url, ctor_param_headers]),
             NONE,
         );
 
@@ -91,16 +142,40 @@ impl<'a> CodegenClient<'a> {
             ast.identifier_name(SPAN, ast.atom("baseUrl")),
             false,
         ));
-        let assign = ast.expression_assignment(
+        let assign_base_url = ast.expression_assignment(
             SPAN,
             oxc_ast::ast::AssignmentOperator::Assign,
             this_base_url,
             ast.expression_identifier(SPAN, ast.atom("baseUrl")),
         );
+
+        // `this.headers = headers ?? {}`
+        let this_headers = oxc_ast::ast::AssignmentTarget::from(ast.member_expression_static(
+            SPAN,
+            ast.expression_this(SPAN),
+            ast.identifier_name(SPAN, ast.atom("headers")),
+            false,
+        ));
+        let headers_or_empty = ast.expression_logical(
+            SPAN,
+            ast.expression_identifier(SPAN, ast.atom("headers")),
+            oxc_ast::ast::LogicalOperator::Coalesce,
+            ast.expression_object(SPAN, ast.vec()),
+        );
+        let assign_headers = ast.expression_assignment(
+            SPAN,
+            oxc_ast::ast::AssignmentOperator::Assign,
+            this_headers,
+            headers_or_empty,
+        );
+
         let ctor_func_body = ast.function_body(
             SPAN,
             ast.vec(),
-            ast.vec1(ast.statement_expression(SPAN, assign)),
+            ast.vec_from_array([
+                ast.statement_expression(SPAN, assign_base_url),
+                ast.statement_expression(SPAN, assign_headers),
+            ]),
         );
         let ctor_func = ast.function(
             SPAN,
@@ -289,37 +364,51 @@ mod tests {
                 import type { Pet } from "./types/pet";
                 export class Client {
                   private baseUrl: string;
-                  constructor(baseUrl: string) {
+                  private headers: Record<string, string>;
+                  constructor(baseUrl: string, headers?: Record<string, string>) {
                     this.baseUrl = baseUrl;
+                    this.headers = headers ?? {};
                   }
                   async listPets(query?: {
                     limit?: string;
                   }): Promise<Pet[]> {
-                    const url = new URL("/pets", this.baseUrl);
+                    const url = new URL("pets", this.baseUrl);
                     if (query?.limit !== undefined) url.searchParams.set("limit", query.limit);
-                    const response = await fetch(url, { method: "GET" });
+                    const response = await fetch(url, {
+                      method: "GET",
+                      headers: this.headers
+                    });
                     if (!response.ok) throw new Error(`${response.status} ${response.statusText}`);
                     return await response.json();
                   }
                   async createPet(request: CreatePetRequest): Promise<Pet> {
-                    const url = new URL("/pets", this.baseUrl);
+                    const url = new URL("pets", this.baseUrl);
                     const response = await fetch(url, {
                       method: "POST",
-                      headers: { "Content-Type": "application/json" },
+                      headers: {
+                        ...this.headers,
+                        "Content-Type": "application/json"
+                      },
                       body: JSON.stringify(request)
                     });
                     if (!response.ok) throw new Error(`${response.status} ${response.statusText}`);
                     return await response.json();
                   }
                   async getPet(petId: string): Promise<Pet> {
-                    const url = new URL(`/pets/${encodeURIComponent(petId)}`, this.baseUrl);
-                    const response = await fetch(url, { method: "GET" });
+                    const url = new URL(`pets/${encodeURIComponent(petId)}`, this.baseUrl);
+                    const response = await fetch(url, {
+                      method: "GET",
+                      headers: this.headers
+                    });
                     if (!response.ok) throw new Error(`${response.status} ${response.statusText}`);
                     return await response.json();
                   }
                   async deletePet(petId: string): Promise<void> {
-                    const url = new URL(`/pets/${encodeURIComponent(petId)}`, this.baseUrl);
-                    const response = await fetch(url, { method: "DELETE" });
+                    const url = new URL(`pets/${encodeURIComponent(petId)}`, this.baseUrl);
+                    const response = await fetch(url, {
+                      method: "DELETE",
+                      headers: this.headers
+                    });
                     if (!response.ok) throw new Error(`${response.status} ${response.statusText}`);
                   }
                 }

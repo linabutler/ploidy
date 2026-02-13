@@ -227,6 +227,19 @@ pub fn ts_field_name(name: &str) -> String {
     name.to_owned()
 }
 
+/// Returns a valid JavaScript identifier for a parameter name.
+///
+/// If the name is already a valid identifier, it's returned as-is.
+/// Otherwise, it's converted to camelCase.
+pub fn ts_param_name(name: &str) -> String {
+    use super::emit::is_valid_js_identifier;
+    if is_valid_js_identifier(name) {
+        name.to_owned()
+    } else {
+        format!("{}", AsLowerCamelCase(&clean(name)))
+    }
+}
+
 /// Returns the variant name for an untagged union member.
 pub fn ts_untagged_variant_name(hint: IrUntaggedVariantNameHint) -> Cow<'static, str> {
     use IrUntaggedVariantNameHint::*;
