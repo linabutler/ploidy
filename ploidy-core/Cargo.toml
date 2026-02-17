@@ -34,7 +34,7 @@ ref-cast = { workspace = true }
 rustc-hash = "2"
 syn = { version = "2", default-features = false, optional = true }
 thiserror = "2"
-toml = { version = "0.9", default-features = false, optional = true }
+toml = { version = "1.0", default-features = false, optional = true }
 unicase = "2"
 winnow = "0.7"
 
