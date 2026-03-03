@@ -73,7 +73,7 @@ impl<'a> ContainerView<'a> {
         index: NodeIndex<usize>,
         container: &'a Container<'a>,
     ) -> Self {
-        let node = IrGraphNode::from_ref(graph.spec(), container.inner().ty.as_ref().as_ref());
+        let node = graph.resolve_type(container.inner().ty.as_ref().as_ref());
         let inner = InnerView {
             graph,
             container: index,

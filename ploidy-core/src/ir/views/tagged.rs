@@ -1,7 +1,7 @@
 use petgraph::graph::NodeIndex;
 
 use crate::ir::{
-    graph::{IrGraph, IrGraphNode},
+    graph::IrGraph,
     types::{IrTagged, IrTaggedVariant},
 };
 
@@ -37,7 +37,7 @@ impl<'a> IrTaggedView<'a> {
     /// Returns an iterator over this tagged union's variants.
     pub fn variants(&self) -> impl Iterator<Item = IrTaggedVariantView<'a>> {
         self.ty.variants.iter().map(move |variant| {
-            let node = IrGraphNode::from_ref(self.graph.spec, variant.ty.as_ref());
+            let node = self.graph.resolve_type(variant.ty.as_ref());
             IrTaggedVariantView::new(self.graph, self.graph.indices[&node], variant)
         })
     }
@@ -88,7 +88,7 @@ impl<'a> IrTaggedVariantView<'a> {
 
     /// Returns a view of this variant's type.
     pub fn ty(&self) -> IrTypeView<'a> {
-        let node = IrGraphNode::from_ref(self.graph.spec, self.variant.ty.as_ref());
+        let node = self.graph.resolve_type(self.variant.ty.as_ref());
         IrTypeView::new(self.graph, self.graph.indices[&node])
     }
 }

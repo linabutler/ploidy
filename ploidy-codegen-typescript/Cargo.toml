@@ -1,0 +1,27 @@
+[package]
+name = "ploidy-codegen-typescript"
+description = "A Ploidy generator that emits TypeScript type declarations"
+readme = "README.md"
+version.workspace = true
+license.workspace = true
+edition.workspace = true
+repository.workspace = true
+keywords.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+heck = "0.5"
+itertools = "0.14"
+miette = "7"
+ploidy-core = { workspace = true }
+quasiquodo-ts = { workspace = true }
+ref-cast = { workspace = true }
+swc_ecma_codegen = { workspace = true }
+thiserror = "2"
+
+[dev-dependencies]
+indoc = { workspace = true }
+pretty_assertions = { workspace = true }
+
+[lints]
+workspace = true

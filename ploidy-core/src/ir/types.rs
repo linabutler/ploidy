@@ -200,6 +200,10 @@ pub enum InlineIrTypePathSegment<'a> {
     ArrayItem,
     Variant(usize),
     Parent(usize),
+    /// An inline struct for a named variant of a tagged union,
+    /// with the tag field pre-stripped. Carries the referenced
+    /// schema name (not the discriminator value).
+    TaggedVariant(&'a str),
 }
 
 /// An enum type.
@@ -224,8 +228,6 @@ pub struct IrStruct<'a> {
     pub fields: Vec<IrStructField<'a>>,
     /// Immediate parent types from `allOf`, in declaration order.
     pub parents: Vec<IrType<'a>>,
-    /// The discriminator property name, if this struct defines one.
-    pub discriminator: Option<&'a str>,
 }
 
 /// A field in a struct.

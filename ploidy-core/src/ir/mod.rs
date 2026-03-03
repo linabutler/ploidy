@@ -8,7 +8,7 @@ mod views;
 #[cfg(test)]
 mod tests;
 
-pub use graph::{EdgeKind, IrGraph, Traversal};
+pub use graph::{EdgeKind, Ir, IrGraph, RawGraph, Traversal};
 pub use spec::IrSpec;
 pub use types::*;
 

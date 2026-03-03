@@ -54,7 +54,6 @@ impl ToTokens for CodegenTagged<'_> {
                 // Look up the proper Rust type name.
                 let view = variant.ty();
                 let variant_name = CodegenIdentUsage::Variant(&scope.uniquify(variant.name()));
-                let rust_type_name = CodegenRef::new(&view);
 
                 // Add `#[serde(alias = ...)]` attributes for multiple
                 // discriminator values that map to the same type.
@@ -73,6 +72,7 @@ impl ToTokens for CodegenTagged<'_> {
                     }
                 };
 
+                let rust_type_name = CodegenRef::new(&view);
                 let v = quote! {
                     #serde_attr
                     #variant_name(#rust_type_name),
@@ -118,7 +118,7 @@ mod tests {
     use super::*;
 
     use ploidy_core::{
-        ir::{IrGraph, IrSpec, SchemaIrTypeView},
+        ir::{Ir, SchemaIrTypeView},
         parse::Document,
     };
     use pretty_assertions::assert_eq;
@@ -157,9 +157,8 @@ mod tests {
         "})
         .unwrap();
 
-        let spec = IrSpec::from_doc(&doc).unwrap();
-        let ir = IrGraph::new(&spec);
-        let graph = CodegenGraph::new(ir);
+        let ir = Ir::from_doc(&doc).unwrap();
+        let graph = CodegenGraph::new(ir.graph().finalize());
 
         let schema = graph.schemas().find(|s| s.name() == "Pet");
         let Some(schema @ SchemaIrTypeView::Tagged(_, tagged)) = &schema else {
@@ -224,9 +223,8 @@ mod tests {
         "})
         .unwrap();
 
-        let spec = IrSpec::from_doc(&doc).unwrap();
-        let ir = IrGraph::new(&spec);
-        let graph = CodegenGraph::new(ir);
+        let ir = Ir::from_doc(&doc).unwrap();
+        let graph = CodegenGraph::new(ir.graph().finalize());
 
         let schema = graph.schemas().find(|s| s.name() == "Pet");
         let Some(schema @ SchemaIrTypeView::Tagged(_, tagged)) = &schema else {
@@ -286,9 +284,8 @@ mod tests {
         "})
         .unwrap();
 
-        let spec = IrSpec::from_doc(&doc).unwrap();
-        let ir = IrGraph::new(&spec);
-        let graph = CodegenGraph::new(ir);
+        let ir = Ir::from_doc(&doc).unwrap();
+        let graph = CodegenGraph::new(ir.graph().finalize());
 
         let schema = graph.schemas().find(|s| s.name() == "Pet");
         let Some(schema @ SchemaIrTypeView::Tagged(_, tagged)) = &schema else {
@@ -347,9 +344,8 @@ mod tests {
         "})
         .unwrap();
 
-        let spec = IrSpec::from_doc(&doc).unwrap();
-        let ir = IrGraph::new(&spec);
-        let graph = CodegenGraph::new(ir);
+        let ir = Ir::from_doc(&doc).unwrap();
+        let graph = CodegenGraph::new(ir.graph().finalize());
 
         let schema = graph.schemas().find(|s| s.name() == "Pet");
         let Some(schema @ SchemaIrTypeView::Tagged(_, tagged)) = &schema else {
@@ -372,6 +368,211 @@ mod tests {
             }
             impl ::std::convert::From<crate::types::Dog> for Pet {
                 fn from(value: crate::types::Dog) -> Self {
+                    Self::Dog(value)
+                }
+            }
+            impl ::std::convert::From<crate::types::Cat> for Pet {
+                fn from(value: crate::types::Cat) -> Self {
+                    Self::Cat(value)
+                }
+            }
+        };
+        assert_eq!(actual, expected);
+    }
+
+    // MARK: Standalone variants
+
+    #[test]
+    fn test_tagged_union_standalone_variant_wraps_inline_type() {
+        // `Dog` is used both inside the `Pet` tagged union AND referenced
+        // by `Owner.dog`, making it standalone. After lowering, the variant
+        // wraps the inline type (with tag stripped) as a tuple variant.
+        let doc = Document::from_yaml(indoc::indoc! {"
+            openapi: 3.0.0
+            info:
+              title: Test API
+              version: 1.0.0
+            components:
+              schemas:
+                Dog:
+                  type: object
+                  properties:
+                    kind:
+                      type: string
+                    bark:
+                      type: string
+                  required:
+                    - kind
+                    - bark
+                Pet:
+                  oneOf:
+                    - $ref: '#/components/schemas/Dog'
+                  discriminator:
+                    propertyName: kind
+                    mapping:
+                      dog: '#/components/schemas/Dog'
+                Owner:
+                  type: object
+                  properties:
+                    dog:
+                      $ref: '#/components/schemas/Dog'
+        "})
+        .unwrap();
+
+        let ir = Ir::from_doc(&doc).unwrap();
+        let mut raw = ir.graph();
+        raw.lower_tagged_variants();
+        let graph = CodegenGraph::new(raw.finalize());
+
+        let schema = graph.schemas().find(|s| s.name() == "Pet");
+        let Some(schema @ SchemaIrTypeView::Tagged(_, tagged)) = &schema else {
+            panic!("expected tagged union `Pet`; got `{schema:?}`");
+        };
+
+        let name = CodegenTypeName::Schema(schema);
+        let codegen = CodegenTagged::new(name, tagged);
+
+        let actual: syn::File = parse_quote!(#codegen);
+        let expected: syn::File = parse_quote! {
+            #[derive(Debug, Clone, PartialEq, Eq, Hash, ::ploidy_util::serde::Serialize, ::ploidy_util::serde::Deserialize)]
+            #[serde(crate = "::ploidy_util::serde", tag = "kind")]
+            pub enum Pet {
+                #[serde(rename = "dog")]
+                Dog(crate::types::pet::types::Dog),
+            }
+            impl ::std::convert::From<crate::types::pet::types::Dog> for Pet {
+                fn from(value: crate::types::pet::types::Dog) -> Self {
+                    Self::Dog(value)
+                }
+            }
+        };
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn test_tagged_union_wraps_non_standalone_variant() {
+        // `Dog` is only used inside the `Pet` tagged union (not standalone),
+        // so the variant wraps the struct type as `Variant(Struct)` with
+        // a `From` impl.
+        let doc = Document::from_yaml(indoc::indoc! {"
+            openapi: 3.0.0
+            info:
+              title: Test API
+              version: 1.0.0
+            components:
+              schemas:
+                Dog:
+                  type: object
+                  properties:
+                    bark:
+                      type: string
+                Pet:
+                  oneOf:
+                    - $ref: '#/components/schemas/Dog'
+                  discriminator:
+                    propertyName: kind
+                    mapping:
+                      dog: '#/components/schemas/Dog'
+        "})
+        .unwrap();
+
+        let ir = Ir::from_doc(&doc).unwrap();
+        let graph = CodegenGraph::new(ir.graph().finalize());
+
+        let schema = graph.schemas().find(|s| s.name() == "Pet");
+        let Some(schema @ SchemaIrTypeView::Tagged(_, tagged)) = &schema else {
+            panic!("expected tagged union `Pet`; got `{schema:?}`");
+        };
+
+        let name = CodegenTypeName::Schema(schema);
+        let codegen = CodegenTagged::new(name, tagged);
+
+        let actual: syn::File = parse_quote!(#codegen);
+        let expected: syn::File = parse_quote! {
+            #[derive(Debug, Clone, PartialEq, Eq, Hash, ::ploidy_util::serde::Serialize, ::ploidy_util::serde::Deserialize)]
+            #[serde(crate = "::ploidy_util::serde", tag = "kind")]
+            pub enum Pet {
+                #[serde(rename = "dog")]
+                Dog(crate::types::Dog),
+            }
+            impl ::std::convert::From<crate::types::Dog> for Pet {
+                fn from(value: crate::types::Dog) -> Self {
+                    Self::Dog(value)
+                }
+            }
+        };
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn test_tagged_union_mixed_standalone_and_non_standalone() {
+        // `Dog` is standalone (referenced by `Owner.dog`), `Cat` is not.
+        // Each should be handled independently.
+        let doc = Document::from_yaml(indoc::indoc! {"
+            openapi: 3.0.0
+            info:
+              title: Test API
+              version: 1.0.0
+            components:
+              schemas:
+                Dog:
+                  type: object
+                  properties:
+                    kind:
+                      type: string
+                    bark:
+                      type: string
+                  required:
+                    - bark
+                Cat:
+                  type: object
+                  properties:
+                    meow:
+                      type: string
+                Pet:
+                  oneOf:
+                    - $ref: '#/components/schemas/Dog'
+                    - $ref: '#/components/schemas/Cat'
+                  discriminator:
+                    propertyName: kind
+                    mapping:
+                      dog: '#/components/schemas/Dog'
+                      cat: '#/components/schemas/Cat'
+                Owner:
+                  type: object
+                  properties:
+                    dog:
+                      $ref: '#/components/schemas/Dog'
+        "})
+        .unwrap();
+
+        let ir = Ir::from_doc(&doc).unwrap();
+        let mut raw = ir.graph();
+        raw.lower_tagged_variants();
+        let graph = CodegenGraph::new(raw.finalize());
+
+        let schema = graph.schemas().find(|s| s.name() == "Pet");
+        let Some(schema @ SchemaIrTypeView::Tagged(_, tagged)) = &schema else {
+            panic!("expected tagged union `Pet`; got `{schema:?}`");
+        };
+
+        let name = CodegenTypeName::Schema(schema);
+        let codegen = CodegenTagged::new(name, tagged);
+
+        let actual: syn::File = parse_quote!(#codegen);
+        // `Dog` is standalone → wraps inline type (tag stripped).
+        // `Cat` is non-standalone → wraps schema type.
+        let expected: syn::File = parse_quote! {
+            #[derive(Debug, Clone, PartialEq, Eq, Hash, ::ploidy_util::serde::Serialize, ::ploidy_util::serde::Deserialize)]
+            #[serde(crate = "::ploidy_util::serde", tag = "kind")]
+            pub enum Pet {
+                #[serde(rename = "dog")]
+                Dog(crate::types::pet::types::Dog),
+                #[serde(rename = "cat")]
+                Cat(crate::types::Cat),
+            }
+            impl ::std::convert::From<crate::types::pet::types::Dog> for Pet {
+                fn from(value: crate::types::pet::types::Dog) -> Self {
                     Self::Dog(value)
                 }
             }

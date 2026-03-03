@@ -77,7 +77,7 @@ mod tests {
     use super::*;
 
     use ploidy_core::{
-        ir::{IrGraph, IrSpec, SchemaIrTypeView},
+        ir::{Ir, SchemaIrTypeView},
         parse::Document,
     };
     use pretty_assertions::assert_eq;
@@ -103,9 +103,8 @@ mod tests {
         "})
         .unwrap();
 
-        let spec = IrSpec::from_doc(&doc).unwrap();
-        let ir = IrGraph::new(&spec);
-        let graph = CodegenGraph::new(ir);
+        let ir = Ir::from_doc(&doc).unwrap();
+        let graph = CodegenGraph::new(ir.graph().finalize());
 
         let schema = graph.schemas().find(|s| s.name() == "StringOrInt");
         let Some(schema @ SchemaIrTypeView::Untagged(_, untagged_view)) = &schema else {
@@ -154,9 +153,8 @@ mod tests {
         "})
         .unwrap();
 
-        let spec = IrSpec::from_doc(&doc).unwrap();
-        let ir = IrGraph::new(&spec);
-        let graph = CodegenGraph::new(ir);
+        let ir = Ir::from_doc(&doc).unwrap();
+        let graph = CodegenGraph::new(ir.graph().finalize());
 
         let schema = graph.schemas().find(|s| s.name() == "Animal");
         let Some(schema @ SchemaIrTypeView::Untagged(_, untagged_view)) = &schema else {
@@ -197,9 +195,8 @@ mod tests {
         "})
         .unwrap();
 
-        let spec = IrSpec::from_doc(&doc).unwrap();
-        let ir = IrGraph::new(&spec);
-        let graph = CodegenGraph::new(ir);
+        let ir = Ir::from_doc(&doc).unwrap();
+        let graph = CodegenGraph::new(ir.graph().finalize());
 
         let schema = graph.schemas().find(|s| s.name() == "StringOrInt");
         let Some(schema @ SchemaIrTypeView::Untagged(_, untagged_view)) = &schema else {
@@ -240,9 +237,8 @@ mod tests {
         "})
         .unwrap();
 
-        let spec = IrSpec::from_doc(&doc).unwrap();
-        let ir = IrGraph::new(&spec);
-        let graph = CodegenGraph::new(ir);
+        let ir = Ir::from_doc(&doc).unwrap();
+        let graph = CodegenGraph::new(ir.graph().finalize());
 
         let schema = graph.schemas().find(|s| s.name() == "StringOrFloat");
         let Some(schema @ SchemaIrTypeView::Untagged(_, untagged_view)) = &schema else {
@@ -282,9 +278,8 @@ mod tests {
         "})
         .unwrap();
 
-        let spec = IrSpec::from_doc(&doc).unwrap();
-        let ir = IrGraph::new(&spec);
-        let graph = CodegenGraph::new(ir);
+        let ir = Ir::from_doc(&doc).unwrap();
+        let graph = CodegenGraph::new(ir.graph().finalize());
 
         let schema = graph.schemas().find(|s| s.name() == "StringOrDouble");
         let Some(schema @ SchemaIrTypeView::Untagged(_, untagged_view)) = &schema else {

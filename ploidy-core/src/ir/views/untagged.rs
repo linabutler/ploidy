@@ -2,7 +2,7 @@ use petgraph::graph::NodeIndex;
 
 use crate::ir::{
     IrUntaggedVariantNameHint,
-    graph::{IrGraph, IrGraphNode},
+    graph::IrGraph,
     types::{IrUntagged, IrUntaggedVariant},
 };
 
@@ -66,7 +66,7 @@ impl<'view, 'a> IrUntaggedVariantView<'view, 'a> {
     pub fn ty(&self) -> Option<SomeIrUntaggedVariant<'a>> {
         match self.variant {
             IrUntaggedVariant::Some(hint, ty) => {
-                let node = IrGraphNode::from_ref(self.parent.graph.spec, ty.as_ref());
+                let node = self.parent.graph.resolve_type(ty.as_ref());
                 Some(SomeIrUntaggedVariant {
                     hint: *hint,
                     view: IrTypeView::new(self.parent.graph, self.parent.graph.indices[&node]),

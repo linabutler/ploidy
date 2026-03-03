@@ -1,10 +1,12 @@
 use std::{
     any::{Any, TypeId},
+    borrow::Cow,
     collections::VecDeque,
     fmt::Debug,
 };
 
 use atomic_refcell::AtomicRefCell;
+use bumpalo::Bump;
 use by_address::ByAddress;
 use enum_map::{Enum, EnumMap, enum_map};
 use fixedbitset::FixedBitSet;
@@ -15,35 +17,85 @@ use petgraph::{
     algo::{TarjanScc, tred},
     data::Build,
     graph::{DiGraph, NodeIndex},
-    visit::{EdgeFiltered, EdgeRef, IntoNeighbors, VisitMap, Visitable},
+    stable_graph::StableGraph,
+    visit::{DfsPostOrder, EdgeFiltered, EdgeRef, IntoNeighbors, VisitMap, Visitable},
 };
 use rustc_hash::{FxHashMap, FxHashSet};
 
+use crate::parse::Document;
+
 use super::{
+    error::IrError,
     spec::IrSpec,
-    types::{InlineIrType, IrOperation, IrType, IrTypeRef, IrUntaggedVariant, SchemaIrType},
+    types::{
+        InlineIrType, InlineIrTypePath, InlineIrTypePathRoot, InlineIrTypePathSegment, IrOperation,
+        IrStruct, IrStructFieldName, IrTagged, IrTaggedVariant, IrType, IrTypeRef,
+        IrUntaggedVariant, SchemaIrType,
+    },
     views::{operation::IrOperationView, primitive::IrPrimitiveView, schema::SchemaIrTypeView},
 };
 
 /// The type graph.
 pub(super) type IrGraphG<'a> = DiGraph<IrGraphNode<'a>, EdgeKind, usize>;
 
-/// A graph of all the types in an [`IrSpec`], where each edge
-/// is a reference from one type to another.
+/// The stable graph used during mutable transformation.
+type RawGraphG<'a> = StableGraph<IrGraphNode<'a>, EdgeKind, petgraph::Directed, usize>;
+
+/// Owns the [`IrSpec`] and an arena for graph transformations.
+///
+/// Created via [`Ir::from_doc`], then use [`Ir::graph`] to build a
+/// [`RawGraph`] for transformation and finalization.
 #[derive(Debug)]
-pub struct IrGraph<'a> {
-    pub(super) spec: &'a IrSpec<'a>,
-    pub(super) g: IrGraphG<'a>,
-    /// An inverted index of nodes to graph indices.
-    pub(super) indices: FxHashMap<IrGraphNode<'a>, NodeIndex<usize>>,
-    /// Additional metadata for each node.
-    pub(super) metadata: IrGraphMetadata<'a>,
+pub struct Ir<'a> {
+    spec: IrSpec<'a>,
+    arena: Bump,
 }
 
-impl<'a> IrGraph<'a> {
-    pub fn new(spec: &'a IrSpec<'a>) -> Self {
-        let mut g = IrGraphG::default();
+impl<'a> Ir<'a> {
+    /// Parses an OpenAPI document into the IR, allocating an
+    /// arena for any graph transformations.
+    #[inline]
+    pub fn from_doc(doc: &'a Document) -> Result<Self, IrError> {
+        let spec = IrSpec::from_doc(doc)?;
+        Ok(Self {
+            spec,
+            arena: Bump::new(),
+        })
+    }
+
+    /// Builds a [`RawGraph`] that borrows from this `Ir`.
+    #[inline]
+    pub fn graph(&self) -> RawGraph<'_> {
+        RawGraph::new(&self.spec, &self.arena)
+    }
+}
+
+/// A mutable intermediate graph of all the types in an [`IrSpec`].
+///
+/// Original types are `IrGraphNode` references into the `IrSpec`;
+/// transformations like [`lower_tagged_variants`](Self::lower_tagged_variants)
+/// arena-allocate modified or new types, producing `IrGraphNode`
+/// references with the same lifetime.
+///
+/// After transformation, call [`RawGraph::finalize`] to produce
+/// a compact [`IrGraph`].
+#[derive(Debug)]
+pub struct RawGraph<'a> {
+    spec: &'a IrSpec<'a>,
+    arena: &'a Bump,
+    g: RawGraphG<'a>,
+    indices: FxHashMap<IrGraphNode<'a>, NodeIndex<usize>>,
+    /// Maps schema names to their node indices in the graph.
+    schemas: FxHashMap<&'a str, NodeIndex<usize>>,
+}
+
+impl<'a> RawGraph<'a> {
+    /// Builds a raw graph from an [`IrSpec`], using `arena` for
+    /// any allocations needed by later transformations.
+    pub fn new(spec: &'a IrSpec<'a>, arena: &'a Bump) -> Self {
+        let mut g = RawGraphG::default();
         let mut indices = FxHashMap::default();
+        let mut schemas = FxHashMap::default();
 
         // All roots (named schemas, parameters, request and response bodies),
         // and all the types within them (inline schemas and primitives).
@@ -56,25 +108,421 @@ impl<'a> IrGraph<'a> {
         // Add nodes for all types, and edges for references between them.
         for (parent, kind, child) in tys {
             use std::collections::hash_map::Entry;
-            let &mut to = match indices.entry(IrGraphNode::from_ref(spec, child.as_ref())) {
-                // We might see the same schema multiple times, if it's
-                // referenced multiple times in the spec. Only add a new node
-                // for the schema if we haven't seen it before.
+            let child_node = resolve(spec, child.as_ref());
+            let &mut to = match indices.entry(child_node) {
                 Entry::Occupied(entry) => entry.into_mut(),
                 Entry::Vacant(entry) => {
+                    // We might see the same schema multiple times, if it's
+                    // referenced multiple times in the spec. Only add a new node
+                    // for the schema if we haven't seen it before.
                     let index = g.add_node(*entry.key());
                     entry.insert(index)
                 }
             };
+            // Track schema names for later lookup.
+            if let IrGraphNode::Schema(ty) = child_node {
+                schemas.entry(ty.name()).or_insert(to);
+            }
             if let Some(parent) = parent {
-                let &mut from = match indices.entry(IrGraphNode::from_ref(spec, parent.as_ref())) {
+                let parent_node = resolve(spec, parent.as_ref());
+                let &mut from = match indices.entry(parent_node) {
                     Entry::Occupied(entry) => entry.into_mut(),
                     Entry::Vacant(entry) => {
                         let index = g.add_node(*entry.key());
                         entry.insert(index)
                     }
                 };
-                // Add a directed edge from parent to child.
+                if let IrGraphNode::Schema(ty) = parent_node {
+                    schemas.entry(ty.name()).or_insert(from);
+                }
+                g.add_edge(from, to, kind);
+            }
+        }
+
+        Self {
+            spec,
+            arena,
+            g,
+            indices,
+            schemas,
+        }
+    }
+
+    /// Rewrites standalone tagged-union variants as inline types.
+    ///
+    /// A variant is "standalone" if its struct is used outside
+    /// tagged unions (by operations, struct fields, containers,
+    /// etc.). Standalone variants get their own inline struct;
+    /// parents that contain the tag field are recursively inlined.
+    ///
+    /// Iterates tagged unions directly: each one is processed
+    /// atomically by discovering standalone variants, creating
+    /// their inline rewrites, and updating the node and edges
+    /// in place.
+    pub fn lower_tagged_variants(&mut self) -> &mut Self {
+        // Snapshot node indices before iteration, which adds new inline nodes.
+        let indices: FixedBitSet = self.g.node_indices().map(|index| index.index()).collect();
+
+        // Pre-compute the set of node indices that operations reference
+        // directly, so `is_standalone` can check membership in O(1)
+        // instead of scanning all operations per node.
+        let op_referenced: FixedBitSet = self
+            .spec
+            .operations
+            .iter()
+            .flat_map(|op| op.types())
+            .filter_map(|ty| {
+                let node = self.resolve_ref(ty.as_ref());
+                self.indices.get(&node).map(|idx| idx.index())
+            })
+            .collect();
+
+        // Pre-compute standalone status before any mutations, since
+        // processing one tagged union's variants can remove edges that
+        // would affect `is_standalone` for later tagged unions.
+        let standalone: FixedBitSet = indices
+            .ones()
+            .filter(|&i| self.is_standalone(NodeIndex::new(i), &op_referenced))
+            .collect();
+
+        for index in indices.ones() {
+            let index = NodeIndex::new(index);
+            let IrGraphNode::Schema(SchemaIrType::Tagged(info, tagged)) = self.g[index] else {
+                continue;
+            };
+
+            // Build modified variants, replacing standalone struct variants
+            // with tag-stripped inline copies.
+            let mut new_variants = Cow::Borrowed(&tagged.variants);
+
+            for (pos, variant) in tagged.variants.iter().enumerate() {
+                let variant_node = self.resolve_ref(variant.ty.as_ref());
+                let IrGraphNode::Schema(variant_ty @ SchemaIrType::Struct(..)) = variant_node
+                else {
+                    continue;
+                };
+                let variant_index = self.indices[&variant_node];
+                if !standalone.contains(variant_index.index()) {
+                    continue;
+                }
+
+                // Only inline when the variant struct (or an ancestor)
+                // actually has the tag field; otherwise the inline would
+                // be identical to the original schema struct.
+                if !self.has_tag_field(variant_index, tagged.tag) {
+                    continue;
+                }
+
+                // Build inline path: Type(tagged_name) / TaggedVariant(schema_name).
+                let path = InlineIrTypePath {
+                    root: InlineIrTypePathRoot::Type(info.name),
+                    segments: vec![InlineIrTypePathSegment::TaggedVariant(variant_ty.name())],
+                };
+
+                let inlines = self.rewrite_struct(variant_index, path);
+
+                // Add all inline nodes to the graph and wire edges.
+                // Instead of adding per-field edges (which would pull
+                // the original schema's inline types into this tagged
+                // union's `inlines()`), connect each inline to the
+                // original schema variant. This gives the inline the
+                // same transitive dependencies and SCC membership
+                // without leaking foreign inline types.
+                for &inline in &inlines {
+                    let node = IrGraphNode::Inline(inline);
+                    let node_index = self.g.add_node(node);
+                    self.indices.insert(node, node_index);
+                    self.g
+                        .add_edge(node_index, variant_index, EdgeKind::Reference);
+                    if let InlineIrType::Struct(_, ref s) = *inline {
+                        for parent in &s.parents {
+                            let parent_node = self.resolve_ref(parent.as_ref());
+                            let parent_index = self.indices[&parent_node];
+                            self.g
+                                .add_edge(node_index, parent_index, EdgeKind::Inherits);
+                        }
+                    }
+                }
+
+                // The last inline is the start struct's rewrite.
+                let start_inline = *inlines.last().unwrap();
+                new_variants.to_mut()[pos] = IrTaggedVariant {
+                    name: variant.name,
+                    aliases: variant.aliases.clone(),
+                    ty: IrType::Inline(start_inline.clone()),
+                };
+            }
+
+            if *new_variants == tagged.variants {
+                continue;
+            }
+
+            let modified_tagged = IrTagged {
+                description: tagged.description,
+                tag: tagged.tag,
+                variants: new_variants.into_owned(),
+            };
+            let modified: &'a SchemaIrType<'a> = self
+                .arena
+                .alloc(SchemaIrType::Tagged(*info, modified_tagged));
+            let old_weight = std::mem::replace(&mut self.g[index], IrGraphNode::Schema(modified));
+            self.indices.remove(&old_weight);
+            self.indices.insert(IrGraphNode::Schema(modified), index);
+
+            // Rebuild Reference edges from the modified variants.
+            let edges_to_remove: Vec<_> = self
+                .g
+                .edges_directed(index, Direction::Outgoing)
+                .filter(|e| matches!(e.weight(), EdgeKind::Reference))
+                .map(|e| e.id())
+                .collect();
+            for edge_id in edges_to_remove {
+                self.g.remove_edge(edge_id);
+            }
+            let SchemaIrType::Tagged(_, modified_tagged) = modified else {
+                unreachable!()
+            };
+            for variant in &modified_tagged.variants {
+                let variant_node = self.resolve_ref(variant.ty.as_ref());
+                let variant_index = self.indices[&variant_node];
+                self.g.add_edge(index, variant_index, EdgeKind::Reference);
+            }
+        }
+
+        self
+    }
+
+    /// Returns `true` if the struct at `index` is used outside
+    /// tagged unions, or if incoming tagged unions disagree on
+    /// their discriminator.
+    fn is_standalone(&self, index: NodeIndex<usize>, op_referenced: &FixedBitSet) -> bool {
+        // Check if any operation directly references this struct.
+        if op_referenced.contains(index.index()) {
+            return true;
+        }
+
+        // Standalone unless every incoming edge is from a tagged
+        // union with the same discriminator.
+        let mut neighbors = self.g.neighbors_directed(index, Direction::Incoming);
+        if let Some(neighbor_index) = neighbors.next()
+            && let IrGraphNode::Schema(SchemaIrType::Tagged(_, tagged)) = self.g[neighbor_index]
+        {
+            !neighbors.all(|neighbor_index| {
+                let neighbor_node = self.g[neighbor_index];
+                matches!(neighbor_node, IrGraphNode::Schema(SchemaIrType::Tagged(_, t))
+                    if t.tag == tagged.tag)
+            })
+        } else {
+            true
+        }
+    }
+
+    /// Returns `true` if the struct at `index` or any of its
+    /// `allOf` ancestors has a field named `tag`.
+    fn has_tag_field(&self, index: NodeIndex<usize>, tag: &str) -> bool {
+        self.inherited_structs(index).iter().any(|(_, s)| {
+            s.fields
+                .iter()
+                .any(|f| matches!(f.name, IrStructFieldName::Name(n) if n == tag))
+        })
+    }
+
+    /// Collects the struct at `index` and all its `allOf` ancestors
+    /// in post-order (ancestors first, start struct last).
+    fn inherited_structs(
+        &self,
+        index: NodeIndex<usize>,
+    ) -> Vec<(NodeIndex<usize>, &'a IrStruct<'a>)> {
+        let inherits = EdgeFiltered::from_fn(&self.g, |e| matches!(e.weight(), EdgeKind::Inherits));
+        let mut dfs = DfsPostOrder::new(&inherits, index);
+        let mut result = Vec::new();
+        while let Some(nx) = dfs.next(&inherits) {
+            let s = match self.g[nx] {
+                IrGraphNode::Schema(SchemaIrType::Struct(_, s))
+                | IrGraphNode::Inline(InlineIrType::Struct(_, s)) => s,
+                _ => continue,
+            };
+            result.push((nx, s));
+        }
+        result
+    }
+
+    /// Resolves an `IrTypeRef` to an `IrGraphNode`, following `$ref`
+    /// pointers through the spec.
+    fn resolve_ref(&self, ty: IrTypeRef<'a>) -> IrGraphNode<'a> {
+        match ty {
+            IrTypeRef::Schema(ty) => IrGraphNode::Schema(ty),
+            IrTypeRef::Inline(ty) => IrGraphNode::Inline(ty),
+            IrTypeRef::Ref(r) => {
+                let index = self.schemas[r.name()];
+                self.g[index]
+            }
+        }
+    }
+
+    /// Creates inline copies of the struct at `start_index` and
+    /// its ancestors, rewriting parent references to point at the
+    /// new inlines. Returns the new inline types in
+    /// graph-insertion order (ancestors first, start struct last).
+    ///
+    /// Uses [`DfsPostOrder`] on the `Inherits`-filtered subgraph so
+    /// that ancestors are processed before descendants, and each
+    /// struct's rewritten parents are available when it is
+    /// constructed. Paths are assigned in a reverse pass (top-down)
+    /// over the same post-order results.
+    fn rewrite_struct(
+        &self,
+        start_index: NodeIndex<usize>,
+        path: InlineIrTypePath<'a>,
+    ) -> Vec<&'a InlineIrType<'a>> {
+        let post_order = self.inherited_structs(start_index);
+
+        // Assign paths top-down (reverse post-order). Each struct
+        // derives its parents' paths from its own path + `Parent(idx)`.
+        let mut paths: FxHashMap<NodeIndex<usize>, InlineIrTypePath<'a>> = FxHashMap::default();
+        paths.insert(start_index, path);
+        for &(nx, s) in post_order.iter().rev() {
+            let Some(p) = paths.get(&nx).cloned() else {
+                continue;
+            };
+            for (idx, parent) in s
+                .parents
+                .iter()
+                .enumerate()
+                .map(|(index, parent)| (index + 1, parent))
+            {
+                let parent_node = self.resolve_ref(parent.as_ref());
+                let parent_index = self.indices[&parent_node];
+                paths
+                    .entry(parent_index)
+                    .or_insert_with(|| InlineIrTypePath {
+                        root: p.root,
+                        segments: {
+                            let mut segs = p.segments.clone();
+                            segs.push(InlineIrTypePathSegment::Parent(idx));
+                            segs
+                        },
+                    });
+            }
+        }
+
+        // Process in post-order (ancestors first). Track rewrites by
+        // their inline type directly, avoiding graph mutation.
+        let mut rewrites: FxHashMap<NodeIndex<usize>, &'a InlineIrType<'a>> = FxHashMap::default();
+        let mut result = Vec::new();
+        for (nx, s) in post_order {
+            // Build parents eagerly, replacing rewritten ones with
+            // their inlines.
+            let mut new_parents = Cow::Borrowed(&s.parents);
+            for (index, parent) in s.parents.iter().enumerate() {
+                let parent_node = self.resolve_ref(parent.as_ref());
+                let parent_index = self.indices[&parent_node];
+                if let Some(&inline_ty) = rewrites.get(&parent_index) {
+                    new_parents.to_mut()[index] = IrType::Inline(inline_ty.clone());
+                }
+            }
+
+            if nx != start_index && *new_parents == s.parents {
+                continue;
+            }
+
+            let p = paths
+                .remove(&nx)
+                .expect("path must exist for rewritten node");
+
+            let ir_struct = IrStruct {
+                description: s.description,
+                fields: s.fields.clone(),
+                parents: new_parents.into_owned(),
+            };
+
+            let inline: &'a InlineIrType<'a> = self.arena.alloc(InlineIrType::Struct(p, ir_struct));
+            rewrites.insert(nx, inline);
+            result.push(inline);
+        }
+
+        result
+    }
+
+    /// Finalizes this raw graph into a compact [`IrGraph`].
+    pub fn finalize(&self) -> IrGraph<'a> {
+        IrGraph::new(self)
+    }
+}
+
+// Resolve an IrTypeRef to an IrGraphNode, following $ref pointers
+// through `spec.schemas`.
+fn resolve<'a>(spec: &'a IrSpec<'a>, mut ty: IrTypeRef<'a>) -> IrGraphNode<'a> {
+    loop {
+        match ty {
+            IrTypeRef::Schema(ty) => return IrGraphNode::Schema(ty),
+            IrTypeRef::Inline(ty) => return IrGraphNode::Inline(ty),
+            IrTypeRef::Ref(r) => {
+                // Recursively resolve through the spec's schema map.
+                ty = spec.schemas[r.name()].as_ref();
+            }
+        }
+    }
+}
+
+/// A graph of all the types in an [`IrSpec`], where each edge
+/// is a reference from one type to another.
+#[derive(Debug)]
+pub struct IrGraph<'a> {
+    pub(super) spec: &'a IrSpec<'a>,
+    pub(super) g: IrGraphG<'a>,
+    /// An inverted index of nodes to graph indices.
+    pub(super) indices: FxHashMap<IrGraphNode<'a>, NodeIndex<usize>>,
+    /// Maps schema names to their resolved graph nodes.
+    schemas: FxHashMap<&'a str, IrGraphNode<'a>>,
+    /// Additional metadata for each node.
+    pub(super) metadata: IrGraphMetadata<'a>,
+}
+
+impl<'a> IrGraph<'a> {
+    /// Builds the final compact graph from a [`RawGraph`].
+    ///
+    /// Copies nodes and edges from the `RawGraph`'s `StableGraph`
+    /// into a compact `DiGraph`, remapping indices in the process.
+    /// Then computes metadata (SCCs, dependencies, operations).
+    pub fn new(raw: &RawGraph<'a>) -> Self {
+        let spec = raw.spec;
+        let mut g = IrGraphG::default();
+        let mut indices = FxHashMap::default();
+
+        let mut schemas: FxHashMap<&'a str, IrGraphNode<'a>> = FxHashMap::default();
+
+        for index in raw.g.node_indices() {
+            use std::collections::hash_map::Entry;
+            let source = raw.g[index];
+            let &mut from = match indices.entry(source) {
+                Entry::Occupied(from) => from.into_mut(),
+                Entry::Vacant(entry) => {
+                    let index = g.add_node(*entry.key());
+                    entry.insert(index)
+                }
+            };
+            if let IrGraphNode::Schema(ty) = source {
+                schemas.entry(ty.name()).or_insert(source);
+            }
+            // `raw.g.edges(...)` yields edges in reverse order of addition;
+            // reverse them so that they're added to the final graph in order.
+            let mut edges = VecDeque::new();
+            for edge in raw.g.edges(index) {
+                let destination = raw.g[edge.target()];
+                let &mut to = match indices.entry(destination) {
+                    Entry::Occupied(to) => to.into_mut(),
+                    Entry::Vacant(entry) => {
+                        let index = g.add_node(*entry.key());
+                        entry.insert(index)
+                    }
+                };
+                if let IrGraphNode::Schema(ty) = destination {
+                    schemas.entry(ty.name()).or_insert(destination);
+                }
+                edges.push_front((from, to, *edge.weight()));
+            }
+            for (from, to, kind) in edges {
                 g.add_edge(from, to, kind);
             }
         }
@@ -103,9 +551,12 @@ impl<'a> IrGraph<'a> {
                 metadata.operations.entry(ByAddress(op)).or_default().types = op
                     .types()
                     .filter_map(|ty| {
-                        indices
-                            .get(&IrGraphNode::from_ref(spec, ty.as_ref()))
-                            .map(|node| node.index())
+                        let node = match ty.as_ref() {
+                            IrTypeRef::Schema(ty) => IrGraphNode::Schema(ty),
+                            IrTypeRef::Inline(ty) => IrGraphNode::Inline(ty),
+                            IrTypeRef::Ref(r) => schemas[r.name()],
+                        };
+                        indices.get(&node).map(|node| node.index())
                     })
                     .collect();
             }
@@ -186,8 +637,19 @@ impl<'a> IrGraph<'a> {
         Self {
             spec,
             indices,
+            schemas,
             g,
             metadata,
+        }
+    }
+
+    /// Resolves an [`IrTypeRef`] to an [`IrGraphNode`], following
+    /// `$ref` pointers through the schemas map.
+    pub fn resolve_type(&self, ty: IrTypeRef<'a>) -> IrGraphNode<'a> {
+        match ty {
+            IrTypeRef::Schema(ty) => IrGraphNode::Schema(ty),
+            IrTypeRef::Inline(ty) => IrGraphNode::Inline(ty),
+            IrTypeRef::Ref(r) => self.schemas[r.name()],
         }
     }
 
@@ -242,18 +704,6 @@ impl<'a> IrGraph<'a> {
 pub enum IrGraphNode<'a> {
     Schema(&'a SchemaIrType<'a>),
     Inline(&'a InlineIrType<'a>),
-}
-
-impl<'a> IrGraphNode<'a> {
-    /// Converts an [`IrTypeRef`] to an [`IrGraphNode`],
-    /// recursively resolving referenced schemas.
-    pub fn from_ref(spec: &'a IrSpec<'a>, ty: IrTypeRef<'a>) -> Self {
-        match ty {
-            IrTypeRef::Schema(ty) => IrGraphNode::Schema(ty),
-            IrTypeRef::Inline(ty) => IrGraphNode::Inline(ty),
-            IrTypeRef::Ref(r) => Self::from_ref(spec, spec.schemas[r.name()].as_ref()),
-        }
-    }
 }
 
 /// An edge between two types in the type graph.

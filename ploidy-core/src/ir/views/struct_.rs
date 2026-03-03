@@ -1,7 +1,7 @@
 use petgraph::{
     Direction,
     graph::NodeIndex,
-    visit::{Bfs, DfsPostOrder, EdgeFiltered},
+    visit::{DfsPostOrder, EdgeFiltered},
 };
 use rustc_hash::FxHashSet;
 
@@ -88,7 +88,7 @@ impl<'a> IrStructView<'a> {
     #[inline]
     pub fn parents(&self) -> impl Iterator<Item = IrTypeView<'a>> + '_ {
         self.ty.parents.iter().map(move |parent| {
-            let node = IrGraphNode::from_ref(self.graph.spec, parent.as_ref());
+            let node = self.graph.resolve_type(parent.as_ref());
             IrTypeView::new(self.graph, self.graph.indices[&node])
         })
     }
@@ -123,7 +123,7 @@ impl<'view, 'a> IrStructFieldView<'view, 'a> {
     /// Returns a view of the inner type that this type wraps.
     #[inline]
     pub fn ty(&self) -> IrTypeView<'a> {
-        let node = IrGraphNode::from_ref(self.parent.graph.spec, self.field.ty.as_ref());
+        let node = self.parent.graph.resolve_type(self.field.ty.as_ref());
         IrTypeView::new(self.parent.graph, self.parent.graph.indices[&node])
     }
 
@@ -139,35 +139,16 @@ impl<'view, 'a> IrStructFieldView<'view, 'a> {
 
     /// Returns `true` if this field is a discriminator property.
     ///
-    /// A field is a discriminator if it's explicitly named as the `discriminator`
-    /// in its parent struct's definition, if it's named as an ancestor struct's
-    /// discriminator, or if its parent struct is a variant of a tagged union
-    /// whose `tag` matches this field's name.
+    /// A field is a discriminator if a tagged union that directly
+    /// references this struct uses it as the tag. After lowering,
+    /// standalone structs have no incoming tagged-union edges, so
+    /// this unconditionally returns `false` for them.
     #[inline]
     pub fn discriminator(&self) -> bool {
         let IrStructFieldName::Name(name) = self.field.name else {
             return false;
         };
 
-        // Check if our parent struct, or any of its ancestors,
-        // declare this field as a discriminator.
-        let inherits = EdgeFiltered::from_fn(&self.parent.graph.g, |e| {
-            matches!(*e.weight(), EdgeKind::Inherits)
-        });
-        let mut bfs = Bfs::new(&inherits, self.parent.index);
-        let is_ancestor_discriminator = std::iter::from_fn(|| bfs.next(&inherits))
-            .filter_map(|index| match self.parent.graph.g[index] {
-                IrGraphNode::Schema(SchemaIrType::Struct(_, s))
-                | IrGraphNode::Inline(InlineIrType::Struct(_, s)) => Some(s),
-                _ => None,
-            })
-            .any(|ancestor| ancestor.discriminator == Some(name));
-        if is_ancestor_discriminator {
-            return true;
-        }
-
-        // Check whether any tagged unions that include our parent struct
-        // declare this field as their discriminators.
         self.parent
             .graph
             .g
@@ -198,7 +179,7 @@ impl<'view, 'a> IrStructFieldView<'view, 'a> {
     #[inline]
     pub fn needs_indirection(&self) -> bool {
         let graph = self.parent.graph;
-        let node = IrGraphNode::from_ref(graph.spec, self.field.ty.as_ref());
+        let node = graph.resolve_type(self.field.ty.as_ref());
         let target = graph.indices[&node];
         graph.metadata.scc_indices[self.parent.index.index()]
             == graph.metadata.scc_indices[target.index()]

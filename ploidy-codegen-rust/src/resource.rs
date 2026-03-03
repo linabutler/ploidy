@@ -62,10 +62,7 @@ mod tests {
     use super::*;
 
     use itertools::Itertools;
-    use ploidy_core::{
-        ir::{IrGraph, IrSpec},
-        parse::Document,
-    };
+    use ploidy_core::{ir::Ir, parse::Document};
     use pretty_assertions::assert_eq;
 
     use syn::parse_quote;
@@ -108,9 +105,8 @@ mod tests {
         "})
         .unwrap();
 
-        let spec = IrSpec::from_doc(&doc).unwrap();
-        let ir = IrGraph::new(&spec);
-        let graph = CodegenGraph::new(ir);
+        let ir = Ir::from_doc(&doc).unwrap();
+        let graph = CodegenGraph::new(ir.graph().finalize());
 
         let ops = graph.operations().collect_vec();
         let feature = CargoFeature::from_name("customer");
@@ -184,9 +180,8 @@ mod tests {
         "})
         .unwrap();
 
-        let spec = IrSpec::from_doc(&doc).unwrap();
-        let ir = IrGraph::new(&spec);
-        let graph = CodegenGraph::new(ir);
+        let ir = Ir::from_doc(&doc).unwrap();
+        let graph = CodegenGraph::new(ir.graph().finalize());
 
         let ops = graph.operations().collect_vec();
         let feature = CargoFeature::from_name("orders");
