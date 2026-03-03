@@ -3,7 +3,7 @@
 use itertools::Itertools;
 
 use crate::{
-    ir::{IrGraph, IrSpec, IrStructFieldName, SchemaIrTypeView, View},
+    ir::{IrGraph, IrSpec, IrStructFieldName, SchemaIrTypeView, View, ViewNode},
     parse::Document,
     tests::assert_matches,
 };
@@ -530,6 +530,50 @@ fn test_circular_refs_multiple_sccs() {
         .find(|f| matches!(f.name(), IrStructFieldName::Name("d")))
         .unwrap();
     assert!(c_d_field.needs_indirection());
+}
+
+// MARK: SCC identity
+
+#[test]
+fn test_scc_id_same_for_cycle_members() {
+    // A <-> B form a cycle; C is independent.
+    let doc = Document::from_yaml(indoc::indoc! {"
+        openapi: 3.0.0
+        info:
+          title: Test
+          version: 1.0.0
+        components:
+          schemas:
+            A:
+              type: object
+              properties:
+                b:
+                  $ref: '#/components/schemas/B'
+            B:
+              type: object
+              properties:
+                a:
+                  $ref: '#/components/schemas/A'
+            C:
+              type: object
+              properties:
+                name:
+                  type: string
+    "})
+    .unwrap();
+
+    let spec = IrSpec::from_doc(&doc).unwrap();
+    let graph = IrGraph::new(&spec);
+
+    let a = graph.schemas().find(|s| s.name() == "A").unwrap();
+    let b = graph.schemas().find(|s| s.name() == "B").unwrap();
+    let c = graph.schemas().find(|s| s.name() == "C").unwrap();
+
+    // A and B are in the same SCC.
+    assert_eq!(a.scc_id(), b.scc_id());
+
+    // C is in a different SCC.
+    assert_ne!(a.scc_id(), c.scc_id());
 }
 
 #[test]

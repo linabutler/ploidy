@@ -46,7 +46,8 @@ pub struct CodegenCommand {
 
 #[derive(Debug)]
 pub enum CodegenCommandLanguage {
-    Rust(RustCodegenCommand),
+    Python,
+    Rust(Box<RustCodegenCommand>),
 }
 
 #[derive(Debug)]
@@ -87,6 +88,7 @@ struct CodegenCommandArgs {
 impl CodegenCommandArgs {
     fn into_command(self) -> ClapResult<CodegenCommand> {
         let language = match self.language {
+            CodegenCommandLanguageArgs::Python => CodegenCommandLanguage::Python,
             CodegenCommandLanguageArgs::Rust(args) => {
                 let path = self.output.join("Cargo.toml");
                 match Manifest::<CargoMetadata>::from_path_with_metadata(&path) {
@@ -117,10 +119,10 @@ impl CodegenCommandArgs {
                             })?;
                             package.version.set(bump_version(&base, bump).to_string());
                         }
-                        CodegenCommandLanguage::Rust(RustCodegenCommand {
+                        CodegenCommandLanguage::Rust(Box::new(RustCodegenCommand {
                             manifest,
                             check: args.check,
-                        })
+                        }))
                     }
                     Err(cargo_toml::Error::Io(err)) if err.kind() == IoErrorKind::NotFound => {
                         let name = args
@@ -142,10 +144,10 @@ impl CodegenCommandArgs {
                             package: Some(Package::new(name, DEFAULT_VERSION.to_string())),
                             ..Default::default()
                         };
-                        CodegenCommandLanguage::Rust(RustCodegenCommand {
+                        CodegenCommandLanguage::Rust(Box::new(RustCodegenCommand {
                             manifest,
                             check: args.check,
-                        })
+                        }))
                     }
                     Err(err) => {
                         return Err(ClapError::raw(
@@ -166,6 +168,8 @@ impl CodegenCommandArgs {
 
 #[derive(Debug, clap::Subcommand)]
 enum CodegenCommandLanguageArgs {
+    /// Generate Python Pydantic models.
+    Python,
     /// Generate a Rust package.
     Rust(RustCodegenCommandArgs),
 }

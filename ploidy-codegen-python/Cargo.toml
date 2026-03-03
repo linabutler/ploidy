@@ -1,0 +1,33 @@
+[package]
+name = "ploidy-codegen-python"
+description = "A Ploidy generator that emits Python code using Pydantic models"
+readme = "README.md"
+version.workspace = true
+license.workspace = true
+edition.workspace = true
+repository.workspace = true
+keywords.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+heck = "0.5"
+itertools = "0.14"
+miette = "7"
+ploidy-core = { workspace = true }
+quasiquodo-py = { workspace = true }
+ref-cast = { workspace = true }
+ruff_python_codegen = { workspace = true }
+ruff_source_file = { workspace = true }
+textwrap = { version = "0.16", default-features = false, features = [
+    "unicode-linebreak",
+    "unicode-width",
+] }
+thiserror = "2"
+unicode-ident = "1"
+
+[dev-dependencies]
+indoc = { workspace = true }
+pretty_assertions = { workspace = true }
+
+[lints]
+workspace = true

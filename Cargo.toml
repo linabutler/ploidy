@@ -1,6 +1,7 @@
 [workspace]
 members = [
     "ploidy",
+    "ploidy-codegen-python",
     "ploidy-codegen-rust",
     "ploidy-core",
     "ploidy-pointer",
@@ -20,6 +21,11 @@ rust-version = "1.89"
 [workspace.dependencies]
 either = "1"
 indoc = "2"
+petgraph = "0.8"
+quasiquodo-py = { git = "https://github.com/linabutler/quasiquodo", rev = "55e23bac85f7f7c09e9275f0181a3399b2a97063" }
+ruff_python_codegen = { git = "https://github.com/astral-sh/ruff", tag = "0.15.4" }
+ruff_source_file = { git = "https://github.com/astral-sh/ruff", tag = "0.15.4" }
+ploidy-codegen-python = { path = "ploidy-codegen-python", version = "0.9.0" }
 ploidy-codegen-rust = { path = "ploidy-codegen-rust", version = "0.9.0" }
 ploidy-core = { path = "ploidy-core", version = "0.9.0" }
 ploidy-pointer = { path = "ploidy-pointer", version = "0.9.0" }
