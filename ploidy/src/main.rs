@@ -36,7 +36,8 @@ fn main() -> Result<()> {
 
             let arena = Arena::new();
             let spec = IrSpec::from_doc(&arena, &doc).into_diagnostic()?;
-            let raw = RawGraph::new(&arena, &spec);
+            let mut raw = RawGraph::new(&arena, &spec);
+            raw.inline_tagged_variants();
 
             let config = command
                 .manifest

@@ -182,6 +182,7 @@ pub enum InlineIrTypePathSegment<'a> {
     ArrayItem,
     Variant(usize),
     Parent(usize),
+    TaggedVariant(&'a str),
 }
 
 /// An enum type.
@@ -206,8 +207,6 @@ pub struct IrStruct<'a> {
     pub fields: Vec<IrStructField<'a>>,
     /// Immediate parent types from `allOf`, in declaration order.
     pub parents: Vec<IrType<'a>>,
-    /// The discriminator property name, if this struct defines one.
-    pub discriminator: Option<&'a str>,
 }
 
 /// A field in a struct.
@@ -234,7 +233,7 @@ pub struct IrTagged<'a> {
 pub struct IrTaggedVariant<'a> {
     pub name: &'a str,
     pub aliases: Vec<&'a str>,
-    pub ty: IrType<'a>,
+    pub ty: &'a IrType<'a>,
 }
 
 /// An untagged union, created from a `oneOf` schema

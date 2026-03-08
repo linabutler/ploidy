@@ -1,5 +1,6 @@
 use std::{
     any::{Any, TypeId},
+    borrow::Cow,
     collections::VecDeque,
     fmt::Debug,
 };
@@ -16,7 +17,7 @@ use petgraph::{
     data::Build,
     graph::{DiGraph, NodeIndex},
     stable_graph::StableDiGraph,
-    visit::{EdgeFiltered, EdgeRef, IntoNeighbors, VisitMap, Visitable},
+    visit::{DfsPostOrder, EdgeFiltered, EdgeRef, IntoNeighbors, VisitMap, Visitable},
 };
 use rustc_hash::{FxHashMap, FxHashSet};
 
@@ -24,7 +25,11 @@ use crate::arena::Arena;
 
 use super::{
     spec::IrSpec,
-    types::{InlineIrType, IrOperation, IrType, IrUntaggedVariant, SchemaIrType},
+    types::{
+        InlineIrType, InlineIrTypePath, InlineIrTypePathRoot, InlineIrTypePathSegment, IrOperation,
+        IrStruct, IrStructFieldName, IrTagged, IrTaggedVariant, IrType, IrUntaggedVariant,
+        SchemaIrType, SchemaTypeInfo,
+    },
     views::{operation::IrOperationView, primitive::IrPrimitiveView, schema::SchemaIrTypeView},
 };
 
@@ -38,17 +43,24 @@ type CookedDiGraph<'a> = DiGraph<GraphNode<'a>, EdgeKind, usize>;
 /// backed by a sparse [`StableDiGraph`].
 ///
 /// This graph is constructed directly from an [`IrSpec`], and represents
-/// type relationships as they exist in the spec. After applying all
-/// transformations, call [`cook`][Self::cook] to turn this graph into
-/// a [`CookedGraph`] that's ready for code generation.
+/// type relationships as they exist in the spec. Transformations like
+/// [`inline_tagged_variants`][Self::inline_tagged_variants] rewrite this graph
+/// in place.
+///
+/// After applying all transformations, call [`cook`][Self::cook] to
+/// turn this graph into a [`CookedGraph`] that's ready for code generation.
 #[derive(Debug)]
 pub struct RawGraph<'a> {
+    arena: &'a Arena,
     spec: &'a IrSpec<'a>,
     graph: RawDiGraph<'a>,
+    indices: FxHashMap<GraphNode<'a>, NodeIndex<usize>>,
+    /// Maps schema names to their graph indices.
+    schemas: FxHashMap<&'a str, NodeIndex<usize>>,
 }
 
 impl<'a> RawGraph<'a> {
-    pub fn new(_: &'a Arena, spec: &'a IrSpec<'a>) -> Self {
+    pub fn new(arena: &'a Arena, spec: &'a IrSpec<'a>) -> Self {
         let mut graph = RawDiGraph::default();
         let mut indices = FxHashMap::default();
         let mut schemas = FxHashMap::default();
@@ -95,13 +107,263 @@ impl<'a> RawGraph<'a> {
             }
         }
 
-        Self { spec, graph }
+        Self {
+            arena,
+            spec,
+            graph,
+            indices,
+            schemas,
+        }
+    }
+
+    /// Inlines schema types used as variants of multiple tagged unions
+    /// with different tags.
+    ///
+    /// In OpenAPI's model of tagged unions, the tag always references a field
+    /// that's defined on each struct variant. This model works well for Python
+    /// and TypeScript, but not Rust; Serde doesn't allow struct variants to
+    /// declare fields with the same name as the tag. The Rust generator
+    /// excludes tag fields when generating structs, but this introduces a
+    /// new problem: a struct can't appear a variant of multiple unions
+    /// with different tags [^1].
+    ///
+    /// This transformation finds and inlines these structs, so that
+    /// the Rust generator can safely omit their tag fields.
+    ///
+    /// [^1]: If struct A has fields `foo` and `bar`, A is a variant of
+    /// tagged unions C and D, C's tag is `foo`, and D's tag is `bar`...
+    /// only `foo` should be excluded when A is used in C, and only `bar`
+    /// should be excluded when A is used in D; but this can't be modeled
+    /// in Serde without splitting A into two distinct types.
+    pub fn inline_tagged_variants(&mut self) -> &mut Self {
+        struct TaggedPlan<'a> {
+            tagged_index: NodeIndex<usize>,
+            info: SchemaTypeInfo<'a>,
+            modified_tagged: IrTagged<'a>,
+            inlines: Vec<VariantInline<'a>>,
+        }
+        struct VariantInline<'a> {
+            ty: &'a IrType<'a>,
+            variant_index: NodeIndex<usize>,
+            parent_indices: Vec<NodeIndex<usize>>,
+        }
+
+        // Compute the set of types used (as query params, request and response
+        // bodies, etc.) by operations. Operations don't create graph edges,
+        // but still need to be considered when deciding whether to inline a
+        // struct variant. Otherwise, a struct that's used by same-tag unions
+        // _and_ an operation wouldn't be inlined, causing the Rust generator to
+        // incorrectly exclude the tag field from the struct.
+        let used_by_ops: FixedBitSet = self
+            .spec
+            .operations
+            .iter()
+            .flat_map(|op| op.types())
+            .filter_map(|ty| {
+                let node = self.resolve(ty);
+                self.indices.get(&node).map(|node| node.index())
+            })
+            .collect();
+
+        // Collect all inlining decisions before mutating the graph,
+        // so that we can check inlinability per variant.
+        let plans = self
+            .graph
+            .node_indices()
+            .filter_map(|index| {
+                let GraphNode::Schema(SchemaIrType::Tagged(info, tagged)) = self.graph[index]
+                else {
+                    return None;
+                };
+                let mut new_variants = Cow::Borrowed(&tagged.variants);
+                let mut inlines = vec![];
+
+                for (at, variant) in tagged.variants.iter().enumerate() {
+                    let variant_node = self.resolve(variant.ty);
+                    let GraphNode::Schema(SchemaIrType::Struct(variant_info, variant_struct)) =
+                        variant_node
+                    else {
+                        continue;
+                    };
+                    let variant_index = self.indices[&variant_node];
+
+                    // A struct variant only needs inlining if it has multiple
+                    // distinct uses. Skip if (1) no operation uses the struct,
+                    // _and_ (2) every incoming edge is from a tagged union with
+                    // the same tag. If both hold, all uses agree, so the
+                    // struct can be used directly without inlining.
+                    if !used_by_ops.contains(variant_index.index()) {
+                        let Some(first) = ({
+                            self.graph
+                                .neighbors_directed(variant_index, Direction::Incoming)
+                                .find_map(|neighbor| match self.graph[neighbor] {
+                                    GraphNode::Schema(SchemaIrType::Tagged(_, t)) => Some(t),
+                                    _ => None,
+                                })
+                        }) else {
+                            continue;
+                        };
+                        // Check that all the variant's inbound edges are from
+                        // tagged unions, and that all their tags match the tag
+                        // of the first union we found.
+                        let all_tags_match = self
+                            .graph
+                            .neighbors_directed(variant_index, Direction::Incoming)
+                            .all(|neighbor| matches!(
+                                self.graph[neighbor],
+                                GraphNode::Schema(SchemaIrType::Tagged(_, t)) if t.tag == first.tag,
+                            ));
+                        if all_tags_match {
+                            continue;
+                        }
+                    }
+
+                    // Skip inlining the struct variant if it doesn't declare
+                    // the tag as a field. Inlining these struct variants
+                    // would just produce identical inline structs.
+                    let has_tag_field = {
+                        let inherits = EdgeFiltered::from_fn(&self.graph, |edge| {
+                            matches!(edge.weight(), EdgeKind::Inherits)
+                        });
+                        let mut dfs = DfsPostOrder::new(&inherits, variant_index);
+                        std::iter::from_fn(|| dfs.next(&inherits))
+                            .flat_map(|ancestor| match self.graph[ancestor] {
+                                GraphNode::Schema(SchemaIrType::Struct(_, s))
+                                | GraphNode::Inline(InlineIrType::Struct(_, s)) => &*s.fields,
+                                _ => &[],
+                            })
+                            .any(|f| {
+                                // Check own and inherited fields; OpenAPI 3.2
+                                // clarifies that the tag can be inherited.
+                                matches!(f.name, IrStructFieldName::Name(n) if n == tagged.tag)
+                            })
+                    };
+                    if !has_tag_field {
+                        continue;
+                    }
+
+                    // Build our new inline type, with the same attributes
+                    // as the schema type, but a distinct inline type path.
+                    let ty = &*self
+                        .arena
+                        .inner()
+                        .alloc(IrType::Inline(InlineIrType::Struct(
+                            InlineIrTypePath {
+                                root: InlineIrTypePathRoot::Type(info.name),
+                                segments: vec![InlineIrTypePathSegment::TaggedVariant(
+                                    variant_info.name,
+                                )],
+                            },
+                            IrStruct {
+                                description: variant_struct.description,
+                                fields: variant_struct.fields.clone(),
+                                parents: variant_struct.parents.clone(),
+                            },
+                        )));
+
+                    let parent_indices = variant_struct
+                        .parents
+                        .iter()
+                        .map(|parent| {
+                            let parent_node = self.resolve(parent);
+                            self.indices[&parent_node]
+                        })
+                        .collect_vec();
+
+                    inlines.push(VariantInline {
+                        ty,
+                        variant_index,
+                        parent_indices,
+                    });
+
+                    new_variants.to_mut()[at] = IrTaggedVariant {
+                        name: variant.name,
+                        aliases: variant.aliases.clone(),
+                        ty,
+                    };
+                }
+                if *new_variants == tagged.variants {
+                    // No variants to rewrite.
+                    return None;
+                }
+
+                Some(TaggedPlan {
+                    tagged_index: index,
+                    info: *info,
+                    modified_tagged: IrTagged {
+                        description: tagged.description,
+                        tag: tagged.tag,
+                        variants: new_variants.into_owned(),
+                    },
+                    inlines,
+                })
+            })
+            .collect_vec();
+
+        // Apply the plans to the graph.
+        for plan in plans {
+            // Add nodes for the inlined types, and connect them to
+            // the original schema variants, so that they'll inherit
+            // the same transitive dependencies and SCC membership.
+            for entry in &plan.inlines {
+                let node = self.resolve(entry.ty);
+                let node_index = self.graph.add_node(node);
+                self.indices.insert(node, node_index);
+                self.graph
+                    .add_edge(node_index, entry.variant_index, EdgeKind::Reference);
+                for &parent_index in &entry.parent_indices {
+                    self.graph
+                        .add_edge(node_index, parent_index, EdgeKind::Inherits);
+                }
+            }
+
+            // Rewrite reference edges from the tagged union
+            // to point to its new variants.
+            let edges_to_remove = self
+                .graph
+                .edges_directed(plan.tagged_index, Direction::Outgoing)
+                .filter(|e| matches!(e.weight(), EdgeKind::Reference))
+                .map(|e| e.id())
+                .collect_vec();
+            for edge_id in edges_to_remove {
+                self.graph.remove_edge(edge_id);
+            }
+            for variant in &plan.modified_tagged.variants {
+                let variant_node = self.resolve(variant.ty);
+                let variant_index = self.indices[&variant_node];
+                self.graph
+                    .add_edge(plan.tagged_index, variant_index, EdgeKind::Reference);
+            }
+
+            // ...And replace the node for the tagged union itself.
+            let new_node = GraphNode::Schema(
+                self.arena
+                    .inner()
+                    .alloc(SchemaIrType::Tagged(plan.info, plan.modified_tagged)),
+            );
+            let old_node = std::mem::replace(&mut self.graph[plan.tagged_index], new_node);
+            self.indices.remove(&old_node);
+            self.indices.insert(new_node, plan.tagged_index);
+        }
+
+        self
     }
 
     /// Builds an immutable [`CookedGraph`] from this mutable raw graph.
     #[inline]
     pub fn cook(&self) -> CookedGraph<'a> {
         CookedGraph::new(self)
+    }
+
+    /// Resolves an [`IrType`] to a [`GraphNode`], following
+    /// [`IrType::Ref`]s through the spec.
+    #[inline]
+    fn resolve(&self, ty: &'a IrType<'a>) -> GraphNode<'a> {
+        match ty {
+            IrType::Schema(ty) => GraphNode::Schema(ty),
+            IrType::Inline(ty) => GraphNode::Inline(ty),
+            IrType::Ref(r) => self.graph[self.schemas[r.name()]],
+        }
     }
 }
 
@@ -447,7 +709,7 @@ impl<'a> Iterator for IrTypeVisitor<'a> {
                 self.stack.extend(
                     ty.variants
                         .iter()
-                        .map(|variant| (Some(top), EdgeKind::Reference, &variant.ty))
+                        .map(|variant| (Some(top), EdgeKind::Reference, variant.ty))
                         .rev(),
                 );
             }

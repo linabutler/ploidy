@@ -50,7 +50,7 @@ impl ToTokens for CodegenStruct<'_> {
         let fields = self
             .ty
             .fields()
-            .filter(|field| !field.discriminator())
+            .filter(|field| !field.tag())
             .map(|field| {
                 let field_name: Ident = match field.name() {
                     IrStructFieldName::Name(n) => {
@@ -112,13 +112,9 @@ impl ToTokens for CodegenStruct<'_> {
                         // depending on their fields. If this struct
                         // inherits fields from another struct,
                         // we need to consider that struct's fields, too.
-                        if view
-                            .fields()
-                            .filter(|f| !f.discriminator())
-                            .all(|f| !f.required())
-                        {
-                            // If all non-discriminator fields of all reachable structs
-                            // are optional, then this struct can derive `Default`.
+                        if view.fields().filter(|f| !f.tag()).all(|f| !f.required()) {
+                            // If all non-tag fields of all reachable structs are optional,
+                            // then this struct can derive `Default`.
                             Traversal::Ignore
                         } else {
                             // Otherwise, skip the struct itself, but visit all its fields
@@ -366,7 +362,9 @@ mod tests {
     }
 
     #[test]
-    fn test_struct_excludes_discriminator_fields() {
+    fn test_struct_excludes_tag_fields() {
+        // `Animal` is only used inside the `Pet` tagged union, so it's
+        // not inlined and the tag field (`type`) is excluded.
         let doc = Document::from_yaml(indoc::indoc! {"
             openapi: 3.0.0
             info:
@@ -385,8 +383,13 @@ mod tests {
                   required:
                     - type
                     - name
+                Pet:
+                  oneOf:
+                    - $ref: '#/components/schemas/Animal'
                   discriminator:
                     propertyName: type
+                    mapping:
+                      animal: '#/components/schemas/Animal'
         "})
         .unwrap();
 
@@ -404,7 +407,7 @@ mod tests {
 
         let actual: syn::ItemStruct = parse_quote!(#codegen);
         // `name` is a required string field, which implements `Default`,
-        // so the struct can derive `Default`. The discriminator field is excluded.
+        // so the struct can derive `Default`. The tag field is excluded.
         let expected: syn::ItemStruct = parse_quote! {
             #[derive(Debug, Clone, PartialEq, Eq, Hash, Default, ::ploidy_util::serde::Serialize, ::ploidy_util::serde::Deserialize)]
             #[serde(crate = "::ploidy_util::serde")]
@@ -1678,6 +1681,75 @@ mod tests {
                 pub name: ::std::string::String,
                 #[serde(flatten,)]
                 pub additional_properties: ::std::collections::BTreeMap<::std::string::String, ::std::string::String>,
+            }
+        };
+        assert_eq!(actual, expected);
+    }
+
+    // MARK: Inlined struct variants of tagged unions
+
+    #[test]
+    fn test_inlined_struct_includes_tag() {
+        // `Dog` is both a variant of `Pet` tagged union _and_ referenced by
+        // `Owner.dog`, making it inlinable. The tag field `kind` should
+        // be included as a regular field on the struct.
+        let doc = Document::from_yaml(indoc::indoc! {"
+            openapi: 3.0.0
+            info:
+              title: Test API
+              version: 1.0.0
+            paths: {}
+            components:
+              schemas:
+                Dog:
+                  type: object
+                  properties:
+                    kind:
+                      type: string
+                    bark:
+                      type: string
+                  required:
+                    - kind
+                    - bark
+                Pet:
+                  oneOf:
+                    - $ref: '#/components/schemas/Dog'
+                  discriminator:
+                    propertyName: kind
+                    mapping:
+                      dog: '#/components/schemas/Dog'
+                Owner:
+                  type: object
+                  properties:
+                    dog:
+                      $ref: '#/components/schemas/Dog'
+        "})
+        .unwrap();
+
+        let arena = Arena::new();
+        let spec = IrSpec::from_doc(&arena, &doc).unwrap();
+        let mut raw = RawGraph::new(&arena, &spec);
+        raw.inline_tagged_variants();
+        let graph = CodegenGraph::new(raw.cook());
+
+        let schema = graph.schemas().find(|s| s.name() == "Dog");
+        let Some(schema @ SchemaIrTypeView::Struct(_, struct_view)) = &schema else {
+            panic!("expected struct `Dog`; got `{schema:?}`");
+        };
+
+        let name = CodegenTypeName::Schema(schema);
+        let codegen = CodegenStruct::new(name, struct_view);
+
+        let actual: syn::ItemStruct = parse_quote!(#codegen);
+        // Both `kind` and `bark` should be present. After inlining, the
+        // tagged union no longer references `Dog` directly, so `kind`
+        // is not treated as a tag.
+        let expected: syn::ItemStruct = parse_quote! {
+            #[derive(Debug, Clone, PartialEq, Eq, Hash, Default, ::ploidy_util::serde::Serialize, ::ploidy_util::serde::Deserialize)]
+            #[serde(crate = "::ploidy_util::serde")]
+            pub struct Dog {
+                pub kind: ::std::string::String,
+                pub bark: ::std::string::String,
             }
         };
         assert_eq!(actual, expected);

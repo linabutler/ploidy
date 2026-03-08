@@ -1930,8 +1930,8 @@ fn test_multiple_parents() {
 #[test]
 fn test_circular_all_of_terminates() {
     // A circular `allOf` (A -> B -> A) is invalid, but can appear in the wild.
-    // `fields()` and `discriminator()` should still terminate and
-    // yield all fields.
+    // `fields()` and `tag()` should still terminate and yield all
+    // fields.
     let doc = Document::from_yaml(indoc::indoc! {"
         openapi: 3.0.0
         info:
@@ -1979,19 +1979,19 @@ fn test_circular_all_of_terminates() {
         .collect_vec();
     assert_matches!(&*field_names, ["b_field", "kind", "a_field"]);
 
-    // `discriminator()` must also terminate, and B's `kind` discriminator
-    // should be visible on A's inherited field.
+    // `tag()` must terminate. Both `A` and `B` have no incoming edges
+    // from tagged unions, so no field is a tag.
     let kind_field = a_struct
         .fields()
         .find(|f| matches!(f.name(), IrStructFieldName::Name("kind")))
         .unwrap();
-    assert!(kind_field.discriminator());
+    assert!(!kind_field.tag());
     assert!(kind_field.inherited());
 
-    // A's own field should not be a discriminator.
+    // A's own field should not be a tag.
     let a_field = a_struct
         .fields()
         .find(|f| matches!(f.name(), IrStructFieldName::Name("a_field")))
         .unwrap();
-    assert!(!a_field.discriminator());
+    assert!(!a_field.tag());
 }
