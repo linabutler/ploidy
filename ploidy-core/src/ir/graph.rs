@@ -15,35 +15,43 @@ use petgraph::{
     algo::{TarjanScc, tred},
     data::Build,
     graph::{DiGraph, NodeIndex},
+    stable_graph::StableDiGraph,
     visit::{EdgeFiltered, EdgeRef, IntoNeighbors, VisitMap, Visitable},
 };
 use rustc_hash::{FxHashMap, FxHashSet};
 
+use crate::arena::Arena;
+
 use super::{
     spec::IrSpec,
-    types::{InlineIrType, IrOperation, IrType, IrTypeRef, IrUntaggedVariant, SchemaIrType},
+    types::{InlineIrType, IrOperation, IrType, IrUntaggedVariant, SchemaIrType},
     views::{operation::IrOperationView, primitive::IrPrimitiveView, schema::SchemaIrTypeView},
 };
 
-/// The type graph.
-pub(super) type IrGraphG<'a> = DiGraph<IrGraphNode<'a>, EdgeKind, usize>;
+/// The mutable, sparse graph used for transformations.
+type RawDiGraph<'a> = StableDiGraph<GraphNode<'a>, EdgeKind, usize>;
 
-/// A graph of all the types in an [`IrSpec`], where each edge
-/// is a reference from one type to another.
+/// The immutable, dense graph used for code generation.
+type CookedDiGraph<'a> = DiGraph<GraphNode<'a>, EdgeKind, usize>;
+
+/// A mutable intermediate dependency graph of all the types in an [`IrSpec`],
+/// backed by a sparse [`StableDiGraph`].
+///
+/// This graph is constructed directly from an [`IrSpec`], and represents
+/// type relationships as they exist in the spec. After applying all
+/// transformations, call [`cook`][Self::cook] to turn this graph into
+/// a [`CookedGraph`] that's ready for code generation.
 #[derive(Debug)]
-pub struct IrGraph<'a> {
-    pub(super) spec: &'a IrSpec<'a>,
-    pub(super) g: IrGraphG<'a>,
-    /// An inverted index of nodes to graph indices.
-    pub(super) indices: FxHashMap<IrGraphNode<'a>, NodeIndex<usize>>,
-    /// Additional metadata for each node.
-    pub(super) metadata: IrGraphMetadata<'a>,
+pub struct RawGraph<'a> {
+    spec: &'a IrSpec<'a>,
+    graph: RawDiGraph<'a>,
 }
 
-impl<'a> IrGraph<'a> {
-    pub fn new(spec: &'a IrSpec<'a>) -> Self {
-        let mut g = IrGraphG::default();
+impl<'a> RawGraph<'a> {
+    pub fn new(_: &'a Arena, spec: &'a IrSpec<'a>) -> Self {
+        let mut graph = RawDiGraph::default();
         let mut indices = FxHashMap::default();
+        let mut schemas = FxHashMap::default();
 
         // All roots (named schemas, parameters, request and response bodies),
         // and all the types within them (inline schemas and primitives).
@@ -56,56 +64,143 @@ impl<'a> IrGraph<'a> {
         // Add nodes for all types, and edges for references between them.
         for (parent, kind, child) in tys {
             use std::collections::hash_map::Entry;
-            let &mut to = match indices.entry(IrGraphNode::from_ref(spec, child.as_ref())) {
-                // We might see the same schema multiple times, if it's
-                // referenced multiple times in the spec. Only add a new node
-                // for the schema if we haven't seen it before.
+            let source = spec.resolve(child);
+            let &mut to = match indices.entry(source) {
                 Entry::Occupied(entry) => entry.into_mut(),
                 Entry::Vacant(entry) => {
-                    let index = g.add_node(*entry.key());
+                    // We might see the same schema multiple times if it's
+                    // referenced multiple times in the spec. Only add
+                    // a new node for the schema if we haven't seen it before.
+                    let index = graph.add_node(*entry.key());
                     entry.insert(index)
                 }
             };
+            // Track schema names for later lookup.
+            if let GraphNode::Schema(ty) = source {
+                schemas.entry(ty.name()).or_insert(to);
+            }
             if let Some(parent) = parent {
-                let &mut from = match indices.entry(IrGraphNode::from_ref(spec, parent.as_ref())) {
+                let destination = spec.resolve(parent);
+                let &mut from = match indices.entry(destination) {
                     Entry::Occupied(entry) => entry.into_mut(),
                     Entry::Vacant(entry) => {
-                        let index = g.add_node(*entry.key());
+                        let index = graph.add_node(*entry.key());
                         entry.insert(index)
                     }
                 };
-                // Add a directed edge from parent to child.
-                g.add_edge(from, to, kind);
+                if let GraphNode::Schema(ty) = destination {
+                    schemas.entry(ty.name()).or_insert(from);
+                }
+                graph.add_edge(from, to, kind);
             }
         }
 
-        let sccs = TopoSccs::new(&g);
+        Self { spec, graph }
+    }
+
+    /// Builds an immutable [`CookedGraph`] from this mutable raw graph.
+    #[inline]
+    pub fn cook(&self) -> CookedGraph<'a> {
+        CookedGraph::new(self)
+    }
+}
+
+/// The final dependency graph of all the types in an [`IrSpec`],
+/// backed by a dense [`DiGraph`].
+///
+/// This graph has all transformations applied, and is ready for
+/// code generation.
+#[derive(Debug)]
+pub struct CookedGraph<'a> {
+    pub(super) spec: &'a IrSpec<'a>,
+    pub(super) graph: CookedDiGraph<'a>,
+    /// An inverted index of nodes to graph indices.
+    pub(super) indices: FxHashMap<GraphNode<'a>, NodeIndex<usize>>,
+    /// Maps schema names to their graph indices.
+    schemas: FxHashMap<&'a str, NodeIndex<usize>>,
+    /// Additional metadata for each node.
+    pub(super) metadata: CookedGraphMetadata<'a>,
+}
+
+impl<'a> CookedGraph<'a> {
+    fn new(raw: &RawGraph<'a>) -> Self {
+        let mut graph = CookedDiGraph::default();
+        let mut indices = FxHashMap::default();
+        let mut schemas = FxHashMap::default();
+
+        for index in raw.graph.node_indices() {
+            use std::collections::hash_map::Entry;
+            let source = raw.graph[index];
+            let &mut from = match indices.entry(source) {
+                Entry::Occupied(from) => from.into_mut(),
+                Entry::Vacant(entry) => {
+                    let index = graph.add_node(*entry.key());
+                    entry.insert(index)
+                }
+            };
+            if let GraphNode::Schema(ty) = source {
+                schemas.entry(ty.name()).or_insert(from);
+            }
+            // `raw.graph.edges(...)` is guaranteed to yield edges in
+            // reverse order of addition, so we accumulate and reverse to
+            // add them to the cooked graph in their original order.
+            let mut edges = vec![];
+            for edge in raw.graph.edges(index) {
+                let destination = raw.graph[edge.target()];
+                let &mut to = match indices.entry(destination) {
+                    Entry::Occupied(to) => to.into_mut(),
+                    Entry::Vacant(entry) => {
+                        let index = graph.add_node(*entry.key());
+                        entry.insert(index)
+                    }
+                };
+                if let GraphNode::Schema(ty) = destination {
+                    schemas.entry(ty.name()).or_insert(to);
+                }
+                edges.push((from, to, *edge.weight()));
+            }
+            for (from, to, kind) in edges.into_iter().rev() {
+                graph.add_edge(from, to, kind);
+            }
+        }
+
+        let sccs = TopoSccs::new(&graph);
 
         let metadata = {
-            let mut metadata = IrGraphMetadata {
+            let mut metadata = CookedGraphMetadata {
                 scc_indices: {
                     // Precompute SCC indices, using just the reference edges.
                     // Inheritance edges don't contribute to cycles.
-                    let refs =
-                        EdgeFiltered::from_fn(&g, |e| matches!(e.weight(), EdgeKind::Reference));
+                    let refs = EdgeFiltered::from_fn(&graph, |e| {
+                        matches!(e.weight(), EdgeKind::Reference)
+                    });
                     let mut scc = TarjanScc::new();
                     scc.run(&refs, |_| ());
-                    g.node_indices()
+                    graph
+                        .node_indices()
                         .map(|node| scc.node_component_index(&refs, node))
                         .collect()
                 },
-                ..Default::default()
+                // `GraphNodeMeta` can't implement `Clone` because it contains
+                // an `AtomicRefCell`, so we use this idiom instead of `vec!`.
+                schemas: std::iter::repeat_with(GraphNodeMeta::default)
+                    .take(graph.node_count())
+                    .collect(),
+                operations: FxHashMap::default(),
             };
 
             // Precompute the set of type indices that each operation
             // references directly.
-            for op in &spec.operations {
+            for op in &raw.spec.operations {
                 metadata.operations.entry(ByAddress(op)).or_default().types = op
                     .types()
                     .filter_map(|ty| {
-                        indices
-                            .get(&IrGraphNode::from_ref(spec, ty.as_ref()))
-                            .map(|node| node.index())
+                        let node = match ty {
+                            IrType::Schema(ty) => GraphNode::Schema(ty),
+                            IrType::Inline(ty) => GraphNode::Inline(ty),
+                            IrType::Ref(r) => graph[schemas[r.name()]],
+                        };
+                        indices.get(&node).map(|node| node.index())
                     })
                     .collect();
             }
@@ -122,7 +217,7 @@ impl<'a> IrGraph<'a> {
 
                 // Compute dependencies between SCCs.
                 let mut scc_deps =
-                    vec![FixedBitSet::with_capacity(g.node_count()); sccs.scc_count()];
+                    vec![FixedBitSet::with_capacity(graph.node_count()); sccs.scc_count()];
                 for (scc, deps) in scc_deps.iter_mut().enumerate() {
                     // Include the SCC itself, so that cycle members appear
                     // in each other's dependencies; and its
@@ -137,46 +232,35 @@ impl<'a> IrGraph<'a> {
                 // Expand SCC dependencies to node dependencies, and
                 // transpose dependencies to build dependents.
                 let mut node_dependents =
-                    vec![FixedBitSet::with_capacity(g.node_count()); g.node_count()];
-                for node in g.node_indices() {
+                    vec![FixedBitSet::with_capacity(graph.node_count()); graph.node_count()];
+                for node in graph.node_indices() {
                     let mut deps = scc_deps[sccs.topo_index(node)].clone();
                     deps.remove(node.index()); // We don't depend on ourselves.
                     for dep in deps.ones() {
                         node_dependents[dep].insert(node.index());
                     }
-                    metadata.schemas.entry(node).or_default().dependencies = deps;
+                    metadata.schemas[node.index()].dependencies = deps;
                 }
                 for (index, dependents) in node_dependents.into_iter().enumerate() {
-                    metadata
-                        .schemas
-                        .entry(NodeIndex::new(index))
-                        .or_default()
-                        .dependents = dependents;
+                    metadata.schemas[index].dependents = dependents;
                 }
             }
 
             // Backward propagation: propagate each operation to all the
             // types that it uses, directly and transitively.
-            for op in &spec.operations {
+            for op in &raw.spec.operations {
                 let meta = &metadata.operations[&ByAddress(op)];
 
                 // Collect all the types that this operation depends on.
-                let mut transitive_deps = FixedBitSet::with_capacity(g.node_count());
-                for node in meta.types.ones().map(NodeIndex::new) {
-                    transitive_deps.insert(node.index());
-                    if let Some(meta) = metadata.schemas.get(&node) {
-                        transitive_deps.union_with(&meta.dependencies);
-                    }
+                let mut transitive_deps = FixedBitSet::with_capacity(graph.node_count());
+                for node in meta.types.ones() {
+                    transitive_deps.insert(node);
+                    transitive_deps.union_with(&metadata.schemas[node].dependencies);
                 }
 
                 // Mark each type as being used by this operation.
-                for node in transitive_deps.ones().map(NodeIndex::new) {
-                    metadata
-                        .schemas
-                        .entry(node)
-                        .or_default()
-                        .used_by
-                        .insert(ByAddress(op));
+                for node in transitive_deps.ones() {
+                    metadata.schemas[node].used_by.insert(ByAddress(op));
                 }
             }
 
@@ -184,10 +268,22 @@ impl<'a> IrGraph<'a> {
         };
 
         Self {
-            spec,
+            spec: raw.spec,
             indices,
-            g,
+            schemas,
+            graph,
             metadata,
+        }
+    }
+
+    /// Resolves an [`IrType`] to a [`GraphNode`], following
+    /// [`IrType::Ref`]s through the spec.
+    #[inline]
+    pub(super) fn resolve(&self, ty: &'a IrType<'a>) -> GraphNode<'a> {
+        match ty {
+            IrType::Schema(ty) => GraphNode::Schema(ty),
+            IrType::Inline(ty) => GraphNode::Inline(ty),
+            IrType::Ref(r) => self.graph[self.schemas[r.name()]],
         }
     }
 
@@ -200,10 +296,10 @@ impl<'a> IrGraph<'a> {
     /// Returns an iterator over all the named schemas in this graph.
     #[inline]
     pub fn schemas(&self) -> impl Iterator<Item = SchemaIrTypeView<'_>> {
-        self.g
+        self.graph
             .node_indices()
-            .filter_map(|index| match self.g[index] {
-                IrGraphNode::Schema(ty) => Some(SchemaIrTypeView::new(self, index, ty)),
+            .filter_map(|index| match self.graph[index] {
+                GraphNode::Schema(ty) => Some(SchemaIrTypeView::new(self, index, ty)),
                 _ => None,
             })
     }
@@ -211,11 +307,11 @@ impl<'a> IrGraph<'a> {
     /// Returns an iterator over all primitive type nodes in this graph.
     #[inline]
     pub fn primitives(&self) -> impl Iterator<Item = IrPrimitiveView<'_>> {
-        self.g
+        self.graph
             .node_indices()
-            .filter_map(|index| match self.g[index] {
-                IrGraphNode::Schema(SchemaIrType::Primitive(_, p))
-                | IrGraphNode::Inline(InlineIrType::Primitive(_, p)) => {
+            .filter_map(|index| match self.graph[index] {
+                GraphNode::Schema(SchemaIrType::Primitive(_, p))
+                | GraphNode::Inline(InlineIrType::Primitive(_, p)) => {
                     Some(IrPrimitiveView::new(self, index, *p))
                 }
                 _ => None,
@@ -239,21 +335,9 @@ impl<'a> IrGraph<'a> {
 /// will be equal. This is important: all types in an [`IrSpec`] are
 /// distinct in memory, but can refer to the same logical type.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-pub enum IrGraphNode<'a> {
+pub enum GraphNode<'a> {
     Schema(&'a SchemaIrType<'a>),
     Inline(&'a InlineIrType<'a>),
-}
-
-impl<'a> IrGraphNode<'a> {
-    /// Converts an [`IrTypeRef`] to an [`IrGraphNode`],
-    /// recursively resolving referenced schemas.
-    pub fn from_ref(spec: &'a IrSpec<'a>, ty: IrTypeRef<'a>) -> Self {
-        match ty {
-            IrTypeRef::Schema(ty) => IrGraphNode::Schema(ty),
-            IrTypeRef::Inline(ty) => IrGraphNode::Inline(ty),
-            IrTypeRef::Ref(r) => Self::from_ref(spec, spec.schemas[r.name()].as_ref()),
-        }
-    }
 }
 
 /// An edge between two types in the type graph.
@@ -267,18 +351,18 @@ pub enum EdgeKind {
 
 /// Precomputed metadata for schema types and operations in the graph.
 #[derive(Debug, Default)]
-pub struct IrGraphMetadata<'a> {
+pub struct CookedGraphMetadata<'a> {
     /// Maps each node index to its strongly connected component index.
     /// Nodes in the same SCC form a cycle.
     pub scc_indices: Vec<usize>,
-    pub schemas: FxHashMap<NodeIndex<usize>, IrGraphNodeMeta<'a>>,
-    pub operations: FxHashMap<ByAddress<&'a IrOperation<'a>>, IrGraphOperationMeta>,
+    pub schemas: Vec<GraphNodeMeta<'a>>,
+    pub operations: FxHashMap<ByAddress<&'a IrOperation<'a>>, GraphOperationMeta>,
 }
 
 /// Precomputed metadata for an operation that references
 /// types in the graph.
 #[derive(Debug, Default)]
-pub struct IrGraphOperationMeta {
+pub struct GraphOperationMeta {
     /// Indices of all the types that this operation directly depends on:
     /// parameters, request body, and response body.
     pub types: FixedBitSet,
@@ -286,7 +370,7 @@ pub struct IrGraphOperationMeta {
 
 /// Precomputed metadata for a schema type in the graph.
 #[derive(Default)]
-pub(super) struct IrGraphNodeMeta<'a> {
+pub(super) struct GraphNodeMeta<'a> {
     /// Operations that use this type.
     pub used_by: FxHashSet<ByAddress<&'a IrOperation<'a>>>,
     /// Indices of other types that this type transitively depends on.
@@ -297,9 +381,9 @@ pub(super) struct IrGraphNodeMeta<'a> {
     pub extensions: AtomicRefCell<ExtensionMap>,
 }
 
-impl Debug for IrGraphNodeMeta<'_> {
+impl Debug for GraphNodeMeta<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("IrGraphNodeMeta")
+        f.debug_struct("GraphNodeMeta")
             .field("used_by", &self.used_by)
             .field("dependencies", &self.dependencies)
             .field("dependents", &self.dependents)
@@ -498,7 +582,7 @@ pub enum Traversal {
 /// Use [`Traverse::run`] with a filter to control which nodes are
 /// yielded and explored.
 pub struct Traverse<'a> {
-    graph: &'a IrGraphG<'a>,
+    graph: &'a CookedDiGraph<'a>,
     stack: VecDeque<(EdgeKind, NodeIndex<usize>)>,
     discovered: EnumMap<EdgeKind, FixedBitSet>,
     direction: Direction,
@@ -506,7 +590,7 @@ pub struct Traverse<'a> {
 
 impl<'a> Traverse<'a> {
     pub fn from_roots(
-        graph: &'a IrGraphG<'a>,
+        graph: &'a CookedDiGraph<'a>,
         roots: EnumMap<EdgeKind, FixedBitSet>,
         direction: Direction,
     ) -> Self {
@@ -525,7 +609,7 @@ impl<'a> Traverse<'a> {
     }
 
     pub fn from_neighbors(
-        graph: &'a IrGraphG<'a>,
+        graph: &'a CookedDiGraph<'a>,
         root: NodeIndex<usize>,
         direction: Direction,
     ) -> Self {
@@ -584,7 +668,7 @@ impl<'a> Traverse<'a> {
 /// Returns the neighbors of `node` in the given `direction`,
 /// grouped by their [`EdgeKind`].
 fn neighbors(
-    graph: &IrGraphG<'_>,
+    graph: &CookedDiGraph<'_>,
     node: NodeIndex<usize>,
     direction: Direction,
 ) -> EnumMap<EdgeKind, FixedBitSet> {

@@ -11,7 +11,7 @@ use petgraph::{
 
 use crate::{
     ir::{
-        graph::{EdgeKind, IrGraph, IrGraphNode, Traversal, Traverse},
+        graph::{CookedGraph, EdgeKind, GraphNode, Traversal, Traverse},
         types::{
             IrOperation, IrParameter, IrParameterInfo, IrParameterStyle, IrRequest, IrResponse,
         },
@@ -24,13 +24,14 @@ use super::{Reach, View, inline::InlineIrTypeView, ir::IrTypeView};
 /// A graph-aware view of an [`IrOperation`].
 #[derive(Debug)]
 pub struct IrOperationView<'a> {
-    graph: &'a IrGraph<'a>,
+    cooked: &'a CookedGraph<'a>,
     op: &'a IrOperation<'a>,
 }
 
 impl<'a> IrOperationView<'a> {
-    pub(in crate::ir) fn new(graph: &'a IrGraph<'a>, op: &'a IrOperation<'a>) -> Self {
-        Self { graph, op }
+    #[inline]
+    pub(in crate::ir) fn new(cooked: &'a CookedGraph<'a>, op: &'a IrOperation<'a>) -> Self {
+        Self { cooked, op }
     }
 
     #[inline]
@@ -57,7 +58,7 @@ impl<'a> IrOperationView<'a> {
     #[inline]
     pub fn query(&self) -> impl Iterator<Item = IrParameterView<'a, IrQueryParameter>> + '_ {
         self.op.params.iter().filter_map(move |param| match param {
-            IrParameter::Query(info) => Some(IrParameterView::new(self.graph, info)),
+            IrParameter::Query(info) => Some(IrParameterView::new(self.cooked, info)),
             _ => None,
         })
     }
@@ -67,8 +68,8 @@ impl<'a> IrOperationView<'a> {
     pub fn request(&self) -> Option<IrRequestView<'a>> {
         self.op.request.as_ref().map(|ty| match ty {
             IrRequest::Json(ty) => {
-                let node = IrGraphNode::from_ref(self.graph.spec, ty.as_ref());
-                IrRequestView::Json(IrTypeView::new(self.graph, self.graph.indices[&node]))
+                let node = self.cooked.resolve(ty);
+                IrRequestView::Json(IrTypeView::new(self.cooked, self.cooked.indices[&node]))
             }
             IrRequest::Multipart => IrRequestView::Multipart,
         })
@@ -79,8 +80,8 @@ impl<'a> IrOperationView<'a> {
     pub fn response(&self) -> Option<IrResponseView<'a>> {
         self.op.response.as_ref().map(|ty| match ty {
             IrResponse::Json(ty) => {
-                let node = IrGraphNode::from_ref(self.graph.spec, ty.as_ref());
-                IrResponseView::Json(IrTypeView::new(self.graph, self.graph.indices[&node]))
+                let node = self.cooked.resolve(ty);
+                IrResponseView::Json(IrTypeView::new(self.cooked, self.cooked.indices[&node]))
             }
         })
     }
@@ -98,13 +99,13 @@ impl<'a> View<'a> for IrOperationView<'a> {
     /// contained within this operation's referenced types.
     #[inline]
     fn inlines(&self) -> impl Iterator<Item = InlineIrTypeView<'a>> + use<'a> {
-        let graph = self.graph;
+        let cooked = self.cooked;
         // Only include edges to other inline schemas.
-        let filtered = EdgeFiltered::from_fn(&graph.g, |r| {
-            matches!(graph.g[r.target()], IrGraphNode::Inline(_))
+        let filtered = EdgeFiltered::from_fn(&cooked.graph, |e| {
+            matches!(cooked.graph[e.target()], GraphNode::Inline(_))
         });
         let mut bfs = {
-            let meta = &self.graph.metadata.operations[&ByAddress(self.op)];
+            let meta = &self.cooked.metadata.operations[&ByAddress(self.op)];
             let stack = meta
                 .types
                 .ones()
@@ -113,18 +114,20 @@ impl<'a> View<'a> for IrOperationView<'a> {
                     // Exclude operation types that aren't inline schemas;
                     // those types, and their inlines, are already emitted
                     // as named schema types.
-                    matches!(graph.g[index], IrGraphNode::Inline(_))
+                    matches!(cooked.graph[index], GraphNode::Inline(_))
                 })
                 .collect();
-            let mut discovered = self.graph.g.visit_map();
+            let mut discovered = self.cooked.graph.visit_map();
             for &index in &stack {
                 discovered.visit(index);
             }
             Bfs { stack, discovered }
         };
-        std::iter::from_fn(move || bfs.next(&filtered)).filter_map(|index| match graph.g[index] {
-            IrGraphNode::Inline(ty) => Some(InlineIrTypeView::new(graph, index, ty)),
-            _ => None,
+        std::iter::from_fn(move || bfs.next(&filtered)).filter_map(|index| {
+            match cooked.graph[index] {
+                GraphNode::Inline(ty) => Some(InlineIrTypeView::new(cooked, index, ty)),
+                _ => None,
+            }
         })
     }
 
@@ -137,18 +140,18 @@ impl<'a> View<'a> for IrOperationView<'a> {
 
     #[inline]
     fn dependencies(&self) -> impl Iterator<Item = IrTypeView<'a>> + use<'a> {
-        let meta = &self.graph.metadata.operations[&ByAddress(self.op)];
+        let meta = &self.cooked.metadata.operations[&ByAddress(self.op)];
         let mut types = meta.types.clone();
         // Collect the transitive dependencies of each of the operation's
         // direct dependencies.
-        for node in meta.types.ones().map(NodeIndex::new) {
-            let meta = &self.graph.metadata.schemas[&node];
+        for node in meta.types.ones() {
+            let meta = &self.cooked.metadata.schemas[node];
             types.union_with(&meta.dependencies);
         }
         types
             .into_ones()
             .map(NodeIndex::new)
-            .map(|index| IrTypeView::new(self.graph, index))
+            .map(|index| IrTypeView::new(self.cooked, index))
     }
 
     /// Returns an empty iterator. Operations don't have dependents.
@@ -169,10 +172,10 @@ impl<'a> View<'a> for IrOperationView<'a> {
         either!(match reach {
             Reach::Dependents => std::iter::empty(),
             Reach::Dependencies => {
-                let graph = self.graph;
-                let meta = &graph.metadata.operations[&ByAddress(self.op)];
+                let cooked = self.cooked;
+                let meta = &cooked.metadata.operations[&ByAddress(self.op)];
                 let traverse = Traverse::from_roots(
-                    &graph.g,
+                    &cooked.graph,
                     enum_map! {
                         EdgeKind::Reference => meta.types.clone(),
                         EdgeKind::Inherits => FixedBitSet::new(),
@@ -181,10 +184,10 @@ impl<'a> View<'a> for IrOperationView<'a> {
                 );
                 traverse
                     .run(move |kind, index| {
-                        let view = IrTypeView::new(graph, index);
+                        let view = IrTypeView::new(cooked, index);
                         filter(kind, &view)
                     })
-                    .map(|index| IrTypeView::new(graph, index))
+                    .map(|index| IrTypeView::new(cooked, index))
             }
         })
     }
@@ -208,7 +211,7 @@ impl<'view, 'a> IrOperationViewPath<'view, 'a> {
             .params
             .iter()
             .filter_map(move |param| match param {
-                IrParameter::Path(info) => Some(IrParameterView::new(self.0.graph, info)),
+                IrParameter::Path(info) => Some(IrParameterView::new(self.0.cooked, info)),
                 _ => None,
             })
     }
@@ -217,15 +220,16 @@ impl<'view, 'a> IrOperationViewPath<'view, 'a> {
 /// A graph-aware view of an operation parameter.
 #[derive(Debug)]
 pub struct IrParameterView<'a, T> {
-    graph: &'a IrGraph<'a>,
+    cooked: &'a CookedGraph<'a>,
     info: &'a IrParameterInfo<'a>,
     phantom: PhantomData<T>,
 }
 
 impl<'a, T> IrParameterView<'a, T> {
-    pub(in crate::ir) fn new(graph: &'a IrGraph<'a>, info: &'a IrParameterInfo<'a>) -> Self {
+    #[inline]
+    pub(in crate::ir) fn new(cooked: &'a CookedGraph<'a>, info: &'a IrParameterInfo<'a>) -> Self {
         Self {
-            graph,
+            cooked,
             info,
             phantom: PhantomData,
         }
@@ -238,9 +242,8 @@ impl<'a, T> IrParameterView<'a, T> {
 
     #[inline]
     pub fn ty(&self) -> IrTypeView<'a> {
-        let graph = self.graph;
-        let node = IrGraphNode::from_ref(graph.spec, self.info.ty.as_ref());
-        IrTypeView::new(graph, graph.indices[&node])
+        let node = self.cooked.resolve(&self.info.ty);
+        IrTypeView::new(self.cooked, self.cooked.indices[&node])
     }
 
     #[inline]

@@ -142,7 +142,8 @@ mod tests {
 
     use cargo_toml::Package;
     use ploidy_core::{
-        ir::{IrGraph, IrSpec},
+        arena::Arena,
+        ir::{IrSpec, RawGraph},
         parse::Document,
     };
 
@@ -175,9 +176,9 @@ mod tests {
         "})
         .unwrap();
 
-        let spec = IrSpec::from_doc(&doc).unwrap();
-        let ir_graph = IrGraph::new(&spec);
-        let graph = CodegenGraph::new(ir_graph);
+        let arena = Arena::new();
+        let spec = IrSpec::from_doc(&arena, &doc).unwrap();
+        let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
         let manifest = CodegenCargoManifest::new(&graph, &default_manifest()).to_manifest();
 
         let keys = manifest
@@ -206,9 +207,9 @@ mod tests {
         "})
         .unwrap();
 
-        let spec = IrSpec::from_doc(&doc).unwrap();
-        let ir_graph = IrGraph::new(&spec);
-        let graph = CodegenGraph::new(ir_graph);
+        let arena = Arena::new();
+        let spec = IrSpec::from_doc(&arena, &doc).unwrap();
+        let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
         let manifest = CodegenCargoManifest::new(&graph, &default_manifest()).to_manifest();
 
         let keys = manifest
@@ -236,9 +237,9 @@ mod tests {
         "})
         .unwrap();
 
-        let spec = IrSpec::from_doc(&doc).unwrap();
-        let ir_graph = IrGraph::new(&spec);
-        let graph = CodegenGraph::new(ir_graph);
+        let arena = Arena::new();
+        let spec = IrSpec::from_doc(&arena, &doc).unwrap();
+        let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
         let manifest = CodegenCargoManifest::new(&graph, &default_manifest()).to_manifest();
 
         let keys = manifest
@@ -275,9 +276,9 @@ mod tests {
         "})
         .unwrap();
 
-        let spec = IrSpec::from_doc(&doc).unwrap();
-        let ir_graph = IrGraph::new(&spec);
-        let graph = CodegenGraph::new(ir_graph);
+        let arena = Arena::new();
+        let spec = IrSpec::from_doc(&arena, &doc).unwrap();
+        let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
         let manifest = CodegenCargoManifest::new(&graph, &default_manifest()).to_manifest();
 
         // `Customer` depends on `BillingInfo`, so the `customer` feature
@@ -319,9 +320,9 @@ mod tests {
         "})
         .unwrap();
 
-        let spec = IrSpec::from_doc(&doc).unwrap();
-        let ir_graph = IrGraph::new(&spec);
-        let graph = CodegenGraph::new(ir_graph);
+        let arena = Arena::new();
+        let spec = IrSpec::from_doc(&arena, &doc).unwrap();
+        let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
         let manifest = CodegenCargoManifest::new(&graph, &default_manifest()).to_manifest();
 
         // `Order` → `Customer` → `BillingInfo`, so `order` should
@@ -356,9 +357,9 @@ mod tests {
         "})
         .unwrap();
 
-        let spec = IrSpec::from_doc(&doc).unwrap();
-        let ir_graph = IrGraph::new(&spec);
-        let graph = CodegenGraph::new(ir_graph);
+        let arena = Arena::new();
+        let spec = IrSpec::from_doc(&arena, &doc).unwrap();
+        let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
         let manifest = CodegenCargoManifest::new(&graph, &default_manifest()).to_manifest();
 
         // `Customer` depends on `Address`, which doesn't have a resource.
@@ -391,9 +392,9 @@ mod tests {
         "})
         .unwrap();
 
-        let spec = IrSpec::from_doc(&doc).unwrap();
-        let ir_graph = IrGraph::new(&spec);
-        let graph = CodegenGraph::new(ir_graph);
+        let arena = Arena::new();
+        let spec = IrSpec::from_doc(&arena, &doc).unwrap();
+        let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
         let manifest = CodegenCargoManifest::new(&graph, &default_manifest()).to_manifest();
 
         // Self-referential schemas should not create self-dependencies.
@@ -443,9 +444,9 @@ mod tests {
         "})
         .unwrap();
 
-        let spec = IrSpec::from_doc(&doc).unwrap();
-        let ir_graph = IrGraph::new(&spec);
-        let graph = CodegenGraph::new(ir_graph);
+        let arena = Arena::new();
+        let spec = IrSpec::from_doc(&arena, &doc).unwrap();
+        let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
         let manifest = CodegenCargoManifest::new(&graph, &default_manifest()).to_manifest();
 
         // `listOrders` returns `Order`, which references `Customer`, so
@@ -493,9 +494,9 @@ mod tests {
         "})
         .unwrap();
 
-        let spec = IrSpec::from_doc(&doc).unwrap();
-        let ir_graph = IrGraph::new(&spec);
-        let graph = CodegenGraph::new(ir_graph);
+        let arena = Arena::new();
+        let spec = IrSpec::from_doc(&arena, &doc).unwrap();
+        let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
         let manifest = CodegenCargoManifest::new(&graph, &default_manifest()).to_manifest();
 
         // `listOrders` returns `Customer`, which references `Address`, but
@@ -549,9 +550,9 @@ mod tests {
         "})
         .unwrap();
 
-        let spec = IrSpec::from_doc(&doc).unwrap();
-        let ir_graph = IrGraph::new(&spec);
-        let graph = CodegenGraph::new(ir_graph);
+        let arena = Arena::new();
+        let spec = IrSpec::from_doc(&arena, &doc).unwrap();
+        let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
         let manifest = CodegenCargoManifest::new(&graph, &default_manifest()).to_manifest();
 
         // `a` depends directly on `b`, `c`; transitively on `d` though `b` and `c`.
@@ -616,9 +617,9 @@ mod tests {
         "})
         .unwrap();
 
-        let spec = IrSpec::from_doc(&doc).unwrap();
-        let ir_graph = IrGraph::new(&spec);
-        let graph = CodegenGraph::new(ir_graph);
+        let arena = Arena::new();
+        let spec = IrSpec::from_doc(&arena, &doc).unwrap();
+        let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
         let manifest = CodegenCargoManifest::new(&graph, &default_manifest()).to_manifest();
 
         // A depends on B (unnamed) and C. Since B is unnamed, A only depends on C.
@@ -675,9 +676,9 @@ mod tests {
         "})
         .unwrap();
 
-        let spec = IrSpec::from_doc(&doc).unwrap();
-        let ir_graph = IrGraph::new(&spec);
-        let graph = CodegenGraph::new(ir_graph);
+        let arena = Arena::new();
+        let spec = IrSpec::from_doc(&arena, &doc).unwrap();
+        let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
         let manifest = CodegenCargoManifest::new(&graph, &default_manifest()).to_manifest();
 
         // A transitively depends on B and C.
@@ -743,9 +744,9 @@ mod tests {
         "})
         .unwrap();
 
-        let spec = IrSpec::from_doc(&doc).unwrap();
-        let ir_graph = IrGraph::new(&spec);
-        let graph = CodegenGraph::new(ir_graph);
+        let arena = Arena::new();
+        let spec = IrSpec::from_doc(&arena, &doc).unwrap();
+        let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
         let manifest = CodegenCargoManifest::new(&graph, &default_manifest()).to_manifest();
 
         // The `default` feature should include all other features, but not itself.
@@ -774,9 +775,9 @@ mod tests {
         "})
         .unwrap();
 
-        let spec = IrSpec::from_doc(&doc).unwrap();
-        let ir_graph = IrGraph::new(&spec);
-        let graph = CodegenGraph::new(ir_graph);
+        let arena = Arena::new();
+        let spec = IrSpec::from_doc(&arena, &doc).unwrap();
+        let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
         let manifest = CodegenCargoManifest::new(&graph, &default_manifest()).to_manifest();
 
         // The `default` feature should include all named features.
@@ -805,9 +806,9 @@ mod tests {
             .dependencies
             .insert("serde".to_owned(), Dependency::Simple("1.0".to_owned()));
 
-        let spec = IrSpec::from_doc(&doc).unwrap();
-        let ir_graph = IrGraph::new(&spec);
-        let graph = CodegenGraph::new(ir_graph);
+        let arena = Arena::new();
+        let spec = IrSpec::from_doc(&arena, &doc).unwrap();
+        let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
         let manifest = CodegenCargoManifest::new(&graph, &manifest).to_manifest();
 
         let dep_names = manifest

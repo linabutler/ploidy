@@ -1,7 +1,7 @@
 use petgraph::graph::NodeIndex;
 
 use crate::ir::{
-    graph::IrGraph,
+    graph::CookedGraph,
     types::{IrEnum, IrEnumVariant},
 };
 
@@ -10,18 +10,19 @@ use super::ViewNode;
 /// A graph-aware view of an [`IrEnum`].
 #[derive(Debug)]
 pub struct IrEnumView<'a> {
-    graph: &'a IrGraph<'a>,
+    cooked: &'a CookedGraph<'a>,
     index: NodeIndex<usize>,
     ty: &'a IrEnum<'a>,
 }
 
 impl<'a> IrEnumView<'a> {
+    #[inline]
     pub(in crate::ir) fn new(
-        graph: &'a IrGraph<'a>,
+        cooked: &'a CookedGraph<'a>,
         index: NodeIndex<usize>,
         ty: &'a IrEnum<'a>,
     ) -> Self {
-        Self { graph, index, ty }
+        Self { cooked, index, ty }
     }
 
     #[inline]
@@ -37,8 +38,8 @@ impl<'a> IrEnumView<'a> {
 
 impl<'a> ViewNode<'a> for IrEnumView<'a> {
     #[inline]
-    fn graph(&self) -> &'a IrGraph<'a> {
-        self.graph
+    fn cooked(&self) -> &'a CookedGraph<'a> {
+        self.cooked
     }
 
     #[inline]

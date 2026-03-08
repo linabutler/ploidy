@@ -271,7 +271,8 @@ mod tests {
 
     use itertools::Itertools;
     use ploidy_core::{
-        ir::{IrGraph, IrSpec},
+        arena::Arena,
+        ir::{IrSpec, RawGraph},
         parse::Document,
     };
     use pretty_assertions::assert_eq;
@@ -452,9 +453,9 @@ mod tests {
         "})
         .unwrap();
 
-        let spec = IrSpec::from_doc(&doc).unwrap();
-        let ir_graph = IrGraph::new(&spec);
-        let graph = CodegenGraph::new(ir_graph);
+        let arena = Arena::new();
+        let spec = IrSpec::from_doc(&arena, &doc).unwrap();
+        let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
         let customer = graph.schemas().find(|s| s.name() == "Customer").unwrap();
 
@@ -483,9 +484,9 @@ mod tests {
         "})
         .unwrap();
 
-        let spec = IrSpec::from_doc(&doc).unwrap();
-        let ir_graph = IrGraph::new(&spec);
-        let graph = CodegenGraph::new(ir_graph);
+        let arena = Arena::new();
+        let spec = IrSpec::from_doc(&arena, &doc).unwrap();
+        let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
         let customer = graph.schemas().find(|s| s.name() == "Customer").unwrap();
         let cfg = CfgFeature::for_schema_type(&customer);
@@ -520,9 +521,9 @@ mod tests {
         "})
         .unwrap();
 
-        let spec = IrSpec::from_doc(&doc).unwrap();
-        let ir_graph = IrGraph::new(&spec);
-        let graph = CodegenGraph::new(ir_graph);
+        let arena = Arena::new();
+        let spec = IrSpec::from_doc(&arena, &doc).unwrap();
+        let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
         // `Customer` should be gated.
         let customer = graph.schemas().find(|s| s.name() == "Customer").unwrap();
@@ -570,9 +571,9 @@ mod tests {
         "})
         .unwrap();
 
-        let spec = IrSpec::from_doc(&doc).unwrap();
-        let ir_graph = IrGraph::new(&spec);
-        let graph = CodegenGraph::new(ir_graph);
+        let arena = Arena::new();
+        let spec = IrSpec::from_doc(&arena, &doc).unwrap();
+        let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
         let customer = graph.schemas().find(|s| s.name() == "Customer").unwrap();
         let cfg = CfgFeature::for_schema_type(&customer);
@@ -626,9 +627,9 @@ mod tests {
         "})
         .unwrap();
 
-        let spec = IrSpec::from_doc(&doc).unwrap();
-        let ir_graph = IrGraph::new(&spec);
-        let graph = CodegenGraph::new(ir_graph);
+        let arena = Arena::new();
+        let spec = IrSpec::from_doc(&arena, &doc).unwrap();
+        let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
         let address = graph.schemas().find(|s| s.name() == "Address").unwrap();
         let cfg = CfgFeature::for_schema_type(&address);
@@ -671,9 +672,9 @@ mod tests {
         "})
         .unwrap();
 
-        let spec = IrSpec::from_doc(&doc).unwrap();
-        let ir_graph = IrGraph::new(&spec);
-        let graph = CodegenGraph::new(ir_graph);
+        let arena = Arena::new();
+        let spec = IrSpec::from_doc(&arena, &doc).unwrap();
+        let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
         let customer = graph.schemas().find(|s| s.name() == "Customer").unwrap();
         let cfg = CfgFeature::for_schema_type(&customer);
@@ -725,9 +726,9 @@ mod tests {
         "})
         .unwrap();
 
-        let spec = IrSpec::from_doc(&doc).unwrap();
-        let ir_graph = IrGraph::new(&spec);
-        let graph = CodegenGraph::new(ir_graph);
+        let arena = Arena::new();
+        let spec = IrSpec::from_doc(&arena, &doc).unwrap();
+        let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
         let customer = graph.schemas().find(|s| s.name() == "Customer").unwrap();
         let cfg = CfgFeature::for_schema_type(&customer);
@@ -777,9 +778,9 @@ mod tests {
         "})
         .unwrap();
 
-        let spec = IrSpec::from_doc(&doc).unwrap();
-        let ir_graph = IrGraph::new(&spec);
-        let graph = CodegenGraph::new(ir_graph);
+        let arena = Arena::new();
+        let spec = IrSpec::from_doc(&arena, &doc).unwrap();
+        let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
         // `Customer` keeps its compound feature gate (own + used by).
         let customer = graph.schemas().find(|s| s.name() == "Customer").unwrap();
@@ -825,9 +826,9 @@ mod tests {
         "})
         .unwrap();
 
-        let spec = IrSpec::from_doc(&doc).unwrap();
-        let ir_graph = IrGraph::new(&spec);
-        let graph = CodegenGraph::new(ir_graph);
+        let arena = Arena::new();
+        let spec = IrSpec::from_doc(&arena, &doc).unwrap();
+        let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
         let simple = graph.schemas().find(|s| s.name() == "Simple").unwrap();
         let cfg = CfgFeature::for_schema_type(&simple);
@@ -871,9 +872,9 @@ mod tests {
         "})
         .unwrap();
 
-        let spec = IrSpec::from_doc(&doc).unwrap();
-        let ir_graph = IrGraph::new(&spec);
-        let graph = CodegenGraph::new(ir_graph);
+        let arena = Arena::new();
+        let spec = IrSpec::from_doc(&arena, &doc).unwrap();
+        let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
         // In a cycle involving B, all types become ungated, because
         // B depends on C, which depends on A, which depends on B.
@@ -923,9 +924,9 @@ mod tests {
         "})
         .unwrap();
 
-        let spec = IrSpec::from_doc(&doc).unwrap();
-        let ir_graph = IrGraph::new(&spec);
-        let graph = CodegenGraph::new(ir_graph);
+        let arena = Arena::new();
+        let spec = IrSpec::from_doc(&arena, &doc).unwrap();
+        let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
         // Each type uses just its own feature; Cargo feature dependencies
         // handle the transitive requirements.
@@ -976,9 +977,9 @@ mod tests {
         "})
         .unwrap();
 
-        let spec = IrSpec::from_doc(&doc).unwrap();
-        let ir_graph = IrGraph::new(&spec);
-        let graph = CodegenGraph::new(ir_graph);
+        let arena = Arena::new();
+        let spec = IrSpec::from_doc(&arena, &doc).unwrap();
+        let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
         let ops = graph.operations().collect_vec();
         let inlines = ops.iter().flat_map(|op| op.inlines()).collect_vec();
@@ -1054,9 +1055,9 @@ mod tests {
         "})
         .unwrap();
 
-        let spec = IrSpec::from_doc(&doc).unwrap();
-        let ir_graph = IrGraph::new(&spec);
-        let graph = CodegenGraph::new(ir_graph);
+        let arena = Arena::new();
+        let spec = IrSpec::from_doc(&arena, &doc).unwrap();
+        let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
         let op = graph.operations().find(|o| o.id() == "getThings").unwrap();
         let cfg = CfgFeature::for_operation(&op);
@@ -1110,9 +1111,9 @@ mod tests {
         "})
         .unwrap();
 
-        let spec = IrSpec::from_doc(&doc).unwrap();
-        let ir_graph = IrGraph::new(&spec);
-        let graph = CodegenGraph::new(ir_graph);
+        let arena = Arena::new();
+        let spec = IrSpec::from_doc(&arena, &doc).unwrap();
+        let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
         let op = graph.operations().find(|o| o.id() == "getThings").unwrap();
         let cfg = CfgFeature::for_operation(&op);
@@ -1165,9 +1166,9 @@ mod tests {
         "})
         .unwrap();
 
-        let spec = IrSpec::from_doc(&doc).unwrap();
-        let ir_graph = IrGraph::new(&spec);
-        let graph = CodegenGraph::new(ir_graph);
+        let arena = Arena::new();
+        let spec = IrSpec::from_doc(&arena, &doc).unwrap();
+        let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
         let op = graph.operations().find(|o| o.id() == "getThings").unwrap();
         let cfg = CfgFeature::for_operation(&op);
@@ -1225,9 +1226,9 @@ mod tests {
         "})
         .unwrap();
 
-        let spec = IrSpec::from_doc(&doc).unwrap();
-        let ir_graph = IrGraph::new(&spec);
-        let graph = CodegenGraph::new(ir_graph);
+        let arena = Arena::new();
+        let spec = IrSpec::from_doc(&arena, &doc).unwrap();
+        let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
         let op = graph.operations().find(|o| o.id() == "getThings").unwrap();
         let cfg = CfgFeature::for_operation(&op);
@@ -1288,9 +1289,9 @@ mod tests {
         "})
         .unwrap();
 
-        let spec = IrSpec::from_doc(&doc).unwrap();
-        let ir_graph = IrGraph::new(&spec);
-        let graph = CodegenGraph::new(ir_graph);
+        let arena = Arena::new();
+        let spec = IrSpec::from_doc(&arena, &doc).unwrap();
+        let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
         let op = graph.operations().find(|o| o.id() == "getThings").unwrap();
         let cfg = CfgFeature::for_operation(&op);
@@ -1319,9 +1320,9 @@ mod tests {
         "})
         .unwrap();
 
-        let spec = IrSpec::from_doc(&doc).unwrap();
-        let ir_graph = IrGraph::new(&spec);
-        let graph = CodegenGraph::new(ir_graph);
+        let arena = Arena::new();
+        let spec = IrSpec::from_doc(&arena, &doc).unwrap();
+        let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
         let op = graph
             .operations()
@@ -1379,9 +1380,9 @@ mod tests {
         "})
         .unwrap();
 
-        let spec = IrSpec::from_doc(&doc).unwrap();
-        let ir_graph = IrGraph::new(&spec);
-        let graph = CodegenGraph::new(ir_graph);
+        let arena = Arena::new();
+        let spec = IrSpec::from_doc(&arena, &doc).unwrap();
+        let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
         let ops = graph.operations().collect_vec();
         let inlines = ops.iter().flat_map(|op| op.inlines()).collect_vec();

@@ -6,7 +6,7 @@ use petgraph::{
 use rustc_hash::FxHashSet;
 
 use crate::ir::{
-    graph::{EdgeKind, IrGraph, IrGraphNode},
+    graph::{CookedGraph, EdgeKind, GraphNode},
     types::{InlineIrType, IrStruct, IrStructField, IrStructFieldName, SchemaIrType},
 };
 
@@ -15,18 +15,19 @@ use super::{ViewNode, ir::IrTypeView};
 /// A graph-aware view of an [`IrStruct`].
 #[derive(Debug)]
 pub struct IrStructView<'a> {
-    graph: &'a IrGraph<'a>,
+    cooked: &'a CookedGraph<'a>,
     index: NodeIndex<usize>,
     ty: &'a IrStruct<'a>,
 }
 
 impl<'a> IrStructView<'a> {
+    #[inline]
     pub(in crate::ir) fn new(
-        graph: &'a IrGraph<'a>,
+        cooked: &'a CookedGraph<'a>,
         index: NodeIndex<usize>,
         ty: &'a IrStruct<'a>,
     ) -> Self {
-        Self { graph, index, ty }
+        Self { cooked, index, ty }
     }
 
     #[inline]
@@ -42,14 +43,15 @@ impl<'a> IrStructView<'a> {
         // Walk inheritance edges in post-order so that the most distant
         // ancestors are yielded first. `DfsPostOrder` also tracks visited
         // nodes internally, which handles circular `allOf` references.
-        let inherits =
-            EdgeFiltered::from_fn(&self.graph.g, |e| matches!(e.weight(), EdgeKind::Inherits));
+        let inherits = EdgeFiltered::from_fn(&self.cooked.graph, |e| {
+            matches!(e.weight(), EdgeKind::Inherits)
+        });
         let mut dfs = DfsPostOrder::new(&inherits, self.index);
         let ancestors = std::iter::from_fn(move || dfs.next(&inherits))
             .filter(move |&index| index != self.index)
-            .filter_map(|index| match &self.graph.g[index] {
-                IrGraphNode::Schema(SchemaIrType::Struct(_, s))
-                | IrGraphNode::Inline(InlineIrType::Struct(_, s)) => Some(s),
+            .filter_map(|index| match &self.cooked.graph[index] {
+                GraphNode::Schema(SchemaIrType::Struct(_, s))
+                | GraphNode::Inline(InlineIrType::Struct(_, s)) => Some(s),
                 _ => None,
             });
 
@@ -88,16 +90,16 @@ impl<'a> IrStructView<'a> {
     #[inline]
     pub fn parents(&self) -> impl Iterator<Item = IrTypeView<'a>> + '_ {
         self.ty.parents.iter().map(move |parent| {
-            let node = IrGraphNode::from_ref(self.graph.spec, parent.as_ref());
-            IrTypeView::new(self.graph, self.graph.indices[&node])
+            let node = self.cooked.resolve(parent);
+            IrTypeView::new(self.cooked, self.cooked.indices[&node])
         })
     }
 }
 
 impl<'a> ViewNode<'a> for IrStructView<'a> {
     #[inline]
-    fn graph(&self) -> &'a IrGraph<'a> {
-        self.graph
+    fn cooked(&self) -> &'a CookedGraph<'a> {
+        self.cooked
     }
 
     #[inline]
@@ -123,8 +125,8 @@ impl<'view, 'a> IrStructFieldView<'view, 'a> {
     /// Returns a view of the inner type that this type wraps.
     #[inline]
     pub fn ty(&self) -> IrTypeView<'a> {
-        let node = IrGraphNode::from_ref(self.parent.graph.spec, self.field.ty.as_ref());
-        IrTypeView::new(self.parent.graph, self.parent.graph.indices[&node])
+        let node = self.parent.cooked.resolve(&self.field.ty);
+        IrTypeView::new(self.parent.cooked, self.parent.cooked.indices[&node])
     }
 
     #[inline]
@@ -143,7 +145,6 @@ impl<'view, 'a> IrStructFieldView<'view, 'a> {
     /// in its parent struct's definition, if it's named as an ancestor struct's
     /// discriminator, or if its parent struct is a variant of a tagged union
     /// whose `tag` matches this field's name.
-    #[inline]
     pub fn discriminator(&self) -> bool {
         let IrStructFieldName::Name(name) = self.field.name else {
             return false;
@@ -151,14 +152,14 @@ impl<'view, 'a> IrStructFieldView<'view, 'a> {
 
         // Check if our parent struct, or any of its ancestors,
         // declare this field as a discriminator.
-        let inherits = EdgeFiltered::from_fn(&self.parent.graph.g, |e| {
+        let inherits = EdgeFiltered::from_fn(&self.parent.cooked.graph, |e| {
             matches!(*e.weight(), EdgeKind::Inherits)
         });
         let mut bfs = Bfs::new(&inherits, self.parent.index);
         let is_ancestor_discriminator = std::iter::from_fn(|| bfs.next(&inherits))
-            .filter_map(|index| match self.parent.graph.g[index] {
-                IrGraphNode::Schema(SchemaIrType::Struct(_, s))
-                | IrGraphNode::Inline(InlineIrType::Struct(_, s)) => Some(s),
+            .filter_map(|index| match self.parent.cooked.graph[index] {
+                GraphNode::Schema(SchemaIrType::Struct(_, s))
+                | GraphNode::Inline(InlineIrType::Struct(_, s)) => Some(s),
                 _ => None,
             })
             .any(|ancestor| ancestor.discriminator == Some(name));
@@ -169,12 +170,12 @@ impl<'view, 'a> IrStructFieldView<'view, 'a> {
         // Check whether any tagged unions that include our parent struct
         // declare this field as their discriminators.
         self.parent
+            .cooked
             .graph
-            .g
             .neighbors_directed(self.parent.index, Direction::Incoming)
-            .filter_map(|index| match self.parent.graph.g[index] {
-                IrGraphNode::Schema(SchemaIrType::Tagged(_, tagged))
-                | IrGraphNode::Inline(InlineIrType::Tagged(_, tagged)) => Some(tagged),
+            .filter_map(|index| match self.parent.cooked.graph[index] {
+                GraphNode::Schema(SchemaIrType::Tagged(_, tagged))
+                | GraphNode::Inline(InlineIrType::Tagged(_, tagged)) => Some(tagged),
                 _ => None,
             })
             .any(|neighbor| neighbor.tag == name)
@@ -197,8 +198,8 @@ impl<'view, 'a> IrStructFieldView<'view, 'a> {
     /// connected component as the struct that contains it.
     #[inline]
     pub fn needs_indirection(&self) -> bool {
-        let graph = self.parent.graph;
-        let node = IrGraphNode::from_ref(graph.spec, self.field.ty.as_ref());
+        let graph = self.parent.cooked;
+        let node = graph.resolve(&self.field.ty);
         let target = graph.indices[&node];
         graph.metadata.scc_indices[self.parent.index.index()]
             == graph.metadata.scc_indices[target.index()]

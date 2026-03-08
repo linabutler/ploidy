@@ -54,7 +54,6 @@ impl ToTokens for CodegenTagged<'_> {
                 // Look up the proper Rust type name.
                 let view = variant.ty();
                 let variant_name = CodegenIdentUsage::Variant(&scope.uniquify(variant.name()));
-                let rust_type_name = CodegenRef::new(&view);
 
                 // Add `#[serde(alias = ...)]` attributes for multiple
                 // discriminator values that map to the same type.
@@ -73,6 +72,7 @@ impl ToTokens for CodegenTagged<'_> {
                     }
                 };
 
+                let rust_type_name = CodegenRef::new(&view);
                 let v = quote! {
                     #serde_attr
                     #variant_name(#rust_type_name),
@@ -118,7 +118,8 @@ mod tests {
     use super::*;
 
     use ploidy_core::{
-        ir::{IrGraph, IrSpec, SchemaIrTypeView},
+        arena::Arena,
+        ir::{IrSpec, RawGraph, SchemaIrTypeView},
         parse::Document,
     };
     use pretty_assertions::assert_eq;
@@ -157,9 +158,9 @@ mod tests {
         "})
         .unwrap();
 
-        let spec = IrSpec::from_doc(&doc).unwrap();
-        let ir = IrGraph::new(&spec);
-        let graph = CodegenGraph::new(ir);
+        let arena = Arena::new();
+        let spec = IrSpec::from_doc(&arena, &doc).unwrap();
+        let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
         let schema = graph.schemas().find(|s| s.name() == "Pet");
         let Some(schema @ SchemaIrTypeView::Tagged(_, tagged)) = &schema else {
@@ -224,9 +225,9 @@ mod tests {
         "})
         .unwrap();
 
-        let spec = IrSpec::from_doc(&doc).unwrap();
-        let ir = IrGraph::new(&spec);
-        let graph = CodegenGraph::new(ir);
+        let arena = Arena::new();
+        let spec = IrSpec::from_doc(&arena, &doc).unwrap();
+        let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
         let schema = graph.schemas().find(|s| s.name() == "Pet");
         let Some(schema @ SchemaIrTypeView::Tagged(_, tagged)) = &schema else {
@@ -286,9 +287,9 @@ mod tests {
         "})
         .unwrap();
 
-        let spec = IrSpec::from_doc(&doc).unwrap();
-        let ir = IrGraph::new(&spec);
-        let graph = CodegenGraph::new(ir);
+        let arena = Arena::new();
+        let spec = IrSpec::from_doc(&arena, &doc).unwrap();
+        let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
         let schema = graph.schemas().find(|s| s.name() == "Pet");
         let Some(schema @ SchemaIrTypeView::Tagged(_, tagged)) = &schema else {
@@ -347,9 +348,9 @@ mod tests {
         "})
         .unwrap();
 
-        let spec = IrSpec::from_doc(&doc).unwrap();
-        let ir = IrGraph::new(&spec);
-        let graph = CodegenGraph::new(ir);
+        let arena = Arena::new();
+        let spec = IrSpec::from_doc(&arena, &doc).unwrap();
+        let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
         let schema = graph.schemas().find(|s| s.name() == "Pet");
         let Some(schema @ SchemaIrTypeView::Tagged(_, tagged)) = &schema else {

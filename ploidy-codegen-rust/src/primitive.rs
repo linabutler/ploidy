@@ -72,7 +72,8 @@ mod tests {
 
     use itertools::Itertools;
     use ploidy_core::{
-        ir::{IrGraph, IrSpec},
+        arena::Arena,
+        ir::{IrSpec, RawGraph},
         parse::Document,
     };
     use pretty_assertions::assert_eq;
@@ -94,8 +95,9 @@ mod tests {
                   type: string
         "})
         .unwrap();
-        let spec = IrSpec::from_doc(&doc).unwrap();
-        let graph = CodegenGraph::new(IrGraph::new(&spec));
+        let arena = Arena::new();
+        let spec = IrSpec::from_doc(&arena, &doc).unwrap();
+        let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
         let primitives = graph.primitives().collect_vec();
         let [ty] = &*primitives else {
             panic!("expected string; got `{primitives:?}`");
@@ -125,8 +127,9 @@ mod tests {
                       format: int8
         "})
         .unwrap();
-        let spec = IrSpec::from_doc(&doc).unwrap();
-        let graph = CodegenGraph::new(IrGraph::new(&spec));
+        let arena = Arena::new();
+        let spec = IrSpec::from_doc(&arena, &doc).unwrap();
+        let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
         let primitives = graph.primitives().collect_vec();
         let [ty] = &*primitives else {
             panic!("expected i8; got `{primitives:?}`");
@@ -156,8 +159,9 @@ mod tests {
                       format: uint8
         "})
         .unwrap();
-        let spec = IrSpec::from_doc(&doc).unwrap();
-        let graph = CodegenGraph::new(IrGraph::new(&spec));
+        let arena = Arena::new();
+        let spec = IrSpec::from_doc(&arena, &doc).unwrap();
+        let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
         let primitives = graph.primitives().collect_vec();
         let [ty] = &*primitives else {
             panic!("expected u8; got `{primitives:?}`");
@@ -187,8 +191,9 @@ mod tests {
                       format: int16
         "})
         .unwrap();
-        let spec = IrSpec::from_doc(&doc).unwrap();
-        let graph = CodegenGraph::new(IrGraph::new(&spec));
+        let arena = Arena::new();
+        let spec = IrSpec::from_doc(&arena, &doc).unwrap();
+        let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
         let primitives = graph.primitives().collect_vec();
         let [ty] = &*primitives else {
             panic!("expected i16; got `{primitives:?}`");
@@ -218,8 +223,9 @@ mod tests {
                       format: uint16
         "})
         .unwrap();
-        let spec = IrSpec::from_doc(&doc).unwrap();
-        let graph = CodegenGraph::new(IrGraph::new(&spec));
+        let arena = Arena::new();
+        let spec = IrSpec::from_doc(&arena, &doc).unwrap();
+        let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
         let primitives = graph.primitives().collect_vec();
         let [ty] = &*primitives else {
             panic!("expected u16; got `{primitives:?}`");
@@ -249,8 +255,9 @@ mod tests {
                       format: int32
         "})
         .unwrap();
-        let spec = IrSpec::from_doc(&doc).unwrap();
-        let graph = CodegenGraph::new(IrGraph::new(&spec));
+        let arena = Arena::new();
+        let spec = IrSpec::from_doc(&arena, &doc).unwrap();
+        let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
         let primitives = graph.primitives().collect_vec();
         let [ty] = &*primitives else {
             panic!("expected string; got `{primitives:?}`");
@@ -280,8 +287,9 @@ mod tests {
                       format: uint32
         "})
         .unwrap();
-        let spec = IrSpec::from_doc(&doc).unwrap();
-        let graph = CodegenGraph::new(IrGraph::new(&spec));
+        let arena = Arena::new();
+        let spec = IrSpec::from_doc(&arena, &doc).unwrap();
+        let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
         let primitives = graph.primitives().collect_vec();
         let [ty] = &*primitives else {
             panic!("expected u32; got `{primitives:?}`");
@@ -311,8 +319,9 @@ mod tests {
                       format: int64
         "})
         .unwrap();
-        let spec = IrSpec::from_doc(&doc).unwrap();
-        let graph = CodegenGraph::new(IrGraph::new(&spec));
+        let arena = Arena::new();
+        let spec = IrSpec::from_doc(&arena, &doc).unwrap();
+        let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
         let primitives = graph.primitives().collect_vec();
         let [ty] = &*primitives else {
             panic!("expected i64; got `{primitives:?}`");
@@ -342,8 +351,9 @@ mod tests {
                       format: uint64
         "})
         .unwrap();
-        let spec = IrSpec::from_doc(&doc).unwrap();
-        let graph = CodegenGraph::new(IrGraph::new(&spec));
+        let arena = Arena::new();
+        let spec = IrSpec::from_doc(&arena, &doc).unwrap();
+        let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
         let primitives = graph.primitives().collect_vec();
         let [ty] = &*primitives else {
             panic!("expected u64; got `{primitives:?}`");
@@ -373,8 +383,9 @@ mod tests {
                       format: float
         "})
         .unwrap();
-        let spec = IrSpec::from_doc(&doc).unwrap();
-        let graph = CodegenGraph::new(IrGraph::new(&spec));
+        let arena = Arena::new();
+        let spec = IrSpec::from_doc(&arena, &doc).unwrap();
+        let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
         let primitives = graph.primitives().collect_vec();
         let [ty] = &*primitives else {
             panic!("expected f32; got `{primitives:?}`");
@@ -404,8 +415,9 @@ mod tests {
                       format: double
         "})
         .unwrap();
-        let spec = IrSpec::from_doc(&doc).unwrap();
-        let graph = CodegenGraph::new(IrGraph::new(&spec));
+        let arena = Arena::new();
+        let spec = IrSpec::from_doc(&arena, &doc).unwrap();
+        let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
         let primitives = graph.primitives().collect_vec();
         let [ty] = &*primitives else {
             panic!("expected f64; got `{primitives:?}`");
@@ -434,8 +446,9 @@ mod tests {
                       type: boolean
         "})
         .unwrap();
-        let spec = IrSpec::from_doc(&doc).unwrap();
-        let graph = CodegenGraph::new(IrGraph::new(&spec));
+        let arena = Arena::new();
+        let spec = IrSpec::from_doc(&arena, &doc).unwrap();
+        let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
         let primitives = graph.primitives().collect_vec();
         let [ty] = &*primitives else {
             panic!("expected bool; got `{primitives:?}`");
@@ -465,9 +478,10 @@ mod tests {
                       format: date-time
         "})
         .unwrap();
-        let spec = IrSpec::from_doc(&doc).unwrap();
-        // Default config uses RFC 3339.
-        let graph = CodegenGraph::new(IrGraph::new(&spec));
+        let arena = Arena::new();
+        let spec = IrSpec::from_doc(&arena, &doc).unwrap();
+        // Default config for `CodegenGraph` uses RFC 3339.
+        let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
         let primitives = graph.primitives().collect_vec();
         let [ty] = &*primitives else {
             panic!("expected datetime; got `{primitives:?}`");
@@ -498,9 +512,10 @@ mod tests {
                       format: date-time
         "})
         .unwrap();
-        let spec = IrSpec::from_doc(&doc).unwrap();
+        let arena = Arena::new();
+        let spec = IrSpec::from_doc(&arena, &doc).unwrap();
         let graph = CodegenGraph::with_config(
-            IrGraph::new(&spec),
+            RawGraph::new(&arena, &spec).cook(),
             &CodegenConfig {
                 date_time_format: DateTimeFormat::UnixMilliseconds,
             },
@@ -534,9 +549,10 @@ mod tests {
                       format: date-time
         "})
         .unwrap();
-        let spec = IrSpec::from_doc(&doc).unwrap();
+        let arena = Arena::new();
+        let spec = IrSpec::from_doc(&arena, &doc).unwrap();
         let graph = CodegenGraph::with_config(
-            IrGraph::new(&spec),
+            RawGraph::new(&arena, &spec).cook(),
             &CodegenConfig {
                 date_time_format: DateTimeFormat::UnixSeconds,
             },
@@ -570,9 +586,10 @@ mod tests {
                       format: date-time
         "})
         .unwrap();
-        let spec = IrSpec::from_doc(&doc).unwrap();
+        let arena = Arena::new();
+        let spec = IrSpec::from_doc(&arena, &doc).unwrap();
         let graph = CodegenGraph::with_config(
-            IrGraph::new(&spec),
+            RawGraph::new(&arena, &spec).cook(),
             &CodegenConfig {
                 date_time_format: DateTimeFormat::UnixMicroseconds,
             },
@@ -606,9 +623,10 @@ mod tests {
                       format: date-time
         "})
         .unwrap();
-        let spec = IrSpec::from_doc(&doc).unwrap();
+        let arena = Arena::new();
+        let spec = IrSpec::from_doc(&arena, &doc).unwrap();
         let graph = CodegenGraph::with_config(
-            IrGraph::new(&spec),
+            RawGraph::new(&arena, &spec).cook(),
             &CodegenConfig {
                 date_time_format: DateTimeFormat::UnixNanoseconds,
             },
@@ -642,8 +660,9 @@ mod tests {
                       format: date
         "})
         .unwrap();
-        let spec = IrSpec::from_doc(&doc).unwrap();
-        let graph = CodegenGraph::new(IrGraph::new(&spec));
+        let arena = Arena::new();
+        let spec = IrSpec::from_doc(&arena, &doc).unwrap();
+        let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
         let primitives = graph.primitives().collect_vec();
         let [ty] = &*primitives else {
             panic!("expected date; got `{primitives:?}`");
@@ -673,8 +692,9 @@ mod tests {
                       format: uri
         "})
         .unwrap();
-        let spec = IrSpec::from_doc(&doc).unwrap();
-        let graph = CodegenGraph::new(IrGraph::new(&spec));
+        let arena = Arena::new();
+        let spec = IrSpec::from_doc(&arena, &doc).unwrap();
+        let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
         let primitives = graph.primitives().collect_vec();
         let [ty] = &*primitives else {
             panic!("expected url; got `{primitives:?}`");
@@ -704,8 +724,9 @@ mod tests {
                       format: uuid
         "})
         .unwrap();
-        let spec = IrSpec::from_doc(&doc).unwrap();
-        let graph = CodegenGraph::new(IrGraph::new(&spec));
+        let arena = Arena::new();
+        let spec = IrSpec::from_doc(&arena, &doc).unwrap();
+        let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
         let primitives = graph.primitives().collect_vec();
         let [ty] = &*primitives else {
             panic!("expected uuid; got `{primitives:?}`");
@@ -735,8 +756,9 @@ mod tests {
                       format: byte
         "})
         .unwrap();
-        let spec = IrSpec::from_doc(&doc).unwrap();
-        let graph = CodegenGraph::new(IrGraph::new(&spec));
+        let arena = Arena::new();
+        let spec = IrSpec::from_doc(&arena, &doc).unwrap();
+        let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
         let primitives = graph.primitives().collect_vec();
         let [ty] = &*primitives else {
             panic!("expected bytes; got `{primitives:?}`");
@@ -766,8 +788,9 @@ mod tests {
                       format: binary
         "})
         .unwrap();
-        let spec = IrSpec::from_doc(&doc).unwrap();
-        let graph = CodegenGraph::new(IrGraph::new(&spec));
+        let arena = Arena::new();
+        let spec = IrSpec::from_doc(&arena, &doc).unwrap();
+        let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
         let primitives = graph.primitives().collect_vec();
         let [ty] = &*primitives else {
             panic!("expected binary; got `{primitives:?}`");

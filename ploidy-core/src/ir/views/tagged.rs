@@ -1,7 +1,7 @@
 use petgraph::graph::NodeIndex;
 
 use crate::ir::{
-    graph::{IrGraph, IrGraphNode},
+    graph::CookedGraph,
     types::{IrTagged, IrTaggedVariant},
 };
 
@@ -10,18 +10,19 @@ use super::{ViewNode, ir::IrTypeView};
 /// A graph-aware view of an [`IrTagged`] union.
 #[derive(Debug)]
 pub struct IrTaggedView<'a> {
-    graph: &'a IrGraph<'a>,
+    cooked: &'a CookedGraph<'a>,
     index: NodeIndex<usize>,
     ty: &'a IrTagged<'a>,
 }
 
 impl<'a> IrTaggedView<'a> {
+    #[inline]
     pub(in crate::ir) fn new(
-        graph: &'a IrGraph<'a>,
+        cooked: &'a CookedGraph<'a>,
         index: NodeIndex<usize>,
         ty: &'a IrTagged<'a>,
     ) -> Self {
-        Self { graph, index, ty }
+        Self { cooked, index, ty }
     }
 
     #[inline]
@@ -35,18 +36,19 @@ impl<'a> IrTaggedView<'a> {
     }
 
     /// Returns an iterator over this tagged union's variants.
+    #[inline]
     pub fn variants(&self) -> impl Iterator<Item = IrTaggedVariantView<'a>> {
         self.ty.variants.iter().map(move |variant| {
-            let node = IrGraphNode::from_ref(self.graph.spec, variant.ty.as_ref());
-            IrTaggedVariantView::new(self.graph, self.graph.indices[&node], variant)
+            let node = self.cooked.resolve(&variant.ty);
+            IrTaggedVariantView::new(self.cooked, self.cooked.indices[&node], variant)
         })
     }
 }
 
 impl<'a> ViewNode<'a> for IrTaggedView<'a> {
     #[inline]
-    fn graph(&self) -> &'a IrGraph<'a> {
-        self.graph
+    fn cooked(&self) -> &'a CookedGraph<'a> {
+        self.cooked
     }
 
     #[inline]
@@ -58,19 +60,20 @@ impl<'a> ViewNode<'a> for IrTaggedView<'a> {
 /// A graph-aware view of an [`IrTaggedVariant`].
 #[derive(Debug)]
 pub struct IrTaggedVariantView<'a> {
-    graph: &'a IrGraph<'a>,
+    cooked: &'a CookedGraph<'a>,
     index: NodeIndex<usize>,
     variant: &'a IrTaggedVariant<'a>,
 }
 
 impl<'a> IrTaggedVariantView<'a> {
+    #[inline]
     fn new(
-        graph: &'a IrGraph<'a>,
+        cooked: &'a CookedGraph<'a>,
         index: NodeIndex<usize>,
         variant: &'a IrTaggedVariant<'a>,
     ) -> Self {
         Self {
-            graph,
+            cooked,
             index,
             variant,
         }
@@ -87,16 +90,17 @@ impl<'a> IrTaggedVariantView<'a> {
     }
 
     /// Returns a view of this variant's type.
+    #[inline]
     pub fn ty(&self) -> IrTypeView<'a> {
-        let node = IrGraphNode::from_ref(self.graph.spec, self.variant.ty.as_ref());
-        IrTypeView::new(self.graph, self.graph.indices[&node])
+        let node = self.cooked.resolve(&self.variant.ty);
+        IrTypeView::new(self.cooked, self.cooked.indices[&node])
     }
 }
 
 impl<'a> ViewNode<'a> for IrTaggedVariantView<'a> {
     #[inline]
-    fn graph(&self) -> &'a IrGraph<'a> {
-        self.graph
+    fn cooked(&self) -> &'a CookedGraph<'a> {
+        self.cooked
     }
 
     #[inline]

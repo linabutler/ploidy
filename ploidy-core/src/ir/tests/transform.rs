@@ -3,6 +3,7 @@
 use serde_json::Number;
 
 use crate::{
+    arena::Arena,
     ir::{
         Container, InlineIrType, InlineIrTypePathRoot, InlineIrTypePathSegment, Inner,
         IrEnumVariant, IrStructField, IrStructFieldName, IrStructFieldNameHint, IrTaggedVariant,
@@ -30,7 +31,8 @@ fn test_enum_string_variants() {
     "})
     .unwrap();
 
-    let result = transform(&doc, "Status", &schema);
+    let arena = Arena::new();
+    let result = transform(&arena, &doc, "Status", &schema);
 
     let enum_ = match result {
         IrType::Schema(SchemaIrType::Enum(SchemaTypeInfo { name: "Status", .. }, enum_)) => enum_,
@@ -61,7 +63,8 @@ fn test_enum_number_variants() {
     "})
     .unwrap();
 
-    let result = transform(&doc, "Priority", &schema);
+    let arena = Arena::new();
+    let result = transform(&arena, &doc, "Priority", &schema);
 
     let enum_ = match result {
         IrType::Schema(SchemaIrType::Enum(
@@ -97,7 +100,8 @@ fn test_enum_bool_variants() {
     "})
     .unwrap();
 
-    let result = transform(&doc, "Flag", &schema);
+    let arena = Arena::new();
+    let result = transform(&arena, &doc, "Flag", &schema);
 
     let enum_ = match result {
         IrType::Schema(SchemaIrType::Enum(SchemaTypeInfo { name: "Flag", .. }, enum_)) => enum_,
@@ -124,7 +128,8 @@ fn test_enum_mixed_types() {
     "})
     .unwrap();
 
-    let result = transform(&doc, "Mixed", &schema);
+    let arena = Arena::new();
+    let result = transform(&arena, &doc, "Mixed", &schema);
 
     let enum_ = match result {
         IrType::Schema(SchemaIrType::Enum(SchemaTypeInfo { name: "Mixed", .. }, enum_)) => enum_,
@@ -151,6 +156,7 @@ fn test_primitive_string_formats() {
           version: 1.0.0
     "})
     .unwrap();
+    let arena = Arena::new();
 
     // `string` with `date-time` format.
     let schema: Schema = serde_yaml::from_str(indoc::indoc! {"
@@ -158,7 +164,7 @@ fn test_primitive_string_formats() {
         format: date-time
     "})
     .unwrap();
-    let result = transform(&doc, "Timestamp", &schema);
+    let result = transform(&arena, &doc, "Timestamp", &schema);
     assert_matches!(
         result,
         IrType::Schema(SchemaIrType::Primitive(_, PrimitiveIrType::DateTime))
@@ -170,7 +176,7 @@ fn test_primitive_string_formats() {
         format: date
     "})
     .unwrap();
-    let result = transform(&doc, "Date", &schema);
+    let result = transform(&arena, &doc, "Date", &schema);
     assert_matches!(
         result,
         IrType::Schema(SchemaIrType::Primitive(_, PrimitiveIrType::Date))
@@ -182,7 +188,7 @@ fn test_primitive_string_formats() {
         format: uri
     "})
     .unwrap();
-    let result = transform(&doc, "Url", &schema);
+    let result = transform(&arena, &doc, "Url", &schema);
     assert_matches!(
         result,
         IrType::Schema(SchemaIrType::Primitive(_, PrimitiveIrType::Url))
@@ -194,7 +200,7 @@ fn test_primitive_string_formats() {
         format: uuid
     "})
     .unwrap();
-    let result = transform(&doc, "Id", &schema);
+    let result = transform(&arena, &doc, "Id", &schema);
     assert_matches!(
         result,
         IrType::Schema(SchemaIrType::Primitive(_, PrimitiveIrType::Uuid))
@@ -206,7 +212,7 @@ fn test_primitive_string_formats() {
         format: byte
     "})
     .unwrap();
-    let result = transform(&doc, "Data", &schema);
+    let result = transform(&arena, &doc, "Data", &schema);
     assert_matches!(
         result,
         IrType::Schema(SchemaIrType::Primitive(_, PrimitiveIrType::Bytes))
@@ -218,7 +224,7 @@ fn test_primitive_string_formats() {
         format: binary
     "})
     .unwrap();
-    let result = transform(&doc, "RawData", &schema);
+    let result = transform(&arena, &doc, "RawData", &schema);
     assert_matches!(
         result,
         IrType::Schema(SchemaIrType::Primitive(_, PrimitiveIrType::Binary))
@@ -229,7 +235,7 @@ fn test_primitive_string_formats() {
         type: string
     "})
     .unwrap();
-    let result = transform(&doc, "Text", &schema);
+    let result = transform(&arena, &doc, "Text", &schema);
     assert_matches!(
         result,
         IrType::Schema(SchemaIrType::Primitive(_, PrimitiveIrType::String))
@@ -245,6 +251,7 @@ fn test_primitive_integer_formats() {
           version: 1.0.0
     "})
     .unwrap();
+    let arena = Arena::new();
 
     // `integer` with `int32` format.
     let schema: Schema = serde_yaml::from_str(indoc::indoc! {"
@@ -252,7 +259,7 @@ fn test_primitive_integer_formats() {
         format: int32
     "})
     .unwrap();
-    let result = transform(&doc, "Count", &schema);
+    let result = transform(&arena, &doc, "Count", &schema);
     assert_matches!(
         result,
         IrType::Schema(SchemaIrType::Primitive(_, PrimitiveIrType::I32))
@@ -264,7 +271,7 @@ fn test_primitive_integer_formats() {
         format: int64
     "})
     .unwrap();
-    let result = transform(&doc, "BigCount", &schema);
+    let result = transform(&arena, &doc, "BigCount", &schema);
     assert_matches!(
         result,
         IrType::Schema(SchemaIrType::Primitive(_, PrimitiveIrType::I64))
@@ -276,7 +283,7 @@ fn test_primitive_integer_formats() {
         format: unix-time
     "})
     .unwrap();
-    let result = transform(&doc, "Timestamp", &schema);
+    let result = transform(&arena, &doc, "Timestamp", &schema);
     assert_matches!(
         result,
         IrType::Schema(SchemaIrType::Primitive(_, PrimitiveIrType::UnixTime))
@@ -287,7 +294,7 @@ fn test_primitive_integer_formats() {
         type: integer
     "})
     .unwrap();
-    let result = transform(&doc, "DefaultInt", &schema);
+    let result = transform(&arena, &doc, "DefaultInt", &schema);
     assert_matches!(
         result,
         IrType::Schema(SchemaIrType::Primitive(_, PrimitiveIrType::I32))
@@ -303,6 +310,7 @@ fn test_primitive_number_formats() {
           version: 1.0.0
     "})
     .unwrap();
+    let arena = Arena::new();
 
     // `number` with `float` format.
     let schema: Schema = serde_yaml::from_str(indoc::indoc! {"
@@ -310,7 +318,7 @@ fn test_primitive_number_formats() {
         format: float
     "})
     .unwrap();
-    let result = transform(&doc, "Price", &schema);
+    let result = transform(&arena, &doc, "Price", &schema);
     assert_matches!(
         result,
         IrType::Schema(SchemaIrType::Primitive(_, PrimitiveIrType::F32))
@@ -322,7 +330,7 @@ fn test_primitive_number_formats() {
         format: double
     "})
     .unwrap();
-    let result = transform(&doc, "BigPrice", &schema);
+    let result = transform(&arena, &doc, "BigPrice", &schema);
     assert_matches!(
         result,
         IrType::Schema(SchemaIrType::Primitive(_, PrimitiveIrType::F64))
@@ -334,7 +342,7 @@ fn test_primitive_number_formats() {
         format: unix-time
     "})
     .unwrap();
-    let result = transform(&doc, "FloatTime", &schema);
+    let result = transform(&arena, &doc, "FloatTime", &schema);
     assert_matches!(
         result,
         IrType::Schema(SchemaIrType::Primitive(_, PrimitiveIrType::UnixTime))
@@ -345,7 +353,7 @@ fn test_primitive_number_formats() {
         type: number
     "})
     .unwrap();
-    let result = transform(&doc, "DefaultNumber", &schema);
+    let result = transform(&arena, &doc, "DefaultNumber", &schema);
     assert_matches!(
         result,
         IrType::Schema(SchemaIrType::Primitive(_, PrimitiveIrType::F64))
@@ -374,7 +382,8 @@ fn test_array_with_ref_items() {
     "})
     .unwrap();
 
-    let result = transform(&doc, "Items", &schema);
+    let arena = Arena::new();
+    let result = transform(&arena, &doc, "Items", &schema);
 
     let container = match result {
         IrType::Schema(SchemaIrType::Container(
@@ -406,7 +415,8 @@ fn test_array_with_inline_items() {
     "})
     .unwrap();
 
-    let result = transform(&doc, "Strings", &schema);
+    let arena = Arena::new();
+    let result = transform(&arena, &doc, "Strings", &schema);
 
     let container = match result {
         IrType::Schema(SchemaIrType::Container(
@@ -438,6 +448,7 @@ fn test_struct_with_own_properties() {
           version: 1.0.0
     "})
     .unwrap();
+    let arena = Arena::new();
     let schema: Schema = serde_yaml::from_str(indoc::indoc! {"
         type: object
         required: [name, age]
@@ -449,7 +460,7 @@ fn test_struct_with_own_properties() {
     "})
     .unwrap();
 
-    let result = transform(&doc, "Person", &schema);
+    let result = transform(&arena, &doc, "Person", &schema);
 
     let struct_ = match result {
         IrType::Schema(SchemaIrType::Struct(SchemaTypeInfo { name: "Person", .. }, struct_)) => {
@@ -497,7 +508,8 @@ fn test_struct_with_additional_properties_ref() {
     "})
     .unwrap();
 
-    let result = transform(&doc, "Config", &schema);
+    let arena = Arena::new();
+    let result = transform(&arena, &doc, "Config", &schema);
 
     let struct_ = match result {
         IrType::Schema(SchemaIrType::Struct(SchemaTypeInfo { name: "Config", .. }, struct_)) => {
@@ -548,7 +560,8 @@ fn test_struct_with_additional_properties_inline() {
     "})
     .unwrap();
 
-    let result = transform(&doc, "Config", &schema);
+    let arena = Arena::new();
+    let result = transform(&arena, &doc, "Config", &schema);
 
     // When `additionalProperties` is present alongside `properties`,
     // the result should be a struct with a flattened map field.
@@ -620,7 +633,8 @@ fn test_struct_with_additional_properties_true() {
     "})
     .unwrap();
 
-    let result = transform(&doc, "DynamicMap", &schema);
+    let arena = Arena::new();
+    let result = transform(&arena, &doc, "DynamicMap", &schema);
 
     // Empty `properties` with `additionalProperties: true` produces a
     // struct with a single flattened map field of type `Any`.
@@ -663,7 +677,8 @@ fn test_struct_without_properties_falls_through() {
     "})
     .unwrap();
 
-    let result = transform(&doc, "DynamicMap", &schema);
+    let arena = Arena::new();
+    let result = transform(&arena, &doc, "DynamicMap", &schema);
 
     assert_matches!(
         &result,
@@ -698,7 +713,8 @@ fn test_struct_with_required_fields() {
     "})
     .unwrap();
 
-    let result = transform(&doc, "User", &schema);
+    let arena = Arena::new();
+    let result = transform(&arena, &doc, "User", &schema);
 
     let struct_ = match result {
         IrType::Schema(SchemaIrType::Struct(SchemaTypeInfo { name: "User", .. }, struct_)) => {
@@ -745,7 +761,8 @@ fn test_struct_with_nullable_field_ref() {
     "})
     .unwrap();
 
-    let result = transform(&doc, "Container", &schema);
+    let arena = Arena::new();
+    let result = transform(&arena, &doc, "Container", &schema);
 
     let struct_ = match result {
         IrType::Schema(SchemaIrType::Struct(
@@ -788,7 +805,8 @@ fn test_struct_with_nullable_field_inline() {
     "})
     .unwrap();
 
-    let result = transform(&doc, "Container", &schema);
+    let arena = Arena::new();
+    let result = transform(&arena, &doc, "Container", &schema);
 
     let struct_ = match result {
         IrType::Schema(SchemaIrType::Struct(
@@ -835,7 +853,8 @@ fn test_struct_with_nullable_field_openapi_31_syntax() {
     "})
     .unwrap();
 
-    let result = transform(&doc, "Container", &schema);
+    let arena = Arena::new();
+    let result = transform(&arena, &doc, "Container", &schema);
 
     // OpenAPI 3.1 `type: [T, 'null']` syntax should produce an `Optional(T)` field,
     // identical to OpenAPI 3.0 `nullable: true`.
@@ -891,7 +910,8 @@ fn test_struct_ref_field_description() {
     "})
     .unwrap();
 
-    let result = transform(&doc, "Entity", &schema);
+    let arena = Arena::new();
+    let result = transform(&arena, &doc, "Entity", &schema);
 
     let struct_ = match result {
         IrType::Schema(SchemaIrType::Struct(SchemaTypeInfo { name: "Entity", .. }, struct_)) => {
@@ -927,7 +947,8 @@ fn test_struct_inline_field_description() {
     "})
     .unwrap();
 
-    let result = transform(&doc, "User", &schema);
+    let arena = Arena::new();
+    let result = transform(&arena, &doc, "User", &schema);
 
     let struct_ = match result {
         IrType::Schema(SchemaIrType::Struct(SchemaTypeInfo { name: "User", .. }, struct_)) => {
@@ -970,7 +991,8 @@ fn test_struct_inline_all_of_becomes_parent() {
     "})
     .unwrap();
 
-    let result = transform(&doc, "Person", &schema);
+    let arena = Arena::new();
+    let result = transform(&arena, &doc, "Person", &schema);
 
     let struct_ = match result {
         IrType::Schema(SchemaIrType::Struct(SchemaTypeInfo { name: "Person", .. }, struct_)) => {
@@ -1029,7 +1051,8 @@ fn test_struct_mixed_all_of_ref_and_inline() {
     "})
     .unwrap();
 
-    let result = transform(&doc, "Child", &schema);
+    let arena = Arena::new();
+    let result = transform(&arena, &doc, "Child", &schema);
 
     let struct_ = match result {
         IrType::Schema(SchemaIrType::Struct(SchemaTypeInfo { name: "Child", .. }, struct_)) => {
@@ -1089,7 +1112,8 @@ fn test_tagged_with_mapping() {
     "})
     .unwrap();
 
-    let result = transform(&doc, "Animal", &schema);
+    let arena = Arena::new();
+    let result = transform(&arena, &doc, "Animal", &schema);
 
     let tagged = match result {
         IrType::Schema(SchemaIrType::Tagged(SchemaTypeInfo { name: "Animal", .. }, tagged)) => {
@@ -1143,7 +1167,8 @@ fn test_tagged_filters_non_refs() {
     "})
     .unwrap();
 
-    let result = transform(&doc, "Animal", &schema);
+    let arena = Arena::new();
+    let result = transform(&arena, &doc, "Animal", &schema);
 
     // Inline schemas can't have discriminator mappings, so `Animal`
     // should lower to an untagged union with two variants.
@@ -1190,7 +1215,8 @@ fn test_tagged_multiple_aliases() {
     "})
     .unwrap();
 
-    let result = transform(&doc, "Result", &schema);
+    let arena = Arena::new();
+    let result = transform(&arena, &doc, "Result", &schema);
 
     let tagged = match result {
         IrType::Schema(SchemaIrType::Tagged(SchemaTypeInfo { name: "Result", .. }, tagged)) => {
@@ -1244,7 +1270,8 @@ fn test_tagged_missing_variant() {
     "})
     .unwrap();
 
-    let result = transform(&doc, "Animal", &schema);
+    let arena = Arena::new();
+    let result = transform(&arena, &doc, "Animal", &schema);
 
     // `Cat` has no discriminator tag, so `Animal` should lower to
     // an untagged union with two variants.
@@ -1290,7 +1317,8 @@ fn test_tagged_description() {
     "})
     .unwrap();
 
-    let result = transform(&doc, "Animal", &schema);
+    let arena = Arena::new();
+    let result = transform(&arena, &doc, "Animal", &schema);
 
     let tagged = match result {
         IrType::Schema(SchemaIrType::Tagged(SchemaTypeInfo { name: "Animal", .. }, tagged)) => {
@@ -1329,7 +1357,8 @@ fn test_untagged_basic() {
     "})
     .unwrap();
 
-    let result = transform(&doc, "StringOrNumber", &schema);
+    let arena = Arena::new();
+    let result = transform(&arena, &doc, "StringOrNumber", &schema);
 
     let untagged = match result {
         IrType::Schema(SchemaIrType::Untagged(
@@ -1364,7 +1393,8 @@ fn test_untagged_empty_simplifies() {
     "})
     .unwrap();
 
-    let result = transform(&doc, "Empty", &schema);
+    let arena = Arena::new();
+    let result = transform(&arena, &doc, "Empty", &schema);
 
     assert_matches!(result, IrType::Schema(SchemaIrType::Any(_)));
 }
@@ -1384,7 +1414,8 @@ fn test_untagged_single_null_simplifies() {
     "})
     .unwrap();
 
-    let result = transform(&doc, "JustNull", &schema);
+    let arena = Arena::new();
+    let result = transform(&arena, &doc, "JustNull", &schema);
 
     assert_matches!(result, IrType::Schema(SchemaIrType::Any(_)));
 }
@@ -1408,7 +1439,8 @@ fn test_untagged_single_variant_unwraps() {
     "})
     .unwrap();
 
-    let result = transform(&doc, "JustString", &schema);
+    let arena = Arena::new();
+    let result = transform(&arena, &doc, "JustString", &schema);
 
     assert_matches!(result, IrType::Ref(_));
 }
@@ -1438,7 +1470,8 @@ fn test_untagged_variant_numbering() {
     "})
     .unwrap();
 
-    let result = transform(&doc, "ABC", &schema);
+    let arena = Arena::new();
+    let result = transform(&arena, &doc, "ABC", &schema);
 
     // Variants should have 1-based indices in their name hints.
     let untagged = match result {
@@ -1473,7 +1506,8 @@ fn test_untagged_null_detection() {
     "})
     .unwrap();
 
-    let result = transform(&doc, "StringOrNull", &schema);
+    let arena = Arena::new();
+    let result = transform(&arena, &doc, "StringOrNull", &schema);
 
     let container = match result {
         IrType::Schema(SchemaIrType::Container(
@@ -1518,7 +1552,8 @@ fn test_any_of_fields_marked_flattened_not_required() {
     "})
     .unwrap();
 
-    let result = transform(&doc, "Contact", &schema);
+    let arena = Arena::new();
+    let result = transform(&arena, &doc, "Contact", &schema);
 
     // Both fields should be flattened.
     let struct_ = match result {
@@ -1572,7 +1607,8 @@ fn test_any_of_ref_uses_type_name() {
     "})
     .unwrap();
 
-    let result = transform(&doc, "Contact", &schema);
+    let arena = Arena::new();
+    let result = transform(&arena, &doc, "Contact", &schema);
 
     // Both fields should be named `Address`, since they reference the same
     // type.
@@ -1622,7 +1658,8 @@ fn test_any_of_inline_uses_index_hint() {
     "})
     .unwrap();
 
-    let result = transform(&doc, "Mixed", &schema);
+    let arena = Arena::new();
+    let result = transform(&arena, &doc, "Mixed", &schema);
 
     // Both inline schemas should have index hints.
     let struct_ = match result {
@@ -1679,7 +1716,8 @@ fn test_any_of_with_properties() {
     "})
     .unwrap();
 
-    let result = transform(&doc, "Combined", &schema);
+    let arena = Arena::new();
+    let result = transform(&arena, &doc, "Combined", &schema);
 
     // `Extra2` is an own field; `Extra1` and `Extra3` are flattened.
     // Own fields should precede the flattened fields.
@@ -1738,7 +1776,8 @@ fn test_any_of_nullable_refs() {
     "})
     .unwrap();
 
-    let result = transform(&doc, "Container", &schema);
+    let arena = Arena::new();
+    let result = transform(&arena, &doc, "Container", &schema);
 
     // Both nullable schemas should be flattened.
     let struct_ = match result {
@@ -1802,7 +1841,8 @@ fn test_any_of_with_all_of() {
     "})
     .unwrap();
 
-    let result = transform(&doc, "Combined", &schema);
+    let arena = Arena::new();
+    let result = transform(&arena, &doc, "Combined", &schema);
 
     let struct_ = match result {
         IrType::Schema(SchemaIrType::Struct(
@@ -1851,7 +1891,8 @@ fn test_boolean_primitive_transformation() {
     "})
     .unwrap();
 
-    let result = transform(&doc, "Flag", &schema);
+    let arena = Arena::new();
+    let result = transform(&arena, &doc, "Flag", &schema);
 
     assert_matches!(
         result,
@@ -1875,7 +1916,8 @@ fn test_unhandled_string_format_falls_back_to_string() {
     "})
     .unwrap();
 
-    let result = transform(&doc, "CustomType", &schema);
+    let arena = Arena::new();
+    let result = transform(&arena, &doc, "CustomType", &schema);
 
     assert_matches!(
         result,
@@ -1897,7 +1939,8 @@ fn test_empty_type_array_produces_any() {
     "})
     .unwrap();
 
-    let result = transform(&doc, "NoType", &schema);
+    let arena = Arena::new();
+    let result = transform(&arena, &doc, "NoType", &schema);
 
     assert_matches!(result, IrType::Schema(SchemaIrType::Any(_)));
 }
@@ -1916,7 +1959,8 @@ fn test_array_without_items_produces_array_of_any() {
     "})
     .unwrap();
 
-    let result = transform(&doc, "ArrayAny", &schema);
+    let arena = Arena::new();
+    let result = transform(&arena, &doc, "ArrayAny", &schema);
 
     let container = match result {
         IrType::Schema(SchemaIrType::Container(
@@ -1949,7 +1993,8 @@ fn test_object_with_empty_properties_produces_struct() {
     "})
     .unwrap();
 
-    let result = transform(&doc, "EmptyObject", &schema);
+    let arena = Arena::new();
+    let result = transform(&arena, &doc, "EmptyObject", &schema);
 
     // An `object` schema without properties should become an empty struct.
     let struct_ = match result {
@@ -1979,7 +2024,8 @@ fn test_schema_without_type_or_properties_produces_any() {
     "})
     .unwrap();
 
-    let result = transform(&doc, "Empty", &schema);
+    let arena = Arena::new();
+    let result = transform(&arena, &doc, "Empty", &schema);
 
     // A schema with no `type` and no `properties` should become `Any`.
     assert_matches!(result, IrType::Schema(SchemaIrType::Any(_)));
@@ -1999,7 +2045,8 @@ fn test_type_and_null_in_type_array_creates_nullable() {
     "})
     .unwrap();
 
-    let result = transform(&doc, "StringOrNull", &schema);
+    let arena = Arena::new();
+    let result = transform(&arena, &doc, "StringOrNull", &schema);
 
     // As a special case, `type: [T, "null"]` should produce a
     // `Container(Optional(T))`.
@@ -2039,7 +2086,8 @@ fn test_type_array_and_null_creates_nullable_array() {
     "})
     .unwrap();
 
-    let result = transform(&doc, "StringArrayOrNull", &schema);
+    let arena = Arena::new();
+    let result = transform(&arena, &doc, "StringArrayOrNull", &schema);
 
     let container = match result {
         IrType::Schema(SchemaIrType::Container(
@@ -2085,7 +2133,8 @@ fn test_type_object_and_null_creates_nullable_map() {
     "})
     .unwrap();
 
-    let result = transform(&doc, "IntMapOrNull", &schema);
+    let arena = Arena::new();
+    let result = transform(&arena, &doc, "IntMapOrNull", &schema);
 
     let container = match result {
         IrType::Schema(SchemaIrType::Container(
@@ -2129,7 +2178,8 @@ fn test_multiple_types_string_and_integer_untagged() {
     "})
     .unwrap();
 
-    let result = transform(&doc, "StringOrInt", &schema);
+    let arena = Arena::new();
+    let result = transform(&arena, &doc, "StringOrInt", &schema);
 
     let untagged = match result {
         IrType::Schema(SchemaIrType::Untagged(
@@ -2180,7 +2230,8 @@ fn test_deeply_nested_inline_types() {
     "})
     .unwrap();
 
-    let result = transform(&doc, "Outer", &schema);
+    let arena = Arena::new();
+    let result = transform(&arena, &doc, "Outer", &schema);
 
     let struct_ = match result {
         IrType::Schema(SchemaIrType::Struct(SchemaTypeInfo { name: "Outer", .. }, struct_)) => {
@@ -2250,7 +2301,8 @@ fn test_enum_with_only_null_json_values_produces_empty_enum() {
     "})
     .unwrap();
 
-    let result = transform(&doc, "NullEnum", &schema);
+    let arena = Arena::new();
+    let result = transform(&arena, &doc, "NullEnum", &schema);
 
     // `null` values are filtered out from enum variants, producing an enum
     // with zero variants.
@@ -2285,7 +2337,8 @@ fn test_additional_properties_false_creates_struct() {
     "})
     .unwrap();
 
-    let result = transform(&doc, "StrictObject", &schema);
+    let arena = Arena::new();
+    let result = transform(&arena, &doc, "StrictObject", &schema);
 
     let struct_ = match result {
         IrType::Schema(SchemaIrType::Struct(
@@ -2328,7 +2381,8 @@ fn test_array_inline_path_construction() {
     "})
     .unwrap();
 
-    let result = transform(&doc, "Container", &schema);
+    let arena = Arena::new();
+    let result = transform(&arena, &doc, "Container", &schema);
 
     let container = match result {
         IrType::Schema(SchemaIrType::Container(
@@ -2370,7 +2424,8 @@ fn test_map_inline_path_construction() {
     "})
     .unwrap();
 
-    let result = transform(&doc, "Dictionary", &schema);
+    let arena = Arena::new();
+    let result = transform(&arena, &doc, "Dictionary", &schema);
 
     let container = match result {
         IrType::Schema(SchemaIrType::Container(
@@ -2414,7 +2469,8 @@ fn test_struct_inline_path_construction() {
     "})
     .unwrap();
 
-    let result = transform(&doc, "Outer", &schema);
+    let arena = Arena::new();
+    let result = transform(&arena, &doc, "Outer", &schema);
 
     let struct_ = match result {
         IrType::Schema(SchemaIrType::Struct(SchemaTypeInfo { name: "Outer", .. }, struct_)) => {
@@ -2483,7 +2539,8 @@ fn test_inline_tagged_union_in_struct_field() {
     "})
     .unwrap();
 
-    let result = transform(&doc, "Container", &schema);
+    let arena = Arena::new();
+    let result = transform(&arena, &doc, "Container", &schema);
 
     let struct_ = match result {
         IrType::Schema(SchemaIrType::Struct(
@@ -2566,7 +2623,8 @@ fn test_recursive_all_of_ref_nullable() {
     .unwrap();
 
     let schema = &doc.components.as_ref().unwrap().schemas["Node"];
-    let result = transform(&doc, "Node", schema);
+    let arena = Arena::new();
+    let result = transform(&arena, &doc, "Node", schema);
 
     // Should successfully produce a struct.
     let struct_ = match result {
@@ -2619,7 +2677,8 @@ fn test_recursive_all_of_ref() {
     .unwrap();
 
     let schema = &doc.components.as_ref().unwrap().schemas["Node"];
-    let result = transform(&doc, "Node", schema);
+    let arena = Arena::new();
+    let result = transform(&arena, &doc, "Node", schema);
 
     // Should successfully produce a struct.
     let struct_ = match result {
@@ -2678,7 +2737,8 @@ fn test_recursive_multi_all_of_ref_no_stack_overflow() {
     .unwrap();
 
     let schema = &doc.components.as_ref().unwrap().schemas["Node"];
-    let result = transform(&doc, "Node", schema);
+    let arena = Arena::new();
+    let result = transform(&arena, &doc, "Node", schema);
 
     // Should successfully produce a struct.
     let struct_ = match result {
@@ -2724,7 +2784,8 @@ fn test_named_array_schema_produces_container() {
     "})
     .unwrap();
 
-    let result = transform(&doc, "StringList", &schema);
+    let arena = Arena::new();
+    let result = transform(&arena, &doc, "StringList", &schema);
 
     let container = match result {
         IrType::Schema(SchemaIrType::Container(
@@ -2775,7 +2836,8 @@ fn test_named_array_with_inline_one_of_items_produces_container() {
     "})
     .unwrap();
 
-    let result = transform(&doc, "Animals", &schema);
+    let arena = Arena::new();
+    let result = transform(&arena, &doc, "Animals", &schema);
 
     // A named array schema should produce a `Container` for the array,
     // wrapped in a `SchemaIrType` that preserves the schema's identity.
@@ -2812,7 +2874,8 @@ fn test_named_map_schema_produces_container() {
     "})
     .unwrap();
 
-    let result = transform(&doc, "Metadata", &schema);
+    let arena = Arena::new();
+    let result = transform(&arena, &doc, "Metadata", &schema);
 
     let container = match result {
         IrType::Schema(SchemaIrType::Container(
@@ -2840,7 +2903,8 @@ fn test_named_nullable_schema_produces_container() {
     "})
     .unwrap();
 
-    let result = transform(&doc, "NullableString", &schema);
+    let arena = Arena::new();
+    let result = transform(&arena, &doc, "NullableString", &schema);
 
     let container = match result {
         IrType::Schema(SchemaIrType::Container(
@@ -2879,7 +2943,8 @@ fn test_named_container_preserves_description() {
     "})
     .unwrap();
 
-    let result = transform(&doc, "Ids", &schema);
+    let arena = Arena::new();
+    let result = transform(&arena, &doc, "Ids", &schema);
 
     let container = match result {
         IrType::Schema(SchemaIrType::Container(SchemaTypeInfo { name: "Ids", .. }, container)) => {
@@ -2908,7 +2973,8 @@ fn test_named_primitive_does_not_produce_container() {
     "})
     .unwrap();
 
-    let result = transform(&doc, "Name", &schema);
+    let arena = Arena::new();
+    let result = transform(&arena, &doc, "Name", &schema);
 
     // Bare primitives should _not_ be wrapped; they don't contain inline types,
     // and don't benefit from a type alias.
@@ -2941,7 +3007,8 @@ fn test_untagged_single_variant_one_of_ref_produces_container() {
     "})
     .unwrap();
 
-    let result = transform(&doc, "MaybeInner", &schema);
+    let arena = Arena::new();
+    let result = transform(&arena, &doc, "MaybeInner", &schema);
 
     // A `oneOf` with `null` and a schema reference should produce a
     // `Container(Optional(Ref(...)))`.
@@ -2983,7 +3050,8 @@ fn test_inline_array_produces_inline_container() {
     "})
     .unwrap();
 
-    let result = transform(&doc, "Container", &schema);
+    let arena = Arena::new();
+    let result = transform(&arena, &doc, "Container", &schema);
 
     // Struct fields that are arrays become inline containers,
     // not schema containers.
@@ -3027,7 +3095,8 @@ fn test_optional_field_container_description_is_not_parent_schema() {
     "})
     .unwrap();
 
-    let result = transform(&doc, "Parent", &schema);
+    let arena = Arena::new();
+    let result = transform(&arena, &doc, "Parent", &schema);
 
     let struct_ = match result {
         IrType::Schema(SchemaIrType::Struct(SchemaTypeInfo { name: "Parent", .. }, struct_)) => {
