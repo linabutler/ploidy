@@ -2702,7 +2702,7 @@ fn test_operation_request_and_response() {
 // MARK: Discriminator fields
 
 #[test]
-fn test_variant_field_matching_tagged_union_discriminator_is_discriminator() {
+fn test_variant_field_matching_tagged_union_tag_is_tag() {
     let doc = Document::from_yaml(indoc::indoc! {"
         openapi: 3.0.0
         info:
@@ -2746,7 +2746,7 @@ fn test_variant_field_matching_tagged_union_discriminator_is_discriminator() {
     let spec = IrSpec::from_doc(&arena, &doc).unwrap();
     let graph = RawGraph::new(&arena, &spec).cook();
 
-    // `Comment.kind` should be detected as a discriminator because
+    // `Comment.kind` should be detected as a tag field because
     // `Comment` is a direct variant of the `Post` tagged union.
     let comment = graph.schemas().find(|s| s.name() == "Comment").unwrap();
     let SchemaIrTypeView::Struct(_, comment_struct) = comment else {
@@ -2756,16 +2756,16 @@ fn test_variant_field_matching_tagged_union_discriminator_is_discriminator() {
         .fields()
         .find(|f| matches!(f.name(), IrStructFieldName::Name("kind")))
         .unwrap();
-    assert!(kind_field.discriminator());
+    assert!(kind_field.tag());
 
-    // Other fields on `Comment` should not be discriminators.
+    // Other fields on `Comment` should not be tags.
     let id_field = comment_struct
         .fields()
         .find(|f| matches!(f.name(), IrStructFieldName::Name("id")))
         .unwrap();
-    assert!(!id_field.discriminator());
+    assert!(!id_field.tag());
 
-    // `Reaction.kind` should also be detected as a discriminator.
+    // `Reaction.kind` should also be detected as a tag field.
     let reaction = graph.schemas().find(|s| s.name() == "Reaction").unwrap();
     let SchemaIrTypeView::Struct(_, reaction_struct) = reaction else {
         panic!("expected struct `Reaction`; got `{reaction:?}`");
@@ -2774,15 +2774,15 @@ fn test_variant_field_matching_tagged_union_discriminator_is_discriminator() {
         .fields()
         .find(|f| matches!(f.name(), IrStructFieldName::Name("kind")))
         .unwrap();
-    assert!(kind_field.discriminator());
+    assert!(kind_field.tag());
 }
 
 #[test]
-fn test_transitive_dependency_field_matching_discriminator_is_not_discriminator() {
+fn test_transitive_dependency_field_matching_tag_is_not_tag() {
     // `Inner` has a `kind` field that matches the `Outer` tagged union's
-    // discriminator, but `Inner` is _not_ a direct variant of `Outer`;
-    // only `Wrapper` is. The `kind` field on `Inner` should _not_ be
-    // treated as a discriminator.
+    // tag, but `Inner` is _not_ a direct variant of `Outer`; only
+    // `Wrapper` is. The `kind` field on `Inner` should _not_ be treated
+    // as a tag field.
     let doc = Document::from_yaml(indoc::indoc! {"
         openapi: 3.0.0
         info:
@@ -2819,7 +2819,7 @@ fn test_transitive_dependency_field_matching_discriminator_is_not_discriminator(
     let spec = IrSpec::from_doc(&arena, &doc).unwrap();
     let graph = RawGraph::new(&arena, &spec).cook();
 
-    // `Wrapper.kind` _is_ a discriminator, because `Wrapper` is a
+    // `Wrapper.kind` _is_ a tag field, because `Wrapper` is a
     // direct variant of `Outer`.
     let wrapper = graph.schemas().find(|s| s.name() == "Wrapper").unwrap();
     let SchemaIrTypeView::Struct(_, wrapper_struct) = wrapper else {
@@ -2829,9 +2829,9 @@ fn test_transitive_dependency_field_matching_discriminator_is_not_discriminator(
         .fields()
         .find(|f| matches!(f.name(), IrStructFieldName::Name("kind")))
         .unwrap();
-    assert!(kind_field.discriminator());
+    assert!(kind_field.tag());
 
-    // `Inner.kind` is _not_ a discriminator, because `Inner` is only
+    // `Inner.kind` is _not_ a tag field, because `Inner` is only
     // transitively reachable from `Outer`, not a direct variant.
     let inner = graph.schemas().find(|s| s.name() == "Inner").unwrap();
     let SchemaIrTypeView::Struct(_, inner_struct) = inner else {
@@ -2841,13 +2841,13 @@ fn test_transitive_dependency_field_matching_discriminator_is_not_discriminator(
         .fields()
         .find(|f| matches!(f.name(), IrStructFieldName::Name("kind")))
         .unwrap();
-    assert!(!kind_field.discriminator());
+    assert!(!kind_field.tag());
 }
 
 #[test]
-fn test_own_struct_discriminator_field() {
-    // A struct with its own `discriminator` property should mark that field
-    // as a discriminator.
+fn test_own_struct_tag_field() {
+    // A struct used only inside a tagged union whose tag matches a field
+    // should mark that field as a tag.
     let doc = Document::from_yaml(indoc::indoc! {"
         openapi: 3.0.0
         info:
@@ -2864,6 +2864,13 @@ fn test_own_struct_discriminator_field() {
                   type: string
               discriminator:
                 propertyName: kind
+            Container:
+              oneOf:
+                - $ref: '#/components/schemas/Base'
+              discriminator:
+                propertyName: kind
+                mapping:
+                  base: '#/components/schemas/Base'
     "})
     .unwrap();
 
@@ -2876,25 +2883,25 @@ fn test_own_struct_discriminator_field() {
         panic!("expected struct `Base`; got `{base:?}`");
     };
 
-    // The `kind` field should be marked as a discriminator.
+    // The `kind` field should be marked as a tag field.
     let kind_field = base_struct
         .fields()
         .find(|f| matches!(f.name(), IrStructFieldName::Name("kind")))
         .unwrap();
-    assert!(kind_field.discriminator());
+    assert!(kind_field.tag());
 
-    // The `name` field should not be a discriminator.
+    // The `name` field should not be a tag field.
     let name_field = base_struct
         .fields()
         .find(|f| matches!(f.name(), IrStructFieldName::Name("name")))
         .unwrap();
-    assert!(!name_field.discriminator());
+    assert!(!name_field.tag());
 }
 
 #[test]
-fn test_inherited_discriminator_field() {
-    // A child struct that inherits from a parent with a discriminator should
-    // mark inherited fields with the same name as discriminators.
+fn test_inherited_tag_field() {
+    // A child struct that inherits a field matching the tag of an incoming
+    // tagged union should mark that inherited field as a tag.
     let doc = Document::from_yaml(indoc::indoc! {"
         openapi: 3.0.0
         info:
@@ -2915,6 +2922,13 @@ fn test_inherited_discriminator_field() {
               properties:
                 name:
                   type: string
+            Container:
+              oneOf:
+                - $ref: '#/components/schemas/Child'
+              discriminator:
+                propertyName: kind
+                mapping:
+                  child: '#/components/schemas/Child'
     "})
     .unwrap();
 
@@ -2927,20 +2941,20 @@ fn test_inherited_discriminator_field() {
         panic!("expected struct `Child`; got `{child:?}`");
     };
 
-    // The child's inherited `kind` field should be marked as a discriminator.
+    // The child's inherited `kind` field should be marked as a tag.
     let kind_field = child_struct
         .fields()
         .find(|f| matches!(f.name(), IrStructFieldName::Name("kind")))
         .unwrap();
-    assert!(kind_field.discriminator());
+    assert!(kind_field.tag());
     assert!(kind_field.inherited());
 
-    // The child's own `name` field should not be a discriminator.
+    // The child's own `name` field should not be a tag.
     let name_field = child_struct
         .fields()
         .find(|f| matches!(f.name(), IrStructFieldName::Name("name")))
         .unwrap();
-    assert!(!name_field.discriminator());
+    assert!(!name_field.tag());
     assert!(!name_field.inherited());
 }
 
@@ -3192,5 +3206,407 @@ fn test_inlines_finds_inline_tagged_unions() {
             InlineIrTypeView::Container(_, _),
             InlineIrTypeView::Tagged(_, _)
         ]
+    );
+}
+
+// MARK: Tag field detection
+
+#[test]
+fn test_tag_false_for_inlined_struct() {
+    let doc = Document::from_yaml(indoc::indoc! {"
+        openapi: 3.0.0
+        info:
+          title: Test
+          version: 1.0.0
+        components:
+          schemas:
+            Dog:
+              type: object
+              properties:
+                kind:
+                  type: string
+                bark:
+                  type: string
+            Pet:
+              oneOf:
+                - $ref: '#/components/schemas/Dog'
+              discriminator:
+                propertyName: kind
+                mapping:
+                  dog: '#/components/schemas/Dog'
+            Owner:
+              type: object
+              properties:
+                dog:
+                  $ref: '#/components/schemas/Dog'
+    "})
+    .unwrap();
+
+    let arena = Arena::new();
+    let spec = IrSpec::from_doc(&arena, &doc).unwrap();
+    let mut raw = RawGraph::new(&arena, &spec);
+    raw.inline_tagged_variants();
+    let graph = raw.cook();
+
+    let dog = graph.schemas().find(|s| s.name() == "Dog").unwrap();
+    let SchemaIrTypeView::Struct(_, dog_struct) = dog else {
+        panic!("expected struct `Dog`; got `{dog:?}`");
+    };
+
+    // `Dog` is inlined (referenced by `Owner.dog`). After inlining,
+    // the tagged union no longer references `Dog` directly, so `kind`
+    // is not treated as a tag field.
+    let kind_field = dog_struct
+        .fields()
+        .find(|f| matches!(f.name(), IrStructFieldName::Name("kind")))
+        .unwrap();
+    assert!(!kind_field.tag());
+}
+
+#[test]
+fn test_inlined_when_tagged_unions_disagree_on_tag() {
+    let doc = Document::from_yaml(indoc::indoc! {"
+        openapi: 3.0.0
+        info:
+          title: Test
+          version: 1.0.0
+        components:
+          schemas:
+            Dog:
+              type: object
+              properties:
+                kind:
+                  type: string
+                category:
+                  type: string
+                bark:
+                  type: string
+            ByKind:
+              oneOf:
+                - $ref: '#/components/schemas/Dog'
+              discriminator:
+                propertyName: kind
+                mapping:
+                  dog: '#/components/schemas/Dog'
+            ByCategory:
+              oneOf:
+                - $ref: '#/components/schemas/Dog'
+              discriminator:
+                propertyName: category
+                mapping:
+                  dog: '#/components/schemas/Dog'
+    "})
+    .unwrap();
+
+    let arena = Arena::new();
+    let spec = IrSpec::from_doc(&arena, &doc).unwrap();
+    let mut raw = RawGraph::new(&arena, &spec);
+    raw.inline_tagged_variants();
+    let graph = raw.cook();
+
+    // `Dog` is inlined because the two tagged unions disagree on
+    // their tag. The original struct keeps all fields.
+    let dog = graph.schemas().find(|s| s.name() == "Dog").unwrap();
+    let SchemaIrTypeView::Struct(_, dog_struct) = dog else {
+        panic!("expected struct `Dog`; got `{dog:?}`");
+    };
+    let field_names = dog_struct.fields().map(|f| f.name()).collect_vec();
+    assert_matches!(
+        &*field_names,
+        [
+            IrStructFieldName::Name("kind"),
+            IrStructFieldName::Name("category"),
+            IrStructFieldName::Name("bark"),
+        ]
+    );
+
+    // Each tagged union should have an inline variant with all
+    // fields present, and tag field should be `tag()`.
+    let by_kind = graph.schemas().find(|s| s.name() == "ByKind").unwrap();
+    let SchemaIrTypeView::Tagged(_, by_kind_tagged) = by_kind else {
+        panic!("expected tagged `ByKind`; got `{by_kind:?}`");
+    };
+    let variant = by_kind_tagged.variants().next().unwrap();
+    let IrTypeView::Inline(InlineIrTypeView::Struct(_, inline_struct)) = variant.ty() else {
+        panic!("expected inline struct variant; got `{:?}`", variant.ty());
+    };
+    let inline_fields = inline_struct.fields().map(|f| f.name()).collect_vec();
+    assert_matches!(
+        &*inline_fields,
+        [
+            IrStructFieldName::Name("kind"),
+            IrStructFieldName::Name("category"),
+            IrStructFieldName::Name("bark"),
+        ]
+    );
+    let tags = inline_struct
+        .fields()
+        .filter(|f| f.tag())
+        .map(|f| f.name())
+        .collect_vec();
+    assert_matches!(&*tags, [IrStructFieldName::Name("kind")]);
+
+    let by_category = graph.schemas().find(|s| s.name() == "ByCategory").unwrap();
+    let SchemaIrTypeView::Tagged(_, by_category_tagged) = by_category else {
+        panic!("expected tagged `ByCategory`; got `{by_category:?}`");
+    };
+    let variant = by_category_tagged.variants().next().unwrap();
+    let IrTypeView::Inline(InlineIrTypeView::Struct(_, inline_struct)) = variant.ty() else {
+        panic!("expected inline struct variant; got `{:?}`", variant.ty());
+    };
+    let inline_fields = inline_struct.fields().map(|f| f.name()).collect_vec();
+    assert_matches!(
+        &*inline_fields,
+        [
+            IrStructFieldName::Name("kind"),
+            IrStructFieldName::Name("category"),
+            IrStructFieldName::Name("bark"),
+        ]
+    );
+    let tags = inline_struct
+        .fields()
+        .filter(|f| f.tag())
+        .map(|f| f.name())
+        .collect_vec();
+    assert_matches!(&*tags, [IrStructFieldName::Name("category")]);
+}
+
+#[test]
+fn test_inlined_variant_inline_field_types_not_leaked() {
+    // `Dog` is inlined (referenced by `Owner.dog`) and has an
+    // inline field type (`details`). After inlining, `Pet`'s
+    // `inlines()` should contain the inline struct variant for
+    // `Dog`, but _not_ `Dog`'s inline `Details` type.
+    let doc = Document::from_yaml(indoc::indoc! {"
+        openapi: 3.0.0
+        info:
+          title: Test
+          version: 1.0.0
+        components:
+          schemas:
+            Dog:
+              type: object
+              properties:
+                kind:
+                  type: string
+                details:
+                  type: object
+                  properties:
+                    color:
+                      type: string
+            Pet:
+              oneOf:
+                - $ref: '#/components/schemas/Dog'
+              discriminator:
+                propertyName: kind
+                mapping:
+                  dog: '#/components/schemas/Dog'
+            Owner:
+              type: object
+              properties:
+                dog:
+                  $ref: '#/components/schemas/Dog'
+    "})
+    .unwrap();
+
+    let arena = Arena::new();
+    let spec = IrSpec::from_doc(&arena, &doc).unwrap();
+    let mut raw = RawGraph::new(&arena, &spec);
+    raw.inline_tagged_variants();
+    let graph = raw.cook();
+
+    let pet = graph.schemas().find(|s| s.name() == "Pet").unwrap();
+    let pet_inlines = pet.inlines().collect_vec();
+
+    // Inlines should only include the inline struct variant `Dog`,
+    // not `Dog`'s inline field type `Details`.
+    let [InlineIrTypeView::Struct(path, _)] = &*pet_inlines else {
+        panic!("expected inline struct variant `Dog`; got `{pet_inlines:?}`");
+    };
+    assert_matches!(path.root, InlineIrTypePathRoot::Type("Pet"));
+    assert_matches!(
+        &*path.segments,
+        [InlineIrTypePathSegment::TaggedVariant("Dog")]
+    );
+
+    // `Dog`'s own `inlines()` still contains its inline types:
+    // containers for optional fields, the `Details` struct, etc.
+    let dog = graph.schemas().find(|s| s.name() == "Dog").unwrap();
+    let dog_inlines = dog.inlines().collect_vec();
+    assert!(
+        dog_inlines
+            .iter()
+            .any(|i| matches!(i, InlineIrTypeView::Struct(..))),
+        "expected `Dog` to have inline struct `Details`"
+    );
+    assert!(
+        dog_inlines
+            .iter()
+            .all(|i| i.path().root == InlineIrTypePathRoot::Type("Dog")),
+        "all of `Dog`'s inlines should be rooted at `Dog`"
+    );
+}
+
+#[test]
+fn test_tag_false_when_only_operation_prevents_inlining() {
+    // `Dog` is referenced by the tagged union `Pet` (with tag `kind`) and by
+    // an operation, but not by any other schema. The operation should cause
+    // `Dog` to be inlined, because `kind` is only a tag field when `Dog` is
+    // used in `Pet`; when it's used in the operation's response body,
+    // `kind` is a regular field.
+    let doc = Document::from_yaml(indoc::indoc! {"
+        openapi: 3.0.0
+        info:
+          title: Test
+          version: 1.0.0
+        paths:
+          /dogs:
+            get:
+              operationId: getDog
+              responses:
+                '200':
+                  description: OK
+                  content:
+                    application/json:
+                      schema:
+                        $ref: '#/components/schemas/Dog'
+        components:
+          schemas:
+            Dog:
+              type: object
+              properties:
+                kind:
+                  type: string
+                bark:
+                  type: string
+            Pet:
+              oneOf:
+                - $ref: '#/components/schemas/Dog'
+              discriminator:
+                propertyName: kind
+                mapping:
+                  dog: '#/components/schemas/Dog'
+    "})
+    .unwrap();
+
+    let arena = Arena::new();
+    let spec = IrSpec::from_doc(&arena, &doc).unwrap();
+    let mut raw = RawGraph::new(&arena, &spec);
+    raw.inline_tagged_variants();
+    let graph = raw.cook();
+
+    // `Dog` must be inlined because the operation needs the schema
+    // struct with `kind` as a regular field.
+    let dog = graph.schemas().find(|s| s.name() == "Dog").unwrap();
+    let SchemaIrTypeView::Struct(_, dog_struct) = dog else {
+        panic!("expected struct `Dog`; got `{dog:?}`");
+    };
+
+    let kind_field = dog_struct
+        .fields()
+        .find(|f| matches!(f.name(), IrStructFieldName::Name("kind")))
+        .unwrap();
+    assert!(
+        !kind_field.tag(),
+        "`kind` should not be a tag on the schema struct \
+         when an operation references it"
+    );
+}
+
+#[test]
+fn test_inlined_when_struct_field_references_tagged_variant() {
+    // `Dog` is both a variant of the `Pet` tagged union _and_ referenced
+    // by `Owner.dog` as a regular struct field. Even though `Pet` is the
+    // only tagged union using `Dog`, the non-tagged incoming edge from
+    // `Owner` means `Dog` must be inlined, so that the schema struct
+    // retains the `kind` field.
+    let doc = Document::from_yaml(indoc::indoc! {"
+        openapi: 3.0.0
+        info:
+          title: Test
+          version: 1.0.0
+        paths: {}
+        components:
+          schemas:
+            Dog:
+              type: object
+              properties:
+                kind:
+                  type: string
+                bark:
+                  type: string
+              required:
+                - kind
+                - bark
+            Owner:
+              type: object
+              properties:
+                dog:
+                  $ref: '#/components/schemas/Dog'
+            Pet:
+              oneOf:
+                - $ref: '#/components/schemas/Dog'
+              discriminator:
+                propertyName: kind
+                mapping:
+                  dog: '#/components/schemas/Dog'
+    "})
+    .unwrap();
+
+    let arena = Arena::new();
+    let spec = IrSpec::from_doc(&arena, &doc).unwrap();
+    let mut raw = RawGraph::new(&arena, &spec);
+    raw.inline_tagged_variants();
+    let graph = raw.cook();
+
+    // The schema struct `Dog` should retain `kind` as a regular field,
+    // not a tag, because it's referenced by `Owner.dog`.
+    let dog = graph.schemas().find(|s| s.name() == "Dog").unwrap();
+    let SchemaIrTypeView::Struct(_, dog_struct) = dog else {
+        panic!("expected struct `Dog`; got `{dog:?}`");
+    };
+    let kind_field = dog_struct
+        .fields()
+        .find(|f| matches!(f.name(), IrStructFieldName::Name("kind")))
+        .unwrap();
+    assert!(
+        !kind_field.tag(),
+        "`kind` should not be a tag on the schema struct \
+         when a non-tagged schema also references it"
+    );
+
+    // The `Pet` tagged union should wrap an inline variant,
+    // not the schema struct directly.
+    let pet = graph.schemas().find(|s| s.name() == "Pet").unwrap();
+    let SchemaIrTypeView::Tagged(_, pet_tagged) = pet else {
+        panic!("expected tagged `Pet`; got `{pet:?}`");
+    };
+    let variant = pet_tagged.variants().next().unwrap();
+    let IrTypeView::Inline(InlineIrTypeView::Struct(path, inline_struct)) = variant.ty() else {
+        panic!("expected inline struct variant; got `{:?}`", variant.ty());
+    };
+    assert_matches!(path.root, InlineIrTypePathRoot::Type("Pet"));
+    assert_matches!(
+        &*path.segments,
+        [InlineIrTypePathSegment::TaggedVariant("Dog")]
+    );
+
+    // The inline struct should have the same fields, and `kind`
+    // should be a tag there; it's the tag for `Pet`.
+    let inline_fields = inline_struct.fields().map(|f| f.name()).collect_vec();
+    assert_matches!(
+        &*inline_fields,
+        [
+            IrStructFieldName::Name("kind"),
+            IrStructFieldName::Name("bark"),
+        ]
+    );
+    let kind_inline = inline_struct
+        .fields()
+        .find(|f| matches!(f.name(), IrStructFieldName::Name("kind")))
+        .unwrap();
+    assert!(
+        kind_inline.tag(),
+        "`kind` should be a tag on the inlined struct variant"
     );
 }

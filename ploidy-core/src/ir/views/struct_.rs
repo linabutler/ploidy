@@ -1,7 +1,7 @@
 use petgraph::{
     Direction,
     graph::NodeIndex,
-    visit::{Bfs, DfsPostOrder, EdgeFiltered},
+    visit::{DfsPostOrder, EdgeFiltered},
 };
 use rustc_hash::FxHashSet;
 
@@ -139,36 +139,15 @@ impl<'view, 'a> IrStructFieldView<'view, 'a> {
         self.field.description
     }
 
-    /// Returns `true` if this field is a discriminator property.
+    /// Returns `true` if this field is a tag.
     ///
-    /// A field is a discriminator if it's explicitly named as the `discriminator`
-    /// in its parent struct's definition, if it's named as an ancestor struct's
-    /// discriminator, or if its parent struct is a variant of a tagged union
-    /// whose `tag` matches this field's name.
-    pub fn discriminator(&self) -> bool {
+    /// A field is a tag if it matches the tag of a tagged union
+    /// that references this struct as one of its variants.
+    #[inline]
+    pub fn tag(&self) -> bool {
         let IrStructFieldName::Name(name) = self.field.name else {
             return false;
         };
-
-        // Check if our parent struct, or any of its ancestors,
-        // declare this field as a discriminator.
-        let inherits = EdgeFiltered::from_fn(&self.parent.cooked.graph, |e| {
-            matches!(*e.weight(), EdgeKind::Inherits)
-        });
-        let mut bfs = Bfs::new(&inherits, self.parent.index);
-        let is_ancestor_discriminator = std::iter::from_fn(|| bfs.next(&inherits))
-            .filter_map(|index| match self.parent.cooked.graph[index] {
-                GraphNode::Schema(SchemaIrType::Struct(_, s))
-                | GraphNode::Inline(InlineIrType::Struct(_, s)) => Some(s),
-                _ => None,
-            })
-            .any(|ancestor| ancestor.discriminator == Some(name));
-        if is_ancestor_discriminator {
-            return true;
-        }
-
-        // Check whether any tagged unions that include our parent struct
-        // declare this field as their discriminators.
         self.parent
             .cooked
             .graph

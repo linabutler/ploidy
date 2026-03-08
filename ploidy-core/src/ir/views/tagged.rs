@@ -39,7 +39,7 @@ impl<'a> IrTaggedView<'a> {
     #[inline]
     pub fn variants(&self) -> impl Iterator<Item = IrTaggedVariantView<'a>> {
         self.ty.variants.iter().map(move |variant| {
-            let node = self.cooked.resolve(&variant.ty);
+            let node = self.cooked.resolve(variant.ty);
             IrTaggedVariantView::new(self.cooked, self.cooked.indices[&node], variant)
         })
     }
@@ -92,7 +92,7 @@ impl<'a> IrTaggedVariantView<'a> {
     /// Returns a view of this variant's type.
     #[inline]
     pub fn ty(&self) -> IrTypeView<'a> {
-        let node = self.cooked.resolve(&self.variant.ty);
+        let node = self.cooked.resolve(self.variant.ty);
         IrTypeView::new(self.cooked, self.cooked.indices[&node])
     }
 }

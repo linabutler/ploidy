@@ -384,4 +384,211 @@ mod tests {
         };
         assert_eq!(actual, expected);
     }
+
+    // MARK: Inlined variants
+
+    #[test]
+    fn test_tagged_union_inlined_variant_wraps_inline_type() {
+        // `Dog` is used both inside the `Pet` tagged union _and_ referenced
+        // by `Owner.dog`, making it inlinable. After inlining, `Pet::Dog`
+        // holds the inlined `Dog`.
+        let doc = Document::from_yaml(indoc::indoc! {"
+            openapi: 3.0.0
+            info:
+              title: Test API
+              version: 1.0.0
+            components:
+              schemas:
+                Dog:
+                  type: object
+                  properties:
+                    kind:
+                      type: string
+                    bark:
+                      type: string
+                  required:
+                    - kind
+                    - bark
+                Pet:
+                  oneOf:
+                    - $ref: '#/components/schemas/Dog'
+                  discriminator:
+                    propertyName: kind
+                    mapping:
+                      dog: '#/components/schemas/Dog'
+                Owner:
+                  type: object
+                  properties:
+                    dog:
+                      $ref: '#/components/schemas/Dog'
+        "})
+        .unwrap();
+
+        let arena = Arena::new();
+        let spec = IrSpec::from_doc(&arena, &doc).unwrap();
+        let mut raw = RawGraph::new(&arena, &spec);
+        raw.inline_tagged_variants();
+        let graph = CodegenGraph::new(raw.cook());
+
+        let schema = graph.schemas().find(|s| s.name() == "Pet");
+        let Some(schema @ SchemaIrTypeView::Tagged(_, tagged)) = &schema else {
+            panic!("expected tagged union `Pet`; got `{schema:?}`");
+        };
+
+        let name = CodegenTypeName::Schema(schema);
+        let codegen = CodegenTagged::new(name, tagged);
+
+        let actual: syn::File = parse_quote!(#codegen);
+        let expected: syn::File = parse_quote! {
+            #[derive(Debug, Clone, PartialEq, Eq, Hash, ::ploidy_util::serde::Serialize, ::ploidy_util::serde::Deserialize)]
+            #[serde(crate = "::ploidy_util::serde", tag = "kind")]
+            pub enum Pet {
+                #[serde(rename = "dog")]
+                Dog(crate::types::pet::types::Dog),
+            }
+            impl ::std::convert::From<crate::types::pet::types::Dog> for Pet {
+                fn from(value: crate::types::pet::types::Dog) -> Self {
+                    Self::Dog(value)
+                }
+            }
+        };
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn test_tagged_union_wraps_non_inlined_variant() {
+        // `Dog` is only used inside the `Pet` tagged union, so it's
+        // used directly in `Pet::Dog`; not inlined.
+        let doc = Document::from_yaml(indoc::indoc! {"
+            openapi: 3.0.0
+            info:
+              title: Test API
+              version: 1.0.0
+            components:
+              schemas:
+                Dog:
+                  type: object
+                  properties:
+                    bark:
+                      type: string
+                Pet:
+                  oneOf:
+                    - $ref: '#/components/schemas/Dog'
+                  discriminator:
+                    propertyName: kind
+                    mapping:
+                      dog: '#/components/schemas/Dog'
+        "})
+        .unwrap();
+
+        let arena = Arena::new();
+        let spec = IrSpec::from_doc(&arena, &doc).unwrap();
+        let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
+
+        let schema = graph.schemas().find(|s| s.name() == "Pet");
+        let Some(schema @ SchemaIrTypeView::Tagged(_, tagged)) = &schema else {
+            panic!("expected tagged union `Pet`; got `{schema:?}`");
+        };
+
+        let name = CodegenTypeName::Schema(schema);
+        let codegen = CodegenTagged::new(name, tagged);
+
+        let actual: syn::File = parse_quote!(#codegen);
+        let expected: syn::File = parse_quote! {
+            #[derive(Debug, Clone, PartialEq, Eq, Hash, ::ploidy_util::serde::Serialize, ::ploidy_util::serde::Deserialize)]
+            #[serde(crate = "::ploidy_util::serde", tag = "kind")]
+            pub enum Pet {
+                #[serde(rename = "dog")]
+                Dog(crate::types::Dog),
+            }
+            impl ::std::convert::From<crate::types::Dog> for Pet {
+                fn from(value: crate::types::Dog) -> Self {
+                    Self::Dog(value)
+                }
+            }
+        };
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn test_tagged_union_mixed_inlined_and_non_inlined() {
+        // `Dog` is inlined (referenced by `Owner.dog`); `Cat` is not.
+        // Each should be handled independently.
+        let doc = Document::from_yaml(indoc::indoc! {"
+            openapi: 3.0.0
+            info:
+              title: Test API
+              version: 1.0.0
+            components:
+              schemas:
+                Dog:
+                  type: object
+                  properties:
+                    kind:
+                      type: string
+                    bark:
+                      type: string
+                  required:
+                    - bark
+                Cat:
+                  type: object
+                  properties:
+                    meow:
+                      type: string
+                Pet:
+                  oneOf:
+                    - $ref: '#/components/schemas/Dog'
+                    - $ref: '#/components/schemas/Cat'
+                  discriminator:
+                    propertyName: kind
+                    mapping:
+                      dog: '#/components/schemas/Dog'
+                      cat: '#/components/schemas/Cat'
+                Owner:
+                  type: object
+                  properties:
+                    dog:
+                      $ref: '#/components/schemas/Dog'
+        "})
+        .unwrap();
+
+        let arena = Arena::new();
+        let spec = IrSpec::from_doc(&arena, &doc).unwrap();
+        let mut raw = RawGraph::new(&arena, &spec);
+        raw.inline_tagged_variants();
+        let graph = CodegenGraph::new(raw.cook());
+
+        let schema = graph.schemas().find(|s| s.name() == "Pet");
+        let Some(schema @ SchemaIrTypeView::Tagged(_, tagged)) = &schema else {
+            panic!("expected tagged union `Pet`; got `{schema:?}`");
+        };
+
+        let name = CodegenTypeName::Schema(schema);
+        let codegen = CodegenTagged::new(name, tagged);
+
+        let actual: syn::File = parse_quote!(#codegen);
+        // `Dog` is inlined, so `Pet::Dog` holds the inline type.
+        // `Cat` isn't inlined, so `Pet::Cat` holds the schema type.
+        let expected: syn::File = parse_quote! {
+            #[derive(Debug, Clone, PartialEq, Eq, Hash, ::ploidy_util::serde::Serialize, ::ploidy_util::serde::Deserialize)]
+            #[serde(crate = "::ploidy_util::serde", tag = "kind")]
+            pub enum Pet {
+                #[serde(rename = "dog")]
+                Dog(crate::types::pet::types::Dog),
+                #[serde(rename = "cat")]
+                Cat(crate::types::Cat),
+            }
+            impl ::std::convert::From<crate::types::pet::types::Dog> for Pet {
+                fn from(value: crate::types::pet::types::Dog) -> Self {
+                    Self::Dog(value)
+                }
+            }
+            impl ::std::convert::From<crate::types::Cat> for Pet {
+                fn from(value: crate::types::Cat) -> Self {
+                    Self::Cat(value)
+                }
+            }
+        };
+        assert_eq!(actual, expected);
+    }
 }
