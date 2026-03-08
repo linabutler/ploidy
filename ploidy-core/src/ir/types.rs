@@ -15,16 +15,6 @@ pub enum IrType<'a> {
     Inline(InlineIrType<'a>),
 }
 
-impl IrType<'_> {
-    pub fn as_ref(&self) -> IrTypeRef<'_> {
-        match self {
-            Self::Schema(ty) => IrTypeRef::Schema(ty),
-            Self::Inline(ty) => IrTypeRef::Inline(ty),
-            Self::Ref(r) => IrTypeRef::Ref(r),
-        }
-    }
-}
-
 impl<'a> From<SchemaIrType<'a>> for IrType<'a> {
     fn from(ty: SchemaIrType<'a>) -> Self {
         Self::Schema(ty)
@@ -35,14 +25,6 @@ impl<'a> From<InlineIrType<'a>> for IrType<'a> {
     fn from(ty: InlineIrType<'a>) -> Self {
         Self::Inline(ty)
     }
-}
-
-/// A reference to a schema type.
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-pub enum IrTypeRef<'a> {
-    Ref(&'a ComponentRef),
-    Schema(&'a SchemaIrType<'a>),
-    Inline(&'a InlineIrType<'a>),
 }
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]

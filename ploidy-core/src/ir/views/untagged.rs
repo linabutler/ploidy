@@ -2,7 +2,7 @@ use petgraph::graph::NodeIndex;
 
 use crate::ir::{
     IrUntaggedVariantNameHint,
-    graph::{IrGraph, IrGraphNode},
+    graph::CookedGraph,
     types::{IrUntagged, IrUntaggedVariant},
 };
 
@@ -11,18 +11,19 @@ use super::{ViewNode, ir::IrTypeView};
 /// A graph-aware view of an [`IrUntagged`] union.
 #[derive(Debug)]
 pub struct IrUntaggedView<'a> {
-    graph: &'a IrGraph<'a>,
+    cooked: &'a CookedGraph<'a>,
     index: NodeIndex<usize>,
     ty: &'a IrUntagged<'a>,
 }
 
 impl<'a> IrUntaggedView<'a> {
+    #[inline]
     pub(in crate::ir) fn new(
-        graph: &'a IrGraph<'a>,
+        cooked: &'a CookedGraph<'a>,
         index: NodeIndex<usize>,
         ty: &'a IrUntagged<'a>,
     ) -> Self {
-        Self { graph, index, ty }
+        Self { cooked, index, ty }
     }
 
     #[inline]
@@ -31,6 +32,7 @@ impl<'a> IrUntaggedView<'a> {
     }
 
     /// Returns an iterator over this untagged union's variants.
+    #[inline]
     pub fn variants(&self) -> impl Iterator<Item = IrUntaggedVariantView<'_, 'a>> {
         self.ty
             .variants
@@ -44,8 +46,8 @@ impl<'a> IrUntaggedView<'a> {
 
 impl<'a> ViewNode<'a> for IrUntaggedView<'a> {
     #[inline]
-    fn graph(&self) -> &'a IrGraph<'a> {
-        self.graph
+    fn cooked(&self) -> &'a CookedGraph<'a> {
+        self.cooked
     }
 
     #[inline]
@@ -63,13 +65,14 @@ pub struct IrUntaggedVariantView<'view, 'a> {
 
 impl<'view, 'a> IrUntaggedVariantView<'view, 'a> {
     /// Returns a view of this variant's type, if it's not `null`.
+    #[inline]
     pub fn ty(&self) -> Option<SomeIrUntaggedVariant<'a>> {
         match self.variant {
             IrUntaggedVariant::Some(hint, ty) => {
-                let node = IrGraphNode::from_ref(self.parent.graph.spec, ty.as_ref());
+                let node = self.parent.cooked.resolve(ty);
                 Some(SomeIrUntaggedVariant {
                     hint: *hint,
-                    view: IrTypeView::new(self.parent.graph, self.parent.graph.indices[&node]),
+                    view: IrTypeView::new(self.parent.cooked, self.parent.cooked.indices[&node]),
                 })
             }
             IrUntaggedVariant::Null => None,

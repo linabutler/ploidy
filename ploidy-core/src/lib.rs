@@ -1,6 +1,7 @@
 #[macro_use]
 mod macros;
 
+pub mod arena;
 pub mod codegen;
 pub mod error;
 pub mod ir;

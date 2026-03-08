@@ -1,15 +1,14 @@
 use std::{borrow::Cow, collections::hash_map::Entry, iter::Peekable, str::CharIndices};
 
-use bumpalo::{
-    Bump,
-    collections::{CollectIn, Vec as BumpVec},
-};
+use bumpalo::collections::{CollectIn, Vec as BumpVec};
 use rustc_hash::FxHashMap;
 use unicase::UniCase;
 
+use crate::arena::Arena;
+
 /// Deduplicates names across case conventions.
 #[derive(Debug, Default)]
-pub struct UniqueNames(Bump);
+pub struct UniqueNames(Arena);
 
 impl UniqueNames {
     /// Creates a new arena for deduplicating names.
@@ -60,12 +59,12 @@ impl UniqueNames {
 /// A scope for unique names.
 #[derive(Debug)]
 pub struct UniqueNamesScope<'a> {
-    arena: &'a Bump,
+    arena: &'a Arena,
     space: FxHashMap<&'a [UniCase<&'a str>], usize>,
 }
 
 impl<'a> UniqueNamesScope<'a> {
-    fn new(arena: &'a Bump) -> Self {
+    fn new(arena: &'a Arena) -> Self {
         Self {
             arena,
             space: FxHashMap::default(),
@@ -73,16 +72,16 @@ impl<'a> UniqueNamesScope<'a> {
     }
 
     fn with_reserved<S: AsRef<str>>(
-        arena: &'a Bump,
+        arena: &'a Arena,
         reserved: impl IntoIterator<Item = S>,
     ) -> Self {
         let space = reserved
             .into_iter()
-            .map(|name| arena.alloc_str(name.as_ref()))
+            .map(|name| arena.inner().alloc_str(name.as_ref()))
             .map(|name| {
                 WordSegments::new(name)
                     .map(UniCase::new)
-                    .collect_in::<BumpVec<_>>(arena)
+                    .collect_in::<BumpVec<_>>(arena.inner())
             })
             .fold(FxHashMap::default(), |mut names, segments| {
                 // Setting the count to 1 automatically filters out duplicates.
@@ -109,8 +108,8 @@ impl<'a> UniqueNamesScope<'a> {
     pub fn uniquify<'b>(&mut self, name: &'b str) -> Cow<'b, str> {
         match self.space.entry(
             WordSegments::new(name)
-                .map(|name| UniCase::new(&*self.arena.alloc_str(name)))
-                .collect_in::<BumpVec<_>>(self.arena)
+                .map(|name| UniCase::new(&*self.arena.inner().alloc_str(name)))
+                .collect_in::<BumpVec<_>>(self.arena.inner())
                 .into_bump_slice(),
         ) {
             Entry::Occupied(mut entry) => {

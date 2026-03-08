@@ -14,7 +14,9 @@ use petgraph::{
 };
 use ref_cast::{RefCastCustom, ref_cast_custom};
 
-use super::graph::{EdgeKind, Extension, ExtensionMap, IrGraph, IrGraphNode, Traversal, Traverse};
+use super::graph::{
+    CookedGraph, EdgeKind, Extension, ExtensionMap, GraphNode, Traversal, Traverse,
+};
 
 pub mod any;
 pub mod container;
@@ -90,57 +92,47 @@ where
 {
     #[inline]
     fn inlines(&self) -> impl Iterator<Item = InlineIrTypeView<'a>> + use<'a, T> {
-        let graph = self.graph();
+        let cooked = self.cooked();
         // Only include edges to other inline schemas.
-        let filtered = EdgeFiltered::from_fn(&graph.g, |r| {
-            matches!(graph.g[r.target()], IrGraphNode::Inline(_))
+        let filtered = EdgeFiltered::from_fn(&cooked.graph, |e| {
+            matches!(cooked.graph[e.target()], GraphNode::Inline(_))
         });
-        let mut bfs = Bfs::new(&graph.g, self.index());
-        std::iter::from_fn(move || bfs.next(&filtered)).filter_map(|index| match graph.g[index] {
-            IrGraphNode::Inline(ty) => Some(InlineIrTypeView::new(graph, index, ty)),
-            _ => None,
+        let mut bfs = Bfs::new(&cooked.graph, self.index());
+        std::iter::from_fn(move || bfs.next(&filtered)).filter_map(|index| {
+            match cooked.graph[index] {
+                GraphNode::Inline(ty) => Some(InlineIrTypeView::new(cooked, index, ty)),
+                _ => None,
+            }
         })
     }
 
     #[inline]
     fn used_by(&self) -> impl Iterator<Item = IrOperationView<'a>> + use<'a, T> {
-        let graph = self.graph();
-        graph
-            .metadata
-            .schemas
-            .get(&self.index())
-            .into_iter()
-            .flat_map(|meta| {
-                meta.used_by
-                    .iter()
-                    .map(|op| IrOperationView::new(graph, op.0))
-            })
+        let cooked = self.cooked();
+        let meta = &cooked.metadata.schemas[self.index().index()];
+        meta.used_by
+            .iter()
+            .map(|op| IrOperationView::new(cooked, op.0))
     }
 
     #[inline]
     fn dependencies(&self) -> impl Iterator<Item = IrTypeView<'a>> + use<'a, T> {
-        let graph = self.graph();
-        graph
-            .metadata
-            .schemas
-            .get(&self.index())
-            .into_iter()
-            .flat_map(|meta| meta.dependencies.ones())
+        let cooked = self.cooked();
+        let meta = &cooked.metadata.schemas[self.index().index()];
+        meta.dependencies
+            .ones()
             .map(NodeIndex::new)
-            .map(|index| IrTypeView::new(graph, index))
+            .map(|index| IrTypeView::new(cooked, index))
     }
 
     #[inline]
     fn dependents(&self) -> impl Iterator<Item = IrTypeView<'a>> + use<'a, T> {
-        let graph = self.graph();
-        graph
-            .metadata
-            .schemas
-            .get(&self.index())
-            .into_iter()
-            .flat_map(|meta| meta.dependents.ones())
+        let cooked = self.cooked();
+        let meta = &cooked.metadata.schemas[self.index().index()];
+        meta.dependents
+            .ones()
             .map(NodeIndex::new)
-            .map(move |index| IrTypeView::new(graph, index))
+            .map(move |index| IrTypeView::new(cooked, index))
     }
 
     #[inline]
@@ -152,9 +144,9 @@ where
     where
         F: Fn(EdgeKind, &IrTypeView<'a>) -> Traversal,
     {
-        let graph = self.graph();
+        let cooked = self.cooked();
         let t = Traverse::from_neighbors(
-            &graph.g,
+            &cooked.graph,
             self.index(),
             match reach {
                 Reach::Dependencies => Direction::Outgoing,
@@ -162,10 +154,10 @@ where
             },
         );
         t.run(move |kind, index| {
-            let view = IrTypeView::new(graph, index);
+            let view = IrTypeView::new(cooked, index);
             filter(kind, &view)
         })
-        .map(|index| IrTypeView::new(graph, index))
+        .map(|index| IrTypeView::new(cooked, index))
     }
 }
 
@@ -185,7 +177,7 @@ where
 }
 
 pub trait ViewNode<'a> {
-    fn graph(&self) -> &'a IrGraph<'a>;
+    fn cooked(&self) -> &'a CookedGraph<'a>;
     fn index(&self) -> NodeIndex<usize>;
 }
 
@@ -220,7 +212,7 @@ where
     where
         'graph: 'view,
     {
-        self.graph().metadata.schemas[&self.index()]
+        self.cooked().metadata.schemas[self.index().index()]
             .extensions
             .borrow()
     }
@@ -230,7 +222,7 @@ where
     where
         'graph: 'b,
     {
-        self.graph().metadata.schemas[&self.index()]
+        self.cooked().metadata.schemas[self.index().index()]
             .extensions
             .borrow_mut()
     }

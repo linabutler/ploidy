@@ -114,7 +114,8 @@ mod tests {
 
     use itertools::Itertools;
     use ploidy_core::{
-        ir::{IrGraph, IrSpec},
+        arena::Arena,
+        ir::{IrSpec, RawGraph},
         parse::Document,
     };
     use pretty_assertions::assert_eq;
@@ -147,9 +148,9 @@ mod tests {
         "})
         .unwrap();
 
-        let spec = IrSpec::from_doc(&doc).unwrap();
-        let ir = IrGraph::new(&spec);
-        let graph = CodegenGraph::new(ir);
+        let arena = Arena::new();
+        let spec = IrSpec::from_doc(&arena, &doc).unwrap();
+        let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
         let ops = graph.operations().collect_vec();
         let inlines = CodegenInlines::Resource(&ops);
@@ -205,9 +206,9 @@ mod tests {
         "})
         .unwrap();
 
-        let spec = IrSpec::from_doc(&doc).unwrap();
-        let ir = IrGraph::new(&spec);
-        let graph = CodegenGraph::new(ir);
+        let arena = Arena::new();
+        let spec = IrSpec::from_doc(&arena, &doc).unwrap();
+        let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
         let ops = graph.operations().collect_vec();
         let inlines = CodegenInlines::Resource(&ops);
@@ -259,9 +260,9 @@ mod tests {
         "})
         .unwrap();
 
-        let spec = IrSpec::from_doc(&doc).unwrap();
-        let ir = IrGraph::new(&spec);
-        let graph = CodegenGraph::new(ir);
+        let arena = Arena::new();
+        let spec = IrSpec::from_doc(&arena, &doc).unwrap();
+        let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
         let ops = graph.operations().collect_vec();
         let inlines = CodegenInlines::Resource(&ops);
@@ -324,9 +325,9 @@ mod tests {
         "})
         .unwrap();
 
-        let spec = IrSpec::from_doc(&doc).unwrap();
-        let ir = IrGraph::new(&spec);
-        let graph = CodegenGraph::new(ir);
+        let arena = Arena::new();
+        let spec = IrSpec::from_doc(&arena, &doc).unwrap();
+        let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
         let ops = graph.operations().collect_vec();
         let inlines = CodegenInlines::Resource(&ops);
@@ -362,9 +363,9 @@ mod tests {
         "})
         .unwrap();
 
-        let spec = IrSpec::from_doc(&doc).unwrap();
-        let ir = IrGraph::new(&spec);
-        let graph = CodegenGraph::new(ir);
+        let arena = Arena::new();
+        let spec = IrSpec::from_doc(&arena, &doc).unwrap();
+        let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
         let ops = graph.operations().collect_vec();
         let inlines = CodegenInlines::Resource(&ops);
@@ -413,9 +414,9 @@ mod tests {
         "})
         .unwrap();
 
-        let spec = IrSpec::from_doc(&doc).unwrap();
-        let ir = IrGraph::new(&spec);
-        let graph = CodegenGraph::new(ir);
+        let arena = Arena::new();
+        let spec = IrSpec::from_doc(&arena, &doc).unwrap();
+        let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
         let ops = graph.operations().collect_vec();
         let inlines = CodegenInlines::Resource(&ops);
@@ -464,9 +465,9 @@ mod tests {
         "})
         .unwrap();
 
-        let spec = IrSpec::from_doc(&doc).unwrap();
-        let ir = IrGraph::new(&spec);
-        let graph = CodegenGraph::new(ir);
+        let arena = Arena::new();
+        let spec = IrSpec::from_doc(&arena, &doc).unwrap();
+        let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
         let ops = graph.operations().collect_vec();
         let inlines = CodegenInlines::Resource(&ops);

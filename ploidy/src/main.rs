@@ -2,8 +2,9 @@ use itertools::Itertools;
 use miette::{Context, IntoDiagnostic, Result};
 use ploidy_codegen_rust::{CodegenCargoManifest, CodegenErrorModule, CodegenGraph, CodegenLibrary};
 use ploidy_core::{
+    arena::Arena,
     codegen::write_to_disk,
-    ir::{IrGraph, IrSpec},
+    ir::{IrSpec, RawGraph},
     parse::Document,
 };
 
@@ -33,7 +34,9 @@ fn main() -> Result<()> {
 
             println!("OpenAPI: {} (version {})", doc.info.title, doc.info.version);
 
-            let spec = IrSpec::from_doc(&doc).into_diagnostic()?;
+            let arena = Arena::new();
+            let spec = IrSpec::from_doc(&arena, &doc).into_diagnostic()?;
+            let raw = RawGraph::new(&arena, &spec);
 
             let config = command
                 .manifest
@@ -41,7 +44,7 @@ fn main() -> Result<()> {
                 .as_ref()
                 .and_then(|p| p.metadata.as_ref()?.ploidy.as_ref());
             let graph = {
-                let graph = IrGraph::new(&spec);
+                let graph = raw.cook();
                 match config {
                     Some(config) => CodegenGraph::with_config(graph, config),
                     None => CodegenGraph::new(graph),

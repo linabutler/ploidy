@@ -1,6 +1,6 @@
 use petgraph::graph::NodeIndex;
 
-use crate::ir::graph::{IrGraph, IrGraphNode};
+use crate::ir::graph::{CookedGraph, GraphNode};
 
 use super::{View, container::ContainerView, inline::InlineIrTypeView, schema::SchemaIrTypeView};
 
@@ -12,10 +12,11 @@ pub enum IrTypeView<'a> {
 }
 
 impl<'a> IrTypeView<'a> {
-    pub(in crate::ir) fn new(graph: &'a IrGraph<'a>, index: NodeIndex<usize>) -> Self {
-        match &graph.g[index] {
-            IrGraphNode::Schema(ty) => Self::Schema(SchemaIrTypeView::new(graph, index, ty)),
-            IrGraphNode::Inline(ty) => Self::Inline(InlineIrTypeView::new(graph, index, ty)),
+    #[inline]
+    pub(in crate::ir) fn new(cooked: &'a CookedGraph<'a>, index: NodeIndex<usize>) -> Self {
+        match &cooked.graph[index] {
+            GraphNode::Schema(ty) => Self::Schema(SchemaIrTypeView::new(cooked, index, ty)),
+            GraphNode::Inline(ty) => Self::Inline(InlineIrTypeView::new(cooked, index, ty)),
         }
     }
 

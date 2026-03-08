@@ -3,6 +3,7 @@
 use itertools::Itertools;
 
 use crate::{
+    arena::Arena,
     ir::{
         IrParameterInfo,
         spec::IrSpec,
@@ -34,7 +35,8 @@ fn test_parses_single_operation_from_path() {
     "})
     .unwrap();
 
-    let ir = IrSpec::from_doc(&doc).unwrap();
+    let arena = Arena::new();
+    let ir = IrSpec::from_doc(&arena, &doc).unwrap();
 
     assert_matches!(
         &*ir.operations,
@@ -69,7 +71,8 @@ fn test_parses_multiple_operations_from_same_path() {
     "})
     .unwrap();
 
-    let ir = IrSpec::from_doc(&doc).unwrap();
+    let arena = Arena::new();
+    let ir = IrSpec::from_doc(&arena, &doc).unwrap();
 
     assert_matches!(
         &*ir.operations,
@@ -109,7 +112,8 @@ fn test_parses_operations_from_multiple_paths() {
     "})
     .unwrap();
 
-    let ir = IrSpec::from_doc(&doc).unwrap();
+    let arena = Arena::new();
+    let ir = IrSpec::from_doc(&arena, &doc).unwrap();
 
     assert_matches!(
         &*ir.operations,
@@ -143,7 +147,8 @@ fn test_parses_path_with_parameter_segments() {
     "})
     .unwrap();
 
-    let ir = IrSpec::from_doc(&doc).unwrap();
+    let arena = Arena::new();
+    let ir = IrSpec::from_doc(&arena, &doc).unwrap();
 
     let [op @ IrOperation { .. }] = &*ir.operations else {
         panic!("expected single operation; got `{:?}`", ir.operations);
@@ -176,7 +181,8 @@ fn test_parses_path_parameter_string_type() {
     "})
     .unwrap();
 
-    let ir = IrSpec::from_doc(&doc).unwrap();
+    let arena = Arena::new();
+    let ir = IrSpec::from_doc(&arena, &doc).unwrap();
 
     let [IrOperation { params, .. }] = &*ir.operations else {
         panic!("expected single operation; got `{:?}`", ir.operations);
@@ -216,7 +222,8 @@ fn test_parses_path_parameter_integer_type() {
     "})
     .unwrap();
 
-    let ir = IrSpec::from_doc(&doc).unwrap();
+    let arena = Arena::new();
+    let ir = IrSpec::from_doc(&arena, &doc).unwrap();
 
     let [IrOperation { params, .. }] = &*ir.operations else {
         panic!("expected single operation; got `{:?}`", ir.operations);
@@ -259,7 +266,8 @@ fn test_parses_multiple_path_parameters() {
     "})
     .unwrap();
 
-    let ir = IrSpec::from_doc(&doc).unwrap();
+    let arena = Arena::new();
+    let ir = IrSpec::from_doc(&arena, &doc).unwrap();
 
     let [IrOperation { params, .. }] = &*ir.operations else {
         panic!("expected single operation; got `{:?}`", ir.operations);
@@ -300,7 +308,8 @@ fn test_parses_query_parameter_form_exploded() {
     "})
     .unwrap();
 
-    let ir = IrSpec::from_doc(&doc).unwrap();
+    let arena = Arena::new();
+    let ir = IrSpec::from_doc(&arena, &doc).unwrap();
 
     let [IrOperation { params, .. }] = &*ir.operations else {
         panic!("expected single operation; got `{:?}`", ir.operations);
@@ -341,7 +350,8 @@ fn test_parses_query_parameter_form_unexploded() {
     "})
     .unwrap();
 
-    let ir = IrSpec::from_doc(&doc).unwrap();
+    let arena = Arena::new();
+    let ir = IrSpec::from_doc(&arena, &doc).unwrap();
 
     let [IrOperation { params, .. }] = &*ir.operations else {
         panic!("expected single operation; got `{:?}`", ir.operations);
@@ -382,7 +392,8 @@ fn test_parses_query_parameter_pipe_delimited() {
     "})
     .unwrap();
 
-    let ir = IrSpec::from_doc(&doc).unwrap();
+    let arena = Arena::new();
+    let ir = IrSpec::from_doc(&arena, &doc).unwrap();
 
     let [IrOperation { params, .. }] = &*ir.operations else {
         panic!("expected single operation; got `{:?}`", ir.operations);
@@ -423,7 +434,8 @@ fn test_parses_query_parameter_space_delimited() {
     "})
     .unwrap();
 
-    let ir = IrSpec::from_doc(&doc).unwrap();
+    let arena = Arena::new();
+    let ir = IrSpec::from_doc(&arena, &doc).unwrap();
 
     let [IrOperation { params, .. }] = &*ir.operations else {
         panic!("expected single operation; got `{:?}`", ir.operations);
@@ -465,7 +477,8 @@ fn test_parses_query_parameter_deep_object() {
     "})
     .unwrap();
 
-    let ir = IrSpec::from_doc(&doc).unwrap();
+    let arena = Arena::new();
+    let ir = IrSpec::from_doc(&arena, &doc).unwrap();
 
     let [IrOperation { params, .. }] = &*ir.operations else {
         panic!("expected single operation; got `{:?}`", ir.operations);
@@ -512,7 +525,8 @@ fn test_parses_multiple_query_parameters() {
     "})
     .unwrap();
 
-    let ir = IrSpec::from_doc(&doc).unwrap();
+    let arena = Arena::new();
+    let ir = IrSpec::from_doc(&arena, &doc).unwrap();
 
     let [IrOperation { params, .. }] = &*ir.operations else {
         panic!("expected single operation; got `{:?}`", ir.operations);
@@ -551,7 +565,8 @@ fn test_parses_query_parameter_with_description() {
     "})
     .unwrap();
 
-    let ir = IrSpec::from_doc(&doc).unwrap();
+    let arena = Arena::new();
+    let ir = IrSpec::from_doc(&arena, &doc).unwrap();
 
     let [IrOperation { params, .. }] = &*ir.operations else {
         panic!("expected single operation; got `{:?}`", ir.operations);
@@ -596,7 +611,8 @@ fn test_parses_request_body_json_reference() {
     "})
     .unwrap();
 
-    let ir = IrSpec::from_doc(&doc).unwrap();
+    let arena = Arena::new();
+    let ir = IrSpec::from_doc(&arena, &doc).unwrap();
 
     assert_matches!(
         &*ir.operations,
@@ -633,7 +649,8 @@ fn test_parses_request_body_json_inline_schema() {
     "})
     .unwrap();
 
-    let ir = IrSpec::from_doc(&doc).unwrap();
+    let arena = Arena::new();
+    let ir = IrSpec::from_doc(&arena, &doc).unwrap();
 
     assert_matches!(
         &*ir.operations,
@@ -671,7 +688,8 @@ fn test_parses_request_body_multipart() {
     "})
     .unwrap();
 
-    let ir = IrSpec::from_doc(&doc).unwrap();
+    let arena = Arena::new();
+    let ir = IrSpec::from_doc(&arena, &doc).unwrap();
 
     assert_matches!(
         &*ir.operations,
@@ -705,7 +723,8 @@ fn test_parses_request_body_wildcard_content_type() {
     "})
     .unwrap();
 
-    let ir = IrSpec::from_doc(&doc).unwrap();
+    let arena = Arena::new();
+    let ir = IrSpec::from_doc(&arena, &doc).unwrap();
 
     assert_matches!(
         &*ir.operations,
@@ -734,7 +753,8 @@ fn test_operation_without_request_body() {
     "})
     .unwrap();
 
-    let ir = IrSpec::from_doc(&doc).unwrap();
+    let arena = Arena::new();
+    let ir = IrSpec::from_doc(&arena, &doc).unwrap();
 
     assert_matches!(&*ir.operations, [IrOperation { request: None, .. }]);
 }
@@ -769,7 +789,8 @@ fn test_parses_response_json_reference() {
     "})
     .unwrap();
 
-    let ir = IrSpec::from_doc(&doc).unwrap();
+    let arena = Arena::new();
+    let ir = IrSpec::from_doc(&arena, &doc).unwrap();
 
     assert_matches!(
         &*ir.operations,
@@ -805,7 +826,8 @@ fn test_parses_response_json_inline_schema() {
     "})
     .unwrap();
 
-    let ir = IrSpec::from_doc(&doc).unwrap();
+    let arena = Arena::new();
+    let ir = IrSpec::from_doc(&arena, &doc).unwrap();
 
     assert_matches!(
         &*ir.operations,
@@ -856,7 +878,8 @@ fn test_prioritizes_2xx_status_over_default_response() {
     "})
     .unwrap();
 
-    let ir = IrSpec::from_doc(&doc).unwrap();
+    let arena = Arena::new();
+    let ir = IrSpec::from_doc(&arena, &doc).unwrap();
 
     let [op @ IrOperation { .. }] = &*ir.operations else {
         panic!("expected single operation; got `{:?}`", ir.operations);
@@ -898,7 +921,8 @@ fn test_falls_back_to_default_response_when_no_2xx_status() {
     "})
     .unwrap();
 
-    let ir = IrSpec::from_doc(&doc).unwrap();
+    let arena = Arena::new();
+    let ir = IrSpec::from_doc(&arena, &doc).unwrap();
 
     assert_matches!(
         &*ir.operations,
@@ -930,7 +954,8 @@ fn test_parses_response_with_wildcard_content_type() {
     "})
     .unwrap();
 
-    let ir = IrSpec::from_doc(&doc).unwrap();
+    let arena = Arena::new();
+    let ir = IrSpec::from_doc(&arena, &doc).unwrap();
 
     assert_matches!(
         &*ir.operations,
@@ -983,7 +1008,8 @@ fn test_selects_first_2xx_status_when_multiple_exist() {
     "})
     .unwrap();
 
-    let ir = IrSpec::from_doc(&doc).unwrap();
+    let arena = Arena::new();
+    let ir = IrSpec::from_doc(&arena, &doc).unwrap();
 
     let [op @ IrOperation { .. }] = &*ir.operations else {
         panic!("expected single operation; got `{:?}`", ir.operations);
@@ -1016,7 +1042,8 @@ fn test_operation_without_response() {
     "})
     .unwrap();
 
-    let ir = IrSpec::from_doc(&doc).unwrap();
+    let arena = Arena::new();
+    let ir = IrSpec::from_doc(&arena, &doc).unwrap();
 
     assert_matches!(&*ir.operations, [IrOperation { response: None, .. }]);
 }
@@ -1041,7 +1068,8 @@ fn test_parses_custom_resource_name_from_extension() {
     "})
     .unwrap();
 
-    let ir = IrSpec::from_doc(&doc).unwrap();
+    let arena = Arena::new();
+    let ir = IrSpec::from_doc(&arena, &doc).unwrap();
 
     assert_matches!(
         &*ir.operations,
@@ -1077,7 +1105,8 @@ fn test_different_operations_can_have_different_resources() {
     "})
     .unwrap();
 
-    let ir = IrSpec::from_doc(&doc).unwrap();
+    let arena = Arena::new();
+    let ir = IrSpec::from_doc(&arena, &doc).unwrap();
 
     assert_matches!(
         &*ir.operations,
@@ -1115,7 +1144,8 @@ fn test_schema_stores_x_resource_id() {
     "})
     .unwrap();
 
-    let spec = IrSpec::from_doc(&doc).unwrap();
+    let arena = Arena::new();
+    let spec = IrSpec::from_doc(&arena, &doc).unwrap();
     let schema = spec.schemas.get("User").unwrap();
 
     assert_matches!(
@@ -1142,7 +1172,8 @@ fn test_schema_without_x_resource_id_has_none() {
     "})
     .unwrap();
 
-    let spec = IrSpec::from_doc(&doc).unwrap();
+    let arena = Arena::new();
+    let spec = IrSpec::from_doc(&arena, &doc).unwrap();
     let schema = spec.schemas.get("User").unwrap();
 
     assert_matches!(
@@ -1174,7 +1205,8 @@ fn test_operation_without_id_is_skipped() {
     "})
     .unwrap();
 
-    let ir = IrSpec::from_doc(&doc).unwrap();
+    let arena = Arena::new();
+    let ir = IrSpec::from_doc(&arena, &doc).unwrap();
 
     // Only the GET operation with `operationId` should be present.
     assert_matches!(
@@ -1211,7 +1243,8 @@ fn test_extracts_schemas_from_components() {
     "})
     .unwrap();
 
-    let ir = IrSpec::from_doc(&doc).unwrap();
+    let arena = Arena::new();
+    let ir = IrSpec::from_doc(&arena, &doc).unwrap();
 
     let ids = ir.schemas.keys().copied().collect_vec();
     assert_matches!(&*ids, ["User", "Post"]);
@@ -1228,7 +1261,8 @@ fn test_empty_spec() {
     "})
     .unwrap();
 
-    let ir = IrSpec::from_doc(&doc).unwrap();
+    let arena = Arena::new();
+    let ir = IrSpec::from_doc(&arena, &doc).unwrap();
 
     assert_eq!(ir.schemas.len(), 0);
     assert_eq!(ir.operations.len(), 0);
@@ -1283,7 +1317,8 @@ fn test_operation_with_all_components() {
     "})
     .unwrap();
 
-    let ir = IrSpec::from_doc(&doc).unwrap();
+    let arena = Arena::new();
+    let ir = IrSpec::from_doc(&arena, &doc).unwrap();
 
     assert_matches!(
         &*ir.operations,
@@ -1319,7 +1354,8 @@ fn test_preserves_operation_descriptions() {
     "})
     .unwrap();
 
-    let ir = IrSpec::from_doc(&doc).unwrap();
+    let arena = Arena::new();
+    let ir = IrSpec::from_doc(&arena, &doc).unwrap();
 
     assert_matches!(
         &*ir.operations,
@@ -1391,7 +1427,8 @@ fn test_complex_spec_with_multiple_operations_and_resources() {
     "})
     .unwrap();
 
-    let ir = IrSpec::from_doc(&doc).unwrap();
+    let arena = Arena::new();
+    let ir = IrSpec::from_doc(&arena, &doc).unwrap();
     assert_eq!(ir.schemas.len(), 1);
     assert_matches!(
         &*ir.operations,
@@ -1447,7 +1484,8 @@ fn test_query_parameter_default_style_is_form_exploded() {
     "})
     .unwrap();
 
-    let ir = IrSpec::from_doc(&doc).unwrap();
+    let arena = Arena::new();
+    let ir = IrSpec::from_doc(&arena, &doc).unwrap();
 
     let [IrOperation { params, .. }] = &*ir.operations else {
         panic!("expected single operation; got `{:?}`", ir.operations);
@@ -1491,7 +1529,8 @@ fn test_mixed_path_and_query_parameters() {
     "})
     .unwrap();
 
-    let ir = IrSpec::from_doc(&doc).unwrap();
+    let arena = Arena::new();
+    let ir = IrSpec::from_doc(&arena, &doc).unwrap();
 
     let [IrOperation { params, .. }] = &*ir.operations else {
         panic!("expected single operation; got `{:?}`", ir.operations);
@@ -1527,7 +1566,8 @@ fn test_ignores_header_and_cookie_parameters() {
     "})
     .unwrap();
 
-    let ir = IrSpec::from_doc(&doc).unwrap();
+    let arena = Arena::new();
+    let ir = IrSpec::from_doc(&arena, &doc).unwrap();
 
     let [IrOperation { params, .. }] = &*ir.operations else {
         panic!("expected single operation; got `{:?}`", ir.operations);

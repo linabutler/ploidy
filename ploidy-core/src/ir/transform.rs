@@ -2,7 +2,10 @@ use itertools::Itertools;
 use ploidy_pointer::JsonPointee;
 use rustc_hash::FxHashMap;
 
-use crate::parse::{AdditionalProperties, Document, Format, RefOrSchema, Schema, Ty};
+use crate::{
+    arena::Arena,
+    parse::{AdditionalProperties, Document, Format, RefOrSchema, Schema, Ty},
+};
 
 use super::types::{
     Container, InlineIrType, InlineIrTypePath, InlineIrTypePathRoot, InlineIrTypePathSegment,
@@ -13,11 +16,12 @@ use super::types::{
 
 #[inline]
 pub fn transform<'a>(
+    arena: &'a Arena,
     doc: &'a Document,
     name: impl Into<IrTypeName<'a>>,
     schema: &'a Schema,
 ) -> IrType<'a> {
-    let context = TransformContext::new(doc);
+    let context = TransformContext::new(arena, doc);
     transform_with_context(&context, name.into(), schema)
 }
 
@@ -30,7 +34,7 @@ pub struct TransformContext<'a> {
 
 impl<'a> TransformContext<'a> {
     /// Creates a new context for the given document.
-    pub fn new(doc: &'a Document) -> Self {
+    pub fn new(_: &'a Arena, doc: &'a Document) -> Self {
         Self { doc }
     }
 }

@@ -3,7 +3,7 @@ use itertools::Itertools;
 use ploidy_pointer::JsonPointee;
 
 use crate::{
-    ir::SchemaTypeInfo,
+    arena::Arena,
     parse::{
         self, Document, Info, Parameter, ParameterLocation, ParameterStyle, RefOrParameter,
         RefOrRequestBody, RefOrResponse, RefOrSchema, RequestBody, Response,
@@ -12,10 +12,12 @@ use crate::{
 
 use super::{
     error::IrError,
+    graph::GraphNode,
     transform::transform,
     types::{
         InlineIrType, InlineIrTypePath, InlineIrTypePathRoot, InlineIrTypePathSegment, IrOperation,
         IrParameter, IrParameterInfo, IrParameterStyle, IrRequest, IrResponse, IrType, IrTypeName,
+        SchemaTypeInfo,
     },
 };
 
@@ -27,13 +29,14 @@ pub struct IrSpec<'a> {
 }
 
 impl<'a> IrSpec<'a> {
-    pub fn from_doc(doc: &'a Document) -> Result<Self, IrError> {
+    pub fn from_doc(arena: &'a Arena, doc: &'a Document) -> Result<Self, IrError> {
         let schemas = match &doc.components {
             Some(components) => components
                 .schemas
                 .iter()
                 .map(|(name, schema)| {
                     let ty = transform(
+                        arena,
                         doc,
                         IrTypeName::Schema(SchemaTypeInfo {
                             name,
@@ -74,6 +77,7 @@ impl<'a> IrSpec<'a> {
                         let ty = match &param.schema {
                             Some(RefOrSchema::Ref(r)) => IrType::Ref(&r.path),
                             Some(RefOrSchema::Other(schema)) => transform(
+                                arena,
                                 doc,
                                 InlineIrTypePath {
                                     root: InlineIrTypePathRoot::Resource(resource),
@@ -159,6 +163,7 @@ impl<'a> IrSpec<'a> {
                         }
                         RequestContent::Json(RefOrSchema::Other(schema)) => {
                             IrRequest::Json(transform(
+                                arena,
                                 doc,
                                 InlineIrTypePath {
                                     root: InlineIrTypePathRoot::Resource(resource),
@@ -226,6 +231,7 @@ impl<'a> IrSpec<'a> {
                             }
                             ResponseContent::Json(RefOrSchema::Other(schema)) => {
                                 IrResponse::Json(transform(
+                                    arena,
                                     doc,
                                     InlineIrTypePath {
                                         root: InlineIrTypePathRoot::Resource(resource),
@@ -269,6 +275,19 @@ impl<'a> IrSpec<'a> {
             operations,
             schemas,
         })
+    }
+
+    /// Resolves an [`IrType`] to a [`GraphNode`], following
+    /// [`IrType::Ref`]s through the spec.
+    #[inline]
+    pub fn resolve(&'a self, mut ty: &'a IrType<'a>) -> GraphNode<'a> {
+        loop {
+            match ty {
+                IrType::Schema(ty) => return GraphNode::Schema(ty),
+                IrType::Inline(ty) => return GraphNode::Inline(ty),
+                IrType::Ref(r) => ty = &self.schemas[r.name()],
+            }
+        }
     }
 }
 

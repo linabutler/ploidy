@@ -81,8 +81,9 @@ mod tests {
     use super::*;
 
     use ploidy_core::{
+        arena::Arena,
         ir::{
-            ContainerView, InlineIrTypeView, IrGraph, IrSpec, IrStructFieldName, IrTypeView,
+            ContainerView, InlineIrTypeView, IrSpec, IrStructFieldName, IrTypeView, RawGraph,
             SchemaIrTypeView,
         },
         parse::Document,
@@ -111,9 +112,9 @@ mod tests {
         "})
         .unwrap();
 
-        let spec = IrSpec::from_doc(&doc).unwrap();
-        let ir = IrGraph::new(&spec);
-        let graph = CodegenGraph::new(ir);
+        let arena = Arena::new();
+        let spec = IrSpec::from_doc(&arena, &doc).unwrap();
+        let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
         let schema = graph.schemas().find(|s| s.name() == "Container");
         let Some(SchemaIrTypeView::Struct(_, struct_view)) = &schema else {
@@ -156,9 +157,9 @@ mod tests {
         "})
         .unwrap();
 
-        let spec = IrSpec::from_doc(&doc).unwrap();
-        let ir = IrGraph::new(&spec);
-        let graph = CodegenGraph::new(ir);
+        let arena = Arena::new();
+        let spec = IrSpec::from_doc(&arena, &doc).unwrap();
+        let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
         let schema = graph.schemas().find(|s| s.name() == "Container");
         let Some(SchemaIrTypeView::Struct(_, struct_view)) = &schema else {
@@ -198,9 +199,9 @@ mod tests {
         "})
         .unwrap();
 
-        let spec = IrSpec::from_doc(&doc).unwrap();
-        let ir = IrGraph::new(&spec);
-        let graph = CodegenGraph::new(ir);
+        let arena = Arena::new();
+        let spec = IrSpec::from_doc(&arena, &doc).unwrap();
+        let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
         let schema = graph.schemas().find(|s| s.name() == "Container");
         let Some(SchemaIrTypeView::Struct(_, struct_view)) = &schema else {
@@ -239,9 +240,9 @@ mod tests {
         "})
         .unwrap();
 
-        let spec = IrSpec::from_doc(&doc).unwrap();
-        let ir = IrGraph::new(&spec);
-        let graph = CodegenGraph::new(ir);
+        let arena = Arena::new();
+        let spec = IrSpec::from_doc(&arena, &doc).unwrap();
+        let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
         let schema = graph.schemas().find(|s| s.name() == "Container");
         let Some(SchemaIrTypeView::Struct(_, struct_view)) = &schema else {
@@ -283,9 +284,9 @@ mod tests {
         "})
         .unwrap();
 
-        let spec = IrSpec::from_doc(&doc).unwrap();
-        let ir = IrGraph::new(&spec);
-        let graph = CodegenGraph::new(ir);
+        let arena = Arena::new();
+        let spec = IrSpec::from_doc(&arena, &doc).unwrap();
+        let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
         let schema = graph.schemas().find(|s| s.name() == "Container");
         let Some(SchemaIrTypeView::Struct(_, struct_view)) = &schema else {
@@ -323,9 +324,9 @@ mod tests {
         "})
         .unwrap();
 
-        let spec = IrSpec::from_doc(&doc).unwrap();
-        let ir = IrGraph::new(&spec);
-        let graph = CodegenGraph::new(ir);
+        let arena = Arena::new();
+        let spec = IrSpec::from_doc(&arena, &doc).unwrap();
+        let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
         let schema = graph.schemas().find(|s| s.name() == "Container");
         let Some(SchemaIrTypeView::Struct(_, struct_view)) = &schema else {
@@ -367,9 +368,9 @@ mod tests {
         "})
         .unwrap();
 
-        let spec = IrSpec::from_doc(&doc).unwrap();
-        let ir = IrGraph::new(&spec);
-        let graph = CodegenGraph::new(ir);
+        let arena = Arena::new();
+        let spec = IrSpec::from_doc(&arena, &doc).unwrap();
+        let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
         let schema = graph.schemas().find(|s| s.name() == "Container");
         let Some(SchemaIrTypeView::Struct(_, struct_view)) = &schema else {
@@ -417,9 +418,9 @@ mod tests {
         "})
         .unwrap();
 
-        let spec = IrSpec::from_doc(&doc).unwrap();
-        let ir = IrGraph::new(&spec);
-        let graph = CodegenGraph::new(ir);
+        let arena = Arena::new();
+        let spec = IrSpec::from_doc(&arena, &doc).unwrap();
+        let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
         let schema = graph.schemas().find(|s| s.name() == "Container");
         let Some(SchemaIrTypeView::Struct(_, struct_view)) = &schema else {
@@ -460,9 +461,9 @@ mod tests {
         "})
         .unwrap();
 
-        let spec = IrSpec::from_doc(&doc).unwrap();
-        let ir = IrGraph::new(&spec);
-        let graph = CodegenGraph::new(ir);
+        let arena = Arena::new();
+        let spec = IrSpec::from_doc(&arena, &doc).unwrap();
+        let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
         let schema = graph.schemas().find(|s| s.name() == "Container");
         let Some(SchemaIrTypeView::Struct(_, struct_view)) = &schema else {
@@ -509,9 +510,9 @@ mod tests {
         "})
         .unwrap();
 
-        let spec = IrSpec::from_doc(&doc).unwrap();
-        let ir = IrGraph::new(&spec);
-        let graph = CodegenGraph::new(ir);
+        let arena = Arena::new();
+        let spec = IrSpec::from_doc(&arena, &doc).unwrap();
+        let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
         let schema = graph.schemas().find(|s| s.name() == "Container");
         let Some(SchemaIrTypeView::Struct(_, struct_view)) = &schema else {
@@ -551,9 +552,9 @@ mod tests {
         "})
         .unwrap();
 
-        let spec = IrSpec::from_doc(&doc).unwrap();
-        let ir = IrGraph::new(&spec);
-        let graph = CodegenGraph::new(ir);
+        let arena = Arena::new();
+        let spec = IrSpec::from_doc(&arena, &doc).unwrap();
+        let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
         let schema = graph
             .schemas()
@@ -592,9 +593,9 @@ mod tests {
         "})
         .unwrap();
 
-        let spec = IrSpec::from_doc(&doc).unwrap();
-        let ir = IrGraph::new(&spec);
-        let graph = CodegenGraph::new(ir);
+        let arena = Arena::new();
+        let spec = IrSpec::from_doc(&arena, &doc).unwrap();
+        let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
         let schema = graph.schemas().find(|s| s.name() == "Container");
         let Some(SchemaIrTypeView::Struct(_, struct_view)) = &schema else {
@@ -634,9 +635,9 @@ mod tests {
         "})
         .unwrap();
 
-        let spec = IrSpec::from_doc(&doc).unwrap();
-        let ir = IrGraph::new(&spec);
-        let graph = CodegenGraph::new(ir);
+        let arena = Arena::new();
+        let spec = IrSpec::from_doc(&arena, &doc).unwrap();
+        let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
         let schema = graph
             .schemas()
@@ -674,9 +675,9 @@ mod tests {
         "})
         .unwrap();
 
-        let spec = IrSpec::from_doc(&doc).unwrap();
-        let ir = IrGraph::new(&spec);
-        let graph = CodegenGraph::new(ir);
+        let arena = Arena::new();
+        let spec = IrSpec::from_doc(&arena, &doc).unwrap();
+        let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
         let schema = graph.schemas().find(|s| s.name() == "Container");
         let Some(SchemaIrTypeView::Struct(_, struct_view)) = &schema else {
@@ -722,9 +723,9 @@ mod tests {
         "})
         .unwrap();
 
-        let spec = IrSpec::from_doc(&doc).unwrap();
-        let ir = IrGraph::new(&spec);
-        let graph = CodegenGraph::new(ir);
+        let arena = Arena::new();
+        let spec = IrSpec::from_doc(&arena, &doc).unwrap();
+        let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
         let op = graph
             .operations()
@@ -770,9 +771,9 @@ mod tests {
         "})
         .unwrap();
 
-        let spec = IrSpec::from_doc(&doc).unwrap();
-        let ir = IrGraph::new(&spec);
-        let graph = CodegenGraph::new(ir);
+        let arena = Arena::new();
+        let spec = IrSpec::from_doc(&arena, &doc).unwrap();
+        let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
         let op = graph
             .operations()

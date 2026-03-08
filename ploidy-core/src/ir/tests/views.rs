@@ -3,10 +3,11 @@
 use itertools::Itertools;
 
 use crate::{
+    arena::Arena,
     ir::{
         ContainerView, EdgeKind, ExtendableView, InlineIrTypePathRoot, InlineIrTypePathSegment,
-        InlineIrTypeView, IrEnumVariant, IrGraph, IrParameterStyle, IrRequestView, IrResponseView,
-        IrSpec, IrStructFieldName, IrTypeView, PrimitiveIrType, Reach, SchemaIrTypeView,
+        InlineIrTypeView, IrEnumVariant, IrParameterStyle, IrRequestView, IrResponseView, IrSpec,
+        IrStructFieldName, IrTypeView, PrimitiveIrType, RawGraph, Reach, SchemaIrTypeView,
         SchemaTypeInfo, SomeIrUntaggedVariant, Traversal, View,
     },
     parse::{Document, Method, path::PathFragment},
@@ -36,8 +37,9 @@ fn test_struct_view_fields_iterator() {
     "})
     .unwrap();
 
-    let spec = IrSpec::from_doc(&doc).unwrap();
-    let graph = IrGraph::new(&spec);
+    let arena = Arena::new();
+    let spec = IrSpec::from_doc(&arena, &doc).unwrap();
+    let graph = RawGraph::new(&arena, &spec).cook();
 
     let person_schema = graph.schemas().find(|s| s.name() == "Person").unwrap();
     let person_struct = match person_schema {
@@ -76,8 +78,9 @@ fn test_struct_field_view_accessors() {
     "})
     .unwrap();
 
-    let spec = IrSpec::from_doc(&doc).unwrap();
-    let graph = IrGraph::new(&spec);
+    let arena = Arena::new();
+    let spec = IrSpec::from_doc(&arena, &doc).unwrap();
+    let graph = RawGraph::new(&arena, &spec).cook();
 
     let record_schema = graph.schemas().find(|s| s.name() == "Record").unwrap();
     let record_struct = match record_schema {
@@ -113,8 +116,9 @@ fn test_schema_view_from_graph() {
     "})
     .unwrap();
 
-    let spec = IrSpec::from_doc(&doc).unwrap();
-    let graph = IrGraph::new(&spec);
+    let arena = Arena::new();
+    let spec = IrSpec::from_doc(&arena, &doc).unwrap();
+    let graph = RawGraph::new(&arena, &spec).cook();
 
     // Should be able to construct views for different schema types.
     let struct_view = graph.schemas().find(|s| s.name() == "MyStruct").unwrap();
@@ -144,8 +148,9 @@ fn test_extension_insertion_retrieval() {
     "})
     .unwrap();
 
-    let spec = IrSpec::from_doc(&doc).unwrap();
-    let graph = IrGraph::new(&spec);
+    let arena = Arena::new();
+    let spec = IrSpec::from_doc(&arena, &doc).unwrap();
+    let graph = RawGraph::new(&arena, &spec).cook();
 
     let mut schema_view = graph.schemas().next().unwrap();
 
@@ -175,8 +180,9 @@ fn test_extension_type_safety() {
     "})
     .unwrap();
 
-    let spec = IrSpec::from_doc(&doc).unwrap();
-    let graph = IrGraph::new(&spec);
+    let arena = Arena::new();
+    let spec = IrSpec::from_doc(&arena, &doc).unwrap();
+    let graph = RawGraph::new(&arena, &spec).cook();
 
     let mut schema_view = graph.schemas().next().unwrap();
 
@@ -225,8 +231,9 @@ fn test_extension_per_node_type() {
     "})
     .unwrap();
 
-    let spec = IrSpec::from_doc(&doc).unwrap();
-    let graph = IrGraph::new(&spec);
+    let arena = Arena::new();
+    let spec = IrSpec::from_doc(&arena, &doc).unwrap();
+    let graph = RawGraph::new(&arena, &spec).cook();
 
     let mut schema1 = graph.schemas().find(|s| s.name() == "Struct1").unwrap();
     let mut schema2 = graph.schemas().find(|s| s.name() == "Struct2").unwrap();
@@ -312,8 +319,9 @@ fn test_dependencies_multiple() {
     "})
     .unwrap();
 
-    let spec = IrSpec::from_doc(&doc).unwrap();
-    let graph = IrGraph::new(&spec);
+    let arena = Arena::new();
+    let spec = IrSpec::from_doc(&arena, &doc).unwrap();
+    let graph = RawGraph::new(&arena, &spec).cook();
 
     let branch_schema = graph.schemas().find(|s| s.name() == "Branch").unwrap();
 
@@ -348,14 +356,15 @@ fn test_dependencies_none() {
     "})
     .unwrap();
 
-    let spec = IrSpec::from_doc(&doc).unwrap();
-    let graph = IrGraph::new(&spec);
+    let arena = Arena::new();
+    let spec = IrSpec::from_doc(&arena, &doc).unwrap();
+    let graph = RawGraph::new(&arena, &spec).cook();
 
-    let standalone_schema = graph.schemas().next().unwrap();
+    let schema = graph.schemas().next().unwrap();
 
     // For a struct with a required primitive field, the dependency set
     // includes just that primitive type.
-    assert_eq!(standalone_schema.dependencies().count(), 1);
+    assert_eq!(schema.dependencies().count(), 1);
 }
 
 #[test]
@@ -382,8 +391,9 @@ fn test_dependencies_handles_cycles_without_infinite_loop() {
     "})
     .unwrap();
 
-    let spec = IrSpec::from_doc(&doc).unwrap();
-    let graph = IrGraph::new(&spec);
+    let arena = Arena::new();
+    let spec = IrSpec::from_doc(&arena, &doc).unwrap();
+    let graph = RawGraph::new(&arena, &spec).cook();
 
     let a_schema = graph.schemas().find(|s| s.name() == "A").unwrap();
 
@@ -417,8 +427,9 @@ fn test_dependencies_from_array_includes_inner_types() {
     "})
     .unwrap();
 
-    let spec = IrSpec::from_doc(&doc).unwrap();
-    let graph = IrGraph::new(&spec);
+    let arena = Arena::new();
+    let spec = IrSpec::from_doc(&arena, &doc).unwrap();
+    let graph = RawGraph::new(&arena, &spec).cook();
 
     let container_schema = graph.schemas().find(|s| s.name() == "Container").unwrap();
     let container_struct = match container_schema {
@@ -483,8 +494,9 @@ fn test_dependencies_from_map_includes_inner_types() {
     "})
     .unwrap();
 
-    let spec = IrSpec::from_doc(&doc).unwrap();
-    let graph = IrGraph::new(&spec);
+    let arena = Arena::new();
+    let spec = IrSpec::from_doc(&arena, &doc).unwrap();
+    let graph = RawGraph::new(&arena, &spec).cook();
 
     let container_schema = graph.schemas().find(|s| s.name() == "Container").unwrap();
     let container_struct = match container_schema {
@@ -548,8 +560,9 @@ fn test_dependencies_from_nullable_includes_inner_types() {
     "})
     .unwrap();
 
-    let spec = IrSpec::from_doc(&doc).unwrap();
-    let graph = IrGraph::new(&spec);
+    let arena = Arena::new();
+    let spec = IrSpec::from_doc(&arena, &doc).unwrap();
+    let graph = RawGraph::new(&arena, &spec).cook();
 
     let container_schema = graph.schemas().find(|s| s.name() == "Container").unwrap();
     let container_struct = match container_schema {
@@ -618,8 +631,9 @@ fn test_dependencies_from_inline_includes_inner_types() {
     "})
     .unwrap();
 
-    let spec = IrSpec::from_doc(&doc).unwrap();
-    let graph = IrGraph::new(&spec);
+    let arena = Arena::new();
+    let spec = IrSpec::from_doc(&arena, &doc).unwrap();
+    let graph = RawGraph::new(&arena, &spec).cook();
 
     let container_schema = graph.schemas().find(|s| s.name() == "Container").unwrap();
     let container_struct = match container_schema {
@@ -679,8 +693,9 @@ fn test_dependencies_from_primitive_returns_empty() {
     "})
     .unwrap();
 
-    let spec = IrSpec::from_doc(&doc).unwrap();
-    let graph = IrGraph::new(&spec);
+    let arena = Arena::new();
+    let spec = IrSpec::from_doc(&arena, &doc).unwrap();
+    let graph = RawGraph::new(&arena, &spec).cook();
 
     let simple_schema = graph.schemas().next().unwrap();
     let simple_struct = match simple_schema {
@@ -720,8 +735,9 @@ fn test_dependencies_from_any_returns_empty() {
     "})
     .unwrap();
 
-    let spec = IrSpec::from_doc(&doc).unwrap();
-    let graph = IrGraph::new(&spec);
+    let arena = Arena::new();
+    let spec = IrSpec::from_doc(&arena, &doc).unwrap();
+    let graph = RawGraph::new(&arena, &spec).cook();
 
     let container_schema = graph.schemas().next().unwrap();
     let container_struct = match container_schema {
@@ -772,8 +788,9 @@ fn test_traverse_skip_excludes_node_but_continues_traversal() {
     "})
     .unwrap();
 
-    let spec = IrSpec::from_doc(&doc).unwrap();
-    let graph = IrGraph::new(&spec);
+    let arena = Arena::new();
+    let spec = IrSpec::from_doc(&arena, &doc).unwrap();
+    let graph = RawGraph::new(&arena, &spec).cook();
 
     let root = graph.schemas().find(|s| s.name() == "Root").unwrap();
 
@@ -825,8 +842,9 @@ fn test_traverse_stop_includes_node_but_stops_traversal() {
     "})
     .unwrap();
 
-    let spec = IrSpec::from_doc(&doc).unwrap();
-    let graph = IrGraph::new(&spec);
+    let arena = Arena::new();
+    let spec = IrSpec::from_doc(&arena, &doc).unwrap();
+    let graph = RawGraph::new(&arena, &spec).cook();
 
     let root = graph.schemas().find(|s| s.name() == "Root").unwrap();
 
@@ -877,8 +895,9 @@ fn test_traverse_ignore_excludes_node_and_stops_traversal() {
     "})
     .unwrap();
 
-    let spec = IrSpec::from_doc(&doc).unwrap();
-    let graph = IrGraph::new(&spec);
+    let arena = Arena::new();
+    let spec = IrSpec::from_doc(&arena, &doc).unwrap();
+    let graph = RawGraph::new(&arena, &spec).cook();
 
     let root = graph.schemas().find(|s| s.name() == "Root").unwrap();
 
@@ -930,8 +949,9 @@ fn test_traverse_dependents_yields_types_that_depend_on_node() {
     "})
     .unwrap();
 
-    let spec = IrSpec::from_doc(&doc).unwrap();
-    let graph = IrGraph::new(&spec);
+    let arena = Arena::new();
+    let spec = IrSpec::from_doc(&arena, &doc).unwrap();
+    let graph = RawGraph::new(&arena, &spec).cook();
 
     let leaf = graph.schemas().find(|s| s.name() == "Leaf").unwrap();
 
@@ -980,8 +1000,9 @@ fn test_traverse_filter_on_edge_kind() {
     "})
     .unwrap();
 
-    let spec = IrSpec::from_doc(&doc).unwrap();
-    let graph = IrGraph::new(&spec);
+    let arena = Arena::new();
+    let spec = IrSpec::from_doc(&arena, &doc).unwrap();
+    let graph = RawGraph::new(&arena, &spec).cook();
 
     let child = graph.schemas().find(|s| s.name() == "Child").unwrap();
 
@@ -1034,8 +1055,9 @@ fn test_inlines_finds_inline_structs_in_struct_fields() {
     "})
     .unwrap();
 
-    let spec = IrSpec::from_doc(&doc).unwrap();
-    let graph = IrGraph::new(&spec);
+    let arena = Arena::new();
+    let spec = IrSpec::from_doc(&arena, &doc).unwrap();
+    let graph = RawGraph::new(&arena, &spec).cook();
 
     let parent_schema = graph.schemas().next().unwrap();
 
@@ -1067,8 +1089,9 @@ fn test_inlines_finds_inline_types_in_nested_arrays() {
     "})
     .unwrap();
 
-    let spec = IrSpec::from_doc(&doc).unwrap();
-    let graph = IrGraph::new(&spec);
+    let arena = Arena::new();
+    let spec = IrSpec::from_doc(&arena, &doc).unwrap();
+    let graph = RawGraph::new(&arena, &spec).cook();
 
     let container_schema = graph.schemas().next().unwrap();
 
@@ -1100,8 +1123,9 @@ fn test_inlines_empty_for_schemas_with_no_inlines() {
     "})
     .unwrap();
 
-    let spec = IrSpec::from_doc(&doc).unwrap();
-    let graph = IrGraph::new(&spec);
+    let arena = Arena::new();
+    let spec = IrSpec::from_doc(&arena, &doc).unwrap();
+    let graph = RawGraph::new(&arena, &spec).cook();
 
     let simple_schema = graph.schemas().find(|s| s.name() == "Simple").unwrap();
 
@@ -1142,8 +1166,9 @@ fn test_tagged_variant_names_and_aliases() {
     "})
     .unwrap();
 
-    let spec = IrSpec::from_doc(&doc).unwrap();
-    let graph = IrGraph::new(&spec);
+    let arena = Arena::new();
+    let spec = IrSpec::from_doc(&arena, &doc).unwrap();
+    let graph = RawGraph::new(&arena, &spec).cook();
 
     let animal_schema = graph.schemas().find(|s| s.name() == "Animal").unwrap();
     let tagged_view = match animal_schema {
@@ -1184,8 +1209,9 @@ fn test_tagged_variant_type_access() {
     "})
     .unwrap();
 
-    let spec = IrSpec::from_doc(&doc).unwrap();
-    let graph = IrGraph::new(&spec);
+    let arena = Arena::new();
+    let spec = IrSpec::from_doc(&arena, &doc).unwrap();
+    let graph = RawGraph::new(&arena, &spec).cook();
 
     let animal_schema = graph.schemas().find(|s| s.name() == "Animal").unwrap();
     let tagged_view = match animal_schema {
@@ -1228,8 +1254,9 @@ fn test_untagged_variant_iteration() {
     "})
     .unwrap();
 
-    let spec = IrSpec::from_doc(&doc).unwrap();
-    let graph = IrGraph::new(&spec);
+    let arena = Arena::new();
+    let spec = IrSpec::from_doc(&arena, &doc).unwrap();
+    let graph = RawGraph::new(&arena, &spec).cook();
 
     let animal_schema = graph.schemas().find(|s| s.name() == "Animal").unwrap();
     let untagged_view = match animal_schema {
@@ -1263,8 +1290,9 @@ fn test_array_view_provides_access_to_item_type() {
     "})
     .unwrap();
 
-    let spec = IrSpec::from_doc(&doc).unwrap();
-    let graph = IrGraph::new(&spec);
+    let arena = Arena::new();
+    let spec = IrSpec::from_doc(&arena, &doc).unwrap();
+    let graph = RawGraph::new(&arena, &spec).cook();
 
     let container_schema = graph.schemas().next().unwrap();
     let container_struct = match container_schema {
@@ -1309,8 +1337,9 @@ fn test_map_view_provides_access_to_value_type() {
     "})
     .unwrap();
 
-    let spec = IrSpec::from_doc(&doc).unwrap();
-    let graph = IrGraph::new(&spec);
+    let arena = Arena::new();
+    let spec = IrSpec::from_doc(&arena, &doc).unwrap();
+    let graph = RawGraph::new(&arena, &spec).cook();
 
     let container_schema = graph.schemas().next().unwrap();
     let container_struct = match container_schema {
@@ -1356,8 +1385,9 @@ fn test_nullable_view_provides_access_to_inner_type() {
     "})
     .unwrap();
 
-    let spec = IrSpec::from_doc(&doc).unwrap();
-    let graph = IrGraph::new(&spec);
+    let arena = Arena::new();
+    let spec = IrSpec::from_doc(&arena, &doc).unwrap();
+    let graph = RawGraph::new(&arena, &spec).cook();
 
     let container_schema = graph.schemas().next().unwrap();
     let container_struct = match container_schema {
@@ -1404,8 +1434,9 @@ fn test_inline_struct_view_construction_and_path_access() {
     "})
     .unwrap();
 
-    let spec = IrSpec::from_doc(&doc).unwrap();
-    let graph = IrGraph::new(&spec);
+    let arena = Arena::new();
+    let spec = IrSpec::from_doc(&arena, &doc).unwrap();
+    let graph = RawGraph::new(&arena, &spec).cook();
 
     let container_schema = graph.schemas().next().unwrap();
     let container_struct = match container_schema {
@@ -1451,8 +1482,9 @@ fn test_inline_enum_view_construction() {
     "})
     .unwrap();
 
-    let spec = IrSpec::from_doc(&doc).unwrap();
-    let graph = IrGraph::new(&spec);
+    let arena = Arena::new();
+    let spec = IrSpec::from_doc(&arena, &doc).unwrap();
+    let graph = RawGraph::new(&arena, &spec).cook();
 
     let container_schema = graph.schemas().next().unwrap();
     let container_struct = match container_schema {
@@ -1501,8 +1533,9 @@ fn test_inline_untagged_view_construction() {
     "})
     .unwrap();
 
-    let spec = IrSpec::from_doc(&doc).unwrap();
-    let graph = IrGraph::new(&spec);
+    let arena = Arena::new();
+    let spec = IrSpec::from_doc(&arena, &doc).unwrap();
+    let graph = RawGraph::new(&arena, &spec).cook();
 
     let container_schema = graph.schemas().next().unwrap();
     let container_struct = match container_schema {
@@ -1555,8 +1588,9 @@ fn test_inline_view_path_method() {
     "})
     .unwrap();
 
-    let spec = IrSpec::from_doc(&doc).unwrap();
-    let graph = IrGraph::new(&spec);
+    let arena = Arena::new();
+    let spec = IrSpec::from_doc(&arena, &doc).unwrap();
+    let graph = RawGraph::new(&arena, &spec).cook();
 
     let parent_schema = graph.schemas().next().unwrap();
     let parent_struct = match parent_schema {
@@ -1614,8 +1648,9 @@ fn test_inline_view_with_view_trait_methods() {
     "})
     .unwrap();
 
-    let spec = IrSpec::from_doc(&doc).unwrap();
-    let graph = IrGraph::new(&spec);
+    let arena = Arena::new();
+    let spec = IrSpec::from_doc(&arena, &doc).unwrap();
+    let graph = RawGraph::new(&arena, &spec).cook();
 
     let operation = graph.operations().next().unwrap();
     let request = operation.request().unwrap();
@@ -1680,8 +1715,9 @@ fn test_untagged_variant_with_null_type() {
     "})
     .unwrap();
 
-    let spec = IrSpec::from_doc(&doc).unwrap();
-    let graph = IrGraph::new(&spec);
+    let arena = Arena::new();
+    let spec = IrSpec::from_doc(&arena, &doc).unwrap();
+    let graph = RawGraph::new(&arena, &spec).cook();
 
     let animal_schema = graph.schemas().find(|s| s.name() == "Animal").unwrap();
     let untagged_view = match animal_schema {
@@ -1733,8 +1769,9 @@ fn test_enum_view_variants() {
     "})
     .unwrap();
 
-    let spec = IrSpec::from_doc(&doc).unwrap();
-    let graph = IrGraph::new(&spec);
+    let arena = Arena::new();
+    let spec = IrSpec::from_doc(&arena, &doc).unwrap();
+    let graph = RawGraph::new(&arena, &spec).cook();
 
     let status_schema = graph.schemas().find(|s| s.name() == "Status").unwrap();
     let enum_view = match status_schema {
@@ -1770,8 +1807,9 @@ fn test_enum_view_with_description() {
     "})
     .unwrap();
 
-    let spec = IrSpec::from_doc(&doc).unwrap();
-    let graph = IrGraph::new(&spec);
+    let arena = Arena::new();
+    let spec = IrSpec::from_doc(&arena, &doc).unwrap();
+    let graph = RawGraph::new(&arena, &spec).cook();
 
     let priority_schema = graph.schemas().find(|s| s.name() == "Priority").unwrap();
     let enum_view = match priority_schema {
@@ -1796,8 +1834,9 @@ fn test_enum_view_without_description() {
     "})
     .unwrap();
 
-    let spec = IrSpec::from_doc(&doc).unwrap();
-    let graph = IrGraph::new(&spec);
+    let arena = Arena::new();
+    let spec = IrSpec::from_doc(&arena, &doc).unwrap();
+    let graph = RawGraph::new(&arena, &spec).cook();
 
     let status_schema = graph.schemas().find(|s| s.name() == "Status").unwrap();
     let enum_view = match status_schema {
@@ -1822,8 +1861,9 @@ fn test_enum_view_variants_with_numbers() {
     "})
     .unwrap();
 
-    let spec = IrSpec::from_doc(&doc).unwrap();
-    let graph = IrGraph::new(&spec);
+    let arena = Arena::new();
+    let spec = IrSpec::from_doc(&arena, &doc).unwrap();
+    let graph = RawGraph::new(&arena, &spec).cook();
 
     let priority_schema = graph.schemas().find(|s| s.name() == "Priority").unwrap();
     let enum_view = match priority_schema {
@@ -1861,8 +1901,9 @@ fn test_enum_view_variants_with_booleans() {
     "})
     .unwrap();
 
-    let spec = IrSpec::from_doc(&doc).unwrap();
-    let graph = IrGraph::new(&spec);
+    let arena = Arena::new();
+    let spec = IrSpec::from_doc(&arena, &doc).unwrap();
+    let graph = RawGraph::new(&arena, &spec).cook();
 
     let toggle_schema = graph.schemas().find(|s| s.name() == "Toggle").unwrap();
     let enum_view = match toggle_schema {
@@ -1908,8 +1949,9 @@ fn test_enum_view_with_view_trait_methods() {
     "})
     .unwrap();
 
-    let spec = IrSpec::from_doc(&doc).unwrap();
-    let graph = IrGraph::new(&spec);
+    let arena = Arena::new();
+    let spec = IrSpec::from_doc(&arena, &doc).unwrap();
+    let graph = RawGraph::new(&arena, &spec).cook();
 
     let status_schema = graph.schemas().find(|s| s.name() == "Status").unwrap();
     let enum_view = match &status_schema {
@@ -1956,8 +1998,9 @@ fn test_operation_view_resource() {
     "})
     .unwrap();
 
-    let spec = IrSpec::from_doc(&doc).unwrap();
-    let graph = IrGraph::new(&spec);
+    let arena = Arena::new();
+    let spec = IrSpec::from_doc(&arena, &doc).unwrap();
+    let graph = RawGraph::new(&arena, &spec).cook();
 
     let operation = graph.operations().next().unwrap();
     assert_eq!(operation.resource(), Some("UserResource"));
@@ -2002,8 +2045,9 @@ fn test_operation_view_method() {
     "})
     .unwrap();
 
-    let spec = IrSpec::from_doc(&doc).unwrap();
-    let graph = IrGraph::new(&spec);
+    let arena = Arena::new();
+    let spec = IrSpec::from_doc(&arena, &doc).unwrap();
+    let graph = RawGraph::new(&arena, &spec).cook();
 
     let operations = graph.operations().collect_vec();
     assert_eq!(operations.len(), 5);
@@ -2061,8 +2105,9 @@ fn test_operation_view_inlines_excludes_schema_references() {
     "})
     .unwrap();
 
-    let spec = IrSpec::from_doc(&doc).unwrap();
-    let graph = IrGraph::new(&spec);
+    let arena = Arena::new();
+    let spec = IrSpec::from_doc(&arena, &doc).unwrap();
+    let graph = RawGraph::new(&arena, &spec).cook();
 
     let operation = graph.operations().next().unwrap();
 
@@ -2109,8 +2154,9 @@ fn test_operation_view_inlines_with_mixed_types() {
     "})
     .unwrap();
 
-    let spec = IrSpec::from_doc(&doc).unwrap();
-    let graph = IrGraph::new(&spec);
+    let arena = Arena::new();
+    let spec = IrSpec::from_doc(&arena, &doc).unwrap();
+    let graph = RawGraph::new(&arena, &spec).cook();
 
     let operation = graph.operations().next().unwrap();
 
@@ -2152,8 +2198,9 @@ fn test_operation_parameter_ty() {
     "})
     .unwrap();
 
-    let spec = IrSpec::from_doc(&doc).unwrap();
-    let graph = IrGraph::new(&spec);
+    let arena = Arena::new();
+    let spec = IrSpec::from_doc(&arena, &doc).unwrap();
+    let graph = RawGraph::new(&arena, &spec).cook();
 
     let operation = graph.operations().next().unwrap();
 
@@ -2233,8 +2280,9 @@ fn test_operation_parameter_style() {
     "})
     .unwrap();
 
-    let spec = IrSpec::from_doc(&doc).unwrap();
-    let graph = IrGraph::new(&spec);
+    let arena = Arena::new();
+    let spec = IrSpec::from_doc(&arena, &doc).unwrap();
+    let graph = RawGraph::new(&arena, &spec).cook();
 
     let operation = graph.operations().next().unwrap();
     let query_params = operation.query().collect_vec();
@@ -2310,8 +2358,9 @@ fn test_operation_request_json() {
     "})
     .unwrap();
 
-    let spec = IrSpec::from_doc(&doc).unwrap();
-    let graph = IrGraph::new(&spec);
+    let arena = Arena::new();
+    let spec = IrSpec::from_doc(&arena, &doc).unwrap();
+    let graph = RawGraph::new(&arena, &spec).cook();
 
     let operation = graph.operations().next().unwrap();
     assert_matches!(
@@ -2346,8 +2395,9 @@ fn test_operation_request_multipart() {
     "})
     .unwrap();
 
-    let spec = IrSpec::from_doc(&doc).unwrap();
-    let graph = IrGraph::new(&spec);
+    let arena = Arena::new();
+    let spec = IrSpec::from_doc(&arena, &doc).unwrap();
+    let graph = RawGraph::new(&arena, &spec).cook();
 
     let operation = graph.operations().next().unwrap();
     assert_matches!(operation.request(), Some(IrRequestView::Multipart));
@@ -2383,8 +2433,9 @@ fn test_operation_path() {
     "})
     .unwrap();
 
-    let spec = IrSpec::from_doc(&doc).unwrap();
-    let graph = IrGraph::new(&spec);
+    let arena = Arena::new();
+    let spec = IrSpec::from_doc(&arena, &doc).unwrap();
+    let graph = RawGraph::new(&arena, &spec).cook();
 
     let operation = graph.operations().next().unwrap();
     let segments = operation.path().segments().as_slice();
@@ -2420,8 +2471,9 @@ fn test_operation_response_without_schema() {
     "})
     .unwrap();
 
-    let spec = IrSpec::from_doc(&doc).unwrap();
-    let graph = IrGraph::new(&spec);
+    let arena = Arena::new();
+    let spec = IrSpec::from_doc(&arena, &doc).unwrap();
+    let graph = RawGraph::new(&arena, &spec).cook();
 
     let operation = graph.operations().next().unwrap();
 
@@ -2465,8 +2517,9 @@ fn test_operation_query() {
     "})
     .unwrap();
 
-    let spec = IrSpec::from_doc(&doc).unwrap();
-    let graph = IrGraph::new(&spec);
+    let arena = Arena::new();
+    let spec = IrSpec::from_doc(&arena, &doc).unwrap();
+    let graph = RawGraph::new(&arena, &spec).cook();
 
     let operation = graph.operations().next().unwrap();
 
@@ -2519,8 +2572,9 @@ fn test_operation_view_inlines_finds_inline_types() {
     "})
     .unwrap();
 
-    let spec = IrSpec::from_doc(&doc).unwrap();
-    let graph = IrGraph::new(&spec);
+    let arena = Arena::new();
+    let spec = IrSpec::from_doc(&arena, &doc).unwrap();
+    let graph = RawGraph::new(&arena, &spec).cook();
 
     let operation = graph.operations().next().unwrap();
 
@@ -2608,8 +2662,9 @@ fn test_operation_request_and_response() {
     "})
     .unwrap();
 
-    let spec = IrSpec::from_doc(&doc).unwrap();
-    let graph = IrGraph::new(&spec);
+    let arena = Arena::new();
+    let spec = IrSpec::from_doc(&arena, &doc).unwrap();
+    let graph = RawGraph::new(&arena, &spec).cook();
 
     let operation = graph.operations().next().unwrap();
 
@@ -2687,8 +2742,9 @@ fn test_variant_field_matching_tagged_union_discriminator_is_discriminator() {
     "})
     .unwrap();
 
-    let spec = IrSpec::from_doc(&doc).unwrap();
-    let graph = IrGraph::new(&spec);
+    let arena = Arena::new();
+    let spec = IrSpec::from_doc(&arena, &doc).unwrap();
+    let graph = RawGraph::new(&arena, &spec).cook();
 
     // `Comment.kind` should be detected as a discriminator because
     // `Comment` is a direct variant of the `Post` tagged union.
@@ -2759,8 +2815,9 @@ fn test_transitive_dependency_field_matching_discriminator_is_not_discriminator(
     "})
     .unwrap();
 
-    let spec = IrSpec::from_doc(&doc).unwrap();
-    let graph = IrGraph::new(&spec);
+    let arena = Arena::new();
+    let spec = IrSpec::from_doc(&arena, &doc).unwrap();
+    let graph = RawGraph::new(&arena, &spec).cook();
 
     // `Wrapper.kind` _is_ a discriminator, because `Wrapper` is a
     // direct variant of `Outer`.
@@ -2810,8 +2867,9 @@ fn test_own_struct_discriminator_field() {
     "})
     .unwrap();
 
-    let spec = IrSpec::from_doc(&doc).unwrap();
-    let graph = IrGraph::new(&spec);
+    let arena = Arena::new();
+    let spec = IrSpec::from_doc(&arena, &doc).unwrap();
+    let graph = RawGraph::new(&arena, &spec).cook();
 
     let base = graph.schemas().find(|s| s.name() == "Base").unwrap();
     let SchemaIrTypeView::Struct(_, base_struct) = base else {
@@ -2860,8 +2918,9 @@ fn test_inherited_discriminator_field() {
     "})
     .unwrap();
 
-    let spec = IrSpec::from_doc(&doc).unwrap();
-    let graph = IrGraph::new(&spec);
+    let arena = Arena::new();
+    let spec = IrSpec::from_doc(&arena, &doc).unwrap();
+    let graph = RawGraph::new(&arena, &spec).cook();
 
     let child = graph.schemas().find(|s| s.name() == "Child").unwrap();
     let SchemaIrTypeView::Struct(_, child_struct) = child else {
@@ -2912,8 +2971,9 @@ fn test_fields_linearizes_inline_all_of_parents() {
     "})
     .unwrap();
 
-    let spec = IrSpec::from_doc(&doc).unwrap();
-    let graph = IrGraph::new(&spec);
+    let arena = Arena::new();
+    let spec = IrSpec::from_doc(&arena, &doc).unwrap();
+    let graph = RawGraph::new(&arena, &spec).cook();
 
     let person = graph.schemas().find(|s| s.name() == "Person").unwrap();
     let SchemaIrTypeView::Struct(_, person_struct) = person else {
@@ -2989,8 +3049,9 @@ fn test_inline_tagged_view_construction() {
     "})
     .unwrap();
 
-    let spec = IrSpec::from_doc(&doc).unwrap();
-    let graph = IrGraph::new(&spec);
+    let arena = Arena::new();
+    let spec = IrSpec::from_doc(&arena, &doc).unwrap();
+    let graph = RawGraph::new(&arena, &spec).cook();
 
     let container_schema = graph.schemas().find(|s| s.name() == "Container").unwrap();
     let container_struct = match container_schema {
@@ -3052,8 +3113,9 @@ fn test_inline_tagged_view_variant_types() {
     "})
     .unwrap();
 
-    let spec = IrSpec::from_doc(&doc).unwrap();
-    let graph = IrGraph::new(&spec);
+    let arena = Arena::new();
+    let spec = IrSpec::from_doc(&arena, &doc).unwrap();
+    let graph = RawGraph::new(&arena, &spec).cook();
 
     let container_schema = graph.schemas().find(|s| s.name() == "Container").unwrap();
     let container_struct = match container_schema {
@@ -3116,8 +3178,9 @@ fn test_inlines_finds_inline_tagged_unions() {
     "})
     .unwrap();
 
-    let spec = IrSpec::from_doc(&doc).unwrap();
-    let graph = IrGraph::new(&spec);
+    let arena = Arena::new();
+    let spec = IrSpec::from_doc(&arena, &doc).unwrap();
+    let graph = RawGraph::new(&arena, &spec).cook();
 
     let container_schema = graph.schemas().find(|s| s.name() == "Container").unwrap();
 

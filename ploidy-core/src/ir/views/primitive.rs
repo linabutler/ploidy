@@ -1,13 +1,13 @@
 use petgraph::graph::NodeIndex;
 
-use crate::ir::{IrGraph, PrimitiveIrType};
+use crate::ir::{CookedGraph, PrimitiveIrType};
 
 use super::ViewNode;
 
 /// A graph-aware view of a primitive type.
 #[derive(Debug)]
 pub struct IrPrimitiveView<'a> {
-    graph: &'a IrGraph<'a>,
+    cooked: &'a CookedGraph<'a>,
     index: NodeIndex<usize>,
     ty: PrimitiveIrType,
 }
@@ -15,11 +15,11 @@ pub struct IrPrimitiveView<'a> {
 impl<'a> IrPrimitiveView<'a> {
     #[inline]
     pub(in crate::ir) fn new(
-        graph: &'a IrGraph<'a>,
+        cooked: &'a CookedGraph<'a>,
         index: NodeIndex<usize>,
         ty: PrimitiveIrType,
     ) -> Self {
-        Self { graph, index, ty }
+        Self { cooked, index, ty }
     }
 
     /// Returns the primitive type.
@@ -31,8 +31,8 @@ impl<'a> IrPrimitiveView<'a> {
 
 impl<'a> ViewNode<'a> for IrPrimitiveView<'a> {
     #[inline]
-    fn graph(&self) -> &'a IrGraph<'a> {
-        self.graph
+    fn cooked(&self) -> &'a CookedGraph<'a> {
+        self.cooked
     }
 
     #[inline]
