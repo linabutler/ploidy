@@ -140,7 +140,7 @@ Ploidy is designed from the ground up to handle inheritance and polymorphism cor
 * ✅ **`allOf`**: Structs with fields linearized from all parent schemas.
 * ✅ **`oneOf` with discriminator**: Enums with named newtype variants for each mapping, represented as an [internally tagged](https://serde.rs/enum-representations.html#internally-tagged) Serde enum.
 * ✅ **`oneOf` without discriminator**: Enums with automatically named (`V1`, `V2`, `V3`...) variants for each subschema, represented as an [untagged](https://serde.rs/enum-representations.html#untagged) Serde enum.
-* ✅ **`anyOf`**: Structs with optional [flattened fields](https://serde.rs/attr-flatten.html) for each subschema.
+* ✅ **`anyOf`**, with or without discriminator: Structs with optional [flattened fields](https://serde.rs/attr-flatten.html) for each subschema.
 
 ### Fast and correct
 
