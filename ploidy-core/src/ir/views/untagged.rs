@@ -13,7 +13,7 @@ use super::{ViewNode, ir::IrTypeView};
 pub struct IrUntaggedView<'a> {
     cooked: &'a CookedGraph<'a>,
     index: NodeIndex<usize>,
-    ty: &'a IrUntagged<'a>,
+    ty: &'a IrUntagged<'a, NodeIndex<usize>>,
 }
 
 impl<'a> IrUntaggedView<'a> {
@@ -21,7 +21,7 @@ impl<'a> IrUntaggedView<'a> {
     pub(in crate::ir) fn new(
         cooked: &'a CookedGraph<'a>,
         index: NodeIndex<usize>,
-        ty: &'a IrUntagged<'a>,
+        ty: &'a IrUntagged<'a, NodeIndex<usize>>,
     ) -> Self {
         Self { cooked, index, ty }
     }
@@ -60,7 +60,7 @@ impl<'a> ViewNode<'a> for IrUntaggedView<'a> {
 #[derive(Debug)]
 pub struct IrUntaggedVariantView<'view, 'a> {
     parent: &'view IrUntaggedView<'a>,
-    variant: &'a IrUntaggedVariant<'a>,
+    variant: &'a IrUntaggedVariant<NodeIndex<usize>>,
 }
 
 impl<'view, 'a> IrUntaggedVariantView<'view, 'a> {
@@ -68,13 +68,10 @@ impl<'view, 'a> IrUntaggedVariantView<'view, 'a> {
     #[inline]
     pub fn ty(&self) -> Option<SomeIrUntaggedVariant<'a>> {
         match self.variant {
-            IrUntaggedVariant::Some(hint, ty) => {
-                let node = self.parent.cooked.resolve(ty);
-                Some(SomeIrUntaggedVariant {
-                    hint: *hint,
-                    view: IrTypeView::new(self.parent.cooked, self.parent.cooked.indices[&node]),
-                })
-            }
+            &IrUntaggedVariant::Some(hint, index) => Some(SomeIrUntaggedVariant {
+                hint,
+                view: IrTypeView::new(self.parent.cooked, index),
+            }),
             IrUntaggedVariant::Null => None,
         }
     }

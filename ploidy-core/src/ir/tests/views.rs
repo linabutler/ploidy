@@ -1612,7 +1612,7 @@ fn test_inline_view_path_method() {
     // `path()` should return a path with one segment.
     let path = nested_inline.path();
     assert_matches!(
-        &*path.segments,
+        path.segments,
         [InlineIrTypePathSegment::Field(IrStructFieldName::Name(
             "nested"
         ))]
@@ -2590,7 +2590,7 @@ fn test_operation_view_inlines_finds_inline_types() {
         .iter()
         .find(|inline| {
             matches!(inline, InlineIrTypeView::Struct(path, _) if matches!(
-                &*path.segments,
+                path.segments,
                 [
                     InlineIrTypePathSegment::Operation("createUser"),
                     InlineIrTypePathSegment::Request,
@@ -2605,7 +2605,7 @@ fn test_operation_view_inlines_finds_inline_types() {
         .iter()
         .find(|inline| {
             matches!(inline, InlineIrTypeView::Struct(path, _) if matches!(
-                &*path.segments,
+                path.segments,
                 [
                     InlineIrTypePathSegment::Operation("createUser"),
                     InlineIrTypePathSegment::Request,
@@ -2619,7 +2619,7 @@ fn test_operation_view_inlines_finds_inline_types() {
         .iter()
         .find(|inline| {
             matches!(inline, InlineIrTypeView::Struct(path, _) if matches!(
-                &*path.segments,
+                path.segments,
                 [
                     InlineIrTypePathSegment::Operation("createUser"),
                     InlineIrTypePathSegment::Response,
@@ -2676,7 +2676,7 @@ fn test_operation_request_and_response() {
     };
     assert_matches!(request.path().root, InlineIrTypePathRoot::Resource(None));
     assert_matches!(
-        &*request.path().segments,
+        request.path().segments,
         [
             InlineIrTypePathSegment::Operation("createUser"),
             InlineIrTypePathSegment::Request,
@@ -2691,7 +2691,7 @@ fn test_operation_request_and_response() {
     };
     assert_matches!(response.path().root, InlineIrTypePathRoot::Resource(None));
     assert_matches!(
-        &*response.path().segments,
+        response.path().segments,
         [
             InlineIrTypePathSegment::Operation("createUser"),
             InlineIrTypePathSegment::Response,
@@ -3425,7 +3425,7 @@ fn test_inlined_variant_inline_field_types_not_leaked() {
     };
     assert_matches!(path.root, InlineIrTypePathRoot::Type("Pet"));
     assert_matches!(
-        &*path.segments,
+        path.segments,
         [InlineIrTypePathSegment::TaggedVariant("Dog")]
     );
 
@@ -3587,7 +3587,7 @@ fn test_inlined_when_struct_field_references_tagged_variant() {
     };
     assert_matches!(path.root, InlineIrTypePathRoot::Type("Pet"));
     assert_matches!(
-        &*path.segments,
+        path.segments,
         [InlineIrTypePathSegment::TaggedVariant("Dog")]
     );
 

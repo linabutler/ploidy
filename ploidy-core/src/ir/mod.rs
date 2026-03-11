@@ -1,3 +1,4 @@
+mod cooker;
 mod error;
 mod graph;
 mod spec;

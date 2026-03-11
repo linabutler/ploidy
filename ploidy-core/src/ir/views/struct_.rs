@@ -17,7 +17,7 @@ use super::{ViewNode, ir::IrTypeView};
 pub struct IrStructView<'a> {
     cooked: &'a CookedGraph<'a>,
     index: NodeIndex<usize>,
-    ty: &'a IrStruct<'a>,
+    ty: &'a IrStruct<'a, NodeIndex<usize>>,
 }
 
 impl<'a> IrStructView<'a> {
@@ -25,7 +25,7 @@ impl<'a> IrStructView<'a> {
     pub(in crate::ir) fn new(
         cooked: &'a CookedGraph<'a>,
         index: NodeIndex<usize>,
-        ty: &'a IrStruct<'a>,
+        ty: &'a IrStruct<'a, NodeIndex<usize>>,
     ) -> Self {
         Self { cooked, index, ty }
     }
@@ -62,7 +62,7 @@ impl<'a> IrStructView<'a> {
         itertools::chain!(
             // Inherited fields first, in declaration order.
             ancestors
-                .flat_map(|ancestor| &ancestor.fields)
+                .flat_map(|ancestor| ancestor.fields)
                 .filter(move |field| seen.insert(field.name))
                 .map(|field| IrStructFieldView {
                     parent: self,
@@ -88,11 +88,11 @@ impl<'a> IrStructView<'a> {
     /// Returns an iterator over immediate parent types from `allOf`,
     /// including named and inline schemas.
     #[inline]
-    pub fn parents(&self) -> impl Iterator<Item = IrTypeView<'a>> + '_ {
-        self.ty.parents.iter().map(move |parent| {
-            let node = self.cooked.resolve(parent);
-            IrTypeView::new(self.cooked, self.cooked.indices[&node])
-        })
+    pub fn parents(&self) -> impl Iterator<Item = IrTypeView<'a>> {
+        self.ty
+            .parents
+            .iter()
+            .map(move |&parent| IrTypeView::new(self.cooked, parent))
     }
 }
 
@@ -112,7 +112,7 @@ impl<'a> ViewNode<'a> for IrStructView<'a> {
 #[derive(Debug)]
 pub struct IrStructFieldView<'view, 'a> {
     parent: &'view IrStructView<'a>,
-    field: &'a IrStructField<'a>,
+    field: &'a IrStructField<'a, NodeIndex<usize>>,
     inherited: bool,
 }
 
@@ -125,8 +125,7 @@ impl<'view, 'a> IrStructFieldView<'view, 'a> {
     /// Returns a view of the inner type that this type wraps.
     #[inline]
     pub fn ty(&self) -> IrTypeView<'a> {
-        let node = self.parent.cooked.resolve(&self.field.ty);
-        IrTypeView::new(self.parent.cooked, self.parent.cooked.indices[&node])
+        IrTypeView::new(self.parent.cooked, self.field.ty)
     }
 
     #[inline]
@@ -178,9 +177,7 @@ impl<'view, 'a> IrStructFieldView<'view, 'a> {
     #[inline]
     pub fn needs_indirection(&self) -> bool {
         let graph = self.parent.cooked;
-        let node = graph.resolve(&self.field.ty);
-        let target = graph.indices[&node];
         graph.metadata.scc_indices[self.parent.index.index()]
-            == graph.metadata.scc_indices[target.index()]
+            == graph.metadata.scc_indices[self.field.ty.index()]
     }
 }

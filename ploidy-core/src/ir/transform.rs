@@ -68,6 +68,12 @@ impl<'context, 'a> IrTransformer<'context, 'a> {
         }
     }
 
+    /// Returns a reference to the arena allocator.
+    #[inline]
+    fn arena(&self) -> &'a Arena {
+        self.context.arena
+    }
+
     fn transform(self) -> IrType<'a> {
         self.try_tagged()
             .or_else(Self::try_untagged)
@@ -100,8 +106,8 @@ impl<'context, 'a> IrTransformer<'context, 'a> {
                         }
                         variants.push(IrTaggedVariant {
                             name: r.path.name(),
-                            ty: self.context.arena.inner().alloc(IrType::Ref(&r.path)),
-                            aliases: aliases.to_vec(),
+                            ty: &*self.arena().alloc(IrType::Ref(&r.path)),
+                            aliases: self.arena().alloc_slice_copy(aliases),
                         });
                     }
                     // An inline schema variant can't have a discriminator mapping;
@@ -115,7 +121,7 @@ impl<'context, 'a> IrTransformer<'context, 'a> {
         let tagged = IrTagged {
             description: self.schema.description.as_deref(),
             tag: discriminator.property_name.as_str(),
-            variants,
+            variants: self.arena().alloc_slice_copy(&variants),
         };
 
         Ok(match self.name {
@@ -138,16 +144,13 @@ impl<'context, 'a> IrTransformer<'context, 'a> {
                     RefOrSchema::Ref(r) => Some(IrType::Ref(&r.path)),
                     RefOrSchema::Other(s) if matches!(&*s.ty, [Ty::Null]) => None,
                     RefOrSchema::Other(schema) => {
-                        let path = match &self.name {
+                        let segment = InlineIrTypePathSegment::Variant(index);
+                        let path = match self.name {
                             IrTypeName::Schema(info) => InlineIrTypePath {
                                 root: InlineIrTypePathRoot::Type(info.name),
-                                segments: vec![InlineIrTypePathSegment::Variant(index)],
+                                segments: self.arena().alloc_slice_copy(&[segment]),
                             },
-                            IrTypeName::Inline(path) => {
-                                let mut path = path.clone();
-                                path.segments.push(InlineIrTypePathSegment::Variant(index));
-                                path
-                            }
+                            IrTypeName::Inline(path) => path.join(self.arena(), &[segment]),
                         };
                         Some(transform_with_context(self.context, path, schema))
                     }
@@ -168,24 +171,24 @@ impl<'context, 'a> IrTransformer<'context, 'a> {
                         }
                         _ => IrUntaggedVariantNameHint::Index(index),
                     };
-                    IrUntaggedVariant::Some(hint, ty)
+                    IrUntaggedVariant::Some(hint, &*self.arena().alloc(ty))
                 })
                 .unwrap_or(IrUntaggedVariant::Null)
             })
             .collect_vec();
 
         Ok(match &*variants {
-            [] => match &self.name {
-                IrTypeName::Schema(info) => SchemaIrType::Any(*info).into(),
-                IrTypeName::Inline(path) => InlineIrType::Any(path.clone()).into(),
+            [] => match self.name {
+                IrTypeName::Schema(info) => SchemaIrType::Any(info).into(),
+                IrTypeName::Inline(path) => InlineIrType::Any(path).into(),
             },
 
             // Unwrap single-variant untagged unions.
-            [IrUntaggedVariant::Null] => match &self.name {
-                IrTypeName::Schema(info) => SchemaIrType::Any(*info).into(),
-                IrTypeName::Inline(path) => InlineIrType::Any(path.clone()).into(),
+            [IrUntaggedVariant::Null] => match self.name {
+                IrTypeName::Schema(info) => SchemaIrType::Any(info).into(),
+                IrTypeName::Inline(path) => InlineIrType::Any(path).into(),
             },
-            [IrUntaggedVariant::Some(_, ty)] => ty.clone(),
+            [IrUntaggedVariant::Some(_, ty)] => **ty,
 
             // Simplify two-variant untagged unions, where one is a type
             // and the other is `null`, into optionals.
@@ -193,26 +196,22 @@ impl<'context, 'a> IrTransformer<'context, 'a> {
             | [IrUntaggedVariant::Null, IrUntaggedVariant::Some(_, ty)] => {
                 let container = Container::Optional(Inner {
                     description: self.schema.description.as_deref(),
-                    ty: ty.clone().into(),
+                    ty: *ty,
                 });
                 match self.name {
                     IrTypeName::Schema(info) => SchemaIrType::Container(info, container).into(),
-                    IrTypeName::Inline(path) => {
-                        InlineIrType::Container(path.clone(), container).into()
-                    }
+                    IrTypeName::Inline(path) => InlineIrType::Container(path, container).into(),
                 }
             }
 
-            _ => {
+            variants => {
                 let untagged = IrUntagged {
                     description: self.schema.description.as_deref(),
-                    variants,
+                    variants: self.arena().alloc_slice_copy(variants),
                 };
-                match &self.name {
-                    IrTypeName::Schema(info) => SchemaIrType::Untagged(*info, untagged).into(),
-                    IrTypeName::Inline(path) => {
-                        InlineIrType::Untagged(path.clone(), untagged).into()
-                    }
+                match self.name {
+                    IrTypeName::Schema(info) => SchemaIrType::Untagged(info, untagged).into(),
+                    IrTypeName::Inline(path) => InlineIrType::Untagged(path, untagged).into(),
                 }
             }
         })
@@ -231,9 +230,9 @@ impl<'context, 'a> IrTransformer<'context, 'a> {
                     let path = match self.name {
                         IrTypeName::Schema(info) => InlineIrTypePath {
                             root: InlineIrTypePathRoot::Type(info.name),
-                            segments: vec![],
+                            segments: &[],
                         },
-                        IrTypeName::Inline(path) => path.clone(),
+                        IrTypeName::Inline(path) => path,
                     };
                     transform_with_context(self.context, path, schema)
                 }
@@ -250,7 +249,7 @@ impl<'context, 'a> IrTransformer<'context, 'a> {
                         // as the field name. For example, a pointer like
                         // `#/components/schemas/Address` becomes `address`.
                         let name = IrStructFieldName::Name(r.path.name());
-                        let ty = IrType::Ref(&r.path);
+                        let ty: &_ = self.arena().alloc(IrType::Ref(&r.path));
                         let desc = self
                             .context
                             .doc
@@ -264,43 +263,34 @@ impl<'context, 'a> IrTransformer<'context, 'a> {
                         // For inline schemas, we don't have a name that we can use,
                         // so use its index in `anyOf` as a naming hint.
                         let name = IrStructFieldName::Hint(IrStructFieldNameHint::Index(index + 1));
-                        let path = match &self.name {
+                        let segment = InlineIrTypePathSegment::Field(name);
+                        let path = match self.name {
                             IrTypeName::Schema(info) => InlineIrTypePath {
                                 root: InlineIrTypePathRoot::Type(info.name),
-                                segments: vec![InlineIrTypePathSegment::Field(name)],
+                                segments: self.arena().alloc_slice_copy(&[segment]),
                             },
-                            IrTypeName::Inline(path) => {
-                                let mut path = path.clone();
-                                path.segments.push(InlineIrTypePathSegment::Field(name));
-                                path
-                            }
+                            IrTypeName::Inline(path) => path.join(self.arena(), &[segment]),
                         };
-                        let ty = transform_with_context(self.context, path, schema);
+                        let ty: &_ =
+                            self.arena()
+                                .alloc(transform_with_context(self.context, path, schema));
                         let desc = schema.description.as_deref();
                         (name, ty, desc)
                     }
                 };
                 // Flattened `anyOf` fields are always optional.
-                let path = match &self.name {
+                let segment = InlineIrTypePathSegment::Field(field_name);
+                let path = match self.name {
                     IrTypeName::Schema(info) => InlineIrTypePath {
                         root: InlineIrTypePathRoot::Type(info.name),
-                        segments: vec![InlineIrTypePathSegment::Field(field_name)],
+                        segments: self.arena().alloc_slice_copy(&[segment]),
                     },
-                    IrTypeName::Inline(path) => {
-                        let mut path = path.clone();
-                        path.segments
-                            .push(InlineIrTypePathSegment::Field(field_name));
-                        path
-                    }
+                    IrTypeName::Inline(path) => path.join(self.arena(), &[segment]),
                 };
-                let ty = InlineIrType::Container(
+                let ty: &_ = self.arena().alloc(IrType::from(InlineIrType::Container(
                     path,
-                    Container::Optional(Inner {
-                        description,
-                        ty: ty.into(),
-                    }),
-                )
-                .into();
+                    Container::Optional(Inner { description, ty }),
+                )));
                 IrStructField {
                     name: field_name,
                     ty,
@@ -311,19 +301,16 @@ impl<'context, 'a> IrTransformer<'context, 'a> {
             })
             .collect_vec();
 
-        let parents = self.parents().collect();
-        let regular_fields = self.properties();
-
-        // Combine all the fields: regular properties first,
-        // followed by the flattened `anyOf` fields. This ordering
-        // ensures that regular properties take precedence during
-        // (de)serialization.
-        let all_fields = itertools::chain!(regular_fields, any_of_fields).collect();
-
         let ty = IrStruct {
             description: self.schema.description.as_deref(),
-            fields: all_fields,
-            parents,
+            fields: self.arena().alloc_slice({
+                // Combine all the fields: regular properties first,
+                // followed by the flattened `anyOf` fields. This ordering
+                // ensures that regular properties take precedence during
+                // (de)serialization.
+                itertools::chain!(self.properties(), any_of_fields)
+            }),
+            parents: self.arena().alloc_slice(self.parents()),
         };
 
         Ok(match self.name {
@@ -336,18 +323,15 @@ impl<'context, 'a> IrTransformer<'context, 'a> {
         let Some(values) = &self.schema.variants else {
             return Err(self);
         };
-        let variants = values
-            .iter()
-            .filter_map(|value| {
-                if let Some(s) = value.as_str() {
-                    Some(IrEnumVariant::String(s))
-                } else if let Some(n) = value.as_number() {
-                    Some(IrEnumVariant::Number(n.clone()))
-                } else {
-                    value.as_bool().map(IrEnumVariant::Bool)
-                }
-            })
-            .collect();
+        let variants = self.arena().alloc_slice(values.iter().filter_map(|value| {
+            if let Some(s) = value.as_str() {
+                Some(IrEnumVariant::String(s))
+            } else if let Some(n) = value.as_number() {
+                Some(IrEnumVariant::Number(n.clone()))
+            } else {
+                value.as_bool().map(IrEnumVariant::Bool)
+            }
+        }));
         let ty = IrEnum {
             description: self.schema.description.as_deref(),
             variants,
@@ -363,12 +347,13 @@ impl<'context, 'a> IrTransformer<'context, 'a> {
             return Err(self);
         }
 
-        let parents = self.parents().collect();
-        let fields = itertools::chain!(self.properties(), self.additional_properties()).collect();
         let ty = IrStruct {
             description: self.schema.description.as_deref(),
-            fields,
-            parents,
+            fields: self.arena().alloc_slice(itertools::chain!(
+                self.properties(),
+                self.additional_properties()
+            )),
+            parents: self.arena().alloc_slice(self.parents()),
         };
         Ok(match self.name {
             IrTypeName::Schema(info) => SchemaIrType::Struct(info, ty).into(),
@@ -450,30 +435,24 @@ impl<'context, 'a> IrTransformer<'context, 'a> {
                     let items = match &self.schema.items {
                         Some(RefOrSchema::Ref(r)) => IrType::Ref(&r.path),
                         Some(RefOrSchema::Other(schema)) => {
-                            let path = match &self.name {
+                            let segment = InlineIrTypePathSegment::ArrayItem;
+                            let path = match self.name {
                                 IrTypeName::Schema(info) => InlineIrTypePath {
                                     root: InlineIrTypePathRoot::Type(info.name),
-                                    segments: vec![InlineIrTypePathSegment::ArrayItem],
+                                    segments: self.arena().alloc_slice_copy(&[segment]),
                                 },
-                                IrTypeName::Inline(path) => {
-                                    let mut path = path.clone();
-                                    path.segments.push(InlineIrTypePathSegment::ArrayItem);
-                                    path
-                                }
+                                IrTypeName::Inline(path) => path.join(self.arena(), &[segment]),
                             };
                             transform_with_context(self.context, path, schema)
                         }
                         None => {
-                            let path = match &self.name {
+                            let segment = InlineIrTypePathSegment::ArrayItem;
+                            let path = match self.name {
                                 IrTypeName::Schema(info) => InlineIrTypePath {
                                     root: InlineIrTypePathRoot::Type(info.name),
-                                    segments: vec![InlineIrTypePathSegment::ArrayItem],
+                                    segments: self.arena().alloc_slice_copy(&[segment]),
                                 },
-                                IrTypeName::Inline(path) => {
-                                    let mut path = path.clone();
-                                    path.segments.push(InlineIrTypePathSegment::ArrayItem);
-                                    path
-                                }
+                                IrTypeName::Inline(path) => path.join(self.arena(), &[segment]),
                             };
                             InlineIrType::Any(path).into()
                         }
@@ -482,7 +461,7 @@ impl<'context, 'a> IrTransformer<'context, 'a> {
                         &self.name,
                         Inner {
                             description: self.schema.description.as_deref(),
-                            ty: items.into(),
+                            ty: self.arena().alloc(items),
                         },
                     )
                 }
@@ -492,41 +471,39 @@ impl<'context, 'a> IrTransformer<'context, 'a> {
                         Some(AdditionalProperties::RefOrSchema(RefOrSchema::Ref(r))) => {
                             Some(Inner {
                                 description: self.schema.description.as_deref(),
-                                ty: IrType::Ref(&r.path).into(),
+                                ty: &*self.arena().alloc(IrType::Ref(&r.path)),
                             })
                         }
                         Some(AdditionalProperties::RefOrSchema(RefOrSchema::Other(schema))) => {
-                            let path = match &self.name {
+                            let segment = InlineIrTypePathSegment::MapValue;
+                            let path = match self.name {
                                 IrTypeName::Schema(info) => InlineIrTypePath {
                                     root: InlineIrTypePathRoot::Type(info.name),
-                                    segments: vec![InlineIrTypePathSegment::MapValue],
+                                    segments: self.arena().alloc_slice_copy(&[segment]),
                                 },
-                                IrTypeName::Inline(path) => {
-                                    let mut path = path.clone();
-                                    path.segments.push(InlineIrTypePathSegment::MapValue);
-                                    path
-                                }
+                                IrTypeName::Inline(path) => path.join(self.arena(), &[segment]),
                             };
                             Some(Inner {
                                 description: self.schema.description.as_deref(),
-                                ty: transform_with_context(self.context, path, schema).into(),
+                                ty: &*self.arena().alloc(transform_with_context(
+                                    self.context,
+                                    path,
+                                    schema,
+                                )),
                             })
                         }
                         Some(AdditionalProperties::Bool(true)) => {
-                            let path = match &self.name {
+                            let segment = InlineIrTypePathSegment::MapValue;
+                            let path = match self.name {
                                 IrTypeName::Schema(info) => InlineIrTypePath {
                                     root: InlineIrTypePathRoot::Type(info.name),
-                                    segments: vec![InlineIrTypePathSegment::MapValue],
+                                    segments: self.arena().alloc_slice_copy(&[segment]),
                                 },
-                                IrTypeName::Inline(path) => {
-                                    let mut path = path.clone();
-                                    path.segments.push(InlineIrTypePathSegment::MapValue);
-                                    path
-                                }
+                                IrTypeName::Inline(path) => path.join(self.arena(), &[segment]),
                             };
                             Some(Inner {
                                 description: self.schema.description.as_deref(),
-                                ty: Box::new(IrType::Inline(InlineIrType::Any(path))),
+                                ty: &*self.arena().alloc(IrType::Inline(InlineIrType::Any(path))),
                             })
                         }
                         _ => None,
@@ -548,15 +525,15 @@ impl<'context, 'a> IrTransformer<'context, 'a> {
         match (&*other.variants, other.nullable) {
             // An empty `type` array is invalid in JSON Schema,
             // but we treat it as "any type".
-            ([], false) => match &self.name {
-                IrTypeName::Schema(info) => SchemaIrType::Any(*info).into(),
-                IrTypeName::Inline(path) => InlineIrType::Any(path.clone()).into(),
+            ([], false) => match self.name {
+                IrTypeName::Schema(info) => SchemaIrType::Any(info).into(),
+                IrTypeName::Inline(path) => InlineIrType::Any(path).into(),
             },
 
             // A `null` variant becomes `Any`.
-            ([], true) => match &self.name {
-                IrTypeName::Schema(info) => SchemaIrType::Any(*info).into(),
-                IrTypeName::Inline(path) => InlineIrType::Any(path.clone()).into(),
+            ([], true) => match self.name {
+                IrTypeName::Schema(info) => SchemaIrType::Any(info).into(),
+                IrTypeName::Inline(path) => InlineIrType::Any(path).into(),
             },
 
             // A union with a single, non-`null` variant unwraps to
@@ -568,13 +545,11 @@ impl<'context, 'a> IrTransformer<'context, 'a> {
             ([variant], true) => {
                 let container = Container::Optional(Inner {
                     description: self.schema.description.as_deref(),
-                    ty: variant.to_inline_type().into(),
+                    ty: &*self.arena().alloc(variant.to_inline_type()),
                 });
                 match self.name {
                     IrTypeName::Schema(info) => SchemaIrType::Container(info, container).into(),
-                    IrTypeName::Inline(path) => {
-                        InlineIrType::Container(path.clone(), container).into()
-                    }
+                    IrTypeName::Inline(path) => InlineIrType::Container(path, container).into(),
                 }
             }
 
@@ -589,7 +564,7 @@ impl<'context, 'a> IrTransformer<'context, 'a> {
                             variant
                                 .hint()
                                 .unwrap_or(IrUntaggedVariantNameHint::Index(index)),
-                            variant.to_type(),
+                            &*self.arena().alloc(variant.to_type()),
                         )
                     })
                     .collect_vec();
@@ -598,13 +573,11 @@ impl<'context, 'a> IrTransformer<'context, 'a> {
                 }
                 let untagged = IrUntagged {
                     description: self.schema.description.as_deref(),
-                    variants,
+                    variants: self.arena().alloc_slice_copy(&variants),
                 };
                 match self.name {
                     IrTypeName::Schema(info) => SchemaIrType::Untagged(info, untagged).into(),
-                    IrTypeName::Inline(path) => {
-                        InlineIrType::Untagged(path.clone(), untagged).into()
-                    }
+                    IrTypeName::Inline(path) => InlineIrType::Untagged(path, untagged).into(),
                 }
             }
         }
@@ -613,28 +586,27 @@ impl<'context, 'a> IrTransformer<'context, 'a> {
     // MARK: Shared lowering
 
     /// Lowers immediate parents from `allOf` into a list of types.
-    fn parents(&self) -> impl Iterator<Item = IrType<'a>> {
+    fn parents(&self) -> impl Iterator<Item = &'a IrType<'a>> {
         self.schema
             .all_of
             .iter()
             .flatten()
             .enumerate()
             .map(|(index, parent)| (index + 1, parent))
-            .map(|(index, parent)| match parent {
-                RefOrSchema::Ref(r) => IrType::Ref(&r.path),
+            .map(move |(index, parent)| match parent {
+                RefOrSchema::Ref(r) => &*self.arena().alloc(IrType::Ref(&r.path)),
                 RefOrSchema::Other(schema) => {
-                    let path = match &self.name {
+                    let segment = InlineIrTypePathSegment::Parent(index);
+                    let path = match self.name {
                         IrTypeName::Schema(info) => InlineIrTypePath {
                             root: InlineIrTypePathRoot::Type(info.name),
-                            segments: vec![InlineIrTypePathSegment::Parent(index)],
+                            segments: self.arena().alloc_slice_copy(&[segment]),
                         },
-                        IrTypeName::Inline(path) => {
-                            let mut path = path.clone();
-                            path.segments.push(InlineIrTypePathSegment::Parent(index));
-                            path
-                        }
+                        IrTypeName::Inline(path) => path.join(self.arena(), &[segment]),
                     };
-                    transform_with_context(self.context, path, schema)
+                    &*self
+                        .arena()
+                        .alloc(transform_with_context(self.context, path, schema))
                 }
             })
     }
@@ -646,28 +618,24 @@ impl<'context, 'a> IrTransformer<'context, 'a> {
             .properties
             .iter()
             .flatten()
-            .map(|(name, field_schema)| {
+            .map(move |(name, field_schema)| {
                 let field_name = name.as_str();
                 let required = self.schema.required.contains(name);
-                let ty = match field_schema {
-                    RefOrSchema::Ref(r) => IrType::Ref(&r.path),
+                let ty: &_ = match field_schema {
+                    RefOrSchema::Ref(r) => &*self.arena().alloc(IrType::Ref(&r.path)),
                     RefOrSchema::Other(schema) => {
-                        let path = match &self.name {
+                        let segment =
+                            InlineIrTypePathSegment::Field(IrStructFieldName::Name(field_name));
+                        let path = match self.name {
                             IrTypeName::Schema(info) => InlineIrTypePath {
                                 root: InlineIrTypePathRoot::Type(info.name),
-                                segments: vec![InlineIrTypePathSegment::Field(
-                                    IrStructFieldName::Name(field_name),
-                                )],
+                                segments: self.arena().alloc_slice_copy(&[segment]),
                             },
-                            IrTypeName::Inline(path) => {
-                                let mut path = path.clone();
-                                path.segments.push(InlineIrTypePathSegment::Field(
-                                    IrStructFieldName::Name(field_name),
-                                ));
-                                path
-                            }
+                            IrTypeName::Inline(path) => path.join(self.arena(), &[segment]),
                         };
-                        transform_with_context(self.context, path, schema)
+                        &*self
+                            .arena()
+                            .alloc(transform_with_context(self.context, path, schema))
                     }
                 };
                 let description = match field_schema {
@@ -697,30 +665,20 @@ impl<'context, 'a> IrTransformer<'context, 'a> {
                 // Wrap the type in `Optional` if the field is either
                 // explicitly nullable, or implicitly optional. The `required`
                 // flag distinguishes between the two for codegen.
-                let ty = if nullable || !required {
-                    let path = match &self.name {
+                let ty: &_ = if nullable || !required {
+                    let segment =
+                        InlineIrTypePathSegment::Field(IrStructFieldName::Name(field_name));
+                    let path = match self.name {
                         IrTypeName::Schema(info) => InlineIrTypePath {
                             root: InlineIrTypePathRoot::Type(info.name),
-                            segments: vec![InlineIrTypePathSegment::Field(
-                                IrStructFieldName::Name(field_name),
-                            )],
+                            segments: self.arena().alloc_slice_copy(&[segment]),
                         },
-                        IrTypeName::Inline(path) => {
-                            let mut path = path.clone();
-                            path.segments.push(InlineIrTypePathSegment::Field(
-                                IrStructFieldName::Name(field_name),
-                            ));
-                            path
-                        }
+                        IrTypeName::Inline(path) => path.join(self.arena(), &[segment]),
                     };
-                    InlineIrType::Container(
+                    self.arena().alloc(IrType::from(InlineIrType::Container(
                         path,
-                        Container::Optional(Inner {
-                            description,
-                            ty: ty.into(),
-                        }),
-                    )
-                    .into()
+                        Container::Optional(Inner { description, ty }),
+                    )))
                 } else {
                     ty
                 };
@@ -738,47 +696,50 @@ impl<'context, 'a> IrTransformer<'context, 'a> {
     /// if the schema specifies them.
     fn additional_properties(&self) -> Option<IrStructField<'a>> {
         let name = IrStructFieldName::Hint(IrStructFieldNameHint::AdditionalProperties);
-        let path = match &self.name {
+        let path = match self.name {
             IrTypeName::Schema(info) => InlineIrTypePath {
                 root: InlineIrTypePathRoot::Type(info.name),
-                segments: vec![InlineIrTypePathSegment::Field(name)],
+                segments: self
+                    .arena()
+                    .alloc_slice_copy(&[InlineIrTypePathSegment::Field(name)]),
             },
             IrTypeName::Inline(path) => {
-                let mut path = path.clone();
-                path.segments.push(InlineIrTypePathSegment::Field(name));
-                path
+                path.join(self.arena(), &[InlineIrTypePathSegment::Field(name)])
             }
         };
 
         let inner = match &self.schema.additional_properties {
             Some(AdditionalProperties::RefOrSchema(RefOrSchema::Ref(r))) => Inner {
                 description: self.schema.description.as_deref(),
-                ty: IrType::Ref(&r.path).into(),
+                ty: &*self.arena().alloc(IrType::Ref(&r.path)),
             },
             Some(AdditionalProperties::RefOrSchema(RefOrSchema::Other(schema))) => {
-                let mut path = path.clone();
-                path.segments.push(InlineIrTypePathSegment::MapValue);
+                let path = path.join(self.arena(), &[InlineIrTypePathSegment::MapValue]);
                 Inner {
                     description: self.schema.description.as_deref(),
-                    ty: transform_with_context(self.context, path, schema).into(),
+                    ty: &*self
+                        .arena()
+                        .alloc(transform_with_context(self.context, path, schema)),
                 }
             }
             Some(AdditionalProperties::Bool(true)) => {
-                let mut path = path.clone();
-                path.segments.push(InlineIrTypePathSegment::MapValue);
+                let path = path.join(self.arena(), &[InlineIrTypePathSegment::MapValue]);
                 Inner {
                     description: self.schema.description.as_deref(),
-                    ty: Box::new(IrType::Inline(InlineIrType::Any(path))),
+                    ty: &*self.arena().alloc(IrType::Inline(InlineIrType::Any(path))),
                 }
             }
             _ => return None,
         };
 
-        let ty = InlineIrType::Container(path, Container::Map(inner));
+        let ty: &_ = self.arena().alloc(IrType::from(InlineIrType::Container(
+            path,
+            Container::Map(inner),
+        )));
 
         Some(IrStructField {
             name,
-            ty: ty.into(),
+            ty,
             required: true,
             description: None,
             flattened: true,
@@ -820,29 +781,25 @@ impl<'name, 'a> OtherVariant<'name, 'a> {
         match self {
             &Self::Primitive(name, p) => match name {
                 IrTypeName::Schema(info) => SchemaIrType::Primitive(*info, p).into(),
-                IrTypeName::Inline(path) => InlineIrType::Primitive(path.clone(), p).into(),
+                IrTypeName::Inline(path) => InlineIrType::Primitive(*path, p).into(),
             },
             Self::Array(name, inner) => {
-                let container = Container::Array(inner.clone());
+                let container = Container::Array(*inner);
                 match name {
                     IrTypeName::Schema(info) => SchemaIrType::Container(*info, container).into(),
-                    IrTypeName::Inline(path) => {
-                        InlineIrType::Container(path.clone(), container).into()
-                    }
+                    IrTypeName::Inline(path) => InlineIrType::Container(*path, container).into(),
                 }
             }
             Self::Map(name, inner) => {
-                let container = Container::Map(inner.clone());
+                let container = Container::Map(*inner);
                 match name {
                     IrTypeName::Schema(info) => SchemaIrType::Container(*info, container).into(),
-                    IrTypeName::Inline(path) => {
-                        InlineIrType::Container(path.clone(), container).into()
-                    }
+                    IrTypeName::Inline(path) => InlineIrType::Container(*path, container).into(),
                 }
             }
             Self::Any(name) => match name {
                 IrTypeName::Schema(info) => SchemaIrType::Any(*info).into(),
-                IrTypeName::Inline(path) => InlineIrType::Any(path.clone()).into(),
+                IrTypeName::Inline(path) => InlineIrType::Any(*path).into(),
             },
         }
     }
@@ -856,31 +813,31 @@ impl<'name, 'a> OtherVariant<'name, 'a> {
                 let path = match name {
                     IrTypeName::Schema(info) => InlineIrTypePath {
                         root: InlineIrTypePathRoot::Type(info.name),
-                        segments: vec![],
+                        segments: &[],
                     },
-                    IrTypeName::Inline(path) => path.clone(),
+                    &IrTypeName::Inline(path) => path,
                 };
                 InlineIrType::Primitive(path, p).into()
             }
             Self::Array(name, inner) => {
-                let container = Container::Array(inner.clone());
+                let container = Container::Array(*inner);
                 let path = match name {
                     IrTypeName::Schema(info) => InlineIrTypePath {
                         root: InlineIrTypePathRoot::Type(info.name),
-                        segments: vec![],
+                        segments: &[],
                     },
-                    IrTypeName::Inline(path) => path.clone(),
+                    &&IrTypeName::Inline(path) => path,
                 };
                 InlineIrType::Container(path, container).into()
             }
             Self::Map(name, inner) => {
-                let container = Container::Map(inner.clone());
+                let container = Container::Map(*inner);
                 let path = match name {
                     IrTypeName::Schema(info) => InlineIrTypePath {
                         root: InlineIrTypePathRoot::Type(info.name),
-                        segments: vec![],
+                        segments: &[],
                     },
-                    IrTypeName::Inline(path) => path.clone(),
+                    &&IrTypeName::Inline(path) => path,
                 };
                 InlineIrType::Container(path, container).into()
             }
@@ -888,9 +845,9 @@ impl<'name, 'a> OtherVariant<'name, 'a> {
                 let path = match name {
                     IrTypeName::Schema(info) => InlineIrTypePath {
                         root: InlineIrTypePathRoot::Type(info.name),
-                        segments: vec![],
+                        segments: &[],
                     },
-                    IrTypeName::Inline(path) => path.clone(),
+                    &&IrTypeName::Inline(path) => path,
                 };
                 InlineIrType::Any(path).into()
             }

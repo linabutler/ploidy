@@ -11,26 +11,24 @@ use petgraph::{
 
 use crate::{
     ir::{
-        graph::{CookedGraph, EdgeKind, GraphNode, Traversal, Traverse},
-        types::{
-            IrOperation, IrParameter, IrParameterInfo, IrParameterStyle, IrRequest, IrResponse,
-        },
+        graph::{CookedGraph, CookedOperation, EdgeKind, GraphNode, Traversal, Traverse},
+        types::{IrParameter, IrParameterInfo, IrParameterStyle, IrRequest, IrResponse},
     },
     parse::{Method, path::PathSegment},
 };
 
 use super::{Reach, View, inline::InlineIrTypeView, ir::IrTypeView};
 
-/// A graph-aware view of an [`IrOperation`].
+/// A graph-aware view of an [`IrOperation`][crate::ir::IrOperation].
 #[derive(Debug)]
 pub struct IrOperationView<'a> {
     cooked: &'a CookedGraph<'a>,
-    op: &'a IrOperation<'a>,
+    op: CookedOperation<'a>,
 }
 
 impl<'a> IrOperationView<'a> {
     #[inline]
-    pub(in crate::ir) fn new(cooked: &'a CookedGraph<'a>, op: &'a IrOperation<'a>) -> Self {
+    pub(in crate::ir) fn new(cooked: &'a CookedGraph<'a>, op: CookedOperation<'a>) -> Self {
         Self { cooked, op }
     }
 
@@ -67,10 +65,7 @@ impl<'a> IrOperationView<'a> {
     #[inline]
     pub fn request(&self) -> Option<IrRequestView<'a>> {
         self.op.request.as_ref().map(|ty| match ty {
-            IrRequest::Json(ty) => {
-                let node = self.cooked.resolve(ty);
-                IrRequestView::Json(IrTypeView::new(self.cooked, self.cooked.indices[&node]))
-            }
+            IrRequest::Json(index) => IrRequestView::Json(IrTypeView::new(self.cooked, *index)),
             IrRequest::Multipart => IrRequestView::Multipart,
         })
     }
@@ -79,10 +74,7 @@ impl<'a> IrOperationView<'a> {
     #[inline]
     pub fn response(&self) -> Option<IrResponseView<'a>> {
         self.op.response.as_ref().map(|ty| match ty {
-            IrResponse::Json(ty) => {
-                let node = self.cooked.resolve(ty);
-                IrResponseView::Json(IrTypeView::new(self.cooked, self.cooked.indices[&node]))
-            }
+            IrResponse::Json(index) => IrResponseView::Json(IrTypeView::new(self.cooked, *index)),
         })
     }
 
@@ -221,13 +213,16 @@ impl<'view, 'a> IrOperationViewPath<'view, 'a> {
 #[derive(Debug)]
 pub struct IrParameterView<'a, T> {
     cooked: &'a CookedGraph<'a>,
-    info: &'a IrParameterInfo<'a>,
+    info: &'a IrParameterInfo<'a, NodeIndex<usize>>,
     phantom: PhantomData<T>,
 }
 
 impl<'a, T> IrParameterView<'a, T> {
     #[inline]
-    pub(in crate::ir) fn new(cooked: &'a CookedGraph<'a>, info: &'a IrParameterInfo<'a>) -> Self {
+    pub(in crate::ir) fn new(
+        cooked: &'a CookedGraph<'a>,
+        info: &'a IrParameterInfo<'a, NodeIndex<usize>>,
+    ) -> Self {
         Self {
             cooked,
             info,
@@ -242,8 +237,7 @@ impl<'a, T> IrParameterView<'a, T> {
 
     #[inline]
     pub fn ty(&self) -> IrTypeView<'a> {
-        let node = self.cooked.resolve(&self.info.ty);
-        IrTypeView::new(self.cooked, self.cooked.indices[&node])
+        IrTypeView::new(self.cooked, self.info.ty)
     }
 
     #[inline]

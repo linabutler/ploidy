@@ -142,7 +142,7 @@ if f.discriminator() { continue; }
 
 ### Other
 
-- **Imports:** Ordered groups (blank lines between): `std::` → external crates (alphabetical) → `crate::` → `super::`. No globs except re-exports in `mod.rs`, `use super::*` in tests.
+- **Imports:** Always add `use` imports; never use inline qualified paths. Rename conflicting imports: `use std::{fmt::Result as FmtResult, io::Result as IoResult}`. Ordered groups (blank lines between): `std::` → external crates (alphabetical) → `crate::` → `super::`. No globs except re-exports in `mod.rs`, `use super::*` in tests.
 - `#[inline]` on small functions only
 - `pub(in crate::path)` for internal constructors
 - `thiserror` for errors, `miette` for user-facing diagnostics

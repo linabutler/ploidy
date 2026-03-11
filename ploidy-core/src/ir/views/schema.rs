@@ -25,7 +25,7 @@ impl<'a> SchemaIrTypeView<'a> {
     pub(in crate::ir) fn new(
         cooked: &'a CookedGraph<'a>,
         index: NodeIndex<usize>,
-        ty: &'a SchemaIrType<'a>,
+        ty: &'a SchemaIrType<'a, NodeIndex<usize>>,
     ) -> Self {
         match ty {
             SchemaIrType::Enum(info, ty) => Self::Enum(*info, IrEnumView::new(cooked, index, ty)),

@@ -12,7 +12,7 @@ use super::{ViewNode, ir::IrTypeView};
 pub struct IrTaggedView<'a> {
     cooked: &'a CookedGraph<'a>,
     index: NodeIndex<usize>,
-    ty: &'a IrTagged<'a>,
+    ty: &'a IrTagged<'a, NodeIndex<usize>>,
 }
 
 impl<'a> IrTaggedView<'a> {
@@ -20,7 +20,7 @@ impl<'a> IrTaggedView<'a> {
     pub(in crate::ir) fn new(
         cooked: &'a CookedGraph<'a>,
         index: NodeIndex<usize>,
-        ty: &'a IrTagged<'a>,
+        ty: &'a IrTagged<'a, NodeIndex<usize>>,
     ) -> Self {
         Self { cooked, index, ty }
     }
@@ -38,10 +38,10 @@ impl<'a> IrTaggedView<'a> {
     /// Returns an iterator over this tagged union's variants.
     #[inline]
     pub fn variants(&self) -> impl Iterator<Item = IrTaggedVariantView<'a>> {
-        self.ty.variants.iter().map(move |variant| {
-            let node = self.cooked.resolve(variant.ty);
-            IrTaggedVariantView::new(self.cooked, self.cooked.indices[&node], variant)
-        })
+        self.ty
+            .variants
+            .iter()
+            .map(move |variant| IrTaggedVariantView::new(self.cooked, variant.ty, variant))
     }
 }
 
@@ -62,7 +62,7 @@ impl<'a> ViewNode<'a> for IrTaggedView<'a> {
 pub struct IrTaggedVariantView<'a> {
     cooked: &'a CookedGraph<'a>,
     index: NodeIndex<usize>,
-    variant: &'a IrTaggedVariant<'a>,
+    variant: &'a IrTaggedVariant<'a, NodeIndex<usize>>,
 }
 
 impl<'a> IrTaggedVariantView<'a> {
@@ -70,7 +70,7 @@ impl<'a> IrTaggedVariantView<'a> {
     fn new(
         cooked: &'a CookedGraph<'a>,
         index: NodeIndex<usize>,
-        variant: &'a IrTaggedVariant<'a>,
+        variant: &'a IrTaggedVariant<'a, NodeIndex<usize>>,
     ) -> Self {
         Self {
             cooked,
@@ -86,14 +86,13 @@ impl<'a> IrTaggedVariantView<'a> {
 
     #[inline]
     pub fn aliases(&self) -> &'a [&'a str] {
-        &self.variant.aliases
+        self.variant.aliases
     }
 
     /// Returns a view of this variant's type.
     #[inline]
     pub fn ty(&self) -> IrTypeView<'a> {
-        let node = self.cooked.resolve(self.variant.ty);
-        IrTypeView::new(self.cooked, self.cooked.indices[&node])
+        IrTypeView::new(self.cooked, self.variant.ty)
     }
 }
 

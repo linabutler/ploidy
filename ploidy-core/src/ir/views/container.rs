@@ -71,15 +71,12 @@ impl<'a> ContainerView<'a> {
     pub(in crate::ir) fn new(
         cooked: &'a CookedGraph<'a>,
         index: NodeIndex<usize>,
-        container: &'a Container<'a>,
+        container: &'a Container<'a, NodeIndex<usize>>,
     ) -> Self {
         let inner = InnerView {
             cooked,
             container: index,
-            inner: {
-                let node = cooked.resolve(&container.inner().ty);
-                cooked.indices[&node]
-            },
+            inner: container.inner().ty,
         };
         match container {
             Container::Array(_) => Self::Array(inner),
