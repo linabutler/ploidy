@@ -21,9 +21,10 @@ use petgraph::{
 };
 use rustc_hash::{FxHashMap, FxHashSet};
 
-use crate::arena::Arena;
+use crate::{arena::Arena, parse::Info};
 
 use super::{
+    cooker::Cooker,
     spec::IrSpec,
     types::{
         InlineIrType, InlineIrTypePath, InlineIrTypePathRoot, InlineIrTypePathSegment, IrOperation,
@@ -37,7 +38,10 @@ use super::{
 type RawDiGraph<'a> = StableDiGraph<GraphNode<'a>, EdgeKind, usize>;
 
 /// The immutable, dense graph used for code generation.
-type CookedDiGraph<'a> = DiGraph<GraphNode<'a>, EdgeKind, usize>;
+type CookedDiGraph<'a> = DiGraph<GraphNode<'a, NodeIndex<usize>>, EdgeKind, usize>;
+
+/// An operation with all type references resolved to graph indices.
+pub type CookedOperation<'a> = &'a IrOperation<'a, NodeIndex<usize>>;
 
 /// A mutable intermediate dependency graph of all the types in an [`IrSpec`],
 /// backed by a sparse [`StableDiGraph`].
@@ -70,7 +74,7 @@ impl<'a> RawGraph<'a> {
         let tys = IrTypeVisitor::new(
             spec.schemas
                 .values()
-                .chain(spec.operations.iter().flat_map(|op| op.types())),
+                .chain(spec.operations.iter().flat_map(|op| op.types().copied())),
         );
 
         // Add nodes for all types, and edges for references between them.
@@ -175,7 +179,7 @@ impl<'a> RawGraph<'a> {
                 else {
                     return None;
                 };
-                let mut new_variants = Cow::Borrowed(&tagged.variants);
+                let mut new_variants = Cow::Borrowed(tagged.variants);
                 let mut inlines = vec![];
 
                 for (at, variant) in tagged.variants.iter().enumerate() {
@@ -229,7 +233,7 @@ impl<'a> RawGraph<'a> {
                         std::iter::from_fn(|| dfs.next(&inherits))
                             .flat_map(|ancestor| match self.graph[ancestor] {
                                 GraphNode::Schema(SchemaIrType::Struct(_, s))
-                                | GraphNode::Inline(InlineIrType::Struct(_, s)) => &*s.fields,
+                                | GraphNode::Inline(InlineIrType::Struct(_, s)) => s.fields,
                                 _ => &[],
                             })
                             .any(|f| {
@@ -244,22 +248,19 @@ impl<'a> RawGraph<'a> {
 
                     // Build our new inline type, with the same attributes
                     // as the schema type, but a distinct inline type path.
-                    let ty = &*self
-                        .arena
-                        .inner()
-                        .alloc(IrType::Inline(InlineIrType::Struct(
-                            InlineIrTypePath {
-                                root: InlineIrTypePathRoot::Type(info.name),
-                                segments: vec![InlineIrTypePathSegment::TaggedVariant(
-                                    variant_info.name,
-                                )],
-                            },
-                            IrStruct {
-                                description: variant_struct.description,
-                                fields: variant_struct.fields.clone(),
-                                parents: variant_struct.parents.clone(),
-                            },
-                        )));
+                    let ty: &_ = self.arena.alloc(IrType::Inline(InlineIrType::Struct(
+                        InlineIrTypePath {
+                            root: InlineIrTypePathRoot::Type(info.name),
+                            segments: self.arena.alloc_slice_copy(&[
+                                InlineIrTypePathSegment::TaggedVariant(variant_info.name),
+                            ]),
+                        },
+                        IrStruct {
+                            description: variant_struct.description,
+                            fields: variant_struct.fields,
+                            parents: variant_struct.parents,
+                        },
+                    )));
 
                     let parent_indices = variant_struct
                         .parents
@@ -278,11 +279,11 @@ impl<'a> RawGraph<'a> {
 
                     new_variants.to_mut()[at] = IrTaggedVariant {
                         name: variant.name,
-                        aliases: variant.aliases.clone(),
+                        aliases: variant.aliases,
                         ty,
                     };
                 }
-                if *new_variants == tagged.variants {
+                if new_variants == tagged.variants {
                     // No variants to rewrite.
                     return None;
                 }
@@ -293,7 +294,7 @@ impl<'a> RawGraph<'a> {
                     modified_tagged: IrTagged {
                         description: tagged.description,
                         tag: tagged.tag,
-                        variants: new_variants.into_owned(),
+                        variants: self.arena.alloc_slice_copy(&new_variants),
                     },
                     inlines,
                 })
@@ -328,7 +329,7 @@ impl<'a> RawGraph<'a> {
             for edge_id in edges_to_remove {
                 self.graph.remove_edge(edge_id);
             }
-            for variant in &plan.modified_tagged.variants {
+            for variant in plan.modified_tagged.variants {
                 let variant_node = self.resolve(variant.ty);
                 let variant_index = self.indices[&variant_node];
                 self.graph
@@ -338,7 +339,6 @@ impl<'a> RawGraph<'a> {
             // ...And replace the node for the tagged union itself.
             let new_node = GraphNode::Schema(
                 self.arena
-                    .inner()
                     .alloc(SchemaIrType::Tagged(plan.info, plan.modified_tagged)),
             );
             let old_node = std::mem::replace(&mut self.graph[plan.tagged_index], new_node);
@@ -374,61 +374,60 @@ impl<'a> RawGraph<'a> {
 /// code generation.
 #[derive(Debug)]
 pub struct CookedGraph<'a> {
-    pub(super) spec: &'a IrSpec<'a>,
     pub(super) graph: CookedDiGraph<'a>,
-    /// An inverted index of nodes to graph indices.
-    pub(super) indices: FxHashMap<GraphNode<'a>, NodeIndex<usize>>,
-    /// Maps schema names to their graph indices.
-    schemas: FxHashMap<&'a str, NodeIndex<usize>>,
+    info: &'a Info,
+    ops: &'a [CookedOperation<'a>],
     /// Additional metadata for each node.
     pub(super) metadata: CookedGraphMetadata<'a>,
 }
 
 impl<'a> CookedGraph<'a> {
     fn new(raw: &RawGraph<'a>) -> Self {
-        let mut graph = CookedDiGraph::default();
-        let mut indices = FxHashMap::default();
-        let mut schemas = FxHashMap::default();
+        // Assign a cooked node index to each raw node index.
+        let indices: FxHashMap<_, _> = raw
+            .graph
+            .node_indices()
+            .zip(0..)
+            .map(|(raw, cooked)| (raw, NodeIndex::new(cooked)))
+            .collect();
 
-        for index in raw.graph.node_indices() {
-            use std::collections::hash_map::Entry;
-            let source = raw.graph[index];
-            let &mut from = match indices.entry(source) {
-                Entry::Occupied(from) => from.into_mut(),
-                Entry::Vacant(entry) => {
-                    let index = graph.add_node(*entry.key());
-                    entry.insert(index)
-                }
+        // Cook each node, translating raw types to their
+        // assigned cooked indices.
+        let cooker = Cooker::new(raw.arena, |ty| {
+            let raw = match ty {
+                IrType::Schema(s) => raw.indices[&GraphNode::Schema(s)],
+                IrType::Inline(i) => raw.indices[&GraphNode::Inline(i)],
+                IrType::Ref(r) => raw.schemas[r.name()],
             };
-            if let GraphNode::Schema(ty) = source {
-                schemas.entry(ty.name()).or_insert(from);
-            }
-            // `raw.graph.edges(...)` is guaranteed to yield edges in
-            // reverse order of addition, so we accumulate and reverse to
-            // add them to the cooked graph in their original order.
-            let mut edges = vec![];
-            for edge in raw.graph.edges(index) {
-                let destination = raw.graph[edge.target()];
-                let &mut to = match indices.entry(destination) {
-                    Entry::Occupied(to) => to.into_mut(),
-                    Entry::Vacant(entry) => {
-                        let index = graph.add_node(*entry.key());
-                        entry.insert(index)
-                    }
-                };
-                if let GraphNode::Schema(ty) = destination {
-                    schemas.entry(ty.name()).or_insert(to);
-                }
-                edges.push((from, to, *edge.weight()));
-            }
-            for (from, to, kind) in edges.into_iter().rev() {
+            indices[&raw]
+        });
+
+        // Build a dense graph.
+        let mut graph = CookedDiGraph::with_capacity(indices.len(), raw.graph.edge_count());
+        for index in raw.graph.node_indices() {
+            let node = raw.graph[index];
+            let cooked = graph.add_node(cooker.node(node));
+            assert_eq!(indices[&index], cooked);
+        }
+
+        // Add edges, preserving original insertion order.
+        for index in raw.graph.node_indices() {
+            let from = indices[&index];
+            // `RawDiGraph::edges` yields edges in reverse insertion order;
+            // collect and reverse to preserve the original order.
+            let edges = raw
+                .graph
+                .edges(index)
+                .map(|e| (indices[&e.target()], *e.weight()))
+                .collect_vec();
+            for (to, kind) in edges.into_iter().rev() {
                 graph.add_edge(from, to, kind);
             }
         }
 
         let sccs = TopoSccs::new(&graph);
 
-        let metadata = {
+        let (metadata, operations) = {
             let mut metadata = CookedGraphMetadata {
                 scc_indices: {
                     // Precompute SCC indices, using just the reference edges.
@@ -451,20 +450,16 @@ impl<'a> CookedGraph<'a> {
                 operations: FxHashMap::default(),
             };
 
+            // Cook each operation.
+            let operations: &_ = raw
+                .arena
+                .alloc_slice_exact(raw.spec.operations.iter().map(|op| cooker.operation(op)));
+
             // Precompute the set of type indices that each operation
             // references directly.
-            for op in &raw.spec.operations {
-                metadata.operations.entry(ByAddress(op)).or_default().types = op
-                    .types()
-                    .filter_map(|ty| {
-                        let node = match ty {
-                            IrType::Schema(ty) => GraphNode::Schema(ty),
-                            IrType::Inline(ty) => GraphNode::Inline(ty),
-                            IrType::Ref(r) => graph[schemas[r.name()]],
-                        };
-                        indices.get(&node).map(|node| node.index())
-                    })
-                    .collect();
+            for &op in operations {
+                metadata.operations.entry(ByAddress(op)).or_default().types =
+                    op.types().map(|node| node.index()).collect();
             }
 
             // Forward propagation: for each type, compute all the types
@@ -510,7 +505,7 @@ impl<'a> CookedGraph<'a> {
 
             // Backward propagation: propagate each operation to all the
             // types that it uses, directly and transitively.
-            for op in &raw.spec.operations {
+            for &op in operations {
                 let meta = &metadata.operations[&ByAddress(op)];
 
                 // Collect all the types that this operation depends on.
@@ -526,33 +521,22 @@ impl<'a> CookedGraph<'a> {
                 }
             }
 
-            metadata
+            (metadata, operations)
         };
 
         Self {
-            spec: raw.spec,
-            indices,
-            schemas,
             graph,
+            info: raw.spec.info,
+            ops: operations,
             metadata,
         }
     }
 
-    /// Resolves an [`IrType`] to a [`GraphNode`], following
-    /// [`IrType::Ref`]s through the spec.
+    /// Returns [`Info`] from the [`Document`][crate::parse::Document]
+    /// used to build this graph.
     #[inline]
-    pub(super) fn resolve(&self, ty: &'a IrType<'a>) -> GraphNode<'a> {
-        match ty {
-            IrType::Schema(ty) => GraphNode::Schema(ty),
-            IrType::Inline(ty) => GraphNode::Inline(ty),
-            IrType::Ref(r) => self.graph[self.schemas[r.name()]],
-        }
-    }
-
-    /// Returns the spec used to build this graph.
-    #[inline]
-    pub fn spec(&self) -> &'a IrSpec<'a> {
-        self.spec
+    pub fn info(&self) -> &'a Info {
+        self.info
     }
 
     /// Returns an iterator over all the named schemas in this graph.
@@ -583,10 +567,9 @@ impl<'a> CookedGraph<'a> {
     /// Returns an iterator over all the operations in this graph.
     #[inline]
     pub fn operations(&self) -> impl Iterator<Item = IrOperationView<'_>> {
-        self.spec
-            .operations
+        self.ops
             .iter()
-            .map(move |op| IrOperationView::new(self, op))
+            .map(move |&op| IrOperationView::new(self, op))
     }
 }
 
@@ -597,9 +580,9 @@ impl<'a> CookedGraph<'a> {
 /// will be equal. This is important: all types in an [`IrSpec`] are
 /// distinct in memory, but can refer to the same logical type.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-pub enum GraphNode<'a> {
-    Schema(&'a SchemaIrType<'a>),
-    Inline(&'a InlineIrType<'a>),
+pub enum GraphNode<'a, Ty = &'a IrType<'a>> {
+    Schema(&'a SchemaIrType<'a, Ty>),
+    Inline(&'a InlineIrType<'a, Ty>),
 }
 
 /// An edge between two types in the type graph.
@@ -618,7 +601,7 @@ pub struct CookedGraphMetadata<'a> {
     /// Nodes in the same SCC form a cycle.
     pub scc_indices: Vec<usize>,
     pub schemas: Vec<GraphNodeMeta<'a>>,
-    pub operations: FxHashMap<ByAddress<&'a IrOperation<'a>>, GraphOperationMeta>,
+    pub operations: FxHashMap<ByAddress<CookedOperation<'a>>, GraphOperationMeta>,
 }
 
 /// Precomputed metadata for an operation that references
@@ -634,7 +617,7 @@ pub struct GraphOperationMeta {
 #[derive(Default)]
 pub(super) struct GraphNodeMeta<'a> {
     /// Operations that use this type.
-    pub used_by: FxHashSet<ByAddress<&'a IrOperation<'a>>>,
+    pub used_by: FxHashSet<ByAddress<CookedOperation<'a>>>,
     /// Indices of other types that this type transitively depends on.
     pub dependencies: FixedBitSet,
     /// Indices of other types that transitively depend on this type.
@@ -683,8 +666,10 @@ impl<'a> Iterator for IrTypeVisitor<'a> {
                     itertools::chain!(
                         ty.fields
                             .iter()
-                            .map(|field| (EdgeKind::Reference, &field.ty)),
-                        ty.parents.iter().map(|parent| (EdgeKind::Inherits, parent)),
+                            .map(|field| (EdgeKind::Reference, field.ty)),
+                        ty.parents
+                            .iter()
+                            .map(|parent| (EdgeKind::Inherits, *parent)),
                     )
                     .map(|(kind, ty)| (Some(top), kind, ty))
                     .rev(),
@@ -697,7 +682,7 @@ impl<'a> Iterator for IrTypeVisitor<'a> {
                         .iter()
                         .filter_map(|variant| match variant {
                             IrUntaggedVariant::Some(_, ty) => {
-                                Some((Some(top), EdgeKind::Reference, ty))
+                                Some((Some(top), EdgeKind::Reference, *ty))
                             }
                             _ => None,
                         })
@@ -716,7 +701,7 @@ impl<'a> Iterator for IrTypeVisitor<'a> {
             IrType::Schema(SchemaIrType::Container(_, container))
             | IrType::Inline(InlineIrType::Container(_, container)) => {
                 self.stack
-                    .push((Some(top), EdgeKind::Reference, &container.inner().ty));
+                    .push((Some(top), EdgeKind::Reference, container.inner().ty));
             }
             IrType::Schema(
                 SchemaIrType::Enum(..) | SchemaIrType::Primitive(..) | SchemaIrType::Any(_),

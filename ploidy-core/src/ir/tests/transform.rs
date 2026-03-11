@@ -39,7 +39,7 @@ fn test_enum_string_variants() {
         other => panic!("expected enum `Status`; got `{other:?}`"),
     };
     assert_matches!(
-        &*enum_.variants,
+        enum_.variants,
         [
             IrEnumVariant::String("active"),
             IrEnumVariant::String("inactive"),
@@ -76,7 +76,7 @@ fn test_enum_number_variants() {
         other => panic!("expected enum `Priority`; got `{other:?}`"),
     };
     assert_matches!(
-        &*enum_.variants,
+        enum_.variants,
         [
             IrEnumVariant::Number(n1),
             IrEnumVariant::Number(n2),
@@ -108,7 +108,7 @@ fn test_enum_bool_variants() {
         other => panic!("expected enum `Flag`; got `{other:?}`"),
     };
     assert_matches!(
-        &*enum_.variants,
+        enum_.variants,
         [IrEnumVariant::Bool(true), IrEnumVariant::Bool(false)],
     );
 }
@@ -136,7 +136,7 @@ fn test_enum_mixed_types() {
         other => panic!("expected enum `Mixed`; got `{other:?}`"),
     };
     assert_matches!(
-        &*enum_.variants,
+        enum_.variants,
         [
             IrEnumVariant::String("text"),
             IrEnumVariant::Number(n),
@@ -469,7 +469,7 @@ fn test_struct_with_own_properties() {
         other => panic!("expected struct `Person`; got `{other:?}`"),
     };
     assert_matches!(
-        &*struct_.fields,
+        struct_.fields,
         [
             IrStructField {
                 name: IrStructFieldName::Name("name"),
@@ -526,7 +526,7 @@ fn test_struct_with_additional_properties_ref() {
             ty,
             ..
         },
-    ] = &*struct_.fields
+    ] = struct_.fields
     else {
         panic!("expected two fields; got `{:?}`", struct_.fields);
     };
@@ -534,7 +534,7 @@ fn test_struct_with_additional_properties_ref() {
         ty,
         IrType::Inline(
             InlineIrType::Container(_, Container::Map(inner)),
-        ) if matches!(&*inner.ty, IrType::Ref(_)),
+        ) if matches!(inner.ty, IrType::Ref(_)),
     );
 }
 
@@ -584,7 +584,7 @@ fn test_struct_with_additional_properties_inline() {
             ty,
             ..
         },
-    ] = &*struct_.fields
+    ] = struct_.fields
     else {
         panic!("expected two fields; got `{:?}`", struct_.fields);
     };
@@ -595,19 +595,19 @@ fn test_struct_with_additional_properties_inline() {
     };
     assert_matches!(container_path.root, InlineIrTypePathRoot::Type("Config"));
     assert_matches!(
-        &*container_path.segments,
+        container_path.segments,
         [InlineIrTypePathSegment::Field(IrStructFieldName::Hint(
             IrStructFieldNameHint::AdditionalProperties,
         ))]
     );
 
     // The inline value type path should append `MapValue`.
-    let IrType::Inline(InlineIrType::Struct(value_path, _)) = &*inner.ty else {
+    let IrType::Inline(InlineIrType::Struct(value_path, _)) = inner.ty else {
         panic!("expected inline struct; got `{:?}`", inner.ty);
     };
     assert_matches!(value_path.root, InlineIrTypePathRoot::Type("Config"));
     assert_matches!(
-        &*value_path.segments,
+        value_path.segments,
         [
             InlineIrTypePathSegment::Field(IrStructFieldName::Hint(
                 IrStructFieldNameHint::AdditionalProperties,
@@ -648,14 +648,14 @@ fn test_struct_with_additional_properties_true() {
         other => panic!("expected struct `DynamicMap`; got `{other:?}`"),
     };
     assert_matches!(
-        &*struct_.fields,
+        struct_.fields,
         [IrStructField {
             name: IrStructFieldName::Hint(IrStructFieldNameHint::AdditionalProperties),
             flattened: true,
             required: true,
             ty: IrType::Inline(InlineIrType::Container(_, Container::Map(inner))),
             ..
-        }] if matches!(&*inner.ty, IrType::Inline(InlineIrType::Any(_)))
+        }] if matches!(inner.ty, IrType::Inline(InlineIrType::Any(_)))
     );
 }
 
@@ -723,7 +723,7 @@ fn test_struct_with_required_fields() {
         other => panic!("expected struct `User`; got `{other:?}`"),
     };
     assert_matches!(
-        &*struct_.fields,
+        struct_.fields,
         [
             IrStructField {
                 name: IrStructFieldName::Name("name"),
@@ -780,7 +780,7 @@ fn test_struct_with_nullable_field_ref() {
                 IrType::Inline(InlineIrType::Container(_, Container::Optional(Inner { ty: inner, .. }))),
             ..
         },
-    ] = &*struct_.fields
+    ] = struct_.fields
     else {
         panic!("expected single nullable field; got `{:?}`", struct_.fields);
     };
@@ -824,7 +824,7 @@ fn test_struct_with_nullable_field_inline() {
                 IrType::Inline(InlineIrType::Container(_, Container::Optional(Inner { ty: inner, .. }))),
             ..
         },
-    ] = &*struct_.fields
+    ] = struct_.fields
     else {
         panic!("expected single nullable field; got `{:?}`", struct_.fields);
     };
@@ -875,7 +875,7 @@ fn test_struct_with_nullable_field_openapi_31_syntax() {
             required: true,
             ..
         },
-    ] = &*struct_.fields
+    ] = struct_.fields
     else {
         panic!(
             "expected single required nullable field; got `{:?}`",
@@ -920,7 +920,7 @@ fn test_struct_ref_field_description() {
         other => panic!("expected struct `Entity`; got `{other:?}`"),
     };
     assert_matches!(
-        &*struct_.fields,
+        struct_.fields,
         [IrStructField {
             name: IrStructFieldName::Name("id"),
             description: Some("An identifier"),
@@ -957,7 +957,7 @@ fn test_struct_inline_field_description() {
         other => panic!("expected struct `User`; got `{other:?}`"),
     };
     assert_matches!(
-        &*struct_.fields,
+        struct_.fields,
         [IrStructField {
             name: IrStructFieldName::Name("name"),
             description: Some("A user's name"),
@@ -1003,7 +1003,7 @@ fn test_struct_inline_all_of_becomes_parent() {
 
     // The struct's own field is `email`; inherited fields come from parents.
     assert_matches!(
-        &*struct_.fields,
+        struct_.fields,
         [IrStructField {
             name: IrStructFieldName::Name("email"),
             ..
@@ -1012,16 +1012,16 @@ fn test_struct_inline_all_of_becomes_parent() {
 
     // The inline `allOf` schemas become inline parent types.
     assert_matches!(
-        &*struct_.parents,
+        struct_.parents,
         [
             IrType::Inline(InlineIrType::Struct(path1, parent1)),
             IrType::Inline(InlineIrType::Struct(path2, parent2)),
         ] if path1.root == InlineIrTypePathRoot::Type("Person")
-            && path1.segments == vec![InlineIrTypePathSegment::Parent(1)]
-            && matches!(&*parent1.fields, [IrStructField { name: IrStructFieldName::Name("name"), .. }])
+            && path1.segments == [InlineIrTypePathSegment::Parent(1)]
+            && matches!(parent1.fields, [IrStructField { name: IrStructFieldName::Name("name"), .. }])
             && path2.root == InlineIrTypePathRoot::Type("Person")
-            && path2.segments == vec![InlineIrTypePathSegment::Parent(2)]
-            && matches!(&*parent2.fields, [IrStructField { name: IrStructFieldName::Name("age"), .. }]),
+            && path2.segments == [InlineIrTypePathSegment::Parent(2)]
+            && matches!(parent2.fields, [IrStructField { name: IrStructFieldName::Name("age"), .. }]),
     );
 }
 
@@ -1066,14 +1066,14 @@ fn test_struct_mixed_all_of_ref_and_inline() {
 
     // Parents include both the named and inline schemas.
     assert_matches!(
-        &*struct_.parents,
+        struct_.parents,
         [
             IrType::Ref(r),
             IrType::Inline(InlineIrType::Struct(path, parent)),
         ] if r.name() == "Base"
             && path.root == InlineIrTypePathRoot::Type("Child")
-            && path.segments == vec![InlineIrTypePathSegment::Parent(2)]
-            && matches!(&*parent.fields, [IrStructField { name: IrStructFieldName::Name("name"), .. }])
+            && path.segments == [InlineIrTypePathSegment::Parent(2)]
+            && matches!(parent.fields, [IrStructField { name: IrStructFieldName::Name("name"), .. }])
     );
 }
 
@@ -1125,15 +1125,15 @@ fn test_tagged_with_mapping() {
     let [
         dog_variant @ IrTaggedVariant { name: "Dog", .. },
         cat_variant @ IrTaggedVariant { name: "Cat", .. },
-    ] = &*tagged.variants
+    ] = tagged.variants
     else {
         panic!(
             "expected and `Cat` variants `Dog`; got `{:?}`",
             tagged.variants,
         );
     };
-    assert_matches!(&*dog_variant.aliases, ["dog"]);
-    assert_eq!(&*cat_variant.aliases, ["cat"]);
+    assert_matches!(dog_variant.aliases, ["dog"]);
+    assert_eq!(cat_variant.aliases, ["cat"]);
 }
 
 #[test]
@@ -1179,7 +1179,7 @@ fn test_tagged_filters_non_refs() {
         other => panic!("expected untagged union `Animal`; got `{other:?}`"),
     };
     assert_matches!(
-        &*untagged.variants,
+        untagged.variants,
         [
             IrUntaggedVariant::Some(IrUntaggedVariantNameHint::Index(1), IrType::Ref(_)),
             IrUntaggedVariant::Some(IrUntaggedVariantNameHint::Index(2), IrType::Inline(_)),
@@ -1230,7 +1230,7 @@ fn test_tagged_multiple_aliases() {
             aliases,
             ..
         },
-    ] = &*tagged.variants
+    ] = tagged.variants
     else {
         panic!("expected variant `Success`; got `{:?}`", tagged.variants);
     };
@@ -1282,7 +1282,7 @@ fn test_tagged_missing_variant() {
         other => panic!("expected untagged union `Animal`; got `{other:?}`"),
     };
     assert_matches!(
-        &*untagged.variants,
+        untagged.variants,
         [
             IrUntaggedVariant::Some(IrUntaggedVariantNameHint::Index(1), IrType::Ref(_)),
             IrUntaggedVariant::Some(IrUntaggedVariantNameHint::Index(2), IrType::Ref(_)),
@@ -1328,7 +1328,7 @@ fn test_tagged_description() {
     };
     assert_eq!(tagged.description, Some("A tagged union of animals"));
     assert_matches!(
-        &*tagged.variants,
+        tagged.variants,
         [IrTaggedVariant { name: "Dog", aliases, .. }] if aliases == &["dog"],
     );
 }
@@ -1371,7 +1371,7 @@ fn test_untagged_basic() {
         other => panic!("expected untagged union `StringOrNumber`; got `{other:?}`"),
     };
     assert_matches!(
-        &*untagged.variants,
+        untagged.variants,
         [
             IrUntaggedVariant::Some(IrUntaggedVariantNameHint::Index(1), IrType::Ref(_)),
             IrUntaggedVariant::Some(IrUntaggedVariantNameHint::Index(2), IrType::Ref(_)),
@@ -1481,7 +1481,7 @@ fn test_untagged_variant_numbering() {
         other => panic!("expected untagged union `ABC`; got `{other:?}`"),
     };
     assert_matches!(
-        &*untagged.variants,
+        untagged.variants,
         [
             IrUntaggedVariant::Some(IrUntaggedVariantNameHint::Index(1), _),
             IrUntaggedVariant::Some(IrUntaggedVariantNameHint::Index(2), _),
@@ -1566,7 +1566,7 @@ fn test_any_of_fields_marked_flattened_not_required() {
         other => panic!("expected struct `Contact`; got `{other:?}`"),
     };
     assert_matches!(
-        &*struct_.fields,
+        struct_.fields,
         [
             IrStructField {
                 name: IrStructFieldName::Name("Address"),
@@ -1622,7 +1622,7 @@ fn test_any_of_ref_uses_type_name() {
         other => panic!("expected struct `Contact`; got `{other:?}`"),
     };
     assert_matches!(
-        &*struct_.fields,
+        struct_.fields,
         [
             IrStructField {
                 name: IrStructFieldName::Name("Address"),
@@ -1669,7 +1669,7 @@ fn test_any_of_inline_uses_index_hint() {
         other => panic!("expected struct `Mixed`; got `{other:?}`"),
     };
     assert_matches!(
-        &*struct_.fields,
+        struct_.fields,
         [
             IrStructField {
                 name: IrStructFieldName::Hint(IrStructFieldNameHint::Index(1)),
@@ -1731,7 +1731,7 @@ fn test_any_of_with_properties() {
         other => panic!("expected struct `Combined`; got `{other:?}`"),
     };
     assert_matches!(
-        &*struct_.fields,
+        struct_.fields,
         [
             IrStructField {
                 name: IrStructFieldName::Name("Extra2"),
@@ -1790,7 +1790,7 @@ fn test_any_of_nullable_refs() {
         other => panic!("expected struct `Container`; got `{other:?}`"),
     };
     assert_matches!(
-        &*struct_.fields,
+        struct_.fields,
         [
             IrStructField {
                 name: IrStructFieldName::Name("NullableString1"),
@@ -1857,7 +1857,7 @@ fn test_any_of_with_all_of() {
     // Only flattened `anyOf` fields should be stored directly; the inherited
     // `id` field is accessed via graph traversal through `parents()`.
     assert_matches!(
-        &*struct_.fields,
+        struct_.fields,
         [
             IrStructField {
                 name: IrStructFieldName::Name("Extra1"),
@@ -2007,7 +2007,7 @@ fn test_object_with_empty_properties_produces_struct() {
         )) => struct_,
         other => panic!("expected struct `EmptyObject`; got `{other:?}`"),
     };
-    assert_matches!(&*struct_.fields, []);
+    assert_matches!(struct_.fields, []);
 }
 
 #[test]
@@ -2192,7 +2192,7 @@ fn test_multiple_types_string_and_integer_untagged() {
         other => panic!("expected untagged union `StringOrInt`; got `{other:?}`"),
     };
     assert_matches!(
-        &*untagged.variants,
+        untagged.variants,
         [
             IrUntaggedVariant::Some(
                 IrUntaggedVariantNameHint::Primitive(PrimitiveIrType::String),
@@ -2246,7 +2246,7 @@ fn test_deeply_nested_inline_types() {
                 IrType::Inline(InlineIrType::Container(path, Container::Array(Inner { ty: items, .. }))),
             ..
         },
-    ] = &*struct_.fields
+    ] = struct_.fields
     else {
         panic!("expected named inline array; got `{:?}`", struct_.fields);
     };
@@ -2254,7 +2254,7 @@ fn test_deeply_nested_inline_types() {
     // Container type path should be correct.
     assert_matches!(path.root, InlineIrTypePathRoot::Type("Outer"));
     assert_matches!(
-        &*path.segments,
+        path.segments,
         [InlineIrTypePathSegment::Field(IrStructFieldName::Name(
             "items"
         ))],
@@ -2268,7 +2268,7 @@ fn test_deeply_nested_inline_types() {
     // Inner struct path should have correct segments.
     assert_matches!(path.root, InlineIrTypePathRoot::Type("Outer"));
     assert_matches!(
-        &*path.segments,
+        path.segments,
         [
             InlineIrTypePathSegment::Field(IrStructFieldName::Name("items")),
             InlineIrTypePathSegment::ArrayItem,
@@ -2277,7 +2277,7 @@ fn test_deeply_nested_inline_types() {
 
     // Inner struct should have correct fields.
     assert_matches!(
-        &*inner_struct.fields,
+        inner_struct.fields,
         [IrStructField {
             name: IrStructFieldName::Name("field"),
             ty: IrType::Inline(InlineIrType::Primitive(_, PrimitiveIrType::String)),
@@ -2315,7 +2315,7 @@ fn test_enum_with_only_null_json_values_produces_empty_enum() {
         )) => enum_,
         other => panic!("expected enum `NullEnum`; got `{other:?}`"),
     };
-    assert_matches!(&*enum_.variants, []);
+    assert_matches!(enum_.variants, []);
 }
 
 #[test]
@@ -2351,7 +2351,7 @@ fn test_additional_properties_false_creates_struct() {
         other => panic!("expected struct `StrictObject`; got `{other:?}`"),
     };
     assert_matches!(
-        &*struct_.fields,
+        struct_.fields,
         [IrStructField {
             name: IrStructFieldName::Name("name"),
             ty: IrType::Inline(InlineIrType::Primitive(_, PrimitiveIrType::String)),
@@ -2402,7 +2402,7 @@ fn test_array_inline_path_construction() {
         other => panic!("expected inline struct; got `{other:?}`"),
     };
     assert_matches!(path.root, InlineIrTypePathRoot::Type("Container"));
-    assert_matches!(&*path.segments, [InlineIrTypePathSegment::ArrayItem]);
+    assert_matches!(path.segments, [InlineIrTypePathSegment::ArrayItem]);
 }
 
 #[test]
@@ -2445,7 +2445,7 @@ fn test_map_inline_path_construction() {
         other => panic!("expected inline struct; got `{other:?}`"),
     };
     assert_matches!(path.root, InlineIrTypePathRoot::Type("Dictionary"));
-    assert_matches!(&*path.segments, [InlineIrTypePathSegment::MapValue]);
+    assert_matches!(path.segments, [InlineIrTypePathSegment::MapValue]);
 }
 
 #[test]
@@ -2484,7 +2484,7 @@ fn test_struct_inline_path_construction() {
             ty: IrType::Inline(InlineIrType::Struct(path, _)),
             ..
         },
-    ] = &*struct_.fields
+    ] = struct_.fields
     else {
         panic!(
             "expected single inline struct field; got `{:?}`",
@@ -2493,7 +2493,7 @@ fn test_struct_inline_path_construction() {
     };
     assert_matches!(path.root, InlineIrTypePathRoot::Type("Outer"));
     assert_matches!(
-        &*path.segments,
+        path.segments,
         [InlineIrTypePathSegment::Field(IrStructFieldName::Name(
             "nested"
         ))],
@@ -2558,7 +2558,7 @@ fn test_inline_tagged_union_in_struct_field() {
             ty: IrType::Inline(InlineIrType::Tagged(path, tagged)),
             ..
         },
-    ] = &*struct_.fields
+    ] = struct_.fields
     else {
         panic!(
             "expected single inline tagged union field; got `{:?}`",
@@ -2569,7 +2569,7 @@ fn test_inline_tagged_union_in_struct_field() {
     // Verify the path.
     assert_matches!(path.root, InlineIrTypePathRoot::Type("Container"));
     assert_matches!(
-        &*path.segments,
+        path.segments,
         [InlineIrTypePathSegment::Field(IrStructFieldName::Name(
             "animal"
         ))],
@@ -2582,15 +2582,15 @@ fn test_inline_tagged_union_in_struct_field() {
     let [
         cat_variant @ IrTaggedVariant { name: "Cat", .. },
         dog_variant @ IrTaggedVariant { name: "Dog", .. },
-    ] = &*tagged.variants
+    ] = tagged.variants
     else {
         panic!(
             "expected `Cat` and `Dog` variants; got `{:?}`",
             tagged.variants
         );
     };
-    assert_eq!(&*cat_variant.aliases, ["cat"]);
-    assert_eq!(&*dog_variant.aliases, ["dog"]);
+    assert_eq!(cat_variant.aliases, ["cat"]);
+    assert_eq!(dog_variant.aliases, ["dog"]);
 }
 
 // MARK: Recursive schemas
@@ -2636,7 +2636,7 @@ fn test_recursive_all_of_ref_nullable() {
 
     // Verify the struct has the expected fields.
     assert_matches!(
-        &*struct_.fields,
+        struct_.fields,
         [
             IrStructField {
                 name: IrStructFieldName::Name("value"),
@@ -2690,7 +2690,7 @@ fn test_recursive_all_of_ref() {
 
     // Verify the struct has the expected fields.
     assert_matches!(
-        &*struct_.fields,
+        struct_.fields,
         [
             IrStructField {
                 name: IrStructFieldName::Name("value"),
@@ -3065,7 +3065,7 @@ fn test_inline_array_produces_inline_container() {
         other => panic!("expected struct `Container`; got `{other:?}`"),
     };
     assert_matches!(
-        &*struct_.fields,
+        struct_.fields,
         [IrStructField {
             name: IrStructFieldName::Name("items"),
             ty: IrType::Inline(InlineIrType::Container(_, Container::Array(_))),
@@ -3114,7 +3114,7 @@ fn test_optional_field_container_description_is_not_parent_schema() {
                 )),
             ..
         },
-    ] = &*struct_.fields
+    ] = struct_.fields
     else {
         panic!(
             "expected optional field `nickname`; got `{:?}`",

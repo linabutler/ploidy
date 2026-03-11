@@ -63,72 +63,67 @@ impl<'a> IrSpec<'a> {
             .map_ok(|(method, path, op)| -> Result<_, IrError> {
                 let resource = op.extension("x-resource-name");
                 let id = op.operation_id.as_deref().ok_or(IrError::NoOperationId)?;
-                let params = op
-                    .parameters
-                    .iter()
-                    .filter_map(|param_or_ref| {
-                        let param = match param_or_ref {
-                            RefOrParameter::Other(p) => p,
-                            RefOrParameter::Ref(r) => doc
-                                .resolve(r.path.pointer().clone())
-                                .ok()
-                                .and_then(|p| p.downcast_ref::<Parameter>())?,
-                        };
-                        let ty = match &param.schema {
-                            Some(RefOrSchema::Ref(r)) => IrType::Ref(&r.path),
-                            Some(RefOrSchema::Other(schema)) => transform(
-                                arena,
-                                doc,
-                                InlineIrTypePath {
-                                    root: InlineIrTypePathRoot::Resource(resource),
-                                    segments: vec![
-                                        InlineIrTypePathSegment::Operation(id),
-                                        InlineIrTypePathSegment::Parameter(param.name.as_str()),
-                                    ],
-                                },
-                                schema,
-                            ),
-                            None => InlineIrType::Any(InlineIrTypePath {
+                let params = arena.alloc_slice(op.parameters.iter().filter_map(|param_or_ref| {
+                    let param = match param_or_ref {
+                        RefOrParameter::Other(p) => p,
+                        RefOrParameter::Ref(r) => doc
+                            .resolve(r.path.pointer().clone())
+                            .ok()
+                            .and_then(|p| p.downcast_ref::<Parameter>())?,
+                    };
+                    let ty = match &param.schema {
+                        Some(RefOrSchema::Ref(r)) => &*arena.alloc(IrType::Ref(&r.path)),
+                        Some(RefOrSchema::Other(schema)) => &*arena.alloc(transform(
+                            arena,
+                            doc,
+                            InlineIrTypePath {
                                 root: InlineIrTypePathRoot::Resource(resource),
-                                segments: vec![
+                                segments: arena.alloc_slice_copy(&[
                                     InlineIrTypePathSegment::Operation(id),
                                     InlineIrTypePathSegment::Parameter(param.name.as_str()),
-                                ],
-                            })
-                            .into(),
-                        };
-                        let style = match (param.style, param.explode) {
-                            (Some(ParameterStyle::DeepObject), Some(true) | None) => {
-                                Some(IrParameterStyle::DeepObject)
-                            }
-                            (Some(ParameterStyle::SpaceDelimited), Some(false) | None) => {
-                                Some(IrParameterStyle::SpaceDelimited)
-                            }
-                            (Some(ParameterStyle::PipeDelimited), Some(false) | None) => {
-                                Some(IrParameterStyle::PipeDelimited)
-                            }
-                            (Some(ParameterStyle::Form) | None, Some(true) | None) => {
-                                Some(IrParameterStyle::Form { exploded: true })
-                            }
-                            (Some(ParameterStyle::Form) | None, Some(false)) => {
-                                Some(IrParameterStyle::Form { exploded: false })
-                            }
-                            _ => None,
-                        };
-                        let info = IrParameterInfo {
-                            name: param.name.as_str(),
-                            ty,
-                            required: param.required,
-                            description: param.description.as_deref(),
-                            style,
-                        };
-                        Some(match param.location {
-                            ParameterLocation::Path => IrParameter::Path(info),
-                            ParameterLocation::Query => IrParameter::Query(info),
-                            _ => return None,
-                        })
+                                ]),
+                            },
+                            schema,
+                        )),
+                        None => &*arena.alloc(IrType::from(InlineIrType::Any(InlineIrTypePath {
+                            root: InlineIrTypePathRoot::Resource(resource),
+                            segments: arena.alloc_slice_copy(&[
+                                InlineIrTypePathSegment::Operation(id),
+                                InlineIrTypePathSegment::Parameter(param.name.as_str()),
+                            ]),
+                        }))),
+                    };
+                    let style = match (param.style, param.explode) {
+                        (Some(ParameterStyle::DeepObject), Some(true) | None) => {
+                            Some(IrParameterStyle::DeepObject)
+                        }
+                        (Some(ParameterStyle::SpaceDelimited), Some(false) | None) => {
+                            Some(IrParameterStyle::SpaceDelimited)
+                        }
+                        (Some(ParameterStyle::PipeDelimited), Some(false) | None) => {
+                            Some(IrParameterStyle::PipeDelimited)
+                        }
+                        (Some(ParameterStyle::Form) | None, Some(true) | None) => {
+                            Some(IrParameterStyle::Form { exploded: true })
+                        }
+                        (Some(ParameterStyle::Form) | None, Some(false)) => {
+                            Some(IrParameterStyle::Form { exploded: false })
+                        }
+                        _ => None,
+                    };
+                    let info = IrParameterInfo {
+                        name: param.name.as_str(),
+                        ty,
+                        required: param.required,
+                        description: param.description.as_deref(),
+                        style,
+                    };
+                    Some(match param.location {
+                        ParameterLocation::Path => IrParameter::Path(info),
+                        ParameterLocation::Query => IrParameter::Query(info),
+                        _ => return None,
                     })
-                    .collect_vec();
+                }));
 
                 let request = op
                     .request_body
@@ -159,32 +154,31 @@ impl<'a> IrSpec<'a> {
                     .map(|content| match content {
                         RequestContent::Multipart => IrRequest::Multipart,
                         RequestContent::Json(RefOrSchema::Ref(r)) => {
-                            IrRequest::Json(IrType::Ref(&r.path))
+                            IrRequest::Json(&*arena.alloc(IrType::Ref(&r.path)))
                         }
                         RequestContent::Json(RefOrSchema::Other(schema)) => {
-                            IrRequest::Json(transform(
+                            IrRequest::Json(&*arena.alloc(transform(
                                 arena,
                                 doc,
                                 InlineIrTypePath {
                                     root: InlineIrTypePathRoot::Resource(resource),
-                                    segments: vec![
+                                    segments: arena.alloc_slice_copy(&[
                                         InlineIrTypePathSegment::Operation(id),
                                         InlineIrTypePathSegment::Request,
-                                    ],
+                                    ]),
                                 },
                                 schema,
-                            ))
+                            )))
                         }
-                        RequestContent::Any => IrRequest::Json(
+                        RequestContent::Any => IrRequest::Json(&*arena.alloc(IrType::from(
                             InlineIrType::Any(InlineIrTypePath {
                                 root: InlineIrTypePathRoot::Resource(resource),
-                                segments: vec![
+                                segments: arena.alloc_slice_copy(&[
                                     InlineIrTypePathSegment::Operation(id),
                                     InlineIrTypePathSegment::Request,
-                                ],
-                            })
-                            .into(),
-                        ),
+                                ]),
+                            }),
+                        ))),
                     });
 
                 let response = {
@@ -227,32 +221,31 @@ impl<'a> IrSpec<'a> {
                         })
                         .map(|content| match content {
                             ResponseContent::Json(RefOrSchema::Ref(r)) => {
-                                IrResponse::Json(IrType::Ref(&r.path))
+                                IrResponse::Json(&*arena.alloc(IrType::Ref(&r.path)))
                             }
                             ResponseContent::Json(RefOrSchema::Other(schema)) => {
-                                IrResponse::Json(transform(
+                                IrResponse::Json(&*arena.alloc(transform(
                                     arena,
                                     doc,
                                     InlineIrTypePath {
                                         root: InlineIrTypePathRoot::Resource(resource),
-                                        segments: vec![
+                                        segments: arena.alloc_slice_copy(&[
                                             InlineIrTypePathSegment::Operation(id),
                                             InlineIrTypePathSegment::Response,
-                                        ],
+                                        ]),
                                     },
                                     schema,
-                                ))
+                                )))
                             }
-                            ResponseContent::Any => IrResponse::Json(
+                            ResponseContent::Any => IrResponse::Json(&*arena.alloc(IrType::from(
                                 InlineIrType::Any(InlineIrTypePath {
                                     root: InlineIrTypePathRoot::Resource(resource),
-                                    segments: vec![
+                                    segments: arena.alloc_slice_copy(&[
                                         InlineIrTypePathSegment::Operation(id),
                                         InlineIrTypePathSegment::Response,
-                                    ],
-                                })
-                                .into(),
-                            ),
+                                    ]),
+                                }),
+                            ))),
                         })
                 };
 
@@ -260,7 +253,7 @@ impl<'a> IrSpec<'a> {
                     resource,
                     id,
                     method,
-                    path,
+                    path: arena.alloc_slice_clone(&path),
                     description: op.description.as_deref(),
                     params,
                     request,

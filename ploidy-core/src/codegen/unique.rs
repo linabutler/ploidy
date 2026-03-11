@@ -1,6 +1,5 @@
 use std::{borrow::Cow, collections::hash_map::Entry, iter::Peekable, str::CharIndices};
 
-use bumpalo::collections::{CollectIn, Vec as BumpVec};
 use rustc_hash::FxHashMap;
 use unicase::UniCase;
 
@@ -77,15 +76,11 @@ impl<'a> UniqueNamesScope<'a> {
     ) -> Self {
         let space = reserved
             .into_iter()
-            .map(|name| arena.inner().alloc_str(name.as_ref()))
-            .map(|name| {
-                WordSegments::new(name)
-                    .map(UniCase::new)
-                    .collect_in::<BumpVec<_>>(arena.inner())
-            })
+            .map(|name| arena.alloc_str(name.as_ref()))
+            .map(|name| arena.alloc_slice(WordSegments::new(name).map(UniCase::new)))
             .fold(FxHashMap::default(), |mut names, segments| {
                 // Setting the count to 1 automatically filters out duplicates.
-                names.insert(segments.into_bump_slice(), 1);
+                names.insert(&*segments, 1);
                 names
             });
         Self { arena, space }
@@ -106,12 +101,9 @@ impl<'a> UniqueNamesScope<'a> {
     /// assert_eq!(scope.uniquify("httpResponse"), "httpResponse3");
     /// ```
     pub fn uniquify<'b>(&mut self, name: &'b str) -> Cow<'b, str> {
-        match self.space.entry(
-            WordSegments::new(name)
-                .map(|name| UniCase::new(&*self.arena.inner().alloc_str(name)))
-                .collect_in::<BumpVec<_>>(self.arena.inner())
-                .into_bump_slice(),
-        ) {
+        match self.space.entry(&*self.arena.alloc_slice(
+            WordSegments::new(name).map(|name| UniCase::new(&*self.arena.alloc_str(name))),
+        )) {
             Entry::Occupied(mut entry) => {
                 let count = entry.get_mut();
                 *count += 1;

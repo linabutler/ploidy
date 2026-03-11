@@ -33,7 +33,7 @@ impl ToTokens for CodegenClientModule<'_> {
         });
 
         let client_doc = {
-            let info = self.graph.spec().info;
+            let info = self.graph.info();
             format!("API client for {} (version {})", info.title, info.version)
         };
 

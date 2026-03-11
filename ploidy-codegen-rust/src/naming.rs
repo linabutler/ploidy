@@ -55,7 +55,7 @@ impl ToTokens for CodegenTypeName<'_> {
                 CodegenIdentUsage::Type(&ident).to_tokens(tokens);
             }
             Self::Inline(view) => {
-                let ident = CodegenIdent::from_segments(&view.path().segments);
+                let ident = CodegenIdent::from_segments(view.path().segments);
                 CodegenIdentUsage::Type(&ident).to_tokens(tokens);
             }
         }
@@ -91,7 +91,7 @@ impl<'a> CodegenModuleName<'a> {
                         write!(f, "{}", CodegenIdentUsage::Module(&ident).display())
                     }
                     CodegenTypeName::Inline(view) => {
-                        let ident = CodegenIdent::from_segments(&view.path().segments);
+                        let ident = CodegenIdent::from_segments(view.path().segments);
                         write!(f, "{}", CodegenIdentUsage::Module(&ident).display())
                     }
                 }
@@ -109,7 +109,7 @@ impl ToTokens for CodegenModuleName<'_> {
                 CodegenIdentUsage::Module(&ident).to_tokens(tokens);
             }
             CodegenTypeName::Inline(view) => {
-                let ident = CodegenIdent::from_segments(&view.path().segments);
+                let ident = CodegenIdent::from_segments(view.path().segments);
                 CodegenIdentUsage::Module(&ident).to_tokens(tokens);
             }
         }

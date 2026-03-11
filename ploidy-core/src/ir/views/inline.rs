@@ -25,7 +25,7 @@ impl<'a> InlineIrTypeView<'a> {
     pub(in crate::ir) fn new(
         cooked: &'a CookedGraph<'a>,
         index: NodeIndex<usize>,
-        ty: &'a InlineIrType<'a>,
+        ty: &'a InlineIrType<'a, NodeIndex<usize>>,
     ) -> Self {
         match ty {
             InlineIrType::Enum(path, ty) => Self::Enum(path, IrEnumView::new(cooked, index, ty)),

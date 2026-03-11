@@ -32,7 +32,7 @@ impl<'a> IrEnumView<'a> {
 
     #[inline]
     pub fn variants(&self) -> &'a [IrEnumVariant<'a>] {
-        &self.ty.variants
+        self.ty.variants
     }
 }
 
