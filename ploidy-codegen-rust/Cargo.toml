@@ -29,7 +29,7 @@ textwrap = { version = "0.16", default-features = false, features = [
     "unicode-width",
 ] }
 thiserror = "2"
-toml = { version = "0.9", default-features = false, features = [
+toml = { version = "1.0", default-features = false, features = [
     "display",
     "parse",
     "serde",
