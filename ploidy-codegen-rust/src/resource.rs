@@ -1,4 +1,4 @@
-use ploidy_core::{codegen::IntoCode, ir::IrOperationView};
+use ploidy_core::{codegen::IntoCode, ir::OperationView};
 use proc_macro2::TokenStream;
 use quote::{ToTokens, TokenStreamExt, quote};
 
@@ -13,11 +13,11 @@ use super::{
 /// with all its operations and inline types.
 pub struct CodegenResource<'a> {
     feature: &'a CargoFeature,
-    ops: &'a [IrOperationView<'a>],
+    ops: &'a [OperationView<'a>],
 }
 
 impl<'a> CodegenResource<'a> {
-    pub fn new(feature: &'a CargoFeature, ops: &'a [IrOperationView<'a>]) -> Self {
+    pub fn new(feature: &'a CargoFeature, ops: &'a [OperationView<'a>]) -> Self {
         Self { feature, ops }
     }
 }

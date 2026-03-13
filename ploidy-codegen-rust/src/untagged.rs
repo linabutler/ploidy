@@ -1,6 +1,5 @@
 use ploidy_core::ir::{
-    InlineIrTypeView, IrTypeView, IrUntaggedView, PrimitiveIrType, SchemaIrTypeView,
-    SomeIrUntaggedVariant,
+    InlineTypeView, PrimitiveType, SchemaTypeView, SomeUntaggedVariant, TypeView, UntaggedView,
 };
 use proc_macro2::TokenStream;
 use quote::{ToTokens, TokenStreamExt, quote};
@@ -15,11 +14,11 @@ use super::{
 #[derive(Clone, Debug)]
 pub struct CodegenUntagged<'a> {
     name: CodegenTypeName<'a>,
-    ty: &'a IrUntaggedView<'a>,
+    ty: &'a UntaggedView<'a>,
 }
 
 impl<'a> CodegenUntagged<'a> {
-    pub fn new(name: CodegenTypeName<'a>, ty: &'a IrUntaggedView<'a>) -> Self {
+    pub fn new(name: CodegenTypeName<'a>, ty: &'a UntaggedView<'a>) -> Self {
         Self { name, ty }
     }
 }
@@ -44,13 +43,13 @@ impl ToTokens for CodegenUntagged<'_> {
 
         let mut extra_derives = vec![];
         let is_hashable = self.ty.variants().all(|variant| match variant.ty() {
-            Some(SomeIrUntaggedVariant { view, .. }) => view
+            Some(SomeUntaggedVariant { view, .. }) => view
                 .dependencies()
                 .chain(std::iter::once(view))
                 .all(|view| match view {
-                    IrTypeView::Inline(InlineIrTypeView::Primitive(_, view))
-                    | IrTypeView::Schema(SchemaIrTypeView::Primitive(_, view)) => {
-                        !matches!(view.ty(), PrimitiveIrType::F32 | PrimitiveIrType::F64)
+                    TypeView::Inline(InlineTypeView::Primitive(_, view))
+                    | TypeView::Schema(SchemaTypeView::Primitive(_, view)) => {
+                        !matches!(view.ty(), PrimitiveType::F32 | PrimitiveType::F64)
                     }
                     _ => true,
                 }),
@@ -78,7 +77,7 @@ mod tests {
 
     use ploidy_core::{
         arena::Arena,
-        ir::{IrSpec, RawGraph, SchemaIrTypeView},
+        ir::{IrSpec, RawGraph, SchemaTypeView},
         parse::Document,
     };
     use pretty_assertions::assert_eq;
@@ -109,7 +108,7 @@ mod tests {
         let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
         let schema = graph.schemas().find(|s| s.name() == "StringOrInt");
-        let Some(schema @ SchemaIrTypeView::Untagged(_, untagged_view)) = &schema else {
+        let Some(schema @ SchemaTypeView::Untagged(_, untagged_view)) = &schema else {
             panic!("expected untagged union `StringOrInt`; got `{schema:?}`");
         };
 
@@ -160,7 +159,7 @@ mod tests {
         let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
         let schema = graph.schemas().find(|s| s.name() == "Animal");
-        let Some(schema @ SchemaIrTypeView::Untagged(_, untagged_view)) = &schema else {
+        let Some(schema @ SchemaTypeView::Untagged(_, untagged_view)) = &schema else {
             panic!("expected untagged union `Animal`; got `{schema:?}`");
         };
 
@@ -203,7 +202,7 @@ mod tests {
         let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
         let schema = graph.schemas().find(|s| s.name() == "StringOrInt");
-        let Some(schema @ SchemaIrTypeView::Untagged(_, untagged_view)) = &schema else {
+        let Some(schema @ SchemaTypeView::Untagged(_, untagged_view)) = &schema else {
             panic!("expected untagged union `StringOrInt`; got `{schema:?}`");
         };
 
@@ -246,7 +245,7 @@ mod tests {
         let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
         let schema = graph.schemas().find(|s| s.name() == "StringOrFloat");
-        let Some(schema @ SchemaIrTypeView::Untagged(_, untagged_view)) = &schema else {
+        let Some(schema @ SchemaTypeView::Untagged(_, untagged_view)) = &schema else {
             panic!("expected untagged union `StringOrFloat`; got `{schema:?}`");
         };
 
@@ -288,7 +287,7 @@ mod tests {
         let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
         let schema = graph.schemas().find(|s| s.name() == "StringOrDouble");
-        let Some(schema @ SchemaIrTypeView::Untagged(_, untagged_view)) = &schema else {
+        let Some(schema @ SchemaTypeView::Untagged(_, untagged_view)) = &schema else {
             panic!("expected untagged union `StringOrDouble`; got `{schema:?}`");
         };
 

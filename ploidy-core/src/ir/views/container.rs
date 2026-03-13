@@ -1,12 +1,11 @@
 use petgraph::graph::NodeIndex;
 
 use crate::ir::{
-    InlineIrType, SchemaIrType,
-    graph::{CookedGraph, GraphNode},
-    types::Container,
+    graph::{CookedGraph, CookedGraphNode},
+    types::{CookedContainer, CookedInlineType, CookedSchemaType},
 };
 
-use super::{IrTypeView, ViewNode};
+use super::{TypeView, ViewNode};
 
 /// A graph-aware view of a container type.
 #[derive(Debug)]
@@ -19,8 +18,8 @@ pub enum ContainerView<'a> {
 impl<'a> ContainerView<'a> {
     /// Returns a type view of this container type.
     #[inline]
-    pub fn ty(&self) -> IrTypeView<'a> {
-        IrTypeView::new(self.cooked(), self.index())
+    pub fn ty(&self) -> TypeView<'a> {
+        TypeView::new(self.cooked(), self.index())
     }
 }
 
@@ -49,16 +48,16 @@ pub struct InnerView<'a> {
 impl<'a> InnerView<'a> {
     /// Returns a view of the contained type.
     #[inline]
-    pub fn ty(&self) -> IrTypeView<'a> {
-        IrTypeView::new(self.cooked, self.inner)
+    pub fn ty(&self) -> TypeView<'a> {
+        TypeView::new(self.cooked, self.inner)
     }
 
     /// Returns a human-readable description of the contained type, if present.
     #[inline]
     pub fn description(&self) -> Option<&'a str> {
         match self.cooked.graph[self.container] {
-            GraphNode::Schema(SchemaIrType::Container(_, container))
-            | GraphNode::Inline(InlineIrType::Container(_, container)) => {
+            CookedGraphNode::Schema(CookedSchemaType::Container(_, container))
+            | CookedGraphNode::Inline(CookedInlineType::Container(_, container)) => {
                 container.inner().description
             }
             _ => None,
@@ -71,7 +70,7 @@ impl<'a> ContainerView<'a> {
     pub(in crate::ir) fn new(
         cooked: &'a CookedGraph<'a>,
         index: NodeIndex<usize>,
-        container: &'a Container<'a, NodeIndex<usize>>,
+        container: &'a CookedContainer<'a>,
     ) -> Self {
         let inner = InnerView {
             cooked,
@@ -79,17 +78,17 @@ impl<'a> ContainerView<'a> {
             inner: container.inner().ty,
         };
         match container {
-            Container::Array(_) => Self::Array(inner),
-            Container::Map(_) => Self::Map(inner),
-            Container::Optional(_) => Self::Optional(inner),
+            CookedContainer::Array(_) => Self::Array(inner),
+            CookedContainer::Map(_) => Self::Map(inner),
+            CookedContainer::Optional(_) => Self::Optional(inner),
         }
     }
 
     /// Returns an iterator over all the types that this container depends on.
     #[inline]
-    pub fn dependencies(&self) -> impl Iterator<Item = IrTypeView<'a>> + use<'a> {
+    pub fn dependencies(&self) -> impl Iterator<Item = TypeView<'a>> + use<'a> {
         let (Self::Array(view) | Self::Map(view) | Self::Optional(view)) = self;
-        let inner = IrTypeView::new(view.cooked, view.inner);
+        let inner = TypeView::new(view.cooked, view.inner);
         let dependencies = inner.dependencies();
         std::iter::once(inner).chain(dependencies)
     }

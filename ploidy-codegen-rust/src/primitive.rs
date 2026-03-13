@@ -1,4 +1,4 @@
-use ploidy_core::ir::{ExtendableView, IrPrimitiveView, PrimitiveIrType};
+use ploidy_core::ir::{ExtendableView, PrimitiveType, PrimitiveView};
 use proc_macro2::TokenStream;
 use quote::{ToTokens, TokenStreamExt, quote};
 
@@ -6,11 +6,11 @@ use super::config::DateTimeFormat;
 
 #[derive(Clone, Copy, Debug)]
 pub struct CodegenPrimitive<'a> {
-    ty: &'a IrPrimitiveView<'a>,
+    ty: &'a PrimitiveView<'a>,
 }
 
 impl<'a> CodegenPrimitive<'a> {
-    pub fn new(ty: &'a IrPrimitiveView<'a>) -> Self {
+    pub fn new(ty: &'a PrimitiveView<'a>) -> Self {
         Self { ty }
     }
 }
@@ -18,19 +18,19 @@ impl<'a> CodegenPrimitive<'a> {
 impl<'a> ToTokens for CodegenPrimitive<'a> {
     fn to_tokens(&self, tokens: &mut TokenStream) {
         tokens.append_all(match self.ty.ty() {
-            PrimitiveIrType::String => quote! { ::std::string::String },
-            PrimitiveIrType::I8 => quote! { i8 },
-            PrimitiveIrType::U8 => quote! { u8 },
-            PrimitiveIrType::I16 => quote! { i16 },
-            PrimitiveIrType::U16 => quote! { u16 },
-            PrimitiveIrType::I32 => quote! { i32 },
-            PrimitiveIrType::U32 => quote! { u32 },
-            PrimitiveIrType::I64 => quote! { i64 },
-            PrimitiveIrType::U64 => quote! { u64 },
-            PrimitiveIrType::F32 => quote! { f32 },
-            PrimitiveIrType::F64 => quote! { f64 },
-            PrimitiveIrType::Bool => quote! { bool },
-            PrimitiveIrType::DateTime => {
+            PrimitiveType::String => quote! { ::std::string::String },
+            PrimitiveType::I8 => quote! { i8 },
+            PrimitiveType::U8 => quote! { u8 },
+            PrimitiveType::I16 => quote! { i16 },
+            PrimitiveType::U16 => quote! { u16 },
+            PrimitiveType::I32 => quote! { i32 },
+            PrimitiveType::U32 => quote! { u32 },
+            PrimitiveType::I64 => quote! { i64 },
+            PrimitiveType::U64 => quote! { u64 },
+            PrimitiveType::F32 => quote! { f32 },
+            PrimitiveType::F64 => quote! { f64 },
+            PrimitiveType::Bool => quote! { bool },
+            PrimitiveType::DateTime => {
                 let format = self
                     .ty
                     .extensions()
@@ -56,12 +56,12 @@ impl<'a> ToTokens for CodegenPrimitive<'a> {
                     }
                 }
             }
-            PrimitiveIrType::UnixTime => quote! { ::ploidy_util::date_time::UnixSeconds },
-            PrimitiveIrType::Date => quote! { ::ploidy_util::chrono::NaiveDate },
-            PrimitiveIrType::Url => quote! { ::ploidy_util::url::Url },
-            PrimitiveIrType::Uuid => quote! { ::ploidy_util::uuid::Uuid },
-            PrimitiveIrType::Bytes => quote! { ::ploidy_util::binary::Base64 },
-            PrimitiveIrType::Binary => quote! { ::ploidy_util::serde_bytes::ByteBuf },
+            PrimitiveType::UnixTime => quote! { ::ploidy_util::date_time::UnixSeconds },
+            PrimitiveType::Date => quote! { ::ploidy_util::chrono::NaiveDate },
+            PrimitiveType::Url => quote! { ::ploidy_util::url::Url },
+            PrimitiveType::Uuid => quote! { ::ploidy_util::uuid::Uuid },
+            PrimitiveType::Bytes => quote! { ::ploidy_util::binary::Base64 },
+            PrimitiveType::Binary => quote! { ::ploidy_util::serde_bytes::ByteBuf },
         });
     }
 }

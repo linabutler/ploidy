@@ -1,55 +1,54 @@
 use petgraph::graph::NodeIndex;
 
-use crate::ir::{InlineIrTypePath, graph::CookedGraph, types::InlineIrType};
+use crate::ir::{InlineTypePath, graph::CookedGraph, types::CookedInlineType};
 
 use super::{
-    ViewNode, any::AnyView, container::ContainerView, enum_::IrEnumView,
-    primitive::IrPrimitiveView, struct_::IrStructView, tagged::IrTaggedView,
-    untagged::IrUntaggedView,
+    ViewNode, any::AnyView, container::ContainerView, enum_::EnumView, primitive::PrimitiveView,
+    struct_::StructView, tagged::TaggedView, untagged::UntaggedView,
 };
 
-/// A graph-aware view of an [`InlineIrType`].
+/// A graph-aware view of an [`InlineType`][CookedInlineType].
 #[derive(Debug)]
-pub enum InlineIrTypeView<'a> {
-    Enum(&'a InlineIrTypePath<'a>, IrEnumView<'a>),
-    Struct(&'a InlineIrTypePath<'a>, IrStructView<'a>),
-    Tagged(&'a InlineIrTypePath<'a>, IrTaggedView<'a>),
-    Untagged(&'a InlineIrTypePath<'a>, IrUntaggedView<'a>),
-    Container(&'a InlineIrTypePath<'a>, ContainerView<'a>),
-    Primitive(&'a InlineIrTypePath<'a>, IrPrimitiveView<'a>),
-    Any(&'a InlineIrTypePath<'a>, AnyView<'a>),
+pub enum InlineTypeView<'a> {
+    Enum(&'a InlineTypePath<'a>, EnumView<'a>),
+    Struct(&'a InlineTypePath<'a>, StructView<'a>),
+    Tagged(&'a InlineTypePath<'a>, TaggedView<'a>),
+    Untagged(&'a InlineTypePath<'a>, UntaggedView<'a>),
+    Container(&'a InlineTypePath<'a>, ContainerView<'a>),
+    Primitive(&'a InlineTypePath<'a>, PrimitiveView<'a>),
+    Any(&'a InlineTypePath<'a>, AnyView<'a>),
 }
 
-impl<'a> InlineIrTypeView<'a> {
+impl<'a> InlineTypeView<'a> {
     #[inline]
     pub(in crate::ir) fn new(
         cooked: &'a CookedGraph<'a>,
         index: NodeIndex<usize>,
-        ty: &'a InlineIrType<'a, NodeIndex<usize>>,
+        ty: &'a CookedInlineType<'a>,
     ) -> Self {
         match ty {
-            InlineIrType::Enum(path, ty) => Self::Enum(path, IrEnumView::new(cooked, index, ty)),
-            InlineIrType::Struct(path, ty) => {
-                Self::Struct(path, IrStructView::new(cooked, index, ty))
+            CookedInlineType::Enum(path, ty) => Self::Enum(path, EnumView::new(cooked, index, ty)),
+            CookedInlineType::Struct(path, ty) => {
+                Self::Struct(path, StructView::new(cooked, index, ty))
             }
-            InlineIrType::Tagged(path, ty) => {
-                Self::Tagged(path, IrTaggedView::new(cooked, index, ty))
+            CookedInlineType::Tagged(path, ty) => {
+                Self::Tagged(path, TaggedView::new(cooked, index, ty))
             }
-            InlineIrType::Untagged(path, ty) => {
-                Self::Untagged(path, IrUntaggedView::new(cooked, index, ty))
+            CookedInlineType::Untagged(path, ty) => {
+                Self::Untagged(path, UntaggedView::new(cooked, index, ty))
             }
-            InlineIrType::Container(path, container) => {
+            CookedInlineType::Container(path, container) => {
                 Self::Container(path, ContainerView::new(cooked, index, container))
             }
-            InlineIrType::Primitive(path, p) => {
-                Self::Primitive(path, IrPrimitiveView::new(cooked, index, *p))
+            CookedInlineType::Primitive(path, p) => {
+                Self::Primitive(path, PrimitiveView::new(cooked, index, *p))
             }
-            InlineIrType::Any(path) => Self::Any(path, AnyView::new(cooked, index)),
+            CookedInlineType::Any(path) => Self::Any(path, AnyView::new(cooked, index)),
         }
     }
 
     #[inline]
-    pub fn path(&self) -> &'a InlineIrTypePath<'a> {
+    pub fn path(&self) -> &'a InlineTypePath<'a> {
         let (Self::Enum(path, _)
         | Self::Struct(path, _)
         | Self::Tagged(path, _)
@@ -61,7 +60,7 @@ impl<'a> InlineIrTypeView<'a> {
     }
 }
 
-impl<'a> ViewNode<'a> for InlineIrTypeView<'a> {
+impl<'a> ViewNode<'a> for InlineTypeView<'a> {
     #[inline]
     fn cooked(&self) -> &'a CookedGraph<'a> {
         match self {

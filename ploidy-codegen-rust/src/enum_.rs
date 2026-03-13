@@ -1,4 +1,4 @@
-use ploidy_core::ir::{IrEnumVariant, IrEnumView};
+use ploidy_core::ir::{EnumVariant, EnumView};
 use proc_macro2::TokenStream;
 use quote::{ToTokens, TokenStreamExt, format_ident, quote};
 use syn::{Ident, parse_quote};
@@ -11,11 +11,11 @@ use super::{
 #[derive(Clone, Debug)]
 pub struct CodegenEnum<'a> {
     name: CodegenTypeName<'a>,
-    ty: &'a IrEnumView<'a>,
+    ty: &'a EnumView<'a>,
 }
 
 impl<'a> CodegenEnum<'a> {
-    pub fn new(name: CodegenTypeName<'a>, ty: &'a IrEnumView<'a>) -> Self {
+    pub fn new(name: CodegenTypeName<'a>, ty: &'a EnumView<'a>) -> Self {
         Self { name, ty }
     }
 }
@@ -26,8 +26,8 @@ impl ToTokens for CodegenEnum<'_> {
         // or have no identifier characters, can't be represented as
         // Rust enum variants.
         let has_unrepresentable = self.ty.variants().iter().any(|variant| match variant {
-            IrEnumVariant::Number(_) | IrEnumVariant::Bool(_) => true,
-            IrEnumVariant::String(s) => s.chars().all(|c| !unicode_ident::is_xid_continue(c)),
+            EnumVariant::Number(_) | EnumVariant::Bool(_) => true,
+            EnumVariant::String(s) => s.chars().all(|c| !unicode_ident::is_xid_continue(c)),
         });
 
         if has_unrepresentable {
@@ -50,14 +50,14 @@ impl ToTokens for CodegenEnum<'_> {
 
             for variant in self.ty.variants() {
                 match variant {
-                    IrEnumVariant::String(name) => {
+                    EnumVariant::String(name) => {
                         let name_ident = CodegenIdent::new(name);
                         let variant_name = CodegenIdentUsage::Variant(&name_ident);
                         variants.push(quote! { #variant_name });
                         display_arms.push(quote! { Self::#variant_name => #name });
                         from_str_arms.push(quote! { #name => Self::#variant_name });
                     }
-                    IrEnumVariant::Number(_) | IrEnumVariant::Bool(_) => continue,
+                    EnumVariant::Number(_) | EnumVariant::Bool(_) => continue,
                 }
             }
 
@@ -157,7 +157,7 @@ mod tests {
 
     use ploidy_core::{
         arena::Arena,
-        ir::{IrSpec, RawGraph, SchemaIrTypeView},
+        ir::{IrSpec, RawGraph, SchemaTypeView},
         parse::Document,
     };
     use pretty_assertions::assert_eq;
@@ -191,7 +191,7 @@ mod tests {
         let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
         let schema = graph.schemas().find(|s| s.name() == "Status");
-        let Some(schema @ SchemaIrTypeView::Enum(_, enum_view)) = &schema else {
+        let Some(schema @ SchemaTypeView::Enum(_, enum_view)) = &schema else {
             panic!("expected enum `Status`; got `{schema:?}`");
         };
 
@@ -307,7 +307,7 @@ mod tests {
         let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
         let schema = graph.schemas().find(|s| s.name() == "Priority");
-        let Some(schema @ SchemaIrTypeView::Enum(_, view)) = &schema else {
+        let Some(schema @ SchemaTypeView::Enum(_, view)) = &schema else {
             panic!("expected enum `Priority`; got `{schema:?}`");
         };
 

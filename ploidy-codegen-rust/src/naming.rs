@@ -8,8 +8,8 @@ use ploidy_core::{
         unique::{UniqueNamesScope, WordSegments},
     },
     ir::{
-        ExtendableView, InlineIrTypePathSegment, InlineIrTypeView, IrStructFieldName,
-        IrStructFieldNameHint, IrUntaggedVariantNameHint, PrimitiveIrType, SchemaIrTypeView,
+        ExtendableView, InlineTypePathSegment, InlineTypeView, PrimitiveType, SchemaTypeView,
+        StructFieldName, StructFieldNameHint, UntaggedVariantNameHint,
     },
 };
 use proc_macro2::{Ident, Span, TokenStream};
@@ -31,8 +31,8 @@ const KEYWORDS: &[&str] = &["crate", "self", "super", "Self"];
 /// and [`into_sort_key`](Self::into_sort_key) for deterministic sorting.
 #[derive(Clone, Copy, Debug)]
 pub enum CodegenTypeName<'a> {
-    Schema(&'a SchemaIrTypeView<'a>),
-    Inline(&'a InlineIrTypeView<'a>),
+    Schema(&'a SchemaTypeView<'a>),
+    Inline(&'a InlineTypeView<'a>),
 }
 
 impl<'a> CodegenTypeName<'a> {
@@ -126,12 +126,12 @@ pub struct CodegenTypeNameSortKey<'a>(CodegenTypeName<'a>);
 
 impl<'a> CodegenTypeNameSortKey<'a> {
     #[inline]
-    pub fn for_schema(view: &'a SchemaIrTypeView<'a>) -> Self {
+    pub fn for_schema(view: &'a SchemaTypeView<'a>) -> Self {
         Self(CodegenTypeName::Schema(view))
     }
 
     #[inline]
-    pub fn for_inline(view: &'a InlineIrTypeView<'a>) -> Self {
+    pub fn for_inline(view: &'a InlineTypeView<'a>) -> Self {
         Self(CodegenTypeName::Inline(view))
     }
 
@@ -183,7 +183,7 @@ impl CodegenIdent {
     }
 
     /// Creates an identifier from an inline type path.
-    pub fn from_segments(segments: &[InlineIrTypePathSegment<'_>]) -> Self {
+    pub fn from_segments(segments: &[InlineTypePathSegment<'_>]) -> Self {
         Self(format!(
             "{}",
             segments
@@ -354,31 +354,31 @@ impl<'a> CodegenIdentScope<'a> {
 }
 
 #[derive(Clone, Copy, Debug)]
-pub struct CodegenUntaggedVariantName(pub IrUntaggedVariantNameHint);
+pub struct CodegenUntaggedVariantName(pub UntaggedVariantNameHint);
 
 impl ToTokens for CodegenUntaggedVariantName {
     fn to_tokens(&self, tokens: &mut TokenStream) {
-        use IrUntaggedVariantNameHint::*;
+        use UntaggedVariantNameHint::*;
         let s = match self.0 {
-            Primitive(PrimitiveIrType::String) => "String".into(),
-            Primitive(PrimitiveIrType::I8) => "I8".into(),
-            Primitive(PrimitiveIrType::U8) => "U8".into(),
-            Primitive(PrimitiveIrType::I16) => "I16".into(),
-            Primitive(PrimitiveIrType::U16) => "U16".into(),
-            Primitive(PrimitiveIrType::I32) => "I32".into(),
-            Primitive(PrimitiveIrType::U32) => "U32".into(),
-            Primitive(PrimitiveIrType::I64) => "I64".into(),
-            Primitive(PrimitiveIrType::U64) => "U64".into(),
-            Primitive(PrimitiveIrType::F32) => "F32".into(),
-            Primitive(PrimitiveIrType::F64) => "F64".into(),
-            Primitive(PrimitiveIrType::Bool) => "Bool".into(),
-            Primitive(PrimitiveIrType::DateTime) => "DateTime".into(),
-            Primitive(PrimitiveIrType::UnixTime) => "UnixTime".into(),
-            Primitive(PrimitiveIrType::Date) => "Date".into(),
-            Primitive(PrimitiveIrType::Url) => "Url".into(),
-            Primitive(PrimitiveIrType::Uuid) => "Uuid".into(),
-            Primitive(PrimitiveIrType::Bytes) => "Bytes".into(),
-            Primitive(PrimitiveIrType::Binary) => "Binary".into(),
+            Primitive(PrimitiveType::String) => "String".into(),
+            Primitive(PrimitiveType::I8) => "I8".into(),
+            Primitive(PrimitiveType::U8) => "U8".into(),
+            Primitive(PrimitiveType::I16) => "I16".into(),
+            Primitive(PrimitiveType::U16) => "U16".into(),
+            Primitive(PrimitiveType::I32) => "I32".into(),
+            Primitive(PrimitiveType::U32) => "U32".into(),
+            Primitive(PrimitiveType::I64) => "I64".into(),
+            Primitive(PrimitiveType::U64) => "U64".into(),
+            Primitive(PrimitiveType::F32) => "F32".into(),
+            Primitive(PrimitiveType::F64) => "F64".into(),
+            Primitive(PrimitiveType::Bool) => "Bool".into(),
+            Primitive(PrimitiveType::DateTime) => "DateTime".into(),
+            Primitive(PrimitiveType::UnixTime) => "UnixTime".into(),
+            Primitive(PrimitiveType::Date) => "Date".into(),
+            Primitive(PrimitiveType::Url) => "Url".into(),
+            Primitive(PrimitiveType::Uuid) => "Uuid".into(),
+            Primitive(PrimitiveType::Bytes) => "Bytes".into(),
+            Primitive(PrimitiveType::Binary) => "Binary".into(),
             Array => "Array".into(),
             Map => "Map".into(),
             Index(index) => Cow::Owned(format!("V{index}")),
@@ -388,16 +388,16 @@ impl ToTokens for CodegenUntaggedVariantName {
 }
 
 #[derive(Clone, Copy, Debug)]
-pub struct CodegenStructFieldName(pub IrStructFieldNameHint);
+pub struct CodegenStructFieldName(pub StructFieldNameHint);
 
 impl ToTokens for CodegenStructFieldName {
     fn to_tokens(&self, tokens: &mut TokenStream) {
         match self.0 {
-            IrStructFieldNameHint::Index(index) => {
+            StructFieldNameHint::Index(index) => {
                 CodegenIdentUsage::Field(&CodegenIdent(format!("variant_{index}")))
                     .to_tokens(tokens)
             }
-            IrStructFieldNameHint::AdditionalProperties => {
+            StructFieldNameHint::AdditionalProperties => {
                 CodegenIdentUsage::Field(CodegenIdentRef::new("additional_properties"))
                     .to_tokens(tokens)
             }
@@ -406,14 +406,14 @@ impl ToTokens for CodegenStructFieldName {
 }
 
 #[derive(Clone, Copy, Debug)]
-pub struct CodegenTypePathSegment<'a>(&'a InlineIrTypePathSegment<'a>);
+pub struct CodegenTypePathSegment<'a>(&'a InlineTypePathSegment<'a>);
 
 impl<'a> CodegenTypePathSegment<'a> {
     pub fn display(&self) -> impl Display {
-        struct DisplaySegment<'a>(&'a InlineIrTypePathSegment<'a>);
+        struct DisplaySegment<'a>(&'a InlineTypePathSegment<'a>);
         impl Display for DisplaySegment<'_> {
             fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-                use InlineIrTypePathSegment::*;
+                use InlineTypePathSegment::*;
                 match self.0 {
                     // Segments are always part of an identifier, never emitted directly;
                     // so we don't need to check for `XID_Start`.
@@ -421,13 +421,13 @@ impl<'a> CodegenTypePathSegment<'a> {
                     Parameter(name) => write!(f, "{}", AsPascalCase(clean(name))),
                     Request => f.write_str("Request"),
                     Response => f.write_str("Response"),
-                    Field(IrStructFieldName::Name(name)) => {
+                    Field(StructFieldName::Name(name)) => {
                         write!(f, "{}", AsPascalCase(clean(name)))
                     }
-                    Field(IrStructFieldName::Hint(IrStructFieldNameHint::Index(index))) => {
+                    Field(StructFieldName::Hint(StructFieldNameHint::Index(index))) => {
                         write!(f, "Variant{index}")
                     }
-                    Field(IrStructFieldName::Hint(IrStructFieldNameHint::AdditionalProperties)) => {
+                    Field(StructFieldName::Hint(StructFieldNameHint::AdditionalProperties)) => {
                         f.write_str("AdditionalProperties")
                     }
                     MapValue => f.write_str("Value"),
@@ -602,9 +602,8 @@ mod tests {
 
     #[test]
     fn test_untagged_variant_name_string() {
-        let variant_name = CodegenUntaggedVariantName(IrUntaggedVariantNameHint::Primitive(
-            PrimitiveIrType::String,
-        ));
+        let variant_name =
+            CodegenUntaggedVariantName(UntaggedVariantNameHint::Primitive(PrimitiveType::String));
         let actual: syn::Ident = parse_quote!(#variant_name);
         let expected: syn::Ident = parse_quote!(String);
         assert_eq!(actual, expected);
@@ -613,7 +612,7 @@ mod tests {
     #[test]
     fn test_untagged_variant_name_i32() {
         let variant_name =
-            CodegenUntaggedVariantName(IrUntaggedVariantNameHint::Primitive(PrimitiveIrType::I32));
+            CodegenUntaggedVariantName(UntaggedVariantNameHint::Primitive(PrimitiveType::I32));
         let actual: syn::Ident = parse_quote!(#variant_name);
         let expected: syn::Ident = parse_quote!(I32);
         assert_eq!(actual, expected);
@@ -622,7 +621,7 @@ mod tests {
     #[test]
     fn test_untagged_variant_name_i64() {
         let variant_name =
-            CodegenUntaggedVariantName(IrUntaggedVariantNameHint::Primitive(PrimitiveIrType::I64));
+            CodegenUntaggedVariantName(UntaggedVariantNameHint::Primitive(PrimitiveType::I64));
         let actual: syn::Ident = parse_quote!(#variant_name);
         let expected: syn::Ident = parse_quote!(I64);
         assert_eq!(actual, expected);
@@ -631,7 +630,7 @@ mod tests {
     #[test]
     fn test_untagged_variant_name_f32() {
         let variant_name =
-            CodegenUntaggedVariantName(IrUntaggedVariantNameHint::Primitive(PrimitiveIrType::F32));
+            CodegenUntaggedVariantName(UntaggedVariantNameHint::Primitive(PrimitiveType::F32));
         let actual: syn::Ident = parse_quote!(#variant_name);
         let expected: syn::Ident = parse_quote!(F32);
         assert_eq!(actual, expected);
@@ -640,7 +639,7 @@ mod tests {
     #[test]
     fn test_untagged_variant_name_f64() {
         let variant_name =
-            CodegenUntaggedVariantName(IrUntaggedVariantNameHint::Primitive(PrimitiveIrType::F64));
+            CodegenUntaggedVariantName(UntaggedVariantNameHint::Primitive(PrimitiveType::F64));
         let actual: syn::Ident = parse_quote!(#variant_name);
         let expected: syn::Ident = parse_quote!(F64);
         assert_eq!(actual, expected);
@@ -649,7 +648,7 @@ mod tests {
     #[test]
     fn test_untagged_variant_name_bool() {
         let variant_name =
-            CodegenUntaggedVariantName(IrUntaggedVariantNameHint::Primitive(PrimitiveIrType::Bool));
+            CodegenUntaggedVariantName(UntaggedVariantNameHint::Primitive(PrimitiveType::Bool));
         let actual: syn::Ident = parse_quote!(#variant_name);
         let expected: syn::Ident = parse_quote!(Bool);
         assert_eq!(actual, expected);
@@ -657,9 +656,8 @@ mod tests {
 
     #[test]
     fn test_untagged_variant_name_datetime() {
-        let variant_name = CodegenUntaggedVariantName(IrUntaggedVariantNameHint::Primitive(
-            PrimitiveIrType::DateTime,
-        ));
+        let variant_name =
+            CodegenUntaggedVariantName(UntaggedVariantNameHint::Primitive(PrimitiveType::DateTime));
         let actual: syn::Ident = parse_quote!(#variant_name);
         let expected: syn::Ident = parse_quote!(DateTime);
         assert_eq!(actual, expected);
@@ -668,7 +666,7 @@ mod tests {
     #[test]
     fn test_untagged_variant_name_date() {
         let variant_name =
-            CodegenUntaggedVariantName(IrUntaggedVariantNameHint::Primitive(PrimitiveIrType::Date));
+            CodegenUntaggedVariantName(UntaggedVariantNameHint::Primitive(PrimitiveType::Date));
         let actual: syn::Ident = parse_quote!(#variant_name);
         let expected: syn::Ident = parse_quote!(Date);
         assert_eq!(actual, expected);
@@ -677,7 +675,7 @@ mod tests {
     #[test]
     fn test_untagged_variant_name_url() {
         let variant_name =
-            CodegenUntaggedVariantName(IrUntaggedVariantNameHint::Primitive(PrimitiveIrType::Url));
+            CodegenUntaggedVariantName(UntaggedVariantNameHint::Primitive(PrimitiveType::Url));
         let actual: syn::Ident = parse_quote!(#variant_name);
         let expected: syn::Ident = parse_quote!(Url);
         assert_eq!(actual, expected);
@@ -686,7 +684,7 @@ mod tests {
     #[test]
     fn test_untagged_variant_name_uuid() {
         let variant_name =
-            CodegenUntaggedVariantName(IrUntaggedVariantNameHint::Primitive(PrimitiveIrType::Uuid));
+            CodegenUntaggedVariantName(UntaggedVariantNameHint::Primitive(PrimitiveType::Uuid));
         let actual: syn::Ident = parse_quote!(#variant_name);
         let expected: syn::Ident = parse_quote!(Uuid);
         assert_eq!(actual, expected);
@@ -694,9 +692,8 @@ mod tests {
 
     #[test]
     fn test_untagged_variant_name_bytes() {
-        let variant_name = CodegenUntaggedVariantName(IrUntaggedVariantNameHint::Primitive(
-            PrimitiveIrType::Bytes,
-        ));
+        let variant_name =
+            CodegenUntaggedVariantName(UntaggedVariantNameHint::Primitive(PrimitiveType::Bytes));
         let actual: syn::Ident = parse_quote!(#variant_name);
         let expected: syn::Ident = parse_quote!(Bytes);
         assert_eq!(actual, expected);
@@ -704,12 +701,12 @@ mod tests {
 
     #[test]
     fn test_untagged_variant_name_index() {
-        let variant_name = CodegenUntaggedVariantName(IrUntaggedVariantNameHint::Index(0));
+        let variant_name = CodegenUntaggedVariantName(UntaggedVariantNameHint::Index(0));
         let actual: syn::Ident = parse_quote!(#variant_name);
         let expected: syn::Ident = parse_quote!(V0);
         assert_eq!(actual, expected);
 
-        let variant_name = CodegenUntaggedVariantName(IrUntaggedVariantNameHint::Index(42));
+        let variant_name = CodegenUntaggedVariantName(UntaggedVariantNameHint::Index(42));
         let actual: syn::Ident = parse_quote!(#variant_name);
         let expected: syn::Ident = parse_quote!(V42);
         assert_eq!(actual, expected);
@@ -717,7 +714,7 @@ mod tests {
 
     #[test]
     fn test_untagged_variant_name_array() {
-        let variant_name = CodegenUntaggedVariantName(IrUntaggedVariantNameHint::Array);
+        let variant_name = CodegenUntaggedVariantName(UntaggedVariantNameHint::Array);
         let actual: syn::Ident = parse_quote!(#variant_name);
         let expected: syn::Ident = parse_quote!(Array);
         assert_eq!(actual, expected);
@@ -725,7 +722,7 @@ mod tests {
 
     #[test]
     fn test_untagged_variant_name_map() {
-        let variant_name = CodegenUntaggedVariantName(IrUntaggedVariantNameHint::Map);
+        let variant_name = CodegenUntaggedVariantName(UntaggedVariantNameHint::Map);
         let actual: syn::Ident = parse_quote!(#variant_name);
         let expected: syn::Ident = parse_quote!(Map);
         assert_eq!(actual, expected);
@@ -735,12 +732,12 @@ mod tests {
 
     #[test]
     fn test_struct_field_name_index() {
-        let field_name = CodegenStructFieldName(IrStructFieldNameHint::Index(0));
+        let field_name = CodegenStructFieldName(StructFieldNameHint::Index(0));
         let actual: syn::Ident = parse_quote!(#field_name);
         let expected: syn::Ident = parse_quote!(variant_0);
         assert_eq!(actual, expected);
 
-        let field_name = CodegenStructFieldName(IrStructFieldNameHint::Index(5));
+        let field_name = CodegenStructFieldName(StructFieldNameHint::Index(5));
         let actual: syn::Ident = parse_quote!(#field_name);
         let expected: syn::Ident = parse_quote!(variant_5);
         assert_eq!(actual, expected);
@@ -748,7 +745,7 @@ mod tests {
 
     #[test]
     fn test_struct_field_name_additional_properties() {
-        let field_name = CodegenStructFieldName(IrStructFieldNameHint::AdditionalProperties);
+        let field_name = CodegenStructFieldName(StructFieldNameHint::AdditionalProperties);
         let actual: syn::Ident = parse_quote!(#field_name);
         let expected: syn::Ident = parse_quote!(additional_properties);
         assert_eq!(actual, expected);

@@ -5,11 +5,10 @@ use itertools::Itertools;
 use crate::{
     arena::Arena,
     ir::{
-        IrParameterInfo,
         spec::IrSpec,
         types::{
-            InlineIrType, IrOperation, IrParameter, IrParameterStyle, IrRequest, IrResponse,
-            IrType, PrimitiveIrType,
+            ParameterStyle, PrimitiveType, RawInlineType, RawOperation, RawParameter,
+            RawParameterInfo, RawRequest, RawResponse, RawType,
         },
     },
     parse::{Document, Method},
@@ -40,7 +39,7 @@ fn test_parses_single_operation_from_path() {
 
     assert_matches!(
         &*ir.operations,
-        [IrOperation {
+        [RawOperation {
             id: "listUsers",
             method: Method::Get,
             resource: None,
@@ -77,11 +76,11 @@ fn test_parses_multiple_operations_from_same_path() {
     assert_matches!(
         &*ir.operations,
         [
-            IrOperation {
+            RawOperation {
                 method: Method::Get,
                 ..
             },
-            IrOperation {
+            RawOperation {
                 method: Method::Post,
                 ..
             },
@@ -118,11 +117,11 @@ fn test_parses_operations_from_multiple_paths() {
     assert_matches!(
         &*ir.operations,
         [
-            IrOperation {
+            RawOperation {
                 id: "listUsers",
                 ..
             },
-            IrOperation {
+            RawOperation {
                 id: "listPosts",
                 ..
             },
@@ -150,7 +149,7 @@ fn test_parses_path_with_parameter_segments() {
     let arena = Arena::new();
     let ir = IrSpec::from_doc(&arena, &doc).unwrap();
 
-    let [op @ IrOperation { .. }] = &*ir.operations else {
+    let [op @ RawOperation { .. }] = &*ir.operations else {
         panic!("expected single operation; got `{:?}`", ir.operations);
     };
     assert_eq!(op.path.len(), 2);
@@ -184,15 +183,15 @@ fn test_parses_path_parameter_string_type() {
     let arena = Arena::new();
     let ir = IrSpec::from_doc(&arena, &doc).unwrap();
 
-    let [IrOperation { params, .. }] = &*ir.operations else {
+    let [RawOperation { params, .. }] = &*ir.operations else {
         panic!("expected single operation; got `{:?}`", ir.operations);
     };
     assert_matches!(
         &**params,
-        [IrParameter::Path(IrParameterInfo {
+        [RawParameter::Path(RawParameterInfo {
             name: "id",
             required: true,
-            ty: IrType::Inline(InlineIrType::Primitive(_, PrimitiveIrType::String)),
+            ty: RawType::Inline(RawInlineType::Primitive(_, PrimitiveType::String)),
             ..
         })],
     );
@@ -225,14 +224,14 @@ fn test_parses_path_parameter_integer_type() {
     let arena = Arena::new();
     let ir = IrSpec::from_doc(&arena, &doc).unwrap();
 
-    let [IrOperation { params, .. }] = &*ir.operations else {
+    let [RawOperation { params, .. }] = &*ir.operations else {
         panic!("expected single operation; got `{:?}`", ir.operations);
     };
     assert_matches!(
         &**params,
-        [IrParameter::Path(IrParameterInfo {
+        [RawParameter::Path(RawParameterInfo {
             name: "id",
-            ty: IrType::Inline(InlineIrType::Primitive(_, PrimitiveIrType::I64)),
+            ty: RawType::Inline(RawInlineType::Primitive(_, PrimitiveType::I64)),
             ..
         })],
     );
@@ -269,14 +268,14 @@ fn test_parses_multiple_path_parameters() {
     let arena = Arena::new();
     let ir = IrSpec::from_doc(&arena, &doc).unwrap();
 
-    let [IrOperation { params, .. }] = &*ir.operations else {
+    let [RawOperation { params, .. }] = &*ir.operations else {
         panic!("expected single operation; got `{:?}`", ir.operations);
     };
     assert_matches!(
         &**params,
         [
-            IrParameter::Path(IrParameterInfo { name: "userId", .. }),
-            IrParameter::Path(IrParameterInfo { name: "postId", .. }),
+            RawParameter::Path(RawParameterInfo { name: "userId", .. }),
+            RawParameter::Path(RawParameterInfo { name: "postId", .. }),
         ],
     );
 }
@@ -311,15 +310,15 @@ fn test_parses_query_parameter_form_exploded() {
     let arena = Arena::new();
     let ir = IrSpec::from_doc(&arena, &doc).unwrap();
 
-    let [IrOperation { params, .. }] = &*ir.operations else {
+    let [RawOperation { params, .. }] = &*ir.operations else {
         panic!("expected single operation; got `{:?}`", ir.operations);
     };
     assert_matches!(
         &**params,
-        [IrParameter::Query(IrParameterInfo {
+        [RawParameter::Query(RawParameterInfo {
             name: "filter",
             required: false,
-            style: Some(IrParameterStyle::Form { exploded: true }),
+            style: Some(ParameterStyle::Form { exploded: true }),
             ..
         })],
     );
@@ -353,13 +352,13 @@ fn test_parses_query_parameter_form_unexploded() {
     let arena = Arena::new();
     let ir = IrSpec::from_doc(&arena, &doc).unwrap();
 
-    let [IrOperation { params, .. }] = &*ir.operations else {
+    let [RawOperation { params, .. }] = &*ir.operations else {
         panic!("expected single operation; got `{:?}`", ir.operations);
     };
     assert_matches!(
         &**params,
-        [IrParameter::Query(IrParameterInfo {
-            style: Some(IrParameterStyle::Form { exploded: false }),
+        [RawParameter::Query(RawParameterInfo {
+            style: Some(ParameterStyle::Form { exploded: false }),
             ..
         })],
     );
@@ -395,13 +394,13 @@ fn test_parses_query_parameter_pipe_delimited() {
     let arena = Arena::new();
     let ir = IrSpec::from_doc(&arena, &doc).unwrap();
 
-    let [IrOperation { params, .. }] = &*ir.operations else {
+    let [RawOperation { params, .. }] = &*ir.operations else {
         panic!("expected single operation; got `{:?}`", ir.operations);
     };
     assert_matches!(
         &**params,
-        [IrParameter::Query(IrParameterInfo {
-            style: Some(IrParameterStyle::PipeDelimited),
+        [RawParameter::Query(RawParameterInfo {
+            style: Some(ParameterStyle::PipeDelimited),
             ..
         })],
     );
@@ -437,13 +436,13 @@ fn test_parses_query_parameter_space_delimited() {
     let arena = Arena::new();
     let ir = IrSpec::from_doc(&arena, &doc).unwrap();
 
-    let [IrOperation { params, .. }] = &*ir.operations else {
+    let [RawOperation { params, .. }] = &*ir.operations else {
         panic!("expected single operation; got `{:?}`", ir.operations);
     };
     assert_matches!(
         &**params,
-        [IrParameter::Query(IrParameterInfo {
-            style: Some(IrParameterStyle::SpaceDelimited),
+        [RawParameter::Query(RawParameterInfo {
+            style: Some(ParameterStyle::SpaceDelimited),
             ..
         })],
     );
@@ -480,13 +479,13 @@ fn test_parses_query_parameter_deep_object() {
     let arena = Arena::new();
     let ir = IrSpec::from_doc(&arena, &doc).unwrap();
 
-    let [IrOperation { params, .. }] = &*ir.operations else {
+    let [RawOperation { params, .. }] = &*ir.operations else {
         panic!("expected single operation; got `{:?}`", ir.operations);
     };
     assert_matches!(
         &**params,
-        [IrParameter::Query(IrParameterInfo {
-            style: Some(IrParameterStyle::DeepObject),
+        [RawParameter::Query(RawParameterInfo {
+            style: Some(ParameterStyle::DeepObject),
             ..
         })],
     );
@@ -528,15 +527,15 @@ fn test_parses_multiple_query_parameters() {
     let arena = Arena::new();
     let ir = IrSpec::from_doc(&arena, &doc).unwrap();
 
-    let [IrOperation { params, .. }] = &*ir.operations else {
+    let [RawOperation { params, .. }] = &*ir.operations else {
         panic!("expected single operation; got `{:?}`", ir.operations);
     };
     assert_matches!(
         &**params,
         [
-            IrParameter::Query(IrParameterInfo { name: "page", .. }),
-            IrParameter::Query(IrParameterInfo { name: "limit", .. }),
-            IrParameter::Query(IrParameterInfo { name: "status", .. }),
+            RawParameter::Query(RawParameterInfo { name: "page", .. }),
+            RawParameter::Query(RawParameterInfo { name: "limit", .. }),
+            RawParameter::Query(RawParameterInfo { name: "status", .. }),
         ],
     );
 }
@@ -568,12 +567,12 @@ fn test_parses_query_parameter_with_description() {
     let arena = Arena::new();
     let ir = IrSpec::from_doc(&arena, &doc).unwrap();
 
-    let [IrOperation { params, .. }] = &*ir.operations else {
+    let [RawOperation { params, .. }] = &*ir.operations else {
         panic!("expected single operation; got `{:?}`", ir.operations);
     };
     assert_matches!(
         &**params,
-        [IrParameter::Query(IrParameterInfo {
+        [RawParameter::Query(RawParameterInfo {
             description: Some("The page number for pagination"),
             ..
         })],
@@ -616,8 +615,8 @@ fn test_parses_request_body_json_reference() {
 
     assert_matches!(
         &*ir.operations,
-        [IrOperation {
-            request: Some(IrRequest::Json(_)),
+        [RawOperation {
+            request: Some(RawRequest::Json(_)),
             ..
         }],
         "expected JSON request",
@@ -654,8 +653,8 @@ fn test_parses_request_body_json_inline_schema() {
 
     assert_matches!(
         &*ir.operations,
-        [IrOperation {
-            request: Some(IrRequest::Json(_)),
+        [RawOperation {
+            request: Some(RawRequest::Json(_)),
             ..
         }],
         "expected JSON request",
@@ -693,8 +692,8 @@ fn test_parses_request_body_multipart() {
 
     assert_matches!(
         &*ir.operations,
-        [IrOperation {
-            request: Some(IrRequest::Multipart),
+        [RawOperation {
+            request: Some(RawRequest::Multipart),
             ..
         }],
         "expected multipart request",
@@ -728,8 +727,8 @@ fn test_parses_request_body_wildcard_content_type() {
 
     assert_matches!(
         &*ir.operations,
-        [IrOperation {
-            request: Some(IrRequest::Json(_)),
+        [RawOperation {
+            request: Some(RawRequest::Json(_)),
             ..
         }],
         "expected JSON request with wildcard content type",
@@ -756,7 +755,7 @@ fn test_operation_without_request_body() {
     let arena = Arena::new();
     let ir = IrSpec::from_doc(&arena, &doc).unwrap();
 
-    assert_matches!(&*ir.operations, [IrOperation { request: None, .. }]);
+    assert_matches!(&*ir.operations, [RawOperation { request: None, .. }]);
 }
 
 // MARK: Response parsing
@@ -794,8 +793,8 @@ fn test_parses_response_json_reference() {
 
     assert_matches!(
         &*ir.operations,
-        [IrOperation {
-            response: Some(IrResponse::Json(_)),
+        [RawOperation {
+            response: Some(RawResponse::Json(_)),
             ..
         }],
         "expected JSON response",
@@ -831,8 +830,8 @@ fn test_parses_response_json_inline_schema() {
 
     assert_matches!(
         &*ir.operations,
-        [IrOperation {
-            response: Some(IrResponse::Json(_)),
+        [RawOperation {
+            response: Some(RawResponse::Json(_)),
             ..
         }],
         "expected JSON response",
@@ -881,17 +880,17 @@ fn test_prioritizes_2xx_status_over_default_response() {
     let arena = Arena::new();
     let ir = IrSpec::from_doc(&arena, &doc).unwrap();
 
-    let [op @ IrOperation { .. }] = &*ir.operations else {
+    let [op @ RawOperation { .. }] = &*ir.operations else {
         panic!("expected single operation; got `{:?}`", ir.operations);
     };
     let ty = match &op.response {
-        Some(IrResponse::Json(ty)) => ty,
+        Some(RawResponse::Json(ty)) => ty,
         other => panic!("expected JSON response; got `{other:?}`"),
     };
 
     // The response should be from the 200 status, not the default.
     let component_ref = match ty {
-        IrType::Ref(component_ref) => component_ref,
+        RawType::Ref(component_ref) => component_ref,
         other => panic!("expected schema reference; got `{other:?}`"),
     };
     assert_eq!(component_ref.name(), "User");
@@ -926,7 +925,7 @@ fn test_falls_back_to_default_response_when_no_2xx_status() {
 
     assert_matches!(
         &*ir.operations,
-        [IrOperation {
+        [RawOperation {
             response: Some(_),
             ..
         }]
@@ -959,8 +958,8 @@ fn test_parses_response_with_wildcard_content_type() {
 
     assert_matches!(
         &*ir.operations,
-        [IrOperation {
-            response: Some(IrResponse::Json(_)),
+        [RawOperation {
+            response: Some(RawResponse::Json(_)),
             ..
         }],
         "expected JSON response with wildcard content type",
@@ -1011,17 +1010,17 @@ fn test_selects_first_2xx_status_when_multiple_exist() {
     let arena = Arena::new();
     let ir = IrSpec::from_doc(&arena, &doc).unwrap();
 
-    let [op @ IrOperation { .. }] = &*ir.operations else {
+    let [op @ RawOperation { .. }] = &*ir.operations else {
         panic!("expected single operation; got `{:?}`", ir.operations);
     };
     let ty = match &op.response {
-        Some(IrResponse::Json(ty)) => ty,
+        Some(RawResponse::Json(ty)) => ty,
         other => panic!("expected JSON response; got `{other:?}`"),
     };
 
     // The response should be from the first 2xx status (200), not 202.
     let component_ref = match ty {
-        IrType::Ref(component_ref) => component_ref,
+        RawType::Ref(component_ref) => component_ref,
         other => panic!("expected schema reference; got `{other:?}`"),
     };
     assert_eq!(component_ref.name(), "UserList");
@@ -1045,7 +1044,7 @@ fn test_operation_without_response() {
     let arena = Arena::new();
     let ir = IrSpec::from_doc(&arena, &doc).unwrap();
 
-    assert_matches!(&*ir.operations, [IrOperation { response: None, .. }]);
+    assert_matches!(&*ir.operations, [RawOperation { response: None, .. }]);
 }
 
 // MARK: `x-resource-name` extension
@@ -1073,7 +1072,7 @@ fn test_parses_custom_resource_name_from_extension() {
 
     assert_matches!(
         &*ir.operations,
-        [IrOperation {
+        [RawOperation {
             resource: Some("user_management"),
             ..
         }],
@@ -1111,11 +1110,11 @@ fn test_different_operations_can_have_different_resources() {
     assert_matches!(
         &*ir.operations,
         [
-            IrOperation {
+            RawOperation {
                 resource: Some("user_management"),
                 ..
             },
-            IrOperation {
+            RawOperation {
                 resource: Some("content"),
                 ..
             }
@@ -1150,7 +1149,7 @@ fn test_schema_stores_x_resource_id() {
 
     assert_matches!(
         schema,
-        IrType::Schema(schema_ty) if schema_ty.resource() == Some("users"),
+        RawType::Schema(schema_ty) if schema_ty.resource() == Some("users"),
     );
 }
 
@@ -1178,7 +1177,7 @@ fn test_schema_without_x_resource_id_has_none() {
 
     assert_matches!(
         schema,
-        IrType::Schema(schema_ty) if schema_ty.resource().is_none(),
+        RawType::Schema(schema_ty) if schema_ty.resource().is_none(),
     );
 }
 
@@ -1211,7 +1210,7 @@ fn test_operation_without_id_is_skipped() {
     // Only the GET operation with `operationId` should be present.
     assert_matches!(
         &*ir.operations,
-        [IrOperation {
+        [RawOperation {
             id: "listUsers",
             ..
         }],
@@ -1322,7 +1321,7 @@ fn test_operation_with_all_components() {
 
     assert_matches!(
         &*ir.operations,
-        [IrOperation {
+        [RawOperation {
             id: "updateUser",
             method: Method::Put,
             resource: Some("users"),
@@ -1359,7 +1358,7 @@ fn test_preserves_operation_descriptions() {
 
     assert_matches!(
         &*ir.operations,
-        [IrOperation {
+        [RawOperation {
             description: Some("Retrieves a list of all users in the system"),
             ..
         }],
@@ -1433,25 +1432,25 @@ fn test_complex_spec_with_multiple_operations_and_resources() {
     assert_matches!(
         &*ir.operations,
         [
-            IrOperation {
+            RawOperation {
                 id: "listUsers",
                 method: Method::Get,
                 resource: Some("users"),
                 ..
             },
-            IrOperation {
+            RawOperation {
                 id: "createUser",
                 method: Method::Post,
                 resource: Some("users"),
                 ..
             },
-            IrOperation {
+            RawOperation {
                 id: "listPosts",
                 method: Method::Get,
                 resource: Some("posts"),
                 ..
             },
-            IrOperation {
+            RawOperation {
                 id: "getPost",
                 resource: Some("posts"),
                 ..
@@ -1487,15 +1486,15 @@ fn test_query_parameter_default_style_is_form_exploded() {
     let arena = Arena::new();
     let ir = IrSpec::from_doc(&arena, &doc).unwrap();
 
-    let [IrOperation { params, .. }] = &*ir.operations else {
+    let [RawOperation { params, .. }] = &*ir.operations else {
         panic!("expected single operation; got `{:?}`", ir.operations);
     };
     assert_matches!(
         &**params,
-        [IrParameter::Query(IrParameterInfo {
+        [RawParameter::Query(RawParameterInfo {
             // When `style` and `explode` are not specified,
             // the default should be an exploded form.
-            style: Some(IrParameterStyle::Form { exploded: true }),
+            style: Some(ParameterStyle::Form { exploded: true }),
             ..
         })]
     );
@@ -1532,10 +1531,10 @@ fn test_mixed_path_and_query_parameters() {
     let arena = Arena::new();
     let ir = IrSpec::from_doc(&arena, &doc).unwrap();
 
-    let [IrOperation { params, .. }] = &*ir.operations else {
+    let [RawOperation { params, .. }] = &*ir.operations else {
         panic!("expected single operation; got `{:?}`", ir.operations);
     };
-    assert_matches!(&**params, [IrParameter::Path(_), IrParameter::Query(_)]);
+    assert_matches!(&**params, [RawParameter::Path(_), RawParameter::Query(_)]);
 }
 
 #[test]
@@ -1569,7 +1568,7 @@ fn test_ignores_header_and_cookie_parameters() {
     let arena = Arena::new();
     let ir = IrSpec::from_doc(&arena, &doc).unwrap();
 
-    let [IrOperation { params, .. }] = &*ir.operations else {
+    let [RawOperation { params, .. }] = &*ir.operations else {
         panic!("expected single operation; got `{:?}`", ir.operations);
     };
     // Header and cookie parameters are ignored for now.

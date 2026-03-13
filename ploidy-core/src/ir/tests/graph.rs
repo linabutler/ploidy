@@ -4,7 +4,7 @@ use itertools::Itertools;
 
 use crate::{
     arena::Arena,
-    ir::{IrSpec, IrStructFieldName, RawGraph, SchemaIrTypeView, View},
+    ir::{IrSpec, RawGraph, SchemaTypeView, StructFieldName, View},
     parse::Document,
     tests::assert_matches,
 };
@@ -356,12 +356,12 @@ fn test_circular_refs_simple_cycle() {
     // The field pointing to B should need indirection due to the cycle.
     let a_schema = graph.schemas().find(|s| s.name() == "A").unwrap();
     let a_struct = match a_schema {
-        SchemaIrTypeView::Struct(_, struct_) => struct_,
+        SchemaTypeView::Struct(_, struct_) => struct_,
         other => panic!("expected struct `A`; got {other:?}"),
     };
     let b_field = a_struct
         .fields()
-        .find(|f| matches!(f.name(), IrStructFieldName::Name("b")))
+        .find(|f| matches!(f.name(), StructFieldName::Name("b")))
         .unwrap();
     assert!(b_field.needs_indirection());
 }
@@ -390,12 +390,12 @@ fn test_circular_refs_self_reference() {
     // Self-references should be detected as cycles.
     let node_schema = graph.schemas().find(|s| s.name() == "Node").unwrap();
     let node_struct = match node_schema {
-        SchemaIrTypeView::Struct(_, struct_) => struct_,
+        SchemaTypeView::Struct(_, struct_) => struct_,
         other => panic!("expected struct `Node`; got {other:?}"),
     };
     let next_field = node_struct
         .fields()
-        .find(|f| matches!(f.name(), IrStructFieldName::Name("next")))
+        .find(|f| matches!(f.name(), StructFieldName::Name("next")))
         .unwrap();
     assert!(next_field.needs_indirection());
 }
@@ -434,12 +434,12 @@ fn test_circular_refs_complex_cycle() {
     // At least one edge in the cycle should need indirection.
     let a_schema = graph.schemas().find(|s| s.name() == "A").unwrap();
     let a_struct = match a_schema {
-        SchemaIrTypeView::Struct(_, struct_) => struct_,
+        SchemaTypeView::Struct(_, struct_) => struct_,
         other => panic!("expected struct `A`; got {other:?}"),
     };
     let b_field = a_struct
         .fields()
-        .find(|f| matches!(f.name(), IrStructFieldName::Name("b")))
+        .find(|f| matches!(f.name(), StructFieldName::Name("b")))
         .unwrap();
     assert!(b_field.needs_indirection());
 }
@@ -476,12 +476,12 @@ fn test_circular_refs_no_cycles() {
     // shouldn't have any circular dependencies.
     let root_schema = graph.schemas().find(|s| s.name() == "Root").unwrap();
     let root_struct = match root_schema {
-        SchemaIrTypeView::Struct(_, struct_) => struct_,
+        SchemaTypeView::Struct(_, struct_) => struct_,
         other => panic!("expected struct `Root`; got {other:?}"),
     };
     let branch_field = root_struct
         .fields()
-        .find(|f| matches!(f.name(), IrStructFieldName::Name("branch")))
+        .find(|f| matches!(f.name(), StructFieldName::Name("branch")))
         .unwrap();
     assert!(!branch_field.needs_indirection());
 }
@@ -526,23 +526,23 @@ fn test_circular_refs_multiple_sccs() {
     // Both cycles should be detected.
     let a_schema = graph.schemas().find(|s| s.name() == "A").unwrap();
     let a_struct = match a_schema {
-        SchemaIrTypeView::Struct(_, struct_) => struct_,
+        SchemaTypeView::Struct(_, struct_) => struct_,
         other => panic!("expected struct `A`; got {other:?}"),
     };
     let a_b_field = a_struct
         .fields()
-        .find(|f| matches!(f.name(), IrStructFieldName::Name("b")))
+        .find(|f| matches!(f.name(), StructFieldName::Name("b")))
         .unwrap();
     assert!(a_b_field.needs_indirection());
 
     let c_schema = graph.schemas().find(|s| s.name() == "C").unwrap();
     let c_struct = match c_schema {
-        SchemaIrTypeView::Struct(_, struct_) => struct_,
+        SchemaTypeView::Struct(_, struct_) => struct_,
         other => panic!("expected struct `C`; got {other:?}"),
     };
     let c_d_field = c_struct
         .fields()
-        .find(|f| matches!(f.name(), IrStructFieldName::Name("d")))
+        .find(|f| matches!(f.name(), StructFieldName::Name("d")))
         .unwrap();
     assert!(c_d_field.needs_indirection());
 }
@@ -580,12 +580,12 @@ fn test_circular_refs_through_containers() {
     // Cycles through containers should be detected.
     let a_schema = graph.schemas().find(|s| s.name() == "A").unwrap();
     let a_struct = match a_schema {
-        SchemaIrTypeView::Struct(_, struct_) => struct_,
+        SchemaTypeView::Struct(_, struct_) => struct_,
         other => panic!("expected struct `A`; got {other:?}"),
     };
     let b_array_field = a_struct
         .fields()
-        .find(|f| matches!(f.name(), IrStructFieldName::Name("b_array")))
+        .find(|f| matches!(f.name(), StructFieldName::Name("b_array")))
         .unwrap();
     assert!(b_array_field.needs_indirection());
 }
@@ -628,12 +628,12 @@ fn test_circular_refs_diamond_no_false_positive() {
     // Diamond inheritance shouldn't be marked as circular.
     let top_schema = graph.schemas().find(|s| s.name() == "Top").unwrap();
     let top_struct = match top_schema {
-        SchemaIrTypeView::Struct(_, struct_) => struct_,
+        SchemaTypeView::Struct(_, struct_) => struct_,
         other => panic!("expected struct `Top`; got {other:?}"),
     };
     let left_field = top_struct
         .fields()
-        .find(|f| matches!(f.name(), IrStructFieldName::Name("left")))
+        .find(|f| matches!(f.name(), StructFieldName::Name("left")))
         .unwrap();
 
     assert!(!left_field.needs_indirection());
@@ -678,24 +678,24 @@ fn test_circular_refs_tarjan_correctness() {
     // A and B should be in a cycle.
     let a_schema = graph.schemas().find(|s| s.name() == "A").unwrap();
     let a_struct = match a_schema {
-        SchemaIrTypeView::Struct(_, struct_) => struct_,
+        SchemaTypeView::Struct(_, struct_) => struct_,
         other => panic!("expected struct `A`; got {other:?}"),
     };
     let a_b_field = a_struct
         .fields()
-        .find(|f| matches!(f.name(), IrStructFieldName::Name("b")))
+        .find(|f| matches!(f.name(), StructFieldName::Name("b")))
         .unwrap();
     assert!(a_b_field.needs_indirection());
 
     // C and D shouldn't be in a cycle.
     let c_schema = graph.schemas().find(|s| s.name() == "C").unwrap();
     let c_struct = match c_schema {
-        SchemaIrTypeView::Struct(_, struct_) => struct_,
+        SchemaTypeView::Struct(_, struct_) => struct_,
         other => panic!("expected struct `C`; got {other:?}"),
     };
     let c_d_field = c_struct
         .fields()
-        .find(|f| matches!(f.name(), IrStructFieldName::Name("d")))
+        .find(|f| matches!(f.name(), StructFieldName::Name("d")))
         .unwrap();
     assert!(!c_d_field.needs_indirection());
 }
@@ -730,12 +730,12 @@ fn test_needs_indirection_through_nullable() {
 
     let a_schema = graph.schemas().find(|s| s.name() == "A").unwrap();
     let a_struct = match a_schema {
-        SchemaIrTypeView::Struct(_, struct_) => struct_,
+        SchemaTypeView::Struct(_, struct_) => struct_,
         other => panic!("expected struct `A`; got {other:?}"),
     };
     let b_field = a_struct
         .fields()
-        .find(|f| matches!(f.name(), IrStructFieldName::Name("b")))
+        .find(|f| matches!(f.name(), StructFieldName::Name("b")))
         .unwrap();
     assert!(b_field.needs_indirection());
 }
@@ -765,12 +765,12 @@ fn test_needs_indirection_through_array() {
 
     let node_schema = graph.schemas().find(|s| s.name() == "Node").unwrap();
     let node_struct = match node_schema {
-        SchemaIrTypeView::Struct(_, struct_) => struct_,
+        SchemaTypeView::Struct(_, struct_) => struct_,
         other => panic!("expected struct `Node`; got {other:?}"),
     };
     let children_field = node_struct
         .fields()
-        .find(|f| matches!(f.name(), IrStructFieldName::Name("children")))
+        .find(|f| matches!(f.name(), StructFieldName::Name("children")))
         .unwrap();
     assert!(children_field.needs_indirection());
 }
@@ -800,12 +800,12 @@ fn test_needs_indirection_through_map() {
 
     let node_schema = graph.schemas().find(|s| s.name() == "Node").unwrap();
     let node_struct = match node_schema {
-        SchemaIrTypeView::Struct(_, struct_) => struct_,
+        SchemaTypeView::Struct(_, struct_) => struct_,
         other => panic!("expected struct `Node`; got {other:?}"),
     };
     let children_map_field = node_struct
         .fields()
-        .find(|f| matches!(f.name(), IrStructFieldName::Name("children_map")))
+        .find(|f| matches!(f.name(), StructFieldName::Name("children_map")))
         .unwrap();
     assert!(children_map_field.needs_indirection());
 }
@@ -840,18 +840,18 @@ fn test_indirect_and_direct_siblings() {
 
     let container_schema = graph.schemas().find(|s| s.name() == "Container").unwrap();
     let container_struct = match container_schema {
-        SchemaIrTypeView::Struct(_, view) => view,
+        SchemaTypeView::Struct(_, view) => view,
         other => panic!("expected struct `Container`; got {other:?}"),
     };
 
     let direct_field = container_struct
         .fields()
-        .find(|f| matches!(f.name(), IrStructFieldName::Name("direct_field")))
+        .find(|f| matches!(f.name(), StructFieldName::Name("direct_field")))
         .unwrap();
 
     let indirect_field = container_struct
         .fields()
-        .find(|f| matches!(f.name(), IrStructFieldName::Name("indirect_field")))
+        .find(|f| matches!(f.name(), StructFieldName::Name("indirect_field")))
         .unwrap();
 
     // Only the cyclic field needs indirection.
@@ -1704,7 +1704,7 @@ fn test_parents_returns_immediate_parents() {
 
     let user = graph.schemas().find(|s| s.name() == "User").unwrap();
     let user_struct = match user {
-        SchemaIrTypeView::Struct(_, view) => view,
+        SchemaTypeView::Struct(_, view) => view,
         other => panic!("expected struct `User`; got {other:?}"),
     };
 
@@ -1720,7 +1720,7 @@ fn test_parents_returns_immediate_parents() {
     let field_names = user_struct
         .fields()
         .map(|f| match f.name() {
-            IrStructFieldName::Name(n) => n,
+            StructFieldName::Name(n) => n,
             other => panic!("expected named field; got {other:?}"),
         })
         .collect_vec();
@@ -1756,7 +1756,7 @@ fn test_all_of_inheritance_with_fields() {
 
     let child = graph.schemas().find(|s| s.name() == "Child").unwrap();
     let child_struct = match child {
-        SchemaIrTypeView::Struct(_, view) => view,
+        SchemaTypeView::Struct(_, view) => view,
         other => panic!("expected struct `Child`; got {other:?}"),
     };
 
@@ -1772,7 +1772,7 @@ fn test_all_of_inheritance_with_fields() {
     let own_field_names = child_struct
         .own_fields()
         .map(|f| match f.name() {
-            IrStructFieldName::Name(n) => n,
+            StructFieldName::Name(n) => n,
             other => panic!("expected named field; got {other:?}"),
         })
         .collect_vec();
@@ -1782,7 +1782,7 @@ fn test_all_of_inheritance_with_fields() {
     let all_field_names = child_struct
         .fields()
         .map(|f| match f.name() {
-            IrStructFieldName::Name(n) => n,
+            StructFieldName::Name(n) => n,
             _ => panic!("expected named field"),
         })
         .collect_vec();
@@ -1791,13 +1791,13 @@ fn test_all_of_inheritance_with_fields() {
     // The `inherited()` flag should be correct for each field.
     let parent_field = child_struct
         .fields()
-        .find(|f| matches!(f.name(), IrStructFieldName::Name("parent_field")))
+        .find(|f| matches!(f.name(), StructFieldName::Name("parent_field")))
         .unwrap();
     assert!(parent_field.inherited());
 
     let child_field = child_struct
         .fields()
-        .find(|f| matches!(f.name(), IrStructFieldName::Name("child_field")))
+        .find(|f| matches!(f.name(), StructFieldName::Name("child_field")))
         .unwrap();
     assert!(!child_field.inherited());
 }
@@ -1837,7 +1837,7 @@ fn test_circular_refs_excludes_inherits_edges() {
 
     let parent = graph.schemas().find(|s| s.name() == "Parent").unwrap();
     let parent_struct = match parent {
-        SchemaIrTypeView::Struct(_, view) => view,
+        SchemaTypeView::Struct(_, view) => view,
         other => panic!("expected struct `Parent`; got {other:?}"),
     };
 
@@ -1845,7 +1845,7 @@ fn test_circular_refs_excludes_inherits_edges() {
     // is through inheritance, so no indirection is needed.
     let child_field = parent_struct
         .own_fields()
-        .find(|f| matches!(f.name(), IrStructFieldName::Name("child")))
+        .find(|f| matches!(f.name(), StructFieldName::Name("child")))
         .unwrap();
     assert!(!child_field.needs_indirection());
 }
@@ -1890,7 +1890,7 @@ fn test_multiple_parents() {
 
     let combined = graph.schemas().find(|s| s.name() == "Combined").unwrap();
     let combined_struct = match combined {
-        SchemaIrTypeView::Struct(_, view) => view,
+        SchemaTypeView::Struct(_, view) => view,
         other => panic!("expected struct `Combined`; got {other:?}"),
     };
 
@@ -1906,7 +1906,7 @@ fn test_multiple_parents() {
     let own_field_names = combined_struct
         .own_fields()
         .map(|f| match f.name() {
-            IrStructFieldName::Name(n) => n,
+            StructFieldName::Name(n) => n,
             other => panic!("expected named field; got {other:?}"),
         })
         .collect_vec();
@@ -1917,7 +1917,7 @@ fn test_multiple_parents() {
     let all_field_names = combined_struct
         .fields()
         .map(|f| match f.name() {
-            IrStructFieldName::Name(n) => n,
+            StructFieldName::Name(n) => n,
             other => panic!("expected named field; got {other:?}"),
         })
         .collect_vec();
@@ -1964,7 +1964,7 @@ fn test_circular_all_of_terminates() {
 
     let a = graph.schemas().find(|s| s.name() == "A").unwrap();
     let a_struct = match a {
-        SchemaIrTypeView::Struct(_, view) => view,
+        SchemaTypeView::Struct(_, view) => view,
         other => panic!("expected struct `A`; got {other:?}"),
     };
 
@@ -1973,7 +1973,7 @@ fn test_circular_all_of_terminates() {
     let field_names = a_struct
         .fields()
         .map(|f| match f.name() {
-            IrStructFieldName::Name(n) => n,
+            StructFieldName::Name(n) => n,
             other => panic!("expected named field; got {other:?}"),
         })
         .collect_vec();
@@ -1983,7 +1983,7 @@ fn test_circular_all_of_terminates() {
     // from tagged unions, so no field is a tag.
     let kind_field = a_struct
         .fields()
-        .find(|f| matches!(f.name(), IrStructFieldName::Name("kind")))
+        .find(|f| matches!(f.name(), StructFieldName::Name("kind")))
         .unwrap();
     assert!(!kind_field.tag());
     assert!(kind_field.inherited());
@@ -1991,7 +1991,7 @@ fn test_circular_all_of_terminates() {
     // A's own field should not be a tag.
     let a_field = a_struct
         .fields()
-        .find(|f| matches!(f.name(), IrStructFieldName::Name("a_field")))
+        .find(|f| matches!(f.name(), StructFieldName::Name("a_field")))
         .unwrap();
     assert!(!a_field.tag());
 }

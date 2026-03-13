@@ -5,10 +5,10 @@ use itertools::Itertools;
 use crate::{
     arena::Arena,
     ir::{
-        ContainerView, EdgeKind, ExtendableView, InlineIrTypePathRoot, InlineIrTypePathSegment,
-        InlineIrTypeView, IrEnumVariant, IrParameterStyle, IrRequestView, IrResponseView, IrSpec,
-        IrStructFieldName, IrTypeView, PrimitiveIrType, RawGraph, Reach, SchemaIrTypeView,
-        SchemaTypeInfo, SomeIrUntaggedVariant, Traversal, View,
+        ContainerView, EdgeKind, EnumVariant, ExtendableView, InlineTypePathRoot,
+        InlineTypePathSegment, InlineTypeView, IrSpec, ParameterStyle, PrimitiveType, RawGraph,
+        Reach, RequestView, ResponseView, SchemaTypeInfo, SchemaTypeView, SomeUntaggedVariant,
+        StructFieldName, Traversal, TypeView, View,
     },
     parse::{Document, Method, path::PathFragment},
     tests::assert_matches,
@@ -43,7 +43,7 @@ fn test_struct_view_fields_iterator() {
 
     let person_schema = graph.schemas().find(|s| s.name() == "Person").unwrap();
     let person_struct = match person_schema {
-        SchemaIrTypeView::Struct(_, view) => view,
+        SchemaTypeView::Struct(_, view) => view,
         other => panic!("expected struct `Person`; got {other:?}"),
     };
 
@@ -51,7 +51,7 @@ fn test_struct_view_fields_iterator() {
     let mut field_names = person_struct
         .fields()
         .map(|f| match f.name() {
-            IrStructFieldName::Name(n) => n,
+            StructFieldName::Name(n) => n,
             other => panic!("expected explicit struct field name; got {other:?}"),
         })
         .collect_vec();
@@ -84,15 +84,15 @@ fn test_struct_field_view_accessors() {
 
     let record_schema = graph.schemas().find(|s| s.name() == "Record").unwrap();
     let record_struct = match record_schema {
-        SchemaIrTypeView::Struct(_, view) => view,
+        SchemaTypeView::Struct(_, view) => view,
         other => panic!("expected struct `Record`; got {other:?}"),
     };
 
     let id_field = record_struct
         .fields()
-        .find(|f| matches!(f.name(), IrStructFieldName::Name("id")))
+        .find(|f| matches!(f.name(), StructFieldName::Name("id")))
         .unwrap();
-    assert_matches!(id_field.name(), IrStructFieldName::Name("id"));
+    assert_matches!(id_field.name(), StructFieldName::Name("id"));
     assert!(id_field.required());
 }
 
@@ -125,8 +125,8 @@ fn test_schema_view_from_graph() {
     let enum_view = graph.schemas().find(|s| s.name() == "MyEnum").unwrap();
 
     // Verify types.
-    assert_matches!(struct_view, SchemaIrTypeView::Struct(..));
-    assert_matches!(enum_view, SchemaIrTypeView::Enum(..));
+    assert_matches!(struct_view, SchemaTypeView::Struct(..));
+    assert_matches!(enum_view, SchemaTypeView::Enum(..));
 }
 
 // MARK: Extension system
@@ -255,27 +255,27 @@ fn test_extension_per_node_type() {
     // should return the same extensions.
     let schema3 = graph.schemas().find(|s| s.name() == "Struct3").unwrap();
     let struct3_view = match schema3 {
-        SchemaIrTypeView::Struct(_, struct_) => struct_,
+        SchemaTypeView::Struct(_, struct_) => struct_,
         other => panic!("expected struct `Struct3`; got {other:?}"),
     };
 
     let ref1_field = struct3_view
         .fields()
-        .find(|f| matches!(f.name(), IrStructFieldName::Name("ref1")))
+        .find(|f| matches!(f.name(), StructFieldName::Name("ref1")))
         .unwrap();
     let ref1_ty = ref1_field.ty();
     let ref1_schema = match ref1_ty {
-        IrTypeView::Schema(schema) => schema,
+        TypeView::Schema(schema) => schema,
         other => panic!("expected schema reference; got {other:?}"),
     };
 
     let ref2_field = struct3_view
         .fields()
-        .find(|f| matches!(f.name(), IrStructFieldName::Name("ref2")))
+        .find(|f| matches!(f.name(), StructFieldName::Name("ref2")))
         .unwrap();
     let ref2_ty = ref2_field.ty();
     let ref2_schema = match ref2_ty {
-        IrTypeView::Schema(view) => view,
+        TypeView::Schema(view) => view,
         other => panic!("expected schema reference; got {other:?}"),
     };
 
@@ -330,7 +330,7 @@ fn test_dependencies_multiple() {
     let mut dep_names = branch_schema
         .dependencies()
         .filter_map(|view| match view {
-            IrTypeView::Schema(view) => Some(view.name()),
+            TypeView::Schema(view) => Some(view.name()),
             _ => None,
         })
         .collect_vec();
@@ -433,17 +433,17 @@ fn test_dependencies_from_array_includes_inner_types() {
 
     let container_schema = graph.schemas().find(|s| s.name() == "Container").unwrap();
     let container_struct = match container_schema {
-        SchemaIrTypeView::Struct(_, view) => view,
+        SchemaTypeView::Struct(_, view) => view,
         other => panic!("expected struct `Container`; got {other:?}"),
     };
 
     let items_field = container_struct
         .fields()
-        .find(|f| matches!(f.name(), IrStructFieldName::Name("items")))
+        .find(|f| matches!(f.name(), StructFieldName::Name("items")))
         .unwrap();
 
     let container_view = match items_field.ty() {
-        IrTypeView::Inline(InlineIrTypeView::Container(_, view @ ContainerView::Array(_))) => view,
+        TypeView::Inline(InlineTypeView::Container(_, view @ ContainerView::Array(_))) => view,
         other => panic!("expected inline array; got {other:?}"),
     };
 
@@ -455,7 +455,7 @@ fn test_dependencies_from_array_includes_inner_types() {
     // Verify the `Item` schema is a dependency.
     assert!(dep_types.iter().any(|t| matches!(
         t,
-        IrTypeView::Schema(SchemaIrTypeView::Struct(
+        TypeView::Schema(SchemaTypeView::Struct(
             SchemaTypeInfo { name: "Item", .. },
             ..
         ))
@@ -464,7 +464,7 @@ fn test_dependencies_from_array_includes_inner_types() {
     // Verify the primitive field is a dependency.
     assert!(dep_types.iter().any(|t| matches!(
         t,
-        IrTypeView::Inline(InlineIrTypeView::Primitive(_, p)) if p.ty() == PrimitiveIrType::String
+        TypeView::Inline(InlineTypeView::Primitive(_, p)) if p.ty() == PrimitiveType::String
     )));
 }
 
@@ -500,17 +500,17 @@ fn test_dependencies_from_map_includes_inner_types() {
 
     let container_schema = graph.schemas().find(|s| s.name() == "Container").unwrap();
     let container_struct = match container_schema {
-        SchemaIrTypeView::Struct(_, view) => view,
+        SchemaTypeView::Struct(_, view) => view,
         other => panic!("expected struct `Container`; got {other:?}"),
     };
 
     let map_field = container_struct
         .fields()
-        .find(|f| matches!(f.name(), IrStructFieldName::Name("map_field")))
+        .find(|f| matches!(f.name(), StructFieldName::Name("map_field")))
         .unwrap();
 
     let container_view = match map_field.ty() {
-        IrTypeView::Inline(InlineIrTypeView::Container(_, view @ ContainerView::Map(_))) => view,
+        TypeView::Inline(InlineTypeView::Container(_, view @ ContainerView::Map(_))) => view,
         other => panic!("expected inline map; got {other:?}"),
     };
 
@@ -522,7 +522,7 @@ fn test_dependencies_from_map_includes_inner_types() {
     // Verify the `Item` schema is a dependency.
     assert!(dep_types.iter().any(|t| matches!(
         t,
-        IrTypeView::Schema(SchemaIrTypeView::Struct(
+        TypeView::Schema(SchemaTypeView::Struct(
             SchemaTypeInfo { name: "Item", .. },
             ..
         ))
@@ -531,7 +531,7 @@ fn test_dependencies_from_map_includes_inner_types() {
     // Verify the primitive field is a dependency.
     assert!(dep_types.iter().any(|t| matches!(
         t,
-        IrTypeView::Inline(InlineIrTypeView::Primitive(_, p)) if p.ty() == PrimitiveIrType::String
+        TypeView::Inline(InlineTypeView::Primitive(_, p)) if p.ty() == PrimitiveType::String
     )));
 }
 
@@ -566,19 +566,17 @@ fn test_dependencies_from_nullable_includes_inner_types() {
 
     let container_schema = graph.schemas().find(|s| s.name() == "Container").unwrap();
     let container_struct = match container_schema {
-        SchemaIrTypeView::Struct(_, view) => view,
+        SchemaTypeView::Struct(_, view) => view,
         other => panic!("expected struct `Container`; got {other:?}"),
     };
 
     let nullable_field = container_struct
         .fields()
-        .find(|f| matches!(f.name(), IrStructFieldName::Name("nullable_field")))
+        .find(|f| matches!(f.name(), StructFieldName::Name("nullable_field")))
         .unwrap();
 
     let container_view = match nullable_field.ty() {
-        IrTypeView::Inline(InlineIrTypeView::Container(_, view @ ContainerView::Optional(_))) => {
-            view
-        }
+        TypeView::Inline(InlineTypeView::Container(_, view @ ContainerView::Optional(_))) => view,
         other => panic!("expected optional; got {other:?}"),
     };
 
@@ -590,7 +588,7 @@ fn test_dependencies_from_nullable_includes_inner_types() {
     // Verify the `Item` schema is a dependency.
     assert!(dep_types.iter().any(|t| matches!(
         t,
-        IrTypeView::Schema(SchemaIrTypeView::Struct(
+        TypeView::Schema(SchemaTypeView::Struct(
             SchemaTypeInfo { name: "Item", .. },
             ..
         ))
@@ -599,7 +597,7 @@ fn test_dependencies_from_nullable_includes_inner_types() {
     // Verify the primitive field is a dependency.
     assert!(dep_types.iter().any(|t| matches!(
         t,
-        IrTypeView::Inline(InlineIrTypeView::Primitive(_, p)) if p.ty() == PrimitiveIrType::String
+        TypeView::Inline(InlineTypeView::Primitive(_, p)) if p.ty() == PrimitiveType::String
     )));
 }
 
@@ -637,17 +635,17 @@ fn test_dependencies_from_inline_includes_inner_types() {
 
     let container_schema = graph.schemas().find(|s| s.name() == "Container").unwrap();
     let container_struct = match container_schema {
-        SchemaIrTypeView::Struct(_, view) => view,
+        SchemaTypeView::Struct(_, view) => view,
         other => panic!("expected struct `Container`; got {other:?}"),
     };
 
     let inline_field = container_struct
         .fields()
-        .find(|f| matches!(f.name(), IrStructFieldName::Name("inline_field")))
+        .find(|f| matches!(f.name(), StructFieldName::Name("inline_field")))
         .unwrap();
 
     let inline_view = match inline_field.ty() {
-        IrTypeView::Inline(view) => view,
+        TypeView::Inline(view) => view,
         other => panic!("expected inline; got {other:?}"),
     };
 
@@ -659,7 +657,7 @@ fn test_dependencies_from_inline_includes_inner_types() {
     // Verify the `RefSchema` schema is a dependency.
     assert!(dep_types.iter().any(|t| matches!(
         t,
-        IrTypeView::Schema(SchemaIrTypeView::Struct(
+        TypeView::Schema(SchemaTypeView::Struct(
             SchemaTypeInfo {
                 name: "RefSchema",
                 ..
@@ -671,7 +669,7 @@ fn test_dependencies_from_inline_includes_inner_types() {
     // Verify the primitive field is a dependency.
     assert!(dep_types.iter().any(|t| matches!(
         t,
-        IrTypeView::Inline(InlineIrTypeView::Primitive(_, p)) if p.ty() == PrimitiveIrType::String
+        TypeView::Inline(InlineTypeView::Primitive(_, p)) if p.ty() == PrimitiveType::String
     )));
 }
 
@@ -699,17 +697,17 @@ fn test_dependencies_from_primitive_returns_empty() {
 
     let simple_schema = graph.schemas().next().unwrap();
     let simple_struct = match simple_schema {
-        SchemaIrTypeView::Struct(_, view) => view,
+        SchemaTypeView::Struct(_, view) => view,
         other => panic!("expected struct `Simple`; got {other:?}"),
     };
 
     let name_field = simple_struct
         .fields()
-        .find(|f| matches!(f.name(), IrStructFieldName::Name("name")))
+        .find(|f| matches!(f.name(), StructFieldName::Name("name")))
         .unwrap();
 
     let primitive_view = match name_field.ty() {
-        IrTypeView::Inline(InlineIrTypeView::Primitive(_, view)) => view,
+        TypeView::Inline(InlineTypeView::Primitive(_, view)) => view,
         other => panic!("expected primitive; got {other:?}"),
     };
 
@@ -741,17 +739,17 @@ fn test_dependencies_from_any_returns_empty() {
 
     let container_schema = graph.schemas().next().unwrap();
     let container_struct = match container_schema {
-        SchemaIrTypeView::Struct(_, view) => view,
+        SchemaTypeView::Struct(_, view) => view,
         other => panic!("expected struct `Container`; got {other:?}"),
     };
 
     let untyped_field = container_struct
         .fields()
-        .find(|f| matches!(f.name(), IrStructFieldName::Name("untyped")))
+        .find(|f| matches!(f.name(), StructFieldName::Name("untyped")))
         .unwrap();
 
     let untyped_view = match untyped_field.ty() {
-        IrTypeView::Inline(InlineIrTypeView::Any(_, view)) => view,
+        TypeView::Inline(InlineTypeView::Any(_, view)) => view,
         other => panic!("expected any; got {other:?}"),
     };
 
@@ -799,12 +797,12 @@ fn test_traverse_skip_excludes_node_but_continues_traversal() {
         .traverse(Reach::Dependencies, |kind, view| {
             assert_eq!(kind, EdgeKind::Reference);
             match view {
-                IrTypeView::Schema(s) if s.name() == "Middle" => Traversal::Skip,
+                TypeView::Schema(s) if s.name() == "Middle" => Traversal::Skip,
                 _ => Traversal::Visit,
             }
         })
         .filter_map(|view| match view {
-            IrTypeView::Schema(s) => Some(s.name()),
+            TypeView::Schema(s) => Some(s.name()),
             _ => None,
         })
         .collect_vec();
@@ -853,12 +851,12 @@ fn test_traverse_stop_includes_node_but_stops_traversal() {
         .traverse(Reach::Dependencies, |kind, view| {
             assert_eq!(kind, EdgeKind::Reference);
             match view {
-                IrTypeView::Schema(s) if s.name() == "Middle" => Traversal::Stop,
+                TypeView::Schema(s) if s.name() == "Middle" => Traversal::Stop,
                 _ => Traversal::Visit,
             }
         })
         .filter_map(|view| match view {
-            IrTypeView::Schema(s) => Some(s.name()),
+            TypeView::Schema(s) => Some(s.name()),
             _ => None,
         })
         .collect_vec();
@@ -906,12 +904,12 @@ fn test_traverse_ignore_excludes_node_and_stops_traversal() {
         .traverse(Reach::Dependencies, |kind, view| {
             assert_eq!(kind, EdgeKind::Reference);
             match view {
-                IrTypeView::Schema(s) if s.name() == "Middle" => Traversal::Ignore,
+                TypeView::Schema(s) if s.name() == "Middle" => Traversal::Ignore,
                 _ => Traversal::Visit,
             }
         })
         .filter_map(|view| match view {
-            IrTypeView::Schema(s) => Some(s.name()),
+            TypeView::Schema(s) => Some(s.name()),
             _ => None,
         })
         .collect_vec();
@@ -961,7 +959,7 @@ fn test_traverse_dependents_yields_types_that_depend_on_node() {
             Traversal::Visit
         })
         .filter_map(|view| match view {
-            IrTypeView::Schema(s) => Some(s.name()),
+            TypeView::Schema(s) => Some(s.name()),
             _ => None,
         })
         .collect_vec();
@@ -1013,7 +1011,7 @@ fn test_traverse_filter_on_edge_kind() {
             EdgeKind::Reference => Traversal::Ignore,
         })
         .filter_map(|view| match view {
-            IrTypeView::Schema(s) => Some(s.name()),
+            TypeView::Schema(s) => Some(s.name()),
             _ => None,
         })
         .collect_vec();
@@ -1026,7 +1024,7 @@ fn test_traverse_filter_on_edge_kind() {
             EdgeKind::Inherits => Traversal::Ignore,
         })
         .filter_map(|view| match view {
-            IrTypeView::Schema(s) => Some(s.name()),
+            TypeView::Schema(s) => Some(s.name()),
             _ => None,
         })
         .collect_vec();
@@ -1172,7 +1170,7 @@ fn test_tagged_variant_names_and_aliases() {
 
     let animal_schema = graph.schemas().find(|s| s.name() == "Animal").unwrap();
     let tagged_view = match animal_schema {
-        SchemaIrTypeView::Tagged(_, view) => view,
+        SchemaTypeView::Tagged(_, view) => view,
         other => panic!("expected tagged union `Animal`; got {other:?}"),
     };
 
@@ -1215,7 +1213,7 @@ fn test_tagged_variant_type_access() {
 
     let animal_schema = graph.schemas().find(|s| s.name() == "Animal").unwrap();
     let tagged_view = match animal_schema {
-        SchemaIrTypeView::Tagged(_, view) => view,
+        SchemaTypeView::Tagged(_, view) => view,
         other => panic!("expected tagged union `Animal`; got {other:?}"),
     };
 
@@ -1223,7 +1221,7 @@ fn test_tagged_variant_type_access() {
     let ty = variant.ty();
 
     // Verify the type is accessible and is a schema reference to `Cat`.
-    assert_matches!(ty, IrTypeView::Schema(view) if view.name() == "Cat");
+    assert_matches!(ty, TypeView::Schema(view) if view.name() == "Cat");
 }
 
 // MARK: Untagged union variant views
@@ -1260,7 +1258,7 @@ fn test_untagged_variant_iteration() {
 
     let animal_schema = graph.schemas().find(|s| s.name() == "Animal").unwrap();
     let untagged_view = match animal_schema {
-        SchemaIrTypeView::Untagged(_, view) => view,
+        SchemaTypeView::Untagged(_, view) => view,
         _ => panic!("`Animal` should be an untagged union"),
     };
 
@@ -1296,23 +1294,23 @@ fn test_array_view_provides_access_to_item_type() {
 
     let container_schema = graph.schemas().next().unwrap();
     let container_struct = match container_schema {
-        SchemaIrTypeView::Struct(_, view) => view,
+        SchemaTypeView::Struct(_, view) => view,
         other => panic!("expected struct `Container`; got {other:?}"),
     };
 
     let items_field = container_struct
         .fields()
-        .find(|f| matches!(f.name(), IrStructFieldName::Name("items")))
+        .find(|f| matches!(f.name(), StructFieldName::Name("items")))
         .unwrap();
 
     // Verify the array's inner type is accessible,
     // and is a string primitive.
     assert_matches!(
         items_field.ty(),
-        IrTypeView::Inline(InlineIrTypeView::Container(_, ContainerView::Array(inner)))
+        TypeView::Inline(InlineTypeView::Container(_, ContainerView::Array(inner)))
             if matches!(
                 inner.ty(),
-                IrTypeView::Inline(InlineIrTypeView::Primitive(_, p)) if p.ty() == PrimitiveIrType::String,
+                TypeView::Inline(InlineTypeView::Primitive(_, p)) if p.ty() == PrimitiveType::String,
             ),
     );
 }
@@ -1343,23 +1341,23 @@ fn test_map_view_provides_access_to_value_type() {
 
     let container_schema = graph.schemas().next().unwrap();
     let container_struct = match container_schema {
-        SchemaIrTypeView::Struct(_, view) => view,
+        SchemaTypeView::Struct(_, view) => view,
         other => panic!("expected struct `Container`; got {other:?}"),
     };
 
     let map_field = container_struct
         .fields()
-        .find(|f| matches!(f.name(), IrStructFieldName::Name("map_field")))
+        .find(|f| matches!(f.name(), StructFieldName::Name("map_field")))
         .unwrap();
 
     // Verify the map's inner type is accessible,
     // and is a string primitive.
     assert_matches!(
         map_field.ty(),
-        IrTypeView::Inline(InlineIrTypeView::Container(_, ContainerView::Map(inner)))
+        TypeView::Inline(InlineTypeView::Container(_, ContainerView::Map(inner)))
             if matches!(
                 inner.ty(),
-                IrTypeView::Inline(InlineIrTypeView::Primitive(_, p)) if p.ty() == PrimitiveIrType::String,
+                TypeView::Inline(InlineTypeView::Primitive(_, p)) if p.ty() == PrimitiveType::String,
             ),
     );
 }
@@ -1391,22 +1389,22 @@ fn test_nullable_view_provides_access_to_inner_type() {
 
     let container_schema = graph.schemas().next().unwrap();
     let container_struct = match container_schema {
-        SchemaIrTypeView::Struct(_, view) => view,
+        SchemaTypeView::Struct(_, view) => view,
         other => panic!("expected struct `Container`; got {other:?}"),
     };
 
     let nullable_field = container_struct
         .fields()
-        .find(|f| matches!(f.name(), IrStructFieldName::Name("nullable_field")))
+        .find(|f| matches!(f.name(), StructFieldName::Name("nullable_field")))
         .unwrap();
 
     // Verify the optional's inner type is accessible, and is an inline struct.
     assert_matches!(
         nullable_field.ty(),
-        IrTypeView::Inline(InlineIrTypeView::Container(_, ContainerView::Optional(inner)))
+        TypeView::Inline(InlineTypeView::Container(_, ContainerView::Optional(inner)))
             if matches!(
                 inner.ty(),
-                IrTypeView::Inline(InlineIrTypeView::Struct(_, _)),
+                TypeView::Inline(InlineTypeView::Struct(_, _)),
             ),
     );
 }
@@ -1440,23 +1438,23 @@ fn test_inline_struct_view_construction_and_path_access() {
 
     let container_schema = graph.schemas().next().unwrap();
     let container_struct = match container_schema {
-        SchemaIrTypeView::Struct(_, view) => view,
+        SchemaTypeView::Struct(_, view) => view,
         other => panic!("expected struct `Container`; got {other:?}"),
     };
 
     let inline_field = container_struct
         .fields()
-        .find(|f| matches!(f.name(), IrStructFieldName::Name("inline_obj")))
+        .find(|f| matches!(f.name(), StructFieldName::Name("inline_obj")))
         .unwrap();
 
     let field_ty = inline_field.ty();
     let inline_view = match field_ty {
-        IrTypeView::Inline(inline_view) => inline_view,
+        TypeView::Inline(inline_view) => inline_view,
         other => panic!("expected inline type; got {other:?}"),
     };
 
     // Should be able to match on the `Struct` variant.
-    assert_matches!(inline_view, InlineIrTypeView::Struct(_, _));
+    assert_matches!(inline_view, InlineTypeView::Struct(_, _));
 
     // `path()` should return the path to the inline type.
     let path = inline_view.path();
@@ -1488,24 +1486,24 @@ fn test_inline_enum_view_construction() {
 
     let container_schema = graph.schemas().next().unwrap();
     let container_struct = match container_schema {
-        SchemaIrTypeView::Struct(_, view) => view,
+        SchemaTypeView::Struct(_, view) => view,
         other => panic!("expected struct `Container`; got {other:?}"),
     };
 
     let status_field = container_struct
         .fields()
-        .find(|f| matches!(f.name(), IrStructFieldName::Name("status")))
+        .find(|f| matches!(f.name(), StructFieldName::Name("status")))
         .unwrap();
 
     let field_ty = status_field.ty();
     let inline_view = match field_ty {
-        IrTypeView::Inline(inline_view) => inline_view,
+        TypeView::Inline(inline_view) => inline_view,
         other => panic!("expected inline enum; got {other:?}"),
     };
 
     // Should construct an `Enum` variant.
     let enum_view = match inline_view {
-        InlineIrTypeView::Enum(_, view) => view,
+        InlineTypeView::Enum(_, view) => view,
         other => panic!("expected inline enum; got {other:?}"),
     };
 
@@ -1539,24 +1537,24 @@ fn test_inline_untagged_view_construction() {
 
     let container_schema = graph.schemas().next().unwrap();
     let container_struct = match container_schema {
-        SchemaIrTypeView::Struct(_, view) => view,
+        SchemaTypeView::Struct(_, view) => view,
         other => panic!("expected struct `Container`; got {other:?}"),
     };
 
     let value_field = container_struct
         .fields()
-        .find(|f| matches!(f.name(), IrStructFieldName::Name("value")))
+        .find(|f| matches!(f.name(), StructFieldName::Name("value")))
         .unwrap();
 
     let field_ty = value_field.ty();
     let inline_view = match field_ty {
-        IrTypeView::Inline(inline_view) => inline_view,
+        TypeView::Inline(inline_view) => inline_view,
         other => panic!("expected inline untagged union; got {other:?}"),
     };
 
     // Should construct an `Untagged` variant.
     let untagged_view = match inline_view {
-        InlineIrTypeView::Untagged(_, view) => view,
+        InlineTypeView::Untagged(_, view) => view,
         other => panic!("expected inline untagged union; got {other:?}"),
     };
 
@@ -1594,18 +1592,18 @@ fn test_inline_view_path_method() {
 
     let parent_schema = graph.schemas().next().unwrap();
     let parent_struct = match parent_schema {
-        SchemaIrTypeView::Struct(_, view) => view,
+        SchemaTypeView::Struct(_, view) => view,
         other => panic!("expected struct `Parent`; got {other:?}"),
     };
 
     let nested_field = parent_struct
         .fields()
-        .find(|f| matches!(f.name(), IrStructFieldName::Name("nested")))
+        .find(|f| matches!(f.name(), StructFieldName::Name("nested")))
         .unwrap();
 
     let nested_ty = nested_field.ty();
     let nested_inline = match nested_ty {
-        IrTypeView::Inline(inline_view) => inline_view,
+        TypeView::Inline(inline_view) => inline_view,
         other => panic!("expected inline type; got {other:?}"),
     };
 
@@ -1613,7 +1611,7 @@ fn test_inline_view_path_method() {
     let path = nested_inline.path();
     assert_matches!(
         path.segments,
-        [InlineIrTypePathSegment::Field(IrStructFieldName::Name(
+        [InlineTypePathSegment::Field(StructFieldName::Name(
             "nested"
         ))]
     );
@@ -1656,23 +1654,23 @@ fn test_inline_view_with_view_trait_methods() {
     let request = operation.request().unwrap();
 
     let request_ty = match request {
-        IrRequestView::Json(ty) => ty,
+        RequestView::Json(ty) => ty,
         other => panic!("expected JSON request; got `{other:?}`"),
     };
 
     let request_struct = match request_ty {
-        IrTypeView::Inline(InlineIrTypeView::Struct(_, view)) => view,
+        TypeView::Inline(InlineTypeView::Struct(_, view)) => view,
         other => panic!("expected inline struct; got {other:?}"),
     };
 
     let status_field = request_struct
         .fields()
-        .find(|f| matches!(f.name(), IrStructFieldName::Name("status")))
+        .find(|f| matches!(f.name(), StructFieldName::Name("status")))
         .unwrap();
 
     let status_ty = status_field.ty();
     let inline_enum = match status_ty {
-        IrTypeView::Inline(inline_view) => inline_view,
+        TypeView::Inline(inline_view) => inline_view,
         other => panic!("expected inline type; got {other:?}"),
     };
 
@@ -1721,7 +1719,7 @@ fn test_untagged_variant_with_null_type() {
 
     let animal_schema = graph.schemas().find(|s| s.name() == "Animal").unwrap();
     let untagged_view = match animal_schema {
-        SchemaIrTypeView::Untagged(_, view) => view,
+        SchemaTypeView::Untagged(_, view) => view,
         other => panic!("expected untagged union `Animal`; got {other:?}"),
     };
 
@@ -1732,8 +1730,8 @@ fn test_untagged_variant_with_null_type() {
     let cat_variant = &variants[0];
     assert_matches!(
         cat_variant.ty(),
-        Some(SomeIrUntaggedVariant {
-            view: IrTypeView::Schema(view),
+        Some(SomeUntaggedVariant {
+            view: TypeView::Schema(view),
             ..
         }) if view.name() == "Cat",
     );
@@ -1741,8 +1739,8 @@ fn test_untagged_variant_with_null_type() {
     let dog_variant = &variants[1];
     assert_matches!(
         dog_variant.ty(),
-        Some(SomeIrUntaggedVariant {
-            view: IrTypeView::Schema(view),
+        Some(SomeUntaggedVariant {
+            view: TypeView::Schema(view),
             ..
         }) if view.name() == "Dog",
     );
@@ -1775,7 +1773,7 @@ fn test_enum_view_variants() {
 
     let status_schema = graph.schemas().find(|s| s.name() == "Status").unwrap();
     let enum_view = match status_schema {
-        SchemaIrTypeView::Enum(_, view) => view,
+        SchemaTypeView::Enum(_, view) => view,
         other => panic!("expected enum `Status`; got {other:?}"),
     };
     let variants = enum_view.variants();
@@ -1784,9 +1782,9 @@ fn test_enum_view_variants() {
     assert_matches!(
         variants,
         [
-            IrEnumVariant::String("active"),
-            IrEnumVariant::String("inactive"),
-            IrEnumVariant::String("pending"),
+            EnumVariant::String("active"),
+            EnumVariant::String("inactive"),
+            EnumVariant::String("pending"),
         ]
     );
 }
@@ -1813,7 +1811,7 @@ fn test_enum_view_with_description() {
 
     let priority_schema = graph.schemas().find(|s| s.name() == "Priority").unwrap();
     let enum_view = match priority_schema {
-        SchemaIrTypeView::Enum(_, view) => view,
+        SchemaTypeView::Enum(_, view) => view,
         other => panic!("expected enum `Priority`; got {other:?}"),
     };
     assert_matches!(enum_view.description(), Some("Task priority level"));
@@ -1840,7 +1838,7 @@ fn test_enum_view_without_description() {
 
     let status_schema = graph.schemas().find(|s| s.name() == "Status").unwrap();
     let enum_view = match status_schema {
-        SchemaIrTypeView::Enum(_, view) => view,
+        SchemaTypeView::Enum(_, view) => view,
         other => panic!("expected enum `Status`; got {other:?}"),
     };
     assert_matches!(enum_view.description(), None);
@@ -1867,16 +1865,16 @@ fn test_enum_view_variants_with_numbers() {
 
     let priority_schema = graph.schemas().find(|s| s.name() == "Priority").unwrap();
     let enum_view = match priority_schema {
-        SchemaIrTypeView::Enum(_, view) => view,
+        SchemaTypeView::Enum(_, view) => view,
         other => panic!("expected enum `Priority`; got {other:?}"),
     };
     let variants = enum_view.variants();
 
     // Verify the actual variant values.
     let [
-        IrEnumVariant::Number(n1),
-        IrEnumVariant::Number(n2),
-        IrEnumVariant::Number(n3),
+        EnumVariant::Number(n1),
+        EnumVariant::Number(n2),
+        EnumVariant::Number(n3),
     ] = variants
     else {
         panic!("expected 3 variants; got {variants:?}");
@@ -1907,13 +1905,13 @@ fn test_enum_view_variants_with_booleans() {
 
     let toggle_schema = graph.schemas().find(|s| s.name() == "Toggle").unwrap();
     let enum_view = match toggle_schema {
-        SchemaIrTypeView::Enum(_, view) => view,
+        SchemaTypeView::Enum(_, view) => view,
         other => panic!("expected enum `Toggle`; got {other:?}"),
     };
     let variants = enum_view.variants();
 
     // Verify the actual variant values.
-    let &[IrEnumVariant::Bool(b1), IrEnumVariant::Bool(b2)] = variants else {
+    let &[EnumVariant::Bool(b1), EnumVariant::Bool(b2)] = variants else {
         panic!("expected 2 variants; got {variants:?}");
     };
     assert!(b1);
@@ -1955,7 +1953,7 @@ fn test_enum_view_with_view_trait_methods() {
 
     let status_schema = graph.schemas().find(|s| s.name() == "Status").unwrap();
     let enum_view = match &status_schema {
-        SchemaIrTypeView::Enum(_, view) => view,
+        SchemaTypeView::Enum(_, view) => view,
         other => panic!("expected enum `Status`; got {other:?}"),
     };
 
@@ -2208,17 +2206,17 @@ fn test_operation_parameter_ty() {
     let path_param = operation.path().params().next().unwrap();
     assert_matches!(
         path_param.ty(),
-        IrTypeView::Inline(InlineIrTypeView::Primitive(_, p)) if p.ty() == PrimitiveIrType::String,
+        TypeView::Inline(InlineTypeView::Primitive(_, p)) if p.ty() == PrimitiveType::String,
     );
 
     // Array-of-strings query parameter.
     let query_param = operation.query().next().unwrap();
     assert_matches!(
         query_param.ty(),
-        IrTypeView::Inline(InlineIrTypeView::Container(_, ContainerView::Array(inner)))
+        TypeView::Inline(InlineTypeView::Container(_, ContainerView::Array(inner)))
             if matches!(
                 inner.ty(),
-                IrTypeView::Inline(InlineIrTypeView::Primitive(_, p)) if p.ty() == PrimitiveIrType::String,
+                TypeView::Inline(InlineTypeView::Primitive(_, p)) if p.ty() == PrimitiveType::String,
             ),
     );
 }
@@ -2289,21 +2287,18 @@ fn test_operation_parameter_style() {
 
     // Non-exploded `form` style.
     let tags = query_params.iter().find(|p| p.name() == "tags").unwrap();
-    assert_matches!(
-        tags.style(),
-        Some(IrParameterStyle::Form { exploded: false }),
-    );
+    assert_matches!(tags.style(), Some(ParameterStyle::Form { exploded: false }),);
 
     // `pipeDelimited` style.
     let filters = query_params.iter().find(|p| p.name() == "filters").unwrap();
-    assert_matches!(filters.style(), Some(IrParameterStyle::PipeDelimited));
+    assert_matches!(filters.style(), Some(ParameterStyle::PipeDelimited));
 
     // `spaceDelimited` style.
     let space = query_params
         .iter()
         .find(|p| p.name() == "space_separated")
         .unwrap();
-    assert_matches!(space.style(), Some(IrParameterStyle::SpaceDelimited));
+    assert_matches!(space.style(), Some(ParameterStyle::SpaceDelimited));
 
     // Exploded `form` style, explicitly specified.
     let form_exploded = query_params
@@ -2312,7 +2307,7 @@ fn test_operation_parameter_style() {
         .unwrap();
     assert_matches!(
         form_exploded.style(),
-        Some(IrParameterStyle::Form { exploded: true }),
+        Some(ParameterStyle::Form { exploded: true }),
     );
 
     // `deepObject` style.
@@ -2320,7 +2315,7 @@ fn test_operation_parameter_style() {
         .iter()
         .find(|p| p.name() == "deep_obj")
         .unwrap();
-    assert_matches!(deep_obj.style(), Some(IrParameterStyle::DeepObject));
+    assert_matches!(deep_obj.style(), Some(ParameterStyle::DeepObject));
 
     // No explicit style; defaults to the exploded `form` style.
     let no_style = query_params
@@ -2329,7 +2324,7 @@ fn test_operation_parameter_style() {
         .unwrap();
     assert_matches!(
         no_style.style(),
-        Some(IrParameterStyle::Form { exploded: true }),
+        Some(ParameterStyle::Form { exploded: true }),
     );
 }
 
@@ -2365,7 +2360,7 @@ fn test_operation_request_json() {
     let operation = graph.operations().next().unwrap();
     assert_matches!(
         operation.request(),
-        Some(IrRequestView::Json(IrTypeView::Inline(_))),
+        Some(RequestView::Json(TypeView::Inline(_))),
     );
 }
 
@@ -2400,7 +2395,7 @@ fn test_operation_request_multipart() {
     let graph = RawGraph::new(&arena, &spec).cook();
 
     let operation = graph.operations().next().unwrap();
-    assert_matches!(operation.request(), Some(IrRequestView::Multipart));
+    assert_matches!(operation.request(), Some(RequestView::Multipart));
 }
 
 #[test]
@@ -2480,9 +2475,9 @@ fn test_operation_response_without_schema() {
     // Empty response schema becomes `IrResponse::Json(IrType::Any)`.
     assert_matches!(
         operation.response(),
-        Some(IrResponseView::Json(IrTypeView::Inline(
-            InlineIrTypeView::Any(..)
-        )))
+        Some(ResponseView::Json(TypeView::Inline(InlineTypeView::Any(
+            ..
+        ))))
     );
 }
 
@@ -2589,45 +2584,45 @@ fn test_operation_view_inlines_finds_inline_types() {
     let address = inlines
         .iter()
         .find(|inline| {
-            matches!(inline, InlineIrTypeView::Struct(path, _) if matches!(
+            matches!(inline, InlineTypeView::Struct(path, _) if matches!(
                 path.segments,
                 [
-                    InlineIrTypePathSegment::Operation("createUser"),
-                    InlineIrTypePathSegment::Request,
-                    InlineIrTypePathSegment::Field(IrStructFieldName::Name("address")),
+                    InlineTypePathSegment::Operation("createUser"),
+                    InlineTypePathSegment::Request,
+                    InlineTypePathSegment::Field(StructFieldName::Name("address")),
                 ],
             ))
         })
         .unwrap();
-    assert_matches!(address, InlineIrTypeView::Struct(_, _));
+    assert_matches!(address, InlineTypeView::Struct(_, _));
 
     let request = inlines
         .iter()
         .find(|inline| {
-            matches!(inline, InlineIrTypeView::Struct(path, _) if matches!(
+            matches!(inline, InlineTypeView::Struct(path, _) if matches!(
                 path.segments,
                 [
-                    InlineIrTypePathSegment::Operation("createUser"),
-                    InlineIrTypePathSegment::Request,
+                    InlineTypePathSegment::Operation("createUser"),
+                    InlineTypePathSegment::Request,
                 ],
             ))
         })
         .unwrap();
-    assert_matches!(request, InlineIrTypeView::Struct(_, _));
+    assert_matches!(request, InlineTypeView::Struct(_, _));
 
     let response = inlines
         .iter()
         .find(|inline| {
-            matches!(inline, InlineIrTypeView::Struct(path, _) if matches!(
+            matches!(inline, InlineTypeView::Struct(path, _) if matches!(
                 path.segments,
                 [
-                    InlineIrTypePathSegment::Operation("createUser"),
-                    InlineIrTypePathSegment::Response,
+                    InlineTypePathSegment::Operation("createUser"),
+                    InlineTypePathSegment::Response,
                 ],
             ))
         })
         .unwrap();
-    assert_matches!(response, InlineIrTypeView::Struct(_, _));
+    assert_matches!(response, InlineTypeView::Struct(_, _));
 }
 
 #[test]
@@ -2668,33 +2663,33 @@ fn test_operation_request_and_response() {
 
     let operation = graph.operations().next().unwrap();
 
-    let Some(IrRequestView::Json(IrTypeView::Inline(request))) = operation.request() else {
+    let Some(RequestView::Json(TypeView::Inline(request))) = operation.request() else {
         panic!(
             "expected inline request schema; got {:?}",
             operation.request(),
         );
     };
-    assert_matches!(request.path().root, InlineIrTypePathRoot::Resource(None));
+    assert_matches!(request.path().root, InlineTypePathRoot::Resource(None));
     assert_matches!(
         request.path().segments,
         [
-            InlineIrTypePathSegment::Operation("createUser"),
-            InlineIrTypePathSegment::Request,
+            InlineTypePathSegment::Operation("createUser"),
+            InlineTypePathSegment::Request,
         ],
     );
 
-    let Some(IrResponseView::Json(IrTypeView::Inline(response))) = operation.response() else {
+    let Some(ResponseView::Json(TypeView::Inline(response))) = operation.response() else {
         panic!(
             "expected inline response schema; got {:?}",
             operation.response(),
         );
     };
-    assert_matches!(response.path().root, InlineIrTypePathRoot::Resource(None));
+    assert_matches!(response.path().root, InlineTypePathRoot::Resource(None));
     assert_matches!(
         response.path().segments,
         [
-            InlineIrTypePathSegment::Operation("createUser"),
-            InlineIrTypePathSegment::Response,
+            InlineTypePathSegment::Operation("createUser"),
+            InlineTypePathSegment::Response,
         ],
     );
 }
@@ -2749,30 +2744,30 @@ fn test_variant_field_matching_tagged_union_tag_is_tag() {
     // `Comment.kind` should be detected as a tag field because
     // `Comment` is a direct variant of the `Post` tagged union.
     let comment = graph.schemas().find(|s| s.name() == "Comment").unwrap();
-    let SchemaIrTypeView::Struct(_, comment_struct) = comment else {
+    let SchemaTypeView::Struct(_, comment_struct) = comment else {
         panic!("expected struct `Comment`; got `{comment:?}`");
     };
     let kind_field = comment_struct
         .fields()
-        .find(|f| matches!(f.name(), IrStructFieldName::Name("kind")))
+        .find(|f| matches!(f.name(), StructFieldName::Name("kind")))
         .unwrap();
     assert!(kind_field.tag());
 
     // Other fields on `Comment` should not be tags.
     let id_field = comment_struct
         .fields()
-        .find(|f| matches!(f.name(), IrStructFieldName::Name("id")))
+        .find(|f| matches!(f.name(), StructFieldName::Name("id")))
         .unwrap();
     assert!(!id_field.tag());
 
     // `Reaction.kind` should also be detected as a tag field.
     let reaction = graph.schemas().find(|s| s.name() == "Reaction").unwrap();
-    let SchemaIrTypeView::Struct(_, reaction_struct) = reaction else {
+    let SchemaTypeView::Struct(_, reaction_struct) = reaction else {
         panic!("expected struct `Reaction`; got `{reaction:?}`");
     };
     let kind_field = reaction_struct
         .fields()
-        .find(|f| matches!(f.name(), IrStructFieldName::Name("kind")))
+        .find(|f| matches!(f.name(), StructFieldName::Name("kind")))
         .unwrap();
     assert!(kind_field.tag());
 }
@@ -2822,24 +2817,24 @@ fn test_transitive_dependency_field_matching_tag_is_not_tag() {
     // `Wrapper.kind` _is_ a tag field, because `Wrapper` is a
     // direct variant of `Outer`.
     let wrapper = graph.schemas().find(|s| s.name() == "Wrapper").unwrap();
-    let SchemaIrTypeView::Struct(_, wrapper_struct) = wrapper else {
+    let SchemaTypeView::Struct(_, wrapper_struct) = wrapper else {
         panic!("expected struct `Wrapper`; got `{wrapper:?}`");
     };
     let kind_field = wrapper_struct
         .fields()
-        .find(|f| matches!(f.name(), IrStructFieldName::Name("kind")))
+        .find(|f| matches!(f.name(), StructFieldName::Name("kind")))
         .unwrap();
     assert!(kind_field.tag());
 
     // `Inner.kind` is _not_ a tag field, because `Inner` is only
     // transitively reachable from `Outer`, not a direct variant.
     let inner = graph.schemas().find(|s| s.name() == "Inner").unwrap();
-    let SchemaIrTypeView::Struct(_, inner_struct) = inner else {
+    let SchemaTypeView::Struct(_, inner_struct) = inner else {
         panic!("expected struct `Inner`; got `{inner:?}`");
     };
     let kind_field = inner_struct
         .fields()
-        .find(|f| matches!(f.name(), IrStructFieldName::Name("kind")))
+        .find(|f| matches!(f.name(), StructFieldName::Name("kind")))
         .unwrap();
     assert!(!kind_field.tag());
 }
@@ -2879,21 +2874,21 @@ fn test_own_struct_tag_field() {
     let graph = RawGraph::new(&arena, &spec).cook();
 
     let base = graph.schemas().find(|s| s.name() == "Base").unwrap();
-    let SchemaIrTypeView::Struct(_, base_struct) = base else {
+    let SchemaTypeView::Struct(_, base_struct) = base else {
         panic!("expected struct `Base`; got `{base:?}`");
     };
 
     // The `kind` field should be marked as a tag field.
     let kind_field = base_struct
         .fields()
-        .find(|f| matches!(f.name(), IrStructFieldName::Name("kind")))
+        .find(|f| matches!(f.name(), StructFieldName::Name("kind")))
         .unwrap();
     assert!(kind_field.tag());
 
     // The `name` field should not be a tag field.
     let name_field = base_struct
         .fields()
-        .find(|f| matches!(f.name(), IrStructFieldName::Name("name")))
+        .find(|f| matches!(f.name(), StructFieldName::Name("name")))
         .unwrap();
     assert!(!name_field.tag());
 }
@@ -2937,14 +2932,14 @@ fn test_inherited_tag_field() {
     let graph = RawGraph::new(&arena, &spec).cook();
 
     let child = graph.schemas().find(|s| s.name() == "Child").unwrap();
-    let SchemaIrTypeView::Struct(_, child_struct) = child else {
+    let SchemaTypeView::Struct(_, child_struct) = child else {
         panic!("expected struct `Child`; got `{child:?}`");
     };
 
     // The child's inherited `kind` field should be marked as a tag.
     let kind_field = child_struct
         .fields()
-        .find(|f| matches!(f.name(), IrStructFieldName::Name("kind")))
+        .find(|f| matches!(f.name(), StructFieldName::Name("kind")))
         .unwrap();
     assert!(kind_field.tag());
     assert!(kind_field.inherited());
@@ -2952,7 +2947,7 @@ fn test_inherited_tag_field() {
     // The child's own `name` field should not be a tag.
     let name_field = child_struct
         .fields()
-        .find(|f| matches!(f.name(), IrStructFieldName::Name("name")))
+        .find(|f| matches!(f.name(), StructFieldName::Name("name")))
         .unwrap();
     assert!(!name_field.tag());
     assert!(!name_field.inherited());
@@ -2990,7 +2985,7 @@ fn test_fields_linearizes_inline_all_of_parents() {
     let graph = RawGraph::new(&arena, &spec).cook();
 
     let person = graph.schemas().find(|s| s.name() == "Person").unwrap();
-    let SchemaIrTypeView::Struct(_, person_struct) = person else {
+    let SchemaTypeView::Struct(_, person_struct) = person else {
         panic!("expected struct `Person`; got `{person:?}`");
     };
 
@@ -2999,7 +2994,7 @@ fn test_fields_linearizes_inline_all_of_parents() {
     let field_names = person_struct
         .fields()
         .filter_map(|f| match f.name() {
-            IrStructFieldName::Name(n) => Some(n),
+            StructFieldName::Name(n) => Some(n),
             _ => None,
         })
         .collect_vec();
@@ -3008,20 +3003,20 @@ fn test_fields_linearizes_inline_all_of_parents() {
     // Fields from inline parents should be marked as inherited.
     let name_field = person_struct
         .fields()
-        .find(|f| matches!(f.name(), IrStructFieldName::Name("name")))
+        .find(|f| matches!(f.name(), StructFieldName::Name("name")))
         .unwrap();
     assert!(name_field.inherited());
 
     let age_field = person_struct
         .fields()
-        .find(|f| matches!(f.name(), IrStructFieldName::Name("age")))
+        .find(|f| matches!(f.name(), StructFieldName::Name("age")))
         .unwrap();
     assert!(age_field.inherited());
 
     // Own field should not be inherited.
     let email_field = person_struct
         .fields()
-        .find(|f| matches!(f.name(), IrStructFieldName::Name("email")))
+        .find(|f| matches!(f.name(), StructFieldName::Name("email")))
         .unwrap();
     assert!(!email_field.inherited());
 }
@@ -3069,24 +3064,24 @@ fn test_inline_tagged_view_construction() {
 
     let container_schema = graph.schemas().find(|s| s.name() == "Container").unwrap();
     let container_struct = match container_schema {
-        SchemaIrTypeView::Struct(_, view) => view,
+        SchemaTypeView::Struct(_, view) => view,
         other => panic!("expected struct `Container`; got {other:?}"),
     };
 
     let animal_field = container_struct
         .fields()
-        .find(|f| matches!(f.name(), IrStructFieldName::Name("animal")))
+        .find(|f| matches!(f.name(), StructFieldName::Name("animal")))
         .unwrap();
 
     let field_ty = animal_field.ty();
     let inline_view = match field_ty {
-        IrTypeView::Inline(inline_view) => inline_view,
+        TypeView::Inline(inline_view) => inline_view,
         other => panic!("expected inline tagged union; got {other:?}"),
     };
 
     // Should construct a `Tagged` variant.
     let tagged_view = match inline_view {
-        InlineIrTypeView::Tagged(_, view) => view,
+        InlineTypeView::Tagged(_, view) => view,
         other => panic!("expected inline tagged union; got {other:?}"),
     };
 
@@ -3133,29 +3128,29 @@ fn test_inline_tagged_view_variant_types() {
 
     let container_schema = graph.schemas().find(|s| s.name() == "Container").unwrap();
     let container_struct = match container_schema {
-        SchemaIrTypeView::Struct(_, view) => view,
+        SchemaTypeView::Struct(_, view) => view,
         other => panic!("expected struct `Container`; got {other:?}"),
     };
 
     let animal_field = container_struct
         .fields()
-        .find(|f| matches!(f.name(), IrStructFieldName::Name("animal")))
+        .find(|f| matches!(f.name(), StructFieldName::Name("animal")))
         .unwrap();
 
     let inline_view = match animal_field.ty() {
-        IrTypeView::Inline(inline_view) => inline_view,
+        TypeView::Inline(inline_view) => inline_view,
         other => panic!("expected inline type; got {other:?}"),
     };
 
     let tagged_view = match inline_view {
-        InlineIrTypeView::Tagged(_, view) => view,
+        InlineTypeView::Tagged(_, view) => view,
         other => panic!("expected inline tagged union; got {other:?}"),
     };
 
     // Verify the variant type is accessible.
     let variant = tagged_view.variants().next().unwrap();
     assert_eq!(variant.name(), "Cat");
-    assert_matches!(variant.ty(), IrTypeView::Schema(view) if view.name() == "Cat");
+    assert_matches!(variant.ty(), TypeView::Schema(view) if view.name() == "Cat");
 }
 
 #[test]
@@ -3203,8 +3198,8 @@ fn test_inlines_finds_inline_tagged_unions() {
     assert_matches!(
         &*inlines,
         [
-            InlineIrTypeView::Container(_, _),
-            InlineIrTypeView::Tagged(_, _)
+            InlineTypeView::Container(_, _),
+            InlineTypeView::Tagged(_, _)
         ]
     );
 }
@@ -3249,7 +3244,7 @@ fn test_tag_false_for_inlined_struct() {
     let graph = raw.cook();
 
     let dog = graph.schemas().find(|s| s.name() == "Dog").unwrap();
-    let SchemaIrTypeView::Struct(_, dog_struct) = dog else {
+    let SchemaTypeView::Struct(_, dog_struct) = dog else {
         panic!("expected struct `Dog`; got `{dog:?}`");
     };
 
@@ -3258,7 +3253,7 @@ fn test_tag_false_for_inlined_struct() {
     // is not treated as a tag field.
     let kind_field = dog_struct
         .fields()
-        .find(|f| matches!(f.name(), IrStructFieldName::Name("kind")))
+        .find(|f| matches!(f.name(), StructFieldName::Name("kind")))
         .unwrap();
     assert!(!kind_field.tag());
 }
@@ -3307,36 +3302,36 @@ fn test_inlined_when_tagged_unions_disagree_on_tag() {
     // `Dog` is inlined because the two tagged unions disagree on
     // their tag. The original struct keeps all fields.
     let dog = graph.schemas().find(|s| s.name() == "Dog").unwrap();
-    let SchemaIrTypeView::Struct(_, dog_struct) = dog else {
+    let SchemaTypeView::Struct(_, dog_struct) = dog else {
         panic!("expected struct `Dog`; got `{dog:?}`");
     };
     let field_names = dog_struct.fields().map(|f| f.name()).collect_vec();
     assert_matches!(
         &*field_names,
         [
-            IrStructFieldName::Name("kind"),
-            IrStructFieldName::Name("category"),
-            IrStructFieldName::Name("bark"),
+            StructFieldName::Name("kind"),
+            StructFieldName::Name("category"),
+            StructFieldName::Name("bark"),
         ]
     );
 
     // Each tagged union should have an inline variant with all
     // fields present, and tag field should be `tag()`.
     let by_kind = graph.schemas().find(|s| s.name() == "ByKind").unwrap();
-    let SchemaIrTypeView::Tagged(_, by_kind_tagged) = by_kind else {
+    let SchemaTypeView::Tagged(_, by_kind_tagged) = by_kind else {
         panic!("expected tagged `ByKind`; got `{by_kind:?}`");
     };
     let variant = by_kind_tagged.variants().next().unwrap();
-    let IrTypeView::Inline(InlineIrTypeView::Struct(_, inline_struct)) = variant.ty() else {
+    let TypeView::Inline(InlineTypeView::Struct(_, inline_struct)) = variant.ty() else {
         panic!("expected inline struct variant; got `{:?}`", variant.ty());
     };
     let inline_fields = inline_struct.fields().map(|f| f.name()).collect_vec();
     assert_matches!(
         &*inline_fields,
         [
-            IrStructFieldName::Name("kind"),
-            IrStructFieldName::Name("category"),
-            IrStructFieldName::Name("bark"),
+            StructFieldName::Name("kind"),
+            StructFieldName::Name("category"),
+            StructFieldName::Name("bark"),
         ]
     );
     let tags = inline_struct
@@ -3344,23 +3339,23 @@ fn test_inlined_when_tagged_unions_disagree_on_tag() {
         .filter(|f| f.tag())
         .map(|f| f.name())
         .collect_vec();
-    assert_matches!(&*tags, [IrStructFieldName::Name("kind")]);
+    assert_matches!(&*tags, [StructFieldName::Name("kind")]);
 
     let by_category = graph.schemas().find(|s| s.name() == "ByCategory").unwrap();
-    let SchemaIrTypeView::Tagged(_, by_category_tagged) = by_category else {
+    let SchemaTypeView::Tagged(_, by_category_tagged) = by_category else {
         panic!("expected tagged `ByCategory`; got `{by_category:?}`");
     };
     let variant = by_category_tagged.variants().next().unwrap();
-    let IrTypeView::Inline(InlineIrTypeView::Struct(_, inline_struct)) = variant.ty() else {
+    let TypeView::Inline(InlineTypeView::Struct(_, inline_struct)) = variant.ty() else {
         panic!("expected inline struct variant; got `{:?}`", variant.ty());
     };
     let inline_fields = inline_struct.fields().map(|f| f.name()).collect_vec();
     assert_matches!(
         &*inline_fields,
         [
-            IrStructFieldName::Name("kind"),
-            IrStructFieldName::Name("category"),
-            IrStructFieldName::Name("bark"),
+            StructFieldName::Name("kind"),
+            StructFieldName::Name("category"),
+            StructFieldName::Name("bark"),
         ]
     );
     let tags = inline_struct
@@ -3368,7 +3363,7 @@ fn test_inlined_when_tagged_unions_disagree_on_tag() {
         .filter(|f| f.tag())
         .map(|f| f.name())
         .collect_vec();
-    assert_matches!(&*tags, [IrStructFieldName::Name("category")]);
+    assert_matches!(&*tags, [StructFieldName::Name("category")]);
 }
 
 #[test]
@@ -3420,14 +3415,11 @@ fn test_inlined_variant_inline_field_types_not_leaked() {
 
     // Inlines should only include the inline struct variant `Dog`,
     // not `Dog`'s inline field type `Details`.
-    let [InlineIrTypeView::Struct(path, _)] = &*pet_inlines else {
+    let [InlineTypeView::Struct(path, _)] = &*pet_inlines else {
         panic!("expected inline struct variant `Dog`; got `{pet_inlines:?}`");
     };
-    assert_matches!(path.root, InlineIrTypePathRoot::Type("Pet"));
-    assert_matches!(
-        path.segments,
-        [InlineIrTypePathSegment::TaggedVariant("Dog")]
-    );
+    assert_matches!(path.root, InlineTypePathRoot::Type("Pet"));
+    assert_matches!(path.segments, [InlineTypePathSegment::TaggedVariant("Dog")]);
 
     // `Dog`'s own `inlines()` still contains its inline types:
     // containers for optional fields, the `Details` struct, etc.
@@ -3436,13 +3428,13 @@ fn test_inlined_variant_inline_field_types_not_leaked() {
     assert!(
         dog_inlines
             .iter()
-            .any(|i| matches!(i, InlineIrTypeView::Struct(..))),
+            .any(|i| matches!(i, InlineTypeView::Struct(..))),
         "expected `Dog` to have inline struct `Details`"
     );
     assert!(
         dog_inlines
             .iter()
-            .all(|i| i.path().root == InlineIrTypePathRoot::Type("Dog")),
+            .all(|i| i.path().root == InlineTypePathRoot::Type("Dog")),
         "all of `Dog`'s inlines should be rooted at `Dog`"
     );
 }
@@ -3498,13 +3490,13 @@ fn test_tag_false_when_only_operation_prevents_inlining() {
     // `Dog` must be inlined because the operation needs the schema
     // struct with `kind` as a regular field.
     let dog = graph.schemas().find(|s| s.name() == "Dog").unwrap();
-    let SchemaIrTypeView::Struct(_, dog_struct) = dog else {
+    let SchemaTypeView::Struct(_, dog_struct) = dog else {
         panic!("expected struct `Dog`; got `{dog:?}`");
     };
 
     let kind_field = dog_struct
         .fields()
-        .find(|f| matches!(f.name(), IrStructFieldName::Name("kind")))
+        .find(|f| matches!(f.name(), StructFieldName::Name("kind")))
         .unwrap();
     assert!(
         !kind_field.tag(),
@@ -3562,12 +3554,12 @@ fn test_inlined_when_struct_field_references_tagged_variant() {
     // The schema struct `Dog` should retain `kind` as a regular field,
     // not a tag, because it's referenced by `Owner.dog`.
     let dog = graph.schemas().find(|s| s.name() == "Dog").unwrap();
-    let SchemaIrTypeView::Struct(_, dog_struct) = dog else {
+    let SchemaTypeView::Struct(_, dog_struct) = dog else {
         panic!("expected struct `Dog`; got `{dog:?}`");
     };
     let kind_field = dog_struct
         .fields()
-        .find(|f| matches!(f.name(), IrStructFieldName::Name("kind")))
+        .find(|f| matches!(f.name(), StructFieldName::Name("kind")))
         .unwrap();
     assert!(
         !kind_field.tag(),
@@ -3578,32 +3570,26 @@ fn test_inlined_when_struct_field_references_tagged_variant() {
     // The `Pet` tagged union should wrap an inline variant,
     // not the schema struct directly.
     let pet = graph.schemas().find(|s| s.name() == "Pet").unwrap();
-    let SchemaIrTypeView::Tagged(_, pet_tagged) = pet else {
+    let SchemaTypeView::Tagged(_, pet_tagged) = pet else {
         panic!("expected tagged `Pet`; got `{pet:?}`");
     };
     let variant = pet_tagged.variants().next().unwrap();
-    let IrTypeView::Inline(InlineIrTypeView::Struct(path, inline_struct)) = variant.ty() else {
+    let TypeView::Inline(InlineTypeView::Struct(path, inline_struct)) = variant.ty() else {
         panic!("expected inline struct variant; got `{:?}`", variant.ty());
     };
-    assert_matches!(path.root, InlineIrTypePathRoot::Type("Pet"));
-    assert_matches!(
-        path.segments,
-        [InlineIrTypePathSegment::TaggedVariant("Dog")]
-    );
+    assert_matches!(path.root, InlineTypePathRoot::Type("Pet"));
+    assert_matches!(path.segments, [InlineTypePathSegment::TaggedVariant("Dog")]);
 
     // The inline struct should have the same fields, and `kind`
     // should be a tag there; it's the tag for `Pet`.
     let inline_fields = inline_struct.fields().map(|f| f.name()).collect_vec();
     assert_matches!(
         &*inline_fields,
-        [
-            IrStructFieldName::Name("kind"),
-            IrStructFieldName::Name("bark"),
-        ]
+        [StructFieldName::Name("kind"), StructFieldName::Name("bark"),]
     );
     let kind_inline = inline_struct
         .fields()
-        .find(|f| matches!(f.name(), IrStructFieldName::Name("kind")))
+        .find(|f| matches!(f.name(), StructFieldName::Name("kind")))
         .unwrap();
     assert!(
         kind_inline.tag(),

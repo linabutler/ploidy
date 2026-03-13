@@ -2,8 +2,8 @@ use itertools::Itertools;
 use ploidy_core::{
     codegen::UniqueNames,
     ir::{
-        ContainerView, IrOperationView, IrParameterStyle, IrParameterView, IrPathParameter,
-        IrQueryParameter, IrRequestView, IrResponseView,
+        ContainerView, OperationView, ParameterStyle, ParameterView, PathParameter, QueryParameter,
+        RequestView, ResponseView,
     },
     parse::{Method, path::PathFragment},
 };
@@ -19,16 +19,16 @@ use super::{
 
 /// Generates a single client method for an API operation.
 pub struct CodegenOperation<'a> {
-    op: &'a IrOperationView<'a>,
+    op: &'a OperationView<'a>,
 }
 
 impl<'a> CodegenOperation<'a> {
-    pub fn new(op: &'a IrOperationView<'a>) -> Self {
+    pub fn new(op: &'a OperationView<'a>) -> Self {
         Self { op }
     }
 
     /// Generates code to build the request URL, with path parameters substituted.
-    fn url(&self, params: &[(CodegenIdent, IrParameterView<'_, IrPathParameter>)]) -> TokenStream {
+    fn url(&self, params: &[(CodegenIdent, ParameterView<'_, PathParameter>)]) -> TokenStream {
         let segments = self
             .op
             .path()
@@ -88,25 +88,22 @@ impl<'a> CodegenOperation<'a> {
     }
 
     /// Generates code to append query parameters.
-    fn query(
-        &self,
-        params: &[(CodegenIdent, IrParameterView<'_, IrQueryParameter>)],
-    ) -> TokenStream {
+    fn query(&self, params: &[(CodegenIdent, ParameterView<'_, QueryParameter>)]) -> TokenStream {
         let appends = params
             .iter()
             .map(|(ident, param)| {
                 let name = param.name();
                 let style = match param.style() {
-                    Some(IrParameterStyle::DeepObject) => {
+                    Some(ParameterStyle::DeepObject) => {
                         quote!(::ploidy_util::QueryStyle::DeepObject)
                     }
-                    Some(IrParameterStyle::SpaceDelimited) => {
+                    Some(ParameterStyle::SpaceDelimited) => {
                         quote!(::ploidy_util::QueryStyle::SpaceDelimited)
                     }
-                    Some(IrParameterStyle::PipeDelimited) => {
+                    Some(ParameterStyle::PipeDelimited) => {
                         quote!(::ploidy_util::QueryStyle::PipeDelimited)
                     }
-                    Some(IrParameterStyle::Form { exploded }) => {
+                    Some(ParameterStyle::Form { exploded }) => {
                         quote!(::ploidy_util::QueryStyle::Form { exploded: #exploded })
                     }
                     None => quote!(::ploidy_util::QueryStyle::default()),
@@ -174,11 +171,11 @@ impl ToTokens for CodegenOperation<'_> {
 
         if let Some(request) = self.op.request() {
             match request {
-                IrRequestView::Json(view) => {
+                RequestView::Json(view) => {
                     let param_type = CodegenRef::new(&view);
                     params.push(quote! { request: impl Into<#param_type> });
                 }
-                IrRequestView::Multipart => {
+                RequestView::Multipart => {
                     params.push(quote! { form: ::ploidy_util::reqwest::multipart::Form });
                 }
             }
@@ -186,7 +183,7 @@ impl ToTokens for CodegenOperation<'_> {
 
         let return_type = match self.op.response() {
             Some(response) => match response {
-                IrResponseView::Json(view) => CodegenRef::new(&view).into_token_stream(),
+                ResponseView::Json(view) => CodegenRef::new(&view).into_token_stream(),
             },
             None => quote! { () },
         };
@@ -196,7 +193,7 @@ impl ToTokens for CodegenOperation<'_> {
 
         let http_method = CodegenMethod(self.op.method());
         let build_request = match self.op.request() {
-            Some(IrRequestView::Json(_)) => quote! {
+            Some(RequestView::Json(_)) => quote! {
                 let response = self.client
                     .#http_method(url)
                     .headers(self.headers.clone())
@@ -205,7 +202,7 @@ impl ToTokens for CodegenOperation<'_> {
                     .await?
                     .error_for_status()?;
             },
-            Some(IrRequestView::Multipart) => quote! {
+            Some(RequestView::Multipart) => quote! {
                 let response = self.client
                     .#http_method(url)
                     .headers(self.headers.clone())

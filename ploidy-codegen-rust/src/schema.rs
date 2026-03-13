@@ -1,5 +1,5 @@
 use ploidy_core::codegen::IntoCode;
-use ploidy_core::ir::{ContainerView, SchemaIrTypeView};
+use ploidy_core::ir::{ContainerView, SchemaTypeView};
 use proc_macro2::TokenStream;
 use quote::{ToTokens, TokenStreamExt, quote};
 
@@ -12,11 +12,11 @@ use super::{
 /// Generates a module for a named schema type.
 #[derive(Debug)]
 pub struct CodegenSchemaType<'a> {
-    ty: &'a SchemaIrTypeView<'a>,
+    ty: &'a SchemaTypeView<'a>,
 }
 
 impl<'a> CodegenSchemaType<'a> {
-    pub fn new(ty: &'a SchemaIrTypeView<'a>) -> Self {
+    pub fn new(ty: &'a SchemaTypeView<'a>) -> Self {
         Self { ty }
     }
 }
@@ -25,13 +25,13 @@ impl ToTokens for CodegenSchemaType<'_> {
     fn to_tokens(&self, tokens: &mut TokenStream) {
         let name = CodegenTypeName::Schema(self.ty);
         let ty = match self.ty {
-            SchemaIrTypeView::Struct(_, view) => CodegenStruct::new(name, view).into_token_stream(),
-            SchemaIrTypeView::Enum(_, view) => CodegenEnum::new(name, view).into_token_stream(),
-            SchemaIrTypeView::Tagged(_, view) => CodegenTagged::new(name, view).into_token_stream(),
-            SchemaIrTypeView::Untagged(_, view) => {
+            SchemaTypeView::Struct(_, view) => CodegenStruct::new(name, view).into_token_stream(),
+            SchemaTypeView::Enum(_, view) => CodegenEnum::new(name, view).into_token_stream(),
+            SchemaTypeView::Tagged(_, view) => CodegenTagged::new(name, view).into_token_stream(),
+            SchemaTypeView::Untagged(_, view) => {
                 CodegenUntagged::new(name, view).into_token_stream()
             }
-            SchemaIrTypeView::Container(_, ContainerView::Array(inner)) => {
+            SchemaTypeView::Container(_, ContainerView::Array(inner)) => {
                 let doc_attrs = inner.description().map(doc_attrs);
                 let inner_ty = inner.ty();
                 let inner_ref = CodegenRef::new(&inner_ty);
@@ -40,7 +40,7 @@ impl ToTokens for CodegenSchemaType<'_> {
                     pub type #name = ::std::vec::Vec<#inner_ref>;
                 }
             }
-            SchemaIrTypeView::Container(_, ContainerView::Map(inner)) => {
+            SchemaTypeView::Container(_, ContainerView::Map(inner)) => {
                 let doc_attrs = inner.description().map(doc_attrs);
                 let inner_ty = inner.ty();
                 let inner_ref = CodegenRef::new(&inner_ty);
@@ -49,7 +49,7 @@ impl ToTokens for CodegenSchemaType<'_> {
                     pub type #name = ::std::collections::BTreeMap<::std::string::String, #inner_ref>;
                 }
             }
-            SchemaIrTypeView::Container(_, ContainerView::Optional(inner)) => {
+            SchemaTypeView::Container(_, ContainerView::Optional(inner)) => {
                 let doc_attrs = inner.description().map(doc_attrs);
                 let inner_ty = inner.ty();
                 let inner_ref = CodegenRef::new(&inner_ty);
@@ -58,13 +58,13 @@ impl ToTokens for CodegenSchemaType<'_> {
                     pub type #name = ::std::option::Option<#inner_ref>;
                 }
             }
-            SchemaIrTypeView::Primitive(_, view) => {
+            SchemaTypeView::Primitive(_, view) => {
                 let primitive = CodegenPrimitive::new(view);
                 quote! {
                     pub type #name = #primitive;
                 }
             }
-            SchemaIrTypeView::Any(_, _) => {
+            SchemaTypeView::Any(_, _) => {
                 quote! {
                     pub type #name = ::ploidy_util::serde_json::Value;
                 }
@@ -96,7 +96,7 @@ mod tests {
 
     use ploidy_core::{
         arena::Arena,
-        ir::{IrSpec, RawGraph, SchemaIrTypeView},
+        ir::{IrSpec, RawGraph, SchemaTypeView},
         parse::Document,
     };
     use pretty_assertions::assert_eq;
@@ -142,7 +142,7 @@ mod tests {
         let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
         let schema = graph.schemas().find(|s| s.name() == "Container");
-        let Some(schema @ SchemaIrTypeView::Struct(_, _)) = &schema else {
+        let Some(schema @ SchemaTypeView::Struct(_, _)) = &schema else {
             panic!("expected struct `Container`; got `{schema:?}`");
         };
 
@@ -219,7 +219,7 @@ mod tests {
         let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
         let schema = graph.schemas().find(|s| s.name() == "InvalidParameters");
-        let Some(schema @ SchemaIrTypeView::Container(_, _)) = &schema else {
+        let Some(schema @ SchemaTypeView::Container(_, _)) = &schema else {
             panic!("expected container `InvalidParameters`; got `{schema:?}`");
         };
 
@@ -263,7 +263,7 @@ mod tests {
         let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
         let schema = graph.schemas().find(|s| s.name() == "Tags");
-        let Some(schema @ SchemaIrTypeView::Container(_, _)) = &schema else {
+        let Some(schema @ SchemaTypeView::Container(_, _)) = &schema else {
             panic!("expected container `Tags`; got `{schema:?}`");
         };
 
@@ -298,7 +298,7 @@ mod tests {
         let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
         let schema = graph.schemas().find(|s| s.name() == "Metadata");
-        let Some(schema @ SchemaIrTypeView::Container(_, _)) = &schema else {
+        let Some(schema @ SchemaTypeView::Container(_, _)) = &schema else {
             panic!("expected container `Metadata`; got `{schema:?}`");
         };
 
@@ -347,7 +347,7 @@ mod tests {
 
         // `type: ["string", "null"]` becomes `Option<String>`.
         let schema = graph.schemas().find(|s| s.name() == "NullableString");
-        let Some(schema @ SchemaIrTypeView::Container(_, _)) = &schema else {
+        let Some(schema @ SchemaTypeView::Container(_, _)) = &schema else {
             panic!("expected container `NullableString`; got `{schema:?}`");
         };
         let codegen = CodegenSchemaType::new(schema);
@@ -359,7 +359,7 @@ mod tests {
 
         // `type: ["array", "null"]` becomes `Option<Vec<String>>`.
         let schema = graph.schemas().find(|s| s.name() == "NullableArray");
-        let Some(schema @ SchemaIrTypeView::Container(_, _)) = &schema else {
+        let Some(schema @ SchemaTypeView::Container(_, _)) = &schema else {
             panic!("expected container `NullableArray`; got `{schema:?}`");
         };
         let codegen = CodegenSchemaType::new(schema);
@@ -372,7 +372,7 @@ mod tests {
         // `type: ["object", "null"]` with `additionalProperties` becomes
         // `Option<BTreeMap<String, String>>`.
         let schema = graph.schemas().find(|s| s.name() == "NullableMap");
-        let Some(schema @ SchemaIrTypeView::Container(_, _)) = &schema else {
+        let Some(schema @ SchemaTypeView::Container(_, _)) = &schema else {
             panic!("expected container `NullableMap`; got `{schema:?}`");
         };
         let codegen = CodegenSchemaType::new(schema);
@@ -385,7 +385,7 @@ mod tests {
         // `oneOf` with an inline schema and `null` becomes an `Option<InlineStruct>`,
         // with the inline struct definition emitted in `mod types`.
         let schema = graph.schemas().find(|s| s.name() == "NullableOneOf");
-        let Some(schema @ SchemaIrTypeView::Container(_, _)) = &schema else {
+        let Some(schema @ SchemaTypeView::Container(_, _)) = &schema else {
             panic!("expected container `NullableOneOf`; got `{schema:?}`");
         };
         let codegen = CodegenSchemaType::new(schema);
@@ -427,7 +427,7 @@ mod tests {
         let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
         let schema = graph.schemas().find(|s| s.name() == "Tags");
-        let Some(schema @ SchemaIrTypeView::Container(_, _)) = &schema else {
+        let Some(schema @ SchemaTypeView::Container(_, _)) = &schema else {
             panic!("expected container `Tags`; got `{schema:?}`");
         };
 

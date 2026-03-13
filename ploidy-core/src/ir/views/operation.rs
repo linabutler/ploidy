@@ -11,24 +11,27 @@ use petgraph::{
 
 use crate::{
     ir::{
-        graph::{CookedGraph, CookedOperation, EdgeKind, GraphNode, Traversal, Traverse},
-        types::{IrParameter, IrParameterInfo, IrParameterStyle, IrRequest, IrResponse},
+        graph::{CookedGraph, EdgeKind, GraphNode, Traversal, Traverse},
+        types::{
+            CookedOperation, CookedParameter, CookedParameterInfo, CookedRequest, CookedResponse,
+            ParameterStyle,
+        },
     },
     parse::{Method, path::PathSegment},
 };
 
-use super::{Reach, View, inline::InlineIrTypeView, ir::IrTypeView};
+use super::{Reach, View, inline::InlineTypeView, ir::TypeView};
 
-/// A graph-aware view of an [`IrOperation`][crate::ir::IrOperation].
+/// A graph-aware view of an [`Operation`][crate::ir::CookedOperation].
 #[derive(Debug)]
-pub struct IrOperationView<'a> {
+pub struct OperationView<'a> {
     cooked: &'a CookedGraph<'a>,
-    op: CookedOperation<'a>,
+    op: &'a CookedOperation<'a>,
 }
 
-impl<'a> IrOperationView<'a> {
+impl<'a> OperationView<'a> {
     #[inline]
-    pub(in crate::ir) fn new(cooked: &'a CookedGraph<'a>, op: CookedOperation<'a>) -> Self {
+    pub(in crate::ir) fn new(cooked: &'a CookedGraph<'a>, op: &'a CookedOperation<'a>) -> Self {
         Self { cooked, op }
     }
 
@@ -43,8 +46,8 @@ impl<'a> IrOperationView<'a> {
     }
 
     #[inline]
-    pub fn path(&self) -> IrOperationViewPath<'_, 'a> {
-        IrOperationViewPath(self)
+    pub fn path(&self) -> OperationViewPath<'_, 'a> {
+        OperationViewPath(self)
     }
 
     #[inline]
@@ -54,27 +57,27 @@ impl<'a> IrOperationView<'a> {
 
     /// Returns an iterator over this operation's query parameters.
     #[inline]
-    pub fn query(&self) -> impl Iterator<Item = IrParameterView<'a, IrQueryParameter>> + '_ {
+    pub fn query(&self) -> impl Iterator<Item = ParameterView<'a, QueryParameter>> + '_ {
         self.op.params.iter().filter_map(move |param| match param {
-            IrParameter::Query(info) => Some(IrParameterView::new(self.cooked, info)),
+            CookedParameter::Query(info) => Some(ParameterView::new(self.cooked, info)),
             _ => None,
         })
     }
 
     /// Returns a view of the request body, if present.
     #[inline]
-    pub fn request(&self) -> Option<IrRequestView<'a>> {
+    pub fn request(&self) -> Option<RequestView<'a>> {
         self.op.request.as_ref().map(|ty| match ty {
-            IrRequest::Json(index) => IrRequestView::Json(IrTypeView::new(self.cooked, *index)),
-            IrRequest::Multipart => IrRequestView::Multipart,
+            CookedRequest::Json(index) => RequestView::Json(TypeView::new(self.cooked, *index)),
+            CookedRequest::Multipart => RequestView::Multipart,
         })
     }
 
     /// Returns a view of the response body, if present.
     #[inline]
-    pub fn response(&self) -> Option<IrResponseView<'a>> {
+    pub fn response(&self) -> Option<ResponseView<'a>> {
         self.op.response.as_ref().map(|ty| match ty {
-            IrResponse::Json(index) => IrResponseView::Json(IrTypeView::new(self.cooked, *index)),
+            CookedResponse::Json(index) => ResponseView::Json(TypeView::new(self.cooked, *index)),
         })
     }
 
@@ -86,11 +89,11 @@ impl<'a> IrOperationView<'a> {
     }
 }
 
-impl<'a> View<'a> for IrOperationView<'a> {
+impl<'a> View<'a> for OperationView<'a> {
     /// Returns an iterator over all the inline types that are
     /// contained within this operation's referenced types.
     #[inline]
-    fn inlines(&self) -> impl Iterator<Item = InlineIrTypeView<'a>> + use<'a> {
+    fn inlines(&self) -> impl Iterator<Item = InlineTypeView<'a>> + use<'a> {
         let cooked = self.cooked;
         // Only include edges to other inline schemas.
         let filtered = EdgeFiltered::from_fn(&cooked.graph, |e| {
@@ -117,7 +120,7 @@ impl<'a> View<'a> for IrOperationView<'a> {
         };
         std::iter::from_fn(move || bfs.next(&filtered)).filter_map(|index| {
             match cooked.graph[index] {
-                GraphNode::Inline(ty) => Some(InlineIrTypeView::new(cooked, index, ty)),
+                GraphNode::Inline(ty) => Some(InlineTypeView::new(cooked, index, ty)),
                 _ => None,
             }
         })
@@ -126,12 +129,12 @@ impl<'a> View<'a> for IrOperationView<'a> {
     /// Returns an empty iterator. Operations aren't "used by" other operations;
     /// they use types.
     #[inline]
-    fn used_by(&self) -> impl Iterator<Item = IrOperationView<'a>> + use<'a> {
+    fn used_by(&self) -> impl Iterator<Item = OperationView<'a>> + use<'a> {
         std::iter::empty()
     }
 
     #[inline]
-    fn dependencies(&self) -> impl Iterator<Item = IrTypeView<'a>> + use<'a> {
+    fn dependencies(&self) -> impl Iterator<Item = TypeView<'a>> + use<'a> {
         let meta = &self.cooked.metadata.operations[&ByAddress(self.op)];
         let mut types = meta.types.clone();
         // Collect the transitive dependencies of each of the operation's
@@ -143,12 +146,12 @@ impl<'a> View<'a> for IrOperationView<'a> {
         types
             .into_ones()
             .map(NodeIndex::new)
-            .map(|index| IrTypeView::new(self.cooked, index))
+            .map(|index| TypeView::new(self.cooked, index))
     }
 
     /// Returns an empty iterator. Operations don't have dependents.
     #[inline]
-    fn dependents(&self) -> impl Iterator<Item = IrTypeView<'a>> + use<'a> {
+    fn dependents(&self) -> impl Iterator<Item = TypeView<'a>> + use<'a> {
         std::iter::empty()
     }
 
@@ -157,9 +160,9 @@ impl<'a> View<'a> for IrOperationView<'a> {
         &self,
         reach: Reach,
         filter: F,
-    ) -> impl Iterator<Item = IrTypeView<'a>> + use<'a, F>
+    ) -> impl Iterator<Item = TypeView<'a>> + use<'a, F>
     where
-        F: Fn(EdgeKind, &IrTypeView<'a>) -> Traversal,
+        F: Fn(EdgeKind, &TypeView<'a>) -> Traversal,
     {
         either!(match reach {
             Reach::Dependents => std::iter::empty(),
@@ -176,10 +179,10 @@ impl<'a> View<'a> for IrOperationView<'a> {
                 );
                 traverse
                     .run(move |kind, index| {
-                        let view = IrTypeView::new(cooked, index);
+                        let view = TypeView::new(cooked, index);
                         filter(kind, &view)
                     })
-                    .map(|index| IrTypeView::new(cooked, index))
+                    .map(|index| TypeView::new(cooked, index))
             }
         })
     }
@@ -187,9 +190,9 @@ impl<'a> View<'a> for IrOperationView<'a> {
 
 /// A graph-aware view of operation's path template and parameters.
 #[derive(Clone, Copy, Debug)]
-pub struct IrOperationViewPath<'view, 'a>(&'view IrOperationView<'a>);
+pub struct OperationViewPath<'view, 'a>(&'view OperationView<'a>);
 
-impl<'view, 'a> IrOperationViewPath<'view, 'a> {
+impl<'view, 'a> OperationViewPath<'view, 'a> {
     #[inline]
     pub fn segments(self) -> std::slice::Iter<'view, PathSegment<'a>> {
         self.0.op.path.iter()
@@ -197,13 +200,13 @@ impl<'view, 'a> IrOperationViewPath<'view, 'a> {
 
     /// Returns an iterator over this operation's path parameters.
     #[inline]
-    pub fn params(self) -> impl Iterator<Item = IrParameterView<'a, IrPathParameter>> + 'view {
+    pub fn params(self) -> impl Iterator<Item = ParameterView<'a, PathParameter>> + 'view {
         self.0
             .op
             .params
             .iter()
             .filter_map(move |param| match param {
-                IrParameter::Path(info) => Some(IrParameterView::new(self.0.cooked, info)),
+                CookedParameter::Path(info) => Some(ParameterView::new(self.0.cooked, info)),
                 _ => None,
             })
     }
@@ -211,17 +214,17 @@ impl<'view, 'a> IrOperationViewPath<'view, 'a> {
 
 /// A graph-aware view of an operation parameter.
 #[derive(Debug)]
-pub struct IrParameterView<'a, T> {
+pub struct ParameterView<'a, T> {
     cooked: &'a CookedGraph<'a>,
-    info: &'a IrParameterInfo<'a, NodeIndex<usize>>,
+    info: &'a CookedParameterInfo<'a>,
     phantom: PhantomData<T>,
 }
 
-impl<'a, T> IrParameterView<'a, T> {
+impl<'a, T> ParameterView<'a, T> {
     #[inline]
     pub(in crate::ir) fn new(
         cooked: &'a CookedGraph<'a>,
-        info: &'a IrParameterInfo<'a, NodeIndex<usize>>,
+        info: &'a CookedParameterInfo<'a>,
     ) -> Self {
         Self {
             cooked,
@@ -236,8 +239,8 @@ impl<'a, T> IrParameterView<'a, T> {
     }
 
     #[inline]
-    pub fn ty(&self) -> IrTypeView<'a> {
-        IrTypeView::new(self.cooked, self.info.ty)
+    pub fn ty(&self) -> TypeView<'a> {
+        TypeView::new(self.cooked, self.info.ty)
     }
 
     #[inline]
@@ -246,28 +249,28 @@ impl<'a, T> IrParameterView<'a, T> {
     }
 
     #[inline]
-    pub fn style(&self) -> Option<IrParameterStyle> {
+    pub fn style(&self) -> Option<ParameterStyle> {
         self.info.style
     }
 }
 
 /// A marker type for a path parameter.
 #[derive(Clone, Copy, Debug)]
-pub enum IrPathParameter {}
+pub enum PathParameter {}
 
 /// A marker type for a query parameter.
 #[derive(Clone, Copy, Debug)]
-pub enum IrQueryParameter {}
+pub enum QueryParameter {}
 
 /// A graph-aware view of an operation's request body.
 #[derive(Debug)]
-pub enum IrRequestView<'a> {
-    Json(IrTypeView<'a>),
+pub enum RequestView<'a> {
+    Json(TypeView<'a>),
     Multipart,
 }
 
 /// A graph-aware view of an operation's response body.
 #[derive(Debug)]
-pub enum IrResponseView<'a> {
-    Json(IrTypeView<'a>),
+pub enum ResponseView<'a> {
+    Json(TypeView<'a>),
 }

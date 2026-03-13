@@ -6,26 +6,27 @@ use petgraph::{
 use rustc_hash::FxHashSet;
 
 use crate::ir::{
-    graph::{CookedGraph, EdgeKind, GraphNode},
-    types::{InlineIrType, IrStruct, IrStructField, IrStructFieldName, SchemaIrType},
+    CookedInlineType,
+    graph::{CookedGraph, CookedGraphNode, EdgeKind},
+    types::{CookedSchemaType, CookedStruct, CookedStructField, StructFieldName},
 };
 
-use super::{ViewNode, ir::IrTypeView};
+use super::{ViewNode, ir::TypeView};
 
-/// A graph-aware view of an [`IrStruct`].
+/// A graph-aware view of a [`Struct`][CookedStruct].
 #[derive(Debug)]
-pub struct IrStructView<'a> {
+pub struct StructView<'a> {
     cooked: &'a CookedGraph<'a>,
     index: NodeIndex<usize>,
-    ty: &'a IrStruct<'a, NodeIndex<usize>>,
+    ty: &'a CookedStruct<'a>,
 }
 
-impl<'a> IrStructView<'a> {
+impl<'a> StructView<'a> {
     #[inline]
     pub(in crate::ir) fn new(
         cooked: &'a CookedGraph<'a>,
         index: NodeIndex<usize>,
-        ty: &'a IrStruct<'a, NodeIndex<usize>>,
+        ty: &'a CookedStruct<'a>,
     ) -> Self {
         Self { cooked, index, ty }
     }
@@ -39,7 +40,7 @@ impl<'a> IrStructView<'a> {
     /// from `allOf` schemas. Fields are returned in declaration order:
     /// ancestor fields first, in the order of their parents in `allOf`;
     /// then this struct's own fields.
-    pub fn fields(&self) -> impl Iterator<Item = IrStructFieldView<'_, 'a>> {
+    pub fn fields(&self) -> impl Iterator<Item = StructFieldView<'_, 'a>> {
         // Walk inheritance edges in post-order so that the most distant
         // ancestors are yielded first. `DfsPostOrder` also tracks visited
         // nodes internally, which handles circular `allOf` references.
@@ -50,8 +51,8 @@ impl<'a> IrStructView<'a> {
         let ancestors = std::iter::from_fn(move || dfs.next(&inherits))
             .filter(move |&index| index != self.index)
             .filter_map(|index| match &self.cooked.graph[index] {
-                GraphNode::Schema(SchemaIrType::Struct(_, s))
-                | GraphNode::Inline(InlineIrType::Struct(_, s)) => Some(s),
+                CookedGraphNode::Schema(CookedSchemaType::Struct(_, s))
+                | CookedGraphNode::Inline(CookedInlineType::Struct(_, s)) => Some(s),
                 _ => None,
             });
 
@@ -64,7 +65,7 @@ impl<'a> IrStructView<'a> {
             ancestors
                 .flat_map(|ancestor| ancestor.fields)
                 .filter(move |field| seen.insert(field.name))
-                .map(|field| IrStructFieldView {
+                .map(|field| StructFieldView {
                     parent: self,
                     field,
                     inherited: true,
@@ -77,8 +78,8 @@ impl<'a> IrStructView<'a> {
     /// Returns an iterator over fields declared directly on this struct,
     /// excluding inherited fields.
     #[inline]
-    pub fn own_fields(&self) -> impl Iterator<Item = IrStructFieldView<'_, 'a>> {
-        self.ty.fields.iter().map(move |field| IrStructFieldView {
+    pub fn own_fields(&self) -> impl Iterator<Item = StructFieldView<'_, 'a>> {
+        self.ty.fields.iter().map(move |field| StructFieldView {
             parent: self,
             field,
             inherited: false,
@@ -88,15 +89,15 @@ impl<'a> IrStructView<'a> {
     /// Returns an iterator over immediate parent types from `allOf`,
     /// including named and inline schemas.
     #[inline]
-    pub fn parents(&self) -> impl Iterator<Item = IrTypeView<'a>> {
+    pub fn parents(&self) -> impl Iterator<Item = TypeView<'a>> {
         self.ty
             .parents
             .iter()
-            .map(move |&parent| IrTypeView::new(self.cooked, parent))
+            .map(move |&parent| TypeView::new(self.cooked, parent))
     }
 }
 
-impl<'a> ViewNode<'a> for IrStructView<'a> {
+impl<'a> ViewNode<'a> for StructView<'a> {
     #[inline]
     fn cooked(&self) -> &'a CookedGraph<'a> {
         self.cooked
@@ -108,24 +109,24 @@ impl<'a> ViewNode<'a> for IrStructView<'a> {
     }
 }
 
-/// A graph-aware view of an [`IrStructField`].
+/// A graph-aware view of a [`StructField`][CookedStructField].
 #[derive(Debug)]
-pub struct IrStructFieldView<'view, 'a> {
-    parent: &'view IrStructView<'a>,
-    field: &'a IrStructField<'a, NodeIndex<usize>>,
+pub struct StructFieldView<'view, 'a> {
+    parent: &'view StructView<'a>,
+    field: &'a CookedStructField<'a>,
     inherited: bool,
 }
 
-impl<'view, 'a> IrStructFieldView<'view, 'a> {
+impl<'view, 'a> StructFieldView<'view, 'a> {
     #[inline]
-    pub fn name(&self) -> IrStructFieldName<'a> {
+    pub fn name(&self) -> StructFieldName<'a> {
         self.field.name
     }
 
     /// Returns a view of the inner type that this type wraps.
     #[inline]
-    pub fn ty(&self) -> IrTypeView<'a> {
-        IrTypeView::new(self.parent.cooked, self.field.ty)
+    pub fn ty(&self) -> TypeView<'a> {
+        TypeView::new(self.parent.cooked, self.field.ty)
     }
 
     #[inline]
@@ -144,7 +145,7 @@ impl<'view, 'a> IrStructFieldView<'view, 'a> {
     /// that references this struct as one of its variants.
     #[inline]
     pub fn tag(&self) -> bool {
-        let IrStructFieldName::Name(name) = self.field.name else {
+        let StructFieldName::Name(name) = self.field.name else {
             return false;
         };
         self.parent
@@ -152,8 +153,8 @@ impl<'view, 'a> IrStructFieldView<'view, 'a> {
             .graph
             .neighbors_directed(self.parent.index, Direction::Incoming)
             .filter_map(|index| match self.parent.cooked.graph[index] {
-                GraphNode::Schema(SchemaIrType::Tagged(_, tagged))
-                | GraphNode::Inline(InlineIrType::Tagged(_, tagged)) => Some(tagged),
+                CookedGraphNode::Schema(CookedSchemaType::Tagged(_, tagged))
+                | CookedGraphNode::Inline(CookedInlineType::Tagged(_, tagged)) => Some(tagged),
                 _ => None,
             })
             .any(|neighbor| neighbor.tag == name)

@@ -1,5 +1,5 @@
 use itertools::Itertools;
-use ploidy_core::ir::{InlineIrTypeView, IrOperationView, SchemaIrTypeView, View};
+use ploidy_core::ir::{InlineTypeView, OperationView, SchemaTypeView, View};
 use proc_macro2::TokenStream;
 use quote::{ToTokens, TokenStreamExt, quote};
 
@@ -19,8 +19,8 @@ use super::{
 /// emitted by [`CodegenSchemaType`](crate::CodegenSchemaType) instead.
 #[derive(Clone, Copy, Debug)]
 pub enum CodegenInlines<'a> {
-    Resource(&'a [IrOperationView<'a>]),
-    Schema(&'a SchemaIrTypeView<'a>),
+    Resource(&'a [OperationView<'a>]),
+    Schema(&'a SchemaTypeView<'a>),
 }
 
 impl ToTokens for CodegenInlines<'_> {
@@ -54,19 +54,19 @@ where
         let mut items = inlines.into_iter().filter_map(|view| {
             let name = CodegenTypeName::Inline(&view);
             let ty = match &view {
-                InlineIrTypeView::Enum(_, view) => CodegenEnum::new(name, view).into_token_stream(),
-                InlineIrTypeView::Struct(_, view) => {
+                InlineTypeView::Enum(_, view) => CodegenEnum::new(name, view).into_token_stream(),
+                InlineTypeView::Struct(_, view) => {
                     CodegenStruct::new(name, view).into_token_stream()
                 }
-                InlineIrTypeView::Tagged(_, view) => {
+                InlineTypeView::Tagged(_, view) => {
                     CodegenTagged::new(name, view).into_token_stream()
                 }
-                InlineIrTypeView::Untagged(_, view) => {
+                InlineTypeView::Untagged(_, view) => {
                     CodegenUntagged::new(name, view).into_token_stream()
                 }
-                InlineIrTypeView::Container(..)
-                | InlineIrTypeView::Primitive(..)
-                | InlineIrTypeView::Any(..) => {
+                InlineTypeView::Container(..)
+                | InlineTypeView::Primitive(..)
+                | InlineTypeView::Any(..) => {
                     // Container types, primitive types, and untyped values
                     // are emitted directly; they don't need type aliases.
                     return None;
