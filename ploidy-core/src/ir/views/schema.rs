@@ -1,50 +1,49 @@
 use petgraph::graph::NodeIndex;
 
-use crate::ir::{SchemaTypeInfo, graph::CookedGraph, types::SchemaIrType};
+use crate::ir::{SchemaTypeInfo, graph::CookedGraph, types::CookedSchemaType};
 
 use super::{
-    ViewNode, any::AnyView, container::ContainerView, enum_::IrEnumView,
-    primitive::IrPrimitiveView, struct_::IrStructView, tagged::IrTaggedView,
-    untagged::IrUntaggedView,
+    ViewNode, any::AnyView, container::ContainerView, enum_::EnumView, primitive::PrimitiveView,
+    struct_::StructView, tagged::TaggedView, untagged::UntaggedView,
 };
 
-/// A graph-aware view of a [`SchemaIrType`].
+/// A graph-aware view of a [`SchemaType`][CookedSchemaType].
 #[derive(Debug)]
-pub enum SchemaIrTypeView<'a> {
-    Enum(SchemaTypeInfo<'a>, IrEnumView<'a>),
-    Struct(SchemaTypeInfo<'a>, IrStructView<'a>),
-    Tagged(SchemaTypeInfo<'a>, IrTaggedView<'a>),
-    Untagged(SchemaTypeInfo<'a>, IrUntaggedView<'a>),
+pub enum SchemaTypeView<'a> {
+    Enum(SchemaTypeInfo<'a>, EnumView<'a>),
+    Struct(SchemaTypeInfo<'a>, StructView<'a>),
+    Tagged(SchemaTypeInfo<'a>, TaggedView<'a>),
+    Untagged(SchemaTypeInfo<'a>, UntaggedView<'a>),
     Container(SchemaTypeInfo<'a>, ContainerView<'a>),
-    Primitive(SchemaTypeInfo<'a>, IrPrimitiveView<'a>),
+    Primitive(SchemaTypeInfo<'a>, PrimitiveView<'a>),
     Any(SchemaTypeInfo<'a>, AnyView<'a>),
 }
 
-impl<'a> SchemaIrTypeView<'a> {
+impl<'a> SchemaTypeView<'a> {
     #[inline]
     pub(in crate::ir) fn new(
         cooked: &'a CookedGraph<'a>,
         index: NodeIndex<usize>,
-        ty: &'a SchemaIrType<'a, NodeIndex<usize>>,
+        ty: &'a CookedSchemaType<'a>,
     ) -> Self {
         match ty {
-            SchemaIrType::Enum(info, ty) => Self::Enum(*info, IrEnumView::new(cooked, index, ty)),
-            SchemaIrType::Struct(info, ty) => {
-                Self::Struct(*info, IrStructView::new(cooked, index, ty))
+            CookedSchemaType::Enum(info, ty) => Self::Enum(*info, EnumView::new(cooked, index, ty)),
+            CookedSchemaType::Struct(info, ty) => {
+                Self::Struct(*info, StructView::new(cooked, index, ty))
             }
-            SchemaIrType::Tagged(info, ty) => {
-                Self::Tagged(*info, IrTaggedView::new(cooked, index, ty))
+            CookedSchemaType::Tagged(info, ty) => {
+                Self::Tagged(*info, TaggedView::new(cooked, index, ty))
             }
-            SchemaIrType::Untagged(info, ty) => {
-                Self::Untagged(*info, IrUntaggedView::new(cooked, index, ty))
+            CookedSchemaType::Untagged(info, ty) => {
+                Self::Untagged(*info, UntaggedView::new(cooked, index, ty))
             }
-            SchemaIrType::Container(info, container) => {
+            CookedSchemaType::Container(info, container) => {
                 Self::Container(*info, ContainerView::new(cooked, index, container))
             }
-            &SchemaIrType::Primitive(info, p) => {
-                Self::Primitive(info, IrPrimitiveView::new(cooked, index, p))
+            &CookedSchemaType::Primitive(info, p) => {
+                Self::Primitive(info, PrimitiveView::new(cooked, index, p))
             }
-            &SchemaIrType::Any(info) => Self::Any(info, AnyView::new(cooked, index)),
+            &CookedSchemaType::Any(info) => Self::Any(info, AnyView::new(cooked, index)),
         }
     }
 
@@ -62,7 +61,7 @@ impl<'a> SchemaIrTypeView<'a> {
 
     /// Returns whether this type transitively depends on `other`.
     #[inline]
-    pub fn depends_on(&self, other: &SchemaIrTypeView<'a>) -> bool {
+    pub fn depends_on(&self, other: &SchemaTypeView<'a>) -> bool {
         self.cooked().metadata.schemas[self.index().index()]
             .dependencies
             .contains(other.index().index())
@@ -83,7 +82,7 @@ impl<'a> SchemaIrTypeView<'a> {
     }
 }
 
-impl<'a> ViewNode<'a> for SchemaIrTypeView<'a> {
+impl<'a> ViewNode<'a> for SchemaTypeView<'a> {
     #[inline]
     fn cooked(&self) -> &'a CookedGraph<'a> {
         match self {

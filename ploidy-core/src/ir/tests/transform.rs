@@ -5,10 +5,10 @@ use serde_json::Number;
 use crate::{
     arena::Arena,
     ir::{
-        Container, InlineIrType, InlineIrTypePathRoot, InlineIrTypePathSegment, Inner,
-        IrEnumVariant, IrStructField, IrStructFieldName, IrStructFieldNameHint, IrTaggedVariant,
-        IrType, IrUntaggedVariant, IrUntaggedVariantNameHint, PrimitiveIrType, SchemaIrType,
-        SchemaTypeInfo, transform::transform,
+        EnumVariant, InlineTypePathRoot, InlineTypePathSegment, PrimitiveType, RawContainer,
+        RawInlineType, RawInner, RawSchemaType, RawStructField, RawTaggedVariant, RawType,
+        RawUntaggedVariant, SchemaTypeInfo, StructFieldName, StructFieldNameHint,
+        UntaggedVariantNameHint, transform::transform,
     },
     parse::{Document, Schema},
     tests::assert_matches,
@@ -35,15 +35,15 @@ fn test_enum_string_variants() {
     let result = transform(&arena, &doc, "Status", &schema);
 
     let enum_ = match result {
-        IrType::Schema(SchemaIrType::Enum(SchemaTypeInfo { name: "Status", .. }, enum_)) => enum_,
+        RawType::Schema(RawSchemaType::Enum(SchemaTypeInfo { name: "Status", .. }, enum_)) => enum_,
         other => panic!("expected enum `Status`; got `{other:?}`"),
     };
     assert_matches!(
         enum_.variants,
         [
-            IrEnumVariant::String("active"),
-            IrEnumVariant::String("inactive"),
-            IrEnumVariant::String("pending"),
+            EnumVariant::String("active"),
+            EnumVariant::String("inactive"),
+            EnumVariant::String("pending"),
         ],
     );
 }
@@ -67,7 +67,7 @@ fn test_enum_number_variants() {
     let result = transform(&arena, &doc, "Priority", &schema);
 
     let enum_ = match result {
-        IrType::Schema(SchemaIrType::Enum(
+        RawType::Schema(RawSchemaType::Enum(
             SchemaTypeInfo {
                 name: "Priority", ..
             },
@@ -78,9 +78,9 @@ fn test_enum_number_variants() {
     assert_matches!(
         enum_.variants,
         [
-            IrEnumVariant::Number(n1),
-            IrEnumVariant::Number(n2),
-            IrEnumVariant::Number(n3),
+            EnumVariant::Number(n1),
+            EnumVariant::Number(n2),
+            EnumVariant::Number(n3),
         ] if n1 == &Number::from(1) && n2 == &Number::from(2) && n3 == &Number::from(3),
     );
 }
@@ -104,12 +104,12 @@ fn test_enum_bool_variants() {
     let result = transform(&arena, &doc, "Flag", &schema);
 
     let enum_ = match result {
-        IrType::Schema(SchemaIrType::Enum(SchemaTypeInfo { name: "Flag", .. }, enum_)) => enum_,
+        RawType::Schema(RawSchemaType::Enum(SchemaTypeInfo { name: "Flag", .. }, enum_)) => enum_,
         other => panic!("expected enum `Flag`; got `{other:?}`"),
     };
     assert_matches!(
         enum_.variants,
-        [IrEnumVariant::Bool(true), IrEnumVariant::Bool(false)],
+        [EnumVariant::Bool(true), EnumVariant::Bool(false)],
     );
 }
 
@@ -132,15 +132,15 @@ fn test_enum_mixed_types() {
     let result = transform(&arena, &doc, "Mixed", &schema);
 
     let enum_ = match result {
-        IrType::Schema(SchemaIrType::Enum(SchemaTypeInfo { name: "Mixed", .. }, enum_)) => enum_,
+        RawType::Schema(RawSchemaType::Enum(SchemaTypeInfo { name: "Mixed", .. }, enum_)) => enum_,
         other => panic!("expected enum `Mixed`; got `{other:?}`"),
     };
     assert_matches!(
         enum_.variants,
         [
-            IrEnumVariant::String("text"),
-            IrEnumVariant::Number(n),
-            IrEnumVariant::Bool(true),
+            EnumVariant::String("text"),
+            EnumVariant::Number(n),
+            EnumVariant::Bool(true),
         ] if n == &Number::from(42),
     );
 }
@@ -167,7 +167,7 @@ fn test_primitive_string_formats() {
     let result = transform(&arena, &doc, "Timestamp", &schema);
     assert_matches!(
         result,
-        IrType::Schema(SchemaIrType::Primitive(_, PrimitiveIrType::DateTime))
+        RawType::Schema(RawSchemaType::Primitive(_, PrimitiveType::DateTime))
     );
 
     // `string` with `date` format.
@@ -179,7 +179,7 @@ fn test_primitive_string_formats() {
     let result = transform(&arena, &doc, "Date", &schema);
     assert_matches!(
         result,
-        IrType::Schema(SchemaIrType::Primitive(_, PrimitiveIrType::Date))
+        RawType::Schema(RawSchemaType::Primitive(_, PrimitiveType::Date))
     );
 
     // `string` with `uri` format.
@@ -191,7 +191,7 @@ fn test_primitive_string_formats() {
     let result = transform(&arena, &doc, "Url", &schema);
     assert_matches!(
         result,
-        IrType::Schema(SchemaIrType::Primitive(_, PrimitiveIrType::Url))
+        RawType::Schema(RawSchemaType::Primitive(_, PrimitiveType::Url))
     );
 
     // `string` with `uuid` format.
@@ -203,7 +203,7 @@ fn test_primitive_string_formats() {
     let result = transform(&arena, &doc, "Id", &schema);
     assert_matches!(
         result,
-        IrType::Schema(SchemaIrType::Primitive(_, PrimitiveIrType::Uuid))
+        RawType::Schema(RawSchemaType::Primitive(_, PrimitiveType::Uuid))
     );
 
     // `string` with `byte` format.
@@ -215,7 +215,7 @@ fn test_primitive_string_formats() {
     let result = transform(&arena, &doc, "Data", &schema);
     assert_matches!(
         result,
-        IrType::Schema(SchemaIrType::Primitive(_, PrimitiveIrType::Bytes))
+        RawType::Schema(RawSchemaType::Primitive(_, PrimitiveType::Bytes))
     );
 
     // `string` with `binary` format.
@@ -227,7 +227,7 @@ fn test_primitive_string_formats() {
     let result = transform(&arena, &doc, "RawData", &schema);
     assert_matches!(
         result,
-        IrType::Schema(SchemaIrType::Primitive(_, PrimitiveIrType::Binary))
+        RawType::Schema(RawSchemaType::Primitive(_, PrimitiveType::Binary))
     );
 
     // `string` without format.
@@ -238,7 +238,7 @@ fn test_primitive_string_formats() {
     let result = transform(&arena, &doc, "Text", &schema);
     assert_matches!(
         result,
-        IrType::Schema(SchemaIrType::Primitive(_, PrimitiveIrType::String))
+        RawType::Schema(RawSchemaType::Primitive(_, PrimitiveType::String))
     );
 }
 
@@ -262,7 +262,7 @@ fn test_primitive_integer_formats() {
     let result = transform(&arena, &doc, "Count", &schema);
     assert_matches!(
         result,
-        IrType::Schema(SchemaIrType::Primitive(_, PrimitiveIrType::I32))
+        RawType::Schema(RawSchemaType::Primitive(_, PrimitiveType::I32))
     );
 
     // `integer` with `int64` format.
@@ -274,7 +274,7 @@ fn test_primitive_integer_formats() {
     let result = transform(&arena, &doc, "BigCount", &schema);
     assert_matches!(
         result,
-        IrType::Schema(SchemaIrType::Primitive(_, PrimitiveIrType::I64))
+        RawType::Schema(RawSchemaType::Primitive(_, PrimitiveType::I64))
     );
 
     // `integer` with `unix-time` format.
@@ -286,7 +286,7 @@ fn test_primitive_integer_formats() {
     let result = transform(&arena, &doc, "Timestamp", &schema);
     assert_matches!(
         result,
-        IrType::Schema(SchemaIrType::Primitive(_, PrimitiveIrType::UnixTime))
+        RawType::Schema(RawSchemaType::Primitive(_, PrimitiveType::UnixTime))
     );
 
     // `integer` without format defaults to `int32`.
@@ -297,7 +297,7 @@ fn test_primitive_integer_formats() {
     let result = transform(&arena, &doc, "DefaultInt", &schema);
     assert_matches!(
         result,
-        IrType::Schema(SchemaIrType::Primitive(_, PrimitiveIrType::I32))
+        RawType::Schema(RawSchemaType::Primitive(_, PrimitiveType::I32))
     );
 }
 
@@ -321,7 +321,7 @@ fn test_primitive_number_formats() {
     let result = transform(&arena, &doc, "Price", &schema);
     assert_matches!(
         result,
-        IrType::Schema(SchemaIrType::Primitive(_, PrimitiveIrType::F32))
+        RawType::Schema(RawSchemaType::Primitive(_, PrimitiveType::F32))
     );
 
     // `number` with `double` format.
@@ -333,7 +333,7 @@ fn test_primitive_number_formats() {
     let result = transform(&arena, &doc, "BigPrice", &schema);
     assert_matches!(
         result,
-        IrType::Schema(SchemaIrType::Primitive(_, PrimitiveIrType::F64))
+        RawType::Schema(RawSchemaType::Primitive(_, PrimitiveType::F64))
     );
 
     // `number` with `unix-time` format.
@@ -345,7 +345,7 @@ fn test_primitive_number_formats() {
     let result = transform(&arena, &doc, "FloatTime", &schema);
     assert_matches!(
         result,
-        IrType::Schema(SchemaIrType::Primitive(_, PrimitiveIrType::UnixTime))
+        RawType::Schema(RawSchemaType::Primitive(_, PrimitiveType::UnixTime))
     );
 
     // `number` without format defaults to `double`.
@@ -356,7 +356,7 @@ fn test_primitive_number_formats() {
     let result = transform(&arena, &doc, "DefaultNumber", &schema);
     assert_matches!(
         result,
-        IrType::Schema(SchemaIrType::Primitive(_, PrimitiveIrType::F64))
+        RawType::Schema(RawSchemaType::Primitive(_, PrimitiveType::F64))
     );
 }
 
@@ -386,17 +386,17 @@ fn test_array_with_ref_items() {
     let result = transform(&arena, &doc, "Items", &schema);
 
     let container = match result {
-        IrType::Schema(SchemaIrType::Container(
+        RawType::Schema(RawSchemaType::Container(
             SchemaTypeInfo { name: "Items", .. },
             container,
         )) => container,
         other => panic!("expected container `Items`; got `{other:?}`"),
     };
     let items = match &container {
-        Container::Array(Inner { ty, .. }) => ty,
+        RawContainer::Array(RawInner { ty, .. }) => ty,
         other => panic!("expected array; got `{other:?}`"),
     };
-    assert_matches!(&**items, IrType::Ref(_));
+    assert_matches!(&**items, RawType::Ref(_));
 }
 
 #[test]
@@ -419,7 +419,7 @@ fn test_array_with_inline_items() {
     let result = transform(&arena, &doc, "Strings", &schema);
 
     let container = match result {
-        IrType::Schema(SchemaIrType::Container(
+        RawType::Schema(RawSchemaType::Container(
             SchemaTypeInfo {
                 name: "Strings", ..
             },
@@ -428,12 +428,12 @@ fn test_array_with_inline_items() {
         other => panic!("expected container `Strings`; got `{other:?}`"),
     };
     let items = match &container {
-        Container::Array(Inner { ty, .. }) => ty,
+        RawContainer::Array(RawInner { ty, .. }) => ty,
         other => panic!("expected array; got `{other:?}`"),
     };
     assert_matches!(
         &**items,
-        IrType::Inline(InlineIrType::Primitive(_, PrimitiveIrType::String))
+        RawType::Inline(RawInlineType::Primitive(_, PrimitiveType::String))
     );
 }
 
@@ -463,7 +463,7 @@ fn test_struct_with_own_properties() {
     let result = transform(&arena, &doc, "Person", &schema);
 
     let struct_ = match result {
-        IrType::Schema(SchemaIrType::Struct(SchemaTypeInfo { name: "Person", .. }, struct_)) => {
+        RawType::Schema(RawSchemaType::Struct(SchemaTypeInfo { name: "Person", .. }, struct_)) => {
             struct_
         }
         other => panic!("expected struct `Person`; got `{other:?}`"),
@@ -471,14 +471,14 @@ fn test_struct_with_own_properties() {
     assert_matches!(
         struct_.fields,
         [
-            IrStructField {
-                name: IrStructFieldName::Name("name"),
-                ty: IrType::Inline(InlineIrType::Primitive(_, PrimitiveIrType::String)),
+            RawStructField {
+                name: StructFieldName::Name("name"),
+                ty: RawType::Inline(RawInlineType::Primitive(_, PrimitiveType::String)),
                 ..
             },
-            IrStructField {
-                name: IrStructFieldName::Name("age"),
-                ty: IrType::Inline(InlineIrType::Primitive(_, PrimitiveIrType::I32)),
+            RawStructField {
+                name: StructFieldName::Name("age"),
+                ty: RawType::Inline(RawInlineType::Primitive(_, PrimitiveType::I32)),
                 ..
             },
         ],
@@ -512,15 +512,15 @@ fn test_struct_with_additional_properties_ref() {
     let result = transform(&arena, &doc, "Config", &schema);
 
     let struct_ = match result {
-        IrType::Schema(SchemaIrType::Struct(SchemaTypeInfo { name: "Config", .. }, struct_)) => {
+        RawType::Schema(RawSchemaType::Struct(SchemaTypeInfo { name: "Config", .. }, struct_)) => {
             struct_
         }
         other => panic!("expected struct `Config`; got `{other:?}`"),
     };
     let [
         _,
-        IrStructField {
-            name: IrStructFieldName::Hint(IrStructFieldNameHint::AdditionalProperties),
+        RawStructField {
+            name: StructFieldName::Hint(StructFieldNameHint::AdditionalProperties),
             flattened: true,
             required: true,
             ty,
@@ -532,9 +532,9 @@ fn test_struct_with_additional_properties_ref() {
     };
     assert_matches!(
         ty,
-        IrType::Inline(
-            InlineIrType::Container(_, Container::Map(inner)),
-        ) if matches!(inner.ty, IrType::Ref(_)),
+        RawType::Inline(
+            RawInlineType::Container(_, RawContainer::Map(inner)),
+        ) if matches!(inner.ty, RawType::Ref(_)),
     );
 }
 
@@ -566,19 +566,19 @@ fn test_struct_with_additional_properties_inline() {
     // When `additionalProperties` is present alongside `properties`,
     // the result should be a struct with a flattened map field.
     let struct_ = match result {
-        IrType::Schema(SchemaIrType::Struct(SchemaTypeInfo { name: "Config", .. }, struct_)) => {
+        RawType::Schema(RawSchemaType::Struct(SchemaTypeInfo { name: "Config", .. }, struct_)) => {
             struct_
         }
         other => panic!("expected struct `Config`; got `{other:?}`"),
     };
     let [
-        IrStructField {
-            name: IrStructFieldName::Name("name"),
+        RawStructField {
+            name: StructFieldName::Name("name"),
             flattened: false,
             ..
         },
-        IrStructField {
-            name: IrStructFieldName::Hint(IrStructFieldNameHint::AdditionalProperties),
+        RawStructField {
+            name: StructFieldName::Hint(StructFieldNameHint::AdditionalProperties),
             flattened: true,
             required: true,
             ty,
@@ -590,29 +590,30 @@ fn test_struct_with_additional_properties_inline() {
     };
 
     // The container path should be `Type("Config") / Field(AdditionalProperties)`.
-    let IrType::Inline(InlineIrType::Container(container_path, Container::Map(inner))) = ty else {
+    let RawType::Inline(RawInlineType::Container(container_path, RawContainer::Map(inner))) = ty
+    else {
         panic!("expected map; got `{ty:?}`");
     };
-    assert_matches!(container_path.root, InlineIrTypePathRoot::Type("Config"));
+    assert_matches!(container_path.root, InlineTypePathRoot::Type("Config"));
     assert_matches!(
         container_path.segments,
-        [InlineIrTypePathSegment::Field(IrStructFieldName::Hint(
-            IrStructFieldNameHint::AdditionalProperties,
+        [InlineTypePathSegment::Field(StructFieldName::Hint(
+            StructFieldNameHint::AdditionalProperties,
         ))]
     );
 
     // The inline value type path should append `MapValue`.
-    let IrType::Inline(InlineIrType::Struct(value_path, _)) = inner.ty else {
+    let RawType::Inline(RawInlineType::Struct(value_path, _)) = inner.ty else {
         panic!("expected inline struct; got `{:?}`", inner.ty);
     };
-    assert_matches!(value_path.root, InlineIrTypePathRoot::Type("Config"));
+    assert_matches!(value_path.root, InlineTypePathRoot::Type("Config"));
     assert_matches!(
         value_path.segments,
         [
-            InlineIrTypePathSegment::Field(IrStructFieldName::Hint(
-                IrStructFieldNameHint::AdditionalProperties,
+            InlineTypePathSegment::Field(StructFieldName::Hint(
+                StructFieldNameHint::AdditionalProperties,
             )),
-            InlineIrTypePathSegment::MapValue,
+            InlineTypePathSegment::MapValue,
         ]
     );
 }
@@ -639,7 +640,7 @@ fn test_struct_with_additional_properties_true() {
     // Empty `properties` with `additionalProperties: true` produces a
     // struct with a single flattened map field of type `Any`.
     let struct_ = match result {
-        IrType::Schema(SchemaIrType::Struct(
+        RawType::Schema(RawSchemaType::Struct(
             SchemaTypeInfo {
                 name: "DynamicMap", ..
             },
@@ -649,13 +650,13 @@ fn test_struct_with_additional_properties_true() {
     };
     assert_matches!(
         struct_.fields,
-        [IrStructField {
-            name: IrStructFieldName::Hint(IrStructFieldNameHint::AdditionalProperties),
+        [RawStructField {
+            name: StructFieldName::Hint(StructFieldNameHint::AdditionalProperties),
             flattened: true,
             required: true,
-            ty: IrType::Inline(InlineIrType::Container(_, Container::Map(inner))),
+            ty: RawType::Inline(RawInlineType::Container(_, RawContainer::Map(inner))),
             ..
-        }] if matches!(inner.ty, IrType::Inline(InlineIrType::Any(_)))
+        }] if matches!(inner.ty, RawType::Inline(RawInlineType::Any(_)))
     );
 }
 
@@ -682,12 +683,12 @@ fn test_struct_without_properties_falls_through() {
 
     assert_matches!(
         &result,
-        IrType::Schema(SchemaIrType::Container(
+        RawType::Schema(RawSchemaType::Container(
             SchemaTypeInfo {
                 name: "DynamicMap",
                 ..
             },
-            Container::Map(_),
+            RawContainer::Map(_),
         ))
     );
 }
@@ -717,7 +718,7 @@ fn test_struct_with_required_fields() {
     let result = transform(&arena, &doc, "User", &schema);
 
     let struct_ = match result {
-        IrType::Schema(SchemaIrType::Struct(SchemaTypeInfo { name: "User", .. }, struct_)) => {
+        RawType::Schema(RawSchemaType::Struct(SchemaTypeInfo { name: "User", .. }, struct_)) => {
             struct_
         }
         other => panic!("expected struct `User`; got `{other:?}`"),
@@ -725,13 +726,13 @@ fn test_struct_with_required_fields() {
     assert_matches!(
         struct_.fields,
         [
-            IrStructField {
-                name: IrStructFieldName::Name("name"),
+            RawStructField {
+                name: StructFieldName::Name("name"),
                 required: true,
                 ..
             },
-            IrStructField {
-                name: IrStructFieldName::Name("email"),
+            RawStructField {
+                name: StructFieldName::Name("email"),
                 required: false,
                 ..
             },
@@ -765,7 +766,7 @@ fn test_struct_with_nullable_field_ref() {
     let result = transform(&arena, &doc, "Container", &schema);
 
     let struct_ = match result {
-        IrType::Schema(SchemaIrType::Struct(
+        RawType::Schema(RawSchemaType::Struct(
             SchemaTypeInfo {
                 name: "Container", ..
             },
@@ -774,17 +775,20 @@ fn test_struct_with_nullable_field_ref() {
         other => panic!("expected struct `Container`; got `{other:?}`"),
     };
     let [
-        IrStructField {
-            name: IrStructFieldName::Name("value"),
+        RawStructField {
+            name: StructFieldName::Name("value"),
             ty:
-                IrType::Inline(InlineIrType::Container(_, Container::Optional(Inner { ty: inner, .. }))),
+                RawType::Inline(RawInlineType::Container(
+                    _,
+                    RawContainer::Optional(RawInner { ty: inner, .. }),
+                )),
             ..
         },
     ] = struct_.fields
     else {
         panic!("expected single nullable field; got `{:?}`", struct_.fields);
     };
-    assert_matches!(&**inner, IrType::Ref(_));
+    assert_matches!(&**inner, RawType::Ref(_));
 }
 
 #[test]
@@ -809,7 +813,7 @@ fn test_struct_with_nullable_field_inline() {
     let result = transform(&arena, &doc, "Container", &schema);
 
     let struct_ = match result {
-        IrType::Schema(SchemaIrType::Struct(
+        RawType::Schema(RawSchemaType::Struct(
             SchemaTypeInfo {
                 name: "Container", ..
             },
@@ -818,10 +822,13 @@ fn test_struct_with_nullable_field_inline() {
         other => panic!("expected struct `Container`; got `{other:?}`"),
     };
     let [
-        IrStructField {
-            name: IrStructFieldName::Name("value"),
+        RawStructField {
+            name: StructFieldName::Name("value"),
             ty:
-                IrType::Inline(InlineIrType::Container(_, Container::Optional(Inner { ty: inner, .. }))),
+                RawType::Inline(RawInlineType::Container(
+                    _,
+                    RawContainer::Optional(RawInner { ty: inner, .. }),
+                )),
             ..
         },
     ] = struct_.fields
@@ -830,7 +837,7 @@ fn test_struct_with_nullable_field_inline() {
     };
     assert_matches!(
         &**inner,
-        IrType::Inline(InlineIrType::Primitive(_, PrimitiveIrType::String))
+        RawType::Inline(RawInlineType::Primitive(_, PrimitiveType::String))
     );
 }
 
@@ -859,7 +866,7 @@ fn test_struct_with_nullable_field_openapi_31_syntax() {
     // OpenAPI 3.1 `type: [T, 'null']` syntax should produce an `Optional(T)` field,
     // identical to OpenAPI 3.0 `nullable: true`.
     let struct_ = match result {
-        IrType::Schema(SchemaIrType::Struct(
+        RawType::Schema(RawSchemaType::Struct(
             SchemaTypeInfo {
                 name: "Container", ..
             },
@@ -868,10 +875,13 @@ fn test_struct_with_nullable_field_openapi_31_syntax() {
         other => panic!("expected struct `Container`; got `{other:?}`"),
     };
     let [
-        IrStructField {
-            name: IrStructFieldName::Name("value"),
+        RawStructField {
+            name: StructFieldName::Name("value"),
             ty:
-                IrType::Inline(InlineIrType::Container(_, Container::Optional(Inner { ty: inner, .. }))),
+                RawType::Inline(RawInlineType::Container(
+                    _,
+                    RawContainer::Optional(RawInner { ty: inner, .. }),
+                )),
             required: true,
             ..
         },
@@ -884,7 +894,7 @@ fn test_struct_with_nullable_field_openapi_31_syntax() {
     };
     assert_matches!(
         &**inner,
-        IrType::Inline(InlineIrType::Primitive(_, PrimitiveIrType::String))
+        RawType::Inline(RawInlineType::Primitive(_, PrimitiveType::String))
     );
 }
 
@@ -914,15 +924,15 @@ fn test_struct_ref_field_description() {
     let result = transform(&arena, &doc, "Entity", &schema);
 
     let struct_ = match result {
-        IrType::Schema(SchemaIrType::Struct(SchemaTypeInfo { name: "Entity", .. }, struct_)) => {
+        RawType::Schema(RawSchemaType::Struct(SchemaTypeInfo { name: "Entity", .. }, struct_)) => {
             struct_
         }
         other => panic!("expected struct `Entity`; got `{other:?}`"),
     };
     assert_matches!(
         struct_.fields,
-        [IrStructField {
-            name: IrStructFieldName::Name("id"),
+        [RawStructField {
+            name: StructFieldName::Name("id"),
             description: Some("An identifier"),
             ..
         }],
@@ -951,15 +961,15 @@ fn test_struct_inline_field_description() {
     let result = transform(&arena, &doc, "User", &schema);
 
     let struct_ = match result {
-        IrType::Schema(SchemaIrType::Struct(SchemaTypeInfo { name: "User", .. }, struct_)) => {
+        RawType::Schema(RawSchemaType::Struct(SchemaTypeInfo { name: "User", .. }, struct_)) => {
             struct_
         }
         other => panic!("expected struct `User`; got `{other:?}`"),
     };
     assert_matches!(
         struct_.fields,
-        [IrStructField {
-            name: IrStructFieldName::Name("name"),
+        [RawStructField {
+            name: StructFieldName::Name("name"),
             description: Some("A user's name"),
             ..
         }],
@@ -995,7 +1005,7 @@ fn test_struct_inline_all_of_becomes_parent() {
     let result = transform(&arena, &doc, "Person", &schema);
 
     let struct_ = match result {
-        IrType::Schema(SchemaIrType::Struct(SchemaTypeInfo { name: "Person", .. }, struct_)) => {
+        RawType::Schema(RawSchemaType::Struct(SchemaTypeInfo { name: "Person", .. }, struct_)) => {
             struct_
         }
         other => panic!("expected struct `Person`; got `{other:?}`"),
@@ -1004,8 +1014,8 @@ fn test_struct_inline_all_of_becomes_parent() {
     // The struct's own field is `email`; inherited fields come from parents.
     assert_matches!(
         struct_.fields,
-        [IrStructField {
-            name: IrStructFieldName::Name("email"),
+        [RawStructField {
+            name: StructFieldName::Name("email"),
             ..
         }],
     );
@@ -1014,14 +1024,14 @@ fn test_struct_inline_all_of_becomes_parent() {
     assert_matches!(
         struct_.parents,
         [
-            IrType::Inline(InlineIrType::Struct(path1, parent1)),
-            IrType::Inline(InlineIrType::Struct(path2, parent2)),
-        ] if path1.root == InlineIrTypePathRoot::Type("Person")
-            && path1.segments == [InlineIrTypePathSegment::Parent(1)]
-            && matches!(parent1.fields, [IrStructField { name: IrStructFieldName::Name("name"), .. }])
-            && path2.root == InlineIrTypePathRoot::Type("Person")
-            && path2.segments == [InlineIrTypePathSegment::Parent(2)]
-            && matches!(parent2.fields, [IrStructField { name: IrStructFieldName::Name("age"), .. }]),
+            RawType::Inline(RawInlineType::Struct(path1, parent1)),
+            RawType::Inline(RawInlineType::Struct(path2, parent2)),
+        ] if path1.root == InlineTypePathRoot::Type("Person")
+            && path1.segments == [InlineTypePathSegment::Parent(1)]
+            && matches!(parent1.fields, [RawStructField { name: StructFieldName::Name("name"), .. }])
+            && path2.root == InlineTypePathRoot::Type("Person")
+            && path2.segments == [InlineTypePathSegment::Parent(2)]
+            && matches!(parent2.fields, [RawStructField { name: StructFieldName::Name("age"), .. }]),
     );
 }
 
@@ -1055,7 +1065,7 @@ fn test_struct_mixed_all_of_ref_and_inline() {
     let result = transform(&arena, &doc, "Child", &schema);
 
     let struct_ = match result {
-        IrType::Schema(SchemaIrType::Struct(SchemaTypeInfo { name: "Child", .. }, struct_)) => {
+        RawType::Schema(RawSchemaType::Struct(SchemaTypeInfo { name: "Child", .. }, struct_)) => {
             struct_
         }
         other => panic!("expected struct `Child`; got `{other:?}`"),
@@ -1068,12 +1078,12 @@ fn test_struct_mixed_all_of_ref_and_inline() {
     assert_matches!(
         struct_.parents,
         [
-            IrType::Ref(r),
-            IrType::Inline(InlineIrType::Struct(path, parent)),
+            RawType::Ref(r),
+            RawType::Inline(RawInlineType::Struct(path, parent)),
         ] if r.name() == "Base"
-            && path.root == InlineIrTypePathRoot::Type("Child")
-            && path.segments == [InlineIrTypePathSegment::Parent(2)]
-            && matches!(parent.fields, [IrStructField { name: IrStructFieldName::Name("name"), .. }])
+            && path.root == InlineTypePathRoot::Type("Child")
+            && path.segments == [InlineTypePathSegment::Parent(2)]
+            && matches!(parent.fields, [RawStructField { name: StructFieldName::Name("name"), .. }])
     );
 }
 
@@ -1116,15 +1126,15 @@ fn test_tagged_with_mapping() {
     let result = transform(&arena, &doc, "Animal", &schema);
 
     let tagged = match result {
-        IrType::Schema(SchemaIrType::Tagged(SchemaTypeInfo { name: "Animal", .. }, tagged)) => {
+        RawType::Schema(RawSchemaType::Tagged(SchemaTypeInfo { name: "Animal", .. }, tagged)) => {
             tagged
         }
         other => panic!("expected tagged union `Animal`; got `{other:?}`"),
     };
     assert_eq!(tagged.tag, "type");
     let [
-        dog_variant @ IrTaggedVariant { name: "Dog", .. },
-        cat_variant @ IrTaggedVariant { name: "Cat", .. },
+        dog_variant @ RawTaggedVariant { name: "Dog", .. },
+        cat_variant @ RawTaggedVariant { name: "Cat", .. },
     ] = tagged.variants
     else {
         panic!(
@@ -1173,16 +1183,17 @@ fn test_tagged_filters_non_refs() {
     // Inline schemas can't have discriminator mappings, so `Animal`
     // should lower to an untagged union with two variants.
     let untagged = match result {
-        IrType::Schema(SchemaIrType::Untagged(SchemaTypeInfo { name: "Animal", .. }, untagged)) => {
-            untagged
-        }
+        RawType::Schema(RawSchemaType::Untagged(
+            SchemaTypeInfo { name: "Animal", .. },
+            untagged,
+        )) => untagged,
         other => panic!("expected untagged union `Animal`; got `{other:?}`"),
     };
     assert_matches!(
         untagged.variants,
         [
-            IrUntaggedVariant::Some(IrUntaggedVariantNameHint::Index(1), IrType::Ref(_)),
-            IrUntaggedVariant::Some(IrUntaggedVariantNameHint::Index(2), IrType::Inline(_)),
+            RawUntaggedVariant::Some(UntaggedVariantNameHint::Index(1), RawType::Ref(_)),
+            RawUntaggedVariant::Some(UntaggedVariantNameHint::Index(2), RawType::Inline(_)),
         ],
     );
 }
@@ -1219,13 +1230,13 @@ fn test_tagged_multiple_aliases() {
     let result = transform(&arena, &doc, "Result", &schema);
 
     let tagged = match result {
-        IrType::Schema(SchemaIrType::Tagged(SchemaTypeInfo { name: "Result", .. }, tagged)) => {
+        RawType::Schema(RawSchemaType::Tagged(SchemaTypeInfo { name: "Result", .. }, tagged)) => {
             tagged
         }
         other => panic!("expected tagged union `Result`; got `{other:?}`"),
     };
     let [
-        IrTaggedVariant {
+        RawTaggedVariant {
             name: "Success",
             aliases,
             ..
@@ -1276,16 +1287,17 @@ fn test_tagged_missing_variant() {
     // `Cat` has no discriminator tag, so `Animal` should lower to
     // an untagged union with two variants.
     let untagged = match result {
-        IrType::Schema(SchemaIrType::Untagged(SchemaTypeInfo { name: "Animal", .. }, untagged)) => {
-            untagged
-        }
+        RawType::Schema(RawSchemaType::Untagged(
+            SchemaTypeInfo { name: "Animal", .. },
+            untagged,
+        )) => untagged,
         other => panic!("expected untagged union `Animal`; got `{other:?}`"),
     };
     assert_matches!(
         untagged.variants,
         [
-            IrUntaggedVariant::Some(IrUntaggedVariantNameHint::Index(1), IrType::Ref(_)),
-            IrUntaggedVariant::Some(IrUntaggedVariantNameHint::Index(2), IrType::Ref(_)),
+            RawUntaggedVariant::Some(UntaggedVariantNameHint::Index(1), RawType::Ref(_)),
+            RawUntaggedVariant::Some(UntaggedVariantNameHint::Index(2), RawType::Ref(_)),
         ],
     );
 }
@@ -1321,7 +1333,7 @@ fn test_tagged_description() {
     let result = transform(&arena, &doc, "Animal", &schema);
 
     let tagged = match result {
-        IrType::Schema(SchemaIrType::Tagged(SchemaTypeInfo { name: "Animal", .. }, tagged)) => {
+        RawType::Schema(RawSchemaType::Tagged(SchemaTypeInfo { name: "Animal", .. }, tagged)) => {
             tagged
         }
         other => panic!("expected tagged union `Animal`; got `{other:?}`"),
@@ -1329,7 +1341,7 @@ fn test_tagged_description() {
     assert_eq!(tagged.description, Some("A tagged union of animals"));
     assert_matches!(
         tagged.variants,
-        [IrTaggedVariant { name: "Dog", aliases, .. }] if aliases == &["dog"],
+        [RawTaggedVariant { name: "Dog", aliases, .. }] if aliases == &["dog"],
     );
 }
 
@@ -1361,7 +1373,7 @@ fn test_untagged_basic() {
     let result = transform(&arena, &doc, "StringOrNumber", &schema);
 
     let untagged = match result {
-        IrType::Schema(SchemaIrType::Untagged(
+        RawType::Schema(RawSchemaType::Untagged(
             SchemaTypeInfo {
                 name: "StringOrNumber",
                 ..
@@ -1373,8 +1385,8 @@ fn test_untagged_basic() {
     assert_matches!(
         untagged.variants,
         [
-            IrUntaggedVariant::Some(IrUntaggedVariantNameHint::Index(1), IrType::Ref(_)),
-            IrUntaggedVariant::Some(IrUntaggedVariantNameHint::Index(2), IrType::Ref(_)),
+            RawUntaggedVariant::Some(UntaggedVariantNameHint::Index(1), RawType::Ref(_)),
+            RawUntaggedVariant::Some(UntaggedVariantNameHint::Index(2), RawType::Ref(_)),
         ],
     );
 }
@@ -1396,7 +1408,7 @@ fn test_untagged_empty_simplifies() {
     let arena = Arena::new();
     let result = transform(&arena, &doc, "Empty", &schema);
 
-    assert_matches!(result, IrType::Schema(SchemaIrType::Any(_)));
+    assert_matches!(result, RawType::Schema(RawSchemaType::Any(_)));
 }
 
 #[test]
@@ -1417,7 +1429,7 @@ fn test_untagged_single_null_simplifies() {
     let arena = Arena::new();
     let result = transform(&arena, &doc, "JustNull", &schema);
 
-    assert_matches!(result, IrType::Schema(SchemaIrType::Any(_)));
+    assert_matches!(result, RawType::Schema(RawSchemaType::Any(_)));
 }
 
 #[test]
@@ -1442,7 +1454,7 @@ fn test_untagged_single_variant_unwraps() {
     let arena = Arena::new();
     let result = transform(&arena, &doc, "JustString", &schema);
 
-    assert_matches!(result, IrType::Ref(_));
+    assert_matches!(result, RawType::Ref(_));
 }
 
 #[test]
@@ -1475,7 +1487,7 @@ fn test_untagged_variant_numbering() {
 
     // Variants should have 1-based indices in their name hints.
     let untagged = match result {
-        IrType::Schema(SchemaIrType::Untagged(SchemaTypeInfo { name: "ABC", .. }, untagged)) => {
+        RawType::Schema(RawSchemaType::Untagged(SchemaTypeInfo { name: "ABC", .. }, untagged)) => {
             untagged
         }
         other => panic!("expected untagged union `ABC`; got `{other:?}`"),
@@ -1483,9 +1495,9 @@ fn test_untagged_variant_numbering() {
     assert_matches!(
         untagged.variants,
         [
-            IrUntaggedVariant::Some(IrUntaggedVariantNameHint::Index(1), _),
-            IrUntaggedVariant::Some(IrUntaggedVariantNameHint::Index(2), _),
-            IrUntaggedVariant::Some(IrUntaggedVariantNameHint::Index(3), _),
+            RawUntaggedVariant::Some(UntaggedVariantNameHint::Index(1), _),
+            RawUntaggedVariant::Some(UntaggedVariantNameHint::Index(2), _),
+            RawUntaggedVariant::Some(UntaggedVariantNameHint::Index(3), _),
         ],
     );
 }
@@ -1510,7 +1522,7 @@ fn test_untagged_null_detection() {
     let result = transform(&arena, &doc, "StringOrNull", &schema);
 
     let container = match result {
-        IrType::Schema(SchemaIrType::Container(
+        RawType::Schema(RawSchemaType::Container(
             SchemaTypeInfo {
                 name: "StringOrNull",
                 ..
@@ -1519,7 +1531,7 @@ fn test_untagged_null_detection() {
         )) => container,
         other => panic!("expected container `StringOrNull`; got `{other:?}`"),
     };
-    assert_matches!(&container, Container::Optional(_));
+    assert_matches!(&container, RawContainer::Optional(_));
 }
 
 // MARK: `try_any_of()`
@@ -1557,7 +1569,7 @@ fn test_any_of_fields_marked_flattened_not_required() {
 
     // Both fields should be flattened.
     let struct_ = match result {
-        IrType::Schema(SchemaIrType::Struct(
+        RawType::Schema(RawSchemaType::Struct(
             SchemaTypeInfo {
                 name: "Contact", ..
             },
@@ -1568,14 +1580,14 @@ fn test_any_of_fields_marked_flattened_not_required() {
     assert_matches!(
         struct_.fields,
         [
-            IrStructField {
-                name: IrStructFieldName::Name("Address"),
+            RawStructField {
+                name: StructFieldName::Name("Address"),
                 flattened: true,
                 required: false,
                 ..
             },
-            IrStructField {
-                name: IrStructFieldName::Name("Email"),
+            RawStructField {
+                name: StructFieldName::Name("Email"),
                 flattened: true,
                 required: false,
                 ..
@@ -1613,7 +1625,7 @@ fn test_any_of_ref_uses_type_name() {
     // Both fields should be named `Address`, since they reference the same
     // type.
     let struct_ = match result {
-        IrType::Schema(SchemaIrType::Struct(
+        RawType::Schema(RawSchemaType::Struct(
             SchemaTypeInfo {
                 name: "Contact", ..
             },
@@ -1624,12 +1636,12 @@ fn test_any_of_ref_uses_type_name() {
     assert_matches!(
         struct_.fields,
         [
-            IrStructField {
-                name: IrStructFieldName::Name("Address"),
+            RawStructField {
+                name: StructFieldName::Name("Address"),
                 ..
             },
-            IrStructField {
-                name: IrStructFieldName::Name("Address"),
+            RawStructField {
+                name: StructFieldName::Name("Address"),
                 ..
             },
         ],
@@ -1663,7 +1675,7 @@ fn test_any_of_inline_uses_index_hint() {
 
     // Both inline schemas should have index hints.
     let struct_ = match result {
-        IrType::Schema(SchemaIrType::Struct(SchemaTypeInfo { name: "Mixed", .. }, struct_)) => {
+        RawType::Schema(RawSchemaType::Struct(SchemaTypeInfo { name: "Mixed", .. }, struct_)) => {
             struct_
         }
         other => panic!("expected struct `Mixed`; got `{other:?}`"),
@@ -1671,13 +1683,13 @@ fn test_any_of_inline_uses_index_hint() {
     assert_matches!(
         struct_.fields,
         [
-            IrStructField {
-                name: IrStructFieldName::Hint(IrStructFieldNameHint::Index(1)),
+            RawStructField {
+                name: StructFieldName::Hint(StructFieldNameHint::Index(1)),
                 flattened: true,
                 ..
             },
-            IrStructField {
-                name: IrStructFieldName::Hint(IrStructFieldNameHint::Index(2)),
+            RawStructField {
+                name: StructFieldName::Hint(StructFieldNameHint::Index(2)),
                 flattened: true,
                 ..
             },
@@ -1722,7 +1734,7 @@ fn test_any_of_with_properties() {
     // `Extra2` is an own field; `Extra1` and `Extra3` are flattened.
     // Own fields should precede the flattened fields.
     let struct_ = match result {
-        IrType::Schema(SchemaIrType::Struct(
+        RawType::Schema(RawSchemaType::Struct(
             SchemaTypeInfo {
                 name: "Combined", ..
             },
@@ -1733,18 +1745,18 @@ fn test_any_of_with_properties() {
     assert_matches!(
         struct_.fields,
         [
-            IrStructField {
-                name: IrStructFieldName::Name("Extra2"),
+            RawStructField {
+                name: StructFieldName::Name("Extra2"),
                 flattened: false,
                 ..
             },
-            IrStructField {
-                name: IrStructFieldName::Name("Extra1"),
+            RawStructField {
+                name: StructFieldName::Name("Extra1"),
                 flattened: true,
                 ..
             },
-            IrStructField {
-                name: IrStructFieldName::Name("Extra3"),
+            RawStructField {
+                name: StructFieldName::Name("Extra3"),
                 flattened: true,
                 ..
             },
@@ -1781,7 +1793,7 @@ fn test_any_of_nullable_refs() {
 
     // Both nullable schemas should be flattened.
     let struct_ = match result {
-        IrType::Schema(SchemaIrType::Struct(
+        RawType::Schema(RawSchemaType::Struct(
             SchemaTypeInfo {
                 name: "Container", ..
             },
@@ -1792,13 +1804,13 @@ fn test_any_of_nullable_refs() {
     assert_matches!(
         struct_.fields,
         [
-            IrStructField {
-                name: IrStructFieldName::Name("NullableString1"),
+            RawStructField {
+                name: StructFieldName::Name("NullableString1"),
                 flattened: true,
                 ..
             },
-            IrStructField {
-                name: IrStructFieldName::Name("NullableString2"),
+            RawStructField {
+                name: StructFieldName::Name("NullableString2"),
                 flattened: true,
                 ..
             },
@@ -1845,7 +1857,7 @@ fn test_any_of_with_all_of() {
     let result = transform(&arena, &doc, "Combined", &schema);
 
     let struct_ = match result {
-        IrType::Schema(SchemaIrType::Struct(
+        RawType::Schema(RawSchemaType::Struct(
             SchemaTypeInfo {
                 name: "Combined", ..
             },
@@ -1859,13 +1871,13 @@ fn test_any_of_with_all_of() {
     assert_matches!(
         struct_.fields,
         [
-            IrStructField {
-                name: IrStructFieldName::Name("Extra1"),
+            RawStructField {
+                name: StructFieldName::Name("Extra1"),
                 flattened: true,
                 ..
             },
-            IrStructField {
-                name: IrStructFieldName::Name("Extra2"),
+            RawStructField {
+                name: StructFieldName::Name("Extra2"),
                 flattened: true,
                 ..
             },
@@ -1896,7 +1908,7 @@ fn test_boolean_primitive_transformation() {
 
     assert_matches!(
         result,
-        IrType::Schema(SchemaIrType::Primitive(_, PrimitiveIrType::Bool))
+        RawType::Schema(RawSchemaType::Primitive(_, PrimitiveType::Bool))
     );
 }
 
@@ -1921,7 +1933,7 @@ fn test_unhandled_string_format_falls_back_to_string() {
 
     assert_matches!(
         result,
-        IrType::Schema(SchemaIrType::Primitive(_, PrimitiveIrType::String))
+        RawType::Schema(RawSchemaType::Primitive(_, PrimitiveType::String))
     );
 }
 
@@ -1942,7 +1954,7 @@ fn test_empty_type_array_produces_any() {
     let arena = Arena::new();
     let result = transform(&arena, &doc, "NoType", &schema);
 
-    assert_matches!(result, IrType::Schema(SchemaIrType::Any(_)));
+    assert_matches!(result, RawType::Schema(RawSchemaType::Any(_)));
 }
 
 #[test]
@@ -1963,7 +1975,7 @@ fn test_array_without_items_produces_array_of_any() {
     let result = transform(&arena, &doc, "ArrayAny", &schema);
 
     let container = match result {
-        IrType::Schema(SchemaIrType::Container(
+        RawType::Schema(RawSchemaType::Container(
             SchemaTypeInfo {
                 name: "ArrayAny", ..
             },
@@ -1972,10 +1984,10 @@ fn test_array_without_items_produces_array_of_any() {
         other => panic!("expected container `ArrayAny`; got `{other:?}`"),
     };
     let items = match &container {
-        Container::Array(Inner { ty, .. }) => ty,
+        RawContainer::Array(RawInner { ty, .. }) => ty,
         other => panic!("expected array; got `{other:?}`"),
     };
-    assert_matches!(&**items, IrType::Inline(InlineIrType::Any(_)));
+    assert_matches!(&**items, RawType::Inline(RawInlineType::Any(_)));
 }
 
 #[test]
@@ -1998,7 +2010,7 @@ fn test_object_with_empty_properties_produces_struct() {
 
     // An `object` schema without properties should become an empty struct.
     let struct_ = match result {
-        IrType::Schema(SchemaIrType::Struct(
+        RawType::Schema(RawSchemaType::Struct(
             SchemaTypeInfo {
                 name: "EmptyObject",
                 ..
@@ -2028,7 +2040,7 @@ fn test_schema_without_type_or_properties_produces_any() {
     let result = transform(&arena, &doc, "Empty", &schema);
 
     // A schema with no `type` and no `properties` should become `Any`.
-    assert_matches!(result, IrType::Schema(SchemaIrType::Any(_)));
+    assert_matches!(result, RawType::Schema(RawSchemaType::Any(_)));
 }
 
 #[test]
@@ -2051,7 +2063,7 @@ fn test_type_and_null_in_type_array_creates_nullable() {
     // As a special case, `type: [T, "null"]` should produce a
     // `Container(Optional(T))`.
     let container = match result {
-        IrType::Schema(SchemaIrType::Container(
+        RawType::Schema(RawSchemaType::Container(
             SchemaTypeInfo {
                 name: "StringOrNull",
                 ..
@@ -2061,12 +2073,12 @@ fn test_type_and_null_in_type_array_creates_nullable() {
         other => panic!("expected container `StringOrNull`; got `{other:?}`"),
     };
     let inner = match &container {
-        Container::Optional(Inner { ty, .. }) => ty,
+        RawContainer::Optional(RawInner { ty, .. }) => ty,
         other => panic!("expected nullable; got `{other:?}`"),
     };
     assert_matches!(
         &**inner,
-        IrType::Inline(InlineIrType::Primitive(_, PrimitiveIrType::String))
+        RawType::Inline(RawInlineType::Primitive(_, PrimitiveType::String))
     );
 }
 
@@ -2090,7 +2102,7 @@ fn test_type_array_and_null_creates_nullable_array() {
     let result = transform(&arena, &doc, "StringArrayOrNull", &schema);
 
     let container = match result {
-        IrType::Schema(SchemaIrType::Container(
+        RawType::Schema(RawSchemaType::Container(
             SchemaTypeInfo {
                 name: "StringArrayOrNull",
                 ..
@@ -2100,20 +2112,20 @@ fn test_type_array_and_null_creates_nullable_array() {
         other => panic!("expected container `StringArrayOrNull`; got `{other:?}`"),
     };
     let inner = match &container {
-        Container::Optional(Inner { ty, .. }) => ty,
+        RawContainer::Optional(RawInner { ty, .. }) => ty,
         other => panic!("expected optional; got `{other:?}`"),
     };
     let inner_container = match &**inner {
-        IrType::Inline(InlineIrType::Container(_, container)) => container,
+        RawType::Inline(RawInlineType::Container(_, container)) => container,
         other => panic!("expected inline container; got `{other:?}`"),
     };
     let items = match inner_container {
-        Container::Array(Inner { ty, .. }) => ty,
+        RawContainer::Array(RawInner { ty, .. }) => ty,
         other => panic!("expected array; got `{other:?}`"),
     };
     assert_matches!(
         &**items,
-        IrType::Inline(InlineIrType::Primitive(_, PrimitiveIrType::String))
+        RawType::Inline(RawInlineType::Primitive(_, PrimitiveType::String))
     );
 }
 
@@ -2137,7 +2149,7 @@ fn test_type_object_and_null_creates_nullable_map() {
     let result = transform(&arena, &doc, "IntMapOrNull", &schema);
 
     let container = match result {
-        IrType::Schema(SchemaIrType::Container(
+        RawType::Schema(RawSchemaType::Container(
             SchemaTypeInfo {
                 name: "IntMapOrNull",
                 ..
@@ -2147,20 +2159,20 @@ fn test_type_object_and_null_creates_nullable_map() {
         other => panic!("expected container `IntMapOrNull`; got `{other:?}`"),
     };
     let inner = match &container {
-        Container::Optional(Inner { ty, .. }) => ty,
+        RawContainer::Optional(RawInner { ty, .. }) => ty,
         other => panic!("expected optional; got `{other:?}`"),
     };
     let inner_container = match &**inner {
-        IrType::Inline(InlineIrType::Container(_, container)) => container,
+        RawType::Inline(RawInlineType::Container(_, container)) => container,
         other => panic!("expected inline container; got `{other:?}`"),
     };
     let values = match inner_container {
-        Container::Map(Inner { ty, .. }) => ty,
+        RawContainer::Map(RawInner { ty, .. }) => ty,
         other => panic!("expected map; got `{other:?}`"),
     };
     assert_matches!(
         &**values,
-        IrType::Inline(InlineIrType::Primitive(_, PrimitiveIrType::I32))
+        RawType::Inline(RawInlineType::Primitive(_, PrimitiveType::I32))
     );
 }
 
@@ -2182,7 +2194,7 @@ fn test_multiple_types_string_and_integer_untagged() {
     let result = transform(&arena, &doc, "StringOrInt", &schema);
 
     let untagged = match result {
-        IrType::Schema(SchemaIrType::Untagged(
+        RawType::Schema(RawSchemaType::Untagged(
             SchemaTypeInfo {
                 name: "StringOrInt",
                 ..
@@ -2194,13 +2206,13 @@ fn test_multiple_types_string_and_integer_untagged() {
     assert_matches!(
         untagged.variants,
         [
-            IrUntaggedVariant::Some(
-                IrUntaggedVariantNameHint::Primitive(PrimitiveIrType::String),
-                IrType::Schema(SchemaIrType::Primitive(_, PrimitiveIrType::String)),
+            RawUntaggedVariant::Some(
+                UntaggedVariantNameHint::Primitive(PrimitiveType::String),
+                RawType::Schema(RawSchemaType::Primitive(_, PrimitiveType::String)),
             ),
-            IrUntaggedVariant::Some(
-                IrUntaggedVariantNameHint::Primitive(PrimitiveIrType::I32),
-                IrType::Schema(SchemaIrType::Primitive(_, PrimitiveIrType::I32)),
+            RawUntaggedVariant::Some(
+                UntaggedVariantNameHint::Primitive(PrimitiveType::I32),
+                RawType::Schema(RawSchemaType::Primitive(_, PrimitiveType::I32)),
             ),
         ],
     );
@@ -2234,16 +2246,19 @@ fn test_deeply_nested_inline_types() {
     let result = transform(&arena, &doc, "Outer", &schema);
 
     let struct_ = match result {
-        IrType::Schema(SchemaIrType::Struct(SchemaTypeInfo { name: "Outer", .. }, struct_)) => {
+        RawType::Schema(RawSchemaType::Struct(SchemaTypeInfo { name: "Outer", .. }, struct_)) => {
             struct_
         }
         other => panic!("expected struct `Outer`; got `{other:?}`"),
     };
     let [
-        IrStructField {
-            name: IrStructFieldName::Name("items"),
+        RawStructField {
+            name: StructFieldName::Name("items"),
             ty:
-                IrType::Inline(InlineIrType::Container(path, Container::Array(Inner { ty: items, .. }))),
+                RawType::Inline(RawInlineType::Container(
+                    path,
+                    RawContainer::Array(RawInner { ty: items, .. }),
+                )),
             ..
         },
     ] = struct_.fields
@@ -2252,35 +2267,33 @@ fn test_deeply_nested_inline_types() {
     };
 
     // Container type path should be correct.
-    assert_matches!(path.root, InlineIrTypePathRoot::Type("Outer"));
+    assert_matches!(path.root, InlineTypePathRoot::Type("Outer"));
     assert_matches!(
         path.segments,
-        [InlineIrTypePathSegment::Field(IrStructFieldName::Name(
-            "items"
-        ))],
+        [InlineTypePathSegment::Field(StructFieldName::Name("items"))],
     );
 
     let (path, inner_struct) = match &**items {
-        IrType::Inline(InlineIrType::Struct(path, inner_struct)) => (path, inner_struct),
+        RawType::Inline(RawInlineType::Struct(path, inner_struct)) => (path, inner_struct),
         other => panic!("expected inline struct; got `{other:?}`"),
     };
 
     // Inner struct path should have correct segments.
-    assert_matches!(path.root, InlineIrTypePathRoot::Type("Outer"));
+    assert_matches!(path.root, InlineTypePathRoot::Type("Outer"));
     assert_matches!(
         path.segments,
         [
-            InlineIrTypePathSegment::Field(IrStructFieldName::Name("items")),
-            InlineIrTypePathSegment::ArrayItem,
+            InlineTypePathSegment::Field(StructFieldName::Name("items")),
+            InlineTypePathSegment::ArrayItem,
         ],
     );
 
     // Inner struct should have correct fields.
     assert_matches!(
         inner_struct.fields,
-        [IrStructField {
-            name: IrStructFieldName::Name("field"),
-            ty: IrType::Inline(InlineIrType::Primitive(_, PrimitiveIrType::String)),
+        [RawStructField {
+            name: StructFieldName::Name("field"),
+            ty: RawType::Inline(RawInlineType::Primitive(_, PrimitiveType::String)),
             ..
         },]
     );
@@ -2307,7 +2320,7 @@ fn test_enum_with_only_null_json_values_produces_empty_enum() {
     // `null` values are filtered out from enum variants, producing an enum
     // with zero variants.
     let enum_ = match result {
-        IrType::Schema(SchemaIrType::Enum(
+        RawType::Schema(RawSchemaType::Enum(
             SchemaTypeInfo {
                 name: "NullEnum", ..
             },
@@ -2341,7 +2354,7 @@ fn test_additional_properties_false_creates_struct() {
     let result = transform(&arena, &doc, "StrictObject", &schema);
 
     let struct_ = match result {
-        IrType::Schema(SchemaIrType::Struct(
+        RawType::Schema(RawSchemaType::Struct(
             SchemaTypeInfo {
                 name: "StrictObject",
                 ..
@@ -2352,9 +2365,9 @@ fn test_additional_properties_false_creates_struct() {
     };
     assert_matches!(
         struct_.fields,
-        [IrStructField {
-            name: IrStructFieldName::Name("name"),
-            ty: IrType::Inline(InlineIrType::Primitive(_, PrimitiveIrType::String)),
+        [RawStructField {
+            name: StructFieldName::Name("name"),
+            ty: RawType::Inline(RawInlineType::Primitive(_, PrimitiveType::String)),
             ..
         }],
     );
@@ -2385,7 +2398,7 @@ fn test_array_inline_path_construction() {
     let result = transform(&arena, &doc, "Container", &schema);
 
     let container = match result {
-        IrType::Schema(SchemaIrType::Container(
+        RawType::Schema(RawSchemaType::Container(
             SchemaTypeInfo {
                 name: "Container", ..
             },
@@ -2394,15 +2407,15 @@ fn test_array_inline_path_construction() {
         other => panic!("expected container `Container`; got `{other:?}`"),
     };
     let items = match &container {
-        Container::Array(Inner { ty, .. }) => ty,
+        RawContainer::Array(RawInner { ty, .. }) => ty,
         other => panic!("expected array; got `{other:?}`"),
     };
     let path = match &**items {
-        IrType::Inline(InlineIrType::Struct(path, _)) => path,
+        RawType::Inline(RawInlineType::Struct(path, _)) => path,
         other => panic!("expected inline struct; got `{other:?}`"),
     };
-    assert_matches!(path.root, InlineIrTypePathRoot::Type("Container"));
-    assert_matches!(path.segments, [InlineIrTypePathSegment::ArrayItem]);
+    assert_matches!(path.root, InlineTypePathRoot::Type("Container"));
+    assert_matches!(path.segments, [InlineTypePathSegment::ArrayItem]);
 }
 
 #[test]
@@ -2428,7 +2441,7 @@ fn test_map_inline_path_construction() {
     let result = transform(&arena, &doc, "Dictionary", &schema);
 
     let container = match result {
-        IrType::Schema(SchemaIrType::Container(
+        RawType::Schema(RawSchemaType::Container(
             SchemaTypeInfo {
                 name: "Dictionary", ..
             },
@@ -2437,15 +2450,15 @@ fn test_map_inline_path_construction() {
         other => panic!("expected container `Dictionary`; got `{other:?}`"),
     };
     let value = match &container {
-        Container::Map(Inner { ty, .. }) => ty,
+        RawContainer::Map(RawInner { ty, .. }) => ty,
         other => panic!("expected map; got `{other:?}`"),
     };
     let path = match &**value {
-        IrType::Inline(InlineIrType::Struct(path, _)) => path,
+        RawType::Inline(RawInlineType::Struct(path, _)) => path,
         other => panic!("expected inline struct; got `{other:?}`"),
     };
-    assert_matches!(path.root, InlineIrTypePathRoot::Type("Dictionary"));
-    assert_matches!(path.segments, [InlineIrTypePathSegment::MapValue]);
+    assert_matches!(path.root, InlineTypePathRoot::Type("Dictionary"));
+    assert_matches!(path.segments, [InlineTypePathSegment::MapValue]);
 }
 
 #[test]
@@ -2473,15 +2486,15 @@ fn test_struct_inline_path_construction() {
     let result = transform(&arena, &doc, "Outer", &schema);
 
     let struct_ = match result {
-        IrType::Schema(SchemaIrType::Struct(SchemaTypeInfo { name: "Outer", .. }, struct_)) => {
+        RawType::Schema(RawSchemaType::Struct(SchemaTypeInfo { name: "Outer", .. }, struct_)) => {
             struct_
         }
         other => panic!("expected struct `Outer`; got `{other:?}`"),
     };
     let [
-        IrStructField {
-            name: IrStructFieldName::Name("nested"),
-            ty: IrType::Inline(InlineIrType::Struct(path, _)),
+        RawStructField {
+            name: StructFieldName::Name("nested"),
+            ty: RawType::Inline(RawInlineType::Struct(path, _)),
             ..
         },
     ] = struct_.fields
@@ -2491,10 +2504,10 @@ fn test_struct_inline_path_construction() {
             struct_.fields,
         );
     };
-    assert_matches!(path.root, InlineIrTypePathRoot::Type("Outer"));
+    assert_matches!(path.root, InlineTypePathRoot::Type("Outer"));
     assert_matches!(
         path.segments,
-        [InlineIrTypePathSegment::Field(IrStructFieldName::Name(
+        [InlineTypePathSegment::Field(StructFieldName::Name(
             "nested"
         ))],
     );
@@ -2543,7 +2556,7 @@ fn test_inline_tagged_union_in_struct_field() {
     let result = transform(&arena, &doc, "Container", &schema);
 
     let struct_ = match result {
-        IrType::Schema(SchemaIrType::Struct(
+        RawType::Schema(RawSchemaType::Struct(
             SchemaTypeInfo {
                 name: "Container", ..
             },
@@ -2553,9 +2566,9 @@ fn test_inline_tagged_union_in_struct_field() {
     };
 
     let [
-        IrStructField {
-            name: IrStructFieldName::Name("animal"),
-            ty: IrType::Inline(InlineIrType::Tagged(path, tagged)),
+        RawStructField {
+            name: StructFieldName::Name("animal"),
+            ty: RawType::Inline(RawInlineType::Tagged(path, tagged)),
             ..
         },
     ] = struct_.fields
@@ -2567,10 +2580,10 @@ fn test_inline_tagged_union_in_struct_field() {
     };
 
     // Verify the path.
-    assert_matches!(path.root, InlineIrTypePathRoot::Type("Container"));
+    assert_matches!(path.root, InlineTypePathRoot::Type("Container"));
     assert_matches!(
         path.segments,
-        [InlineIrTypePathSegment::Field(IrStructFieldName::Name(
+        [InlineTypePathSegment::Field(StructFieldName::Name(
             "animal"
         ))],
     );
@@ -2580,8 +2593,8 @@ fn test_inline_tagged_union_in_struct_field() {
 
     // Verify the variants.
     let [
-        cat_variant @ IrTaggedVariant { name: "Cat", .. },
-        dog_variant @ IrTaggedVariant { name: "Dog", .. },
+        cat_variant @ RawTaggedVariant { name: "Cat", .. },
+        dog_variant @ RawTaggedVariant { name: "Dog", .. },
     ] = tagged.variants
     else {
         panic!(
@@ -2628,7 +2641,7 @@ fn test_recursive_all_of_ref_nullable() {
 
     // Should successfully produce a struct.
     let struct_ = match result {
-        IrType::Schema(SchemaIrType::Struct(SchemaTypeInfo { name: "Node", .. }, struct_)) => {
+        RawType::Schema(RawSchemaType::Struct(SchemaTypeInfo { name: "Node", .. }, struct_)) => {
             struct_
         }
         other => panic!("expected struct `Node`; got `{other:?}`"),
@@ -2638,15 +2651,15 @@ fn test_recursive_all_of_ref_nullable() {
     assert_matches!(
         struct_.fields,
         [
-            IrStructField {
-                name: IrStructFieldName::Name("value"),
-                ty: IrType::Inline(InlineIrType::Primitive(_, PrimitiveIrType::String)),
+            RawStructField {
+                name: StructFieldName::Name("value"),
+                ty: RawType::Inline(RawInlineType::Primitive(_, PrimitiveType::String)),
                 required: true,
                 ..
             },
-            IrStructField {
-                name: IrStructFieldName::Name("next"),
-                ty: IrType::Inline(InlineIrType::Container(_, Container::Optional(_))),
+            RawStructField {
+                name: StructFieldName::Name("next"),
+                ty: RawType::Inline(RawInlineType::Container(_, RawContainer::Optional(_))),
                 required: true,
                 ..
             },
@@ -2682,7 +2695,7 @@ fn test_recursive_all_of_ref() {
 
     // Should successfully produce a struct.
     let struct_ = match result {
-        IrType::Schema(SchemaIrType::Struct(SchemaTypeInfo { name: "Node", .. }, struct_)) => {
+        RawType::Schema(RawSchemaType::Struct(SchemaTypeInfo { name: "Node", .. }, struct_)) => {
             struct_
         }
         other => panic!("expected struct `Node`; got `{other:?}`"),
@@ -2692,15 +2705,15 @@ fn test_recursive_all_of_ref() {
     assert_matches!(
         struct_.fields,
         [
-            IrStructField {
-                name: IrStructFieldName::Name("value"),
-                ty: IrType::Inline(InlineIrType::Container(_, Container::Optional(_))),
+            RawStructField {
+                name: StructFieldName::Name("value"),
+                ty: RawType::Inline(RawInlineType::Container(_, RawContainer::Optional(_))),
                 required: false,
                 ..
             },
-            IrStructField {
-                name: IrStructFieldName::Name("next"),
-                ty: IrType::Inline(InlineIrType::Container(_, Container::Optional(_))),
+            RawStructField {
+                name: StructFieldName::Name("next"),
+                ty: RawType::Inline(RawInlineType::Container(_, RawContainer::Optional(_))),
                 required: false,
                 ..
             },
@@ -2742,7 +2755,7 @@ fn test_recursive_multi_all_of_ref_no_stack_overflow() {
 
     // Should successfully produce a struct.
     let struct_ = match result {
-        IrType::Schema(SchemaIrType::Struct(SchemaTypeInfo { name: "Node", .. }, struct_)) => {
+        RawType::Schema(RawSchemaType::Struct(SchemaTypeInfo { name: "Node", .. }, struct_)) => {
             struct_
         }
         other => panic!("expected struct `Node`; got `{other:?}`"),
@@ -2752,15 +2765,15 @@ fn test_recursive_multi_all_of_ref_no_stack_overflow() {
     assert_eq!(struct_.fields.len(), 2);
     assert_matches!(
         &struct_.fields[0],
-        IrStructField {
-            name: IrStructFieldName::Name("value"),
+        RawStructField {
+            name: StructFieldName::Name("value"),
             ..
         }
     );
     assert_matches!(
         &struct_.fields[1],
-        IrStructField {
-            name: IrStructFieldName::Name("next"),
+        RawStructField {
+            name: StructFieldName::Name("next"),
             ..
         }
     );
@@ -2788,7 +2801,7 @@ fn test_named_array_schema_produces_container() {
     let result = transform(&arena, &doc, "StringList", &schema);
 
     let container = match result {
-        IrType::Schema(SchemaIrType::Container(
+        RawType::Schema(RawSchemaType::Container(
             SchemaTypeInfo {
                 name: "StringList", ..
             },
@@ -2797,12 +2810,12 @@ fn test_named_array_schema_produces_container() {
         other => panic!("expected container `StringList`; got `{other:?}`"),
     };
     let items = match &container {
-        Container::Array(Inner { ty, .. }) => ty,
+        RawContainer::Array(RawInner { ty, .. }) => ty,
         other => panic!("expected array; got `{other:?}`"),
     };
     assert_matches!(
         &**items,
-        IrType::Inline(InlineIrType::Primitive(_, PrimitiveIrType::String))
+        RawType::Inline(RawInlineType::Primitive(_, PrimitiveType::String))
     );
 }
 
@@ -2842,7 +2855,7 @@ fn test_named_array_with_inline_one_of_items_produces_container() {
     // A named array schema should produce a `Container` for the array,
     // wrapped in a `SchemaIrType` that preserves the schema's identity.
     let container = match result {
-        IrType::Schema(SchemaIrType::Container(
+        RawType::Schema(RawSchemaType::Container(
             SchemaTypeInfo {
                 name: "Animals", ..
             },
@@ -2851,11 +2864,11 @@ fn test_named_array_with_inline_one_of_items_produces_container() {
         other => panic!("expected container `Animals`; got `{other:?}`"),
     };
     let items = match &container {
-        Container::Array(Inner { ty, .. }) => ty,
+        RawContainer::Array(RawInner { ty, .. }) => ty,
         other => panic!("expected array; got `{other:?}`"),
     };
     // The inline `oneOf` should produce an inline untagged union.
-    assert_matches!(&**items, IrType::Inline(InlineIrType::Untagged(..)));
+    assert_matches!(&**items, RawType::Inline(RawInlineType::Untagged(..)));
 }
 
 #[test]
@@ -2878,7 +2891,7 @@ fn test_named_map_schema_produces_container() {
     let result = transform(&arena, &doc, "Metadata", &schema);
 
     let container = match result {
-        IrType::Schema(SchemaIrType::Container(
+        RawType::Schema(RawSchemaType::Container(
             SchemaTypeInfo {
                 name: "Metadata", ..
             },
@@ -2886,7 +2899,7 @@ fn test_named_map_schema_produces_container() {
         )) => container,
         other => panic!("expected container `Metadata`; got `{other:?}`"),
     };
-    assert_matches!(&container, Container::Map(_));
+    assert_matches!(&container, RawContainer::Map(_));
 }
 
 #[test]
@@ -2907,7 +2920,7 @@ fn test_named_nullable_schema_produces_container() {
     let result = transform(&arena, &doc, "NullableString", &schema);
 
     let container = match result {
-        IrType::Schema(SchemaIrType::Container(
+        RawType::Schema(RawSchemaType::Container(
             SchemaTypeInfo {
                 name: "NullableString",
                 ..
@@ -2917,12 +2930,12 @@ fn test_named_nullable_schema_produces_container() {
         other => panic!("expected container `NullableString`; got `{other:?}`"),
     };
     let inner = match &container {
-        Container::Optional(Inner { ty, .. }) => ty,
+        RawContainer::Optional(RawInner { ty, .. }) => ty,
         other => panic!("expected optional; got `{other:?}`"),
     };
     assert_matches!(
         &**inner,
-        IrType::Inline(InlineIrType::Primitive(_, PrimitiveIrType::String))
+        RawType::Inline(RawInlineType::Primitive(_, PrimitiveType::String))
     );
 }
 
@@ -2947,13 +2960,14 @@ fn test_named_container_preserves_description() {
     let result = transform(&arena, &doc, "Ids", &schema);
 
     let container = match result {
-        IrType::Schema(SchemaIrType::Container(SchemaTypeInfo { name: "Ids", .. }, container)) => {
-            container
-        }
+        RawType::Schema(RawSchemaType::Container(
+            SchemaTypeInfo { name: "Ids", .. },
+            container,
+        )) => container,
         other => panic!("expected container `Ids`; got `{other:?}`"),
     };
     let description = match &container {
-        Container::Array(Inner { description, .. }) => *description,
+        RawContainer::Array(RawInner { description, .. }) => *description,
         other => panic!("expected array; got `{other:?}`"),
     };
     assert_eq!(description, Some("A list of identifiers"));
@@ -2980,7 +2994,7 @@ fn test_named_primitive_does_not_produce_container() {
     // and don't benefit from a type alias.
     assert_matches!(
         result,
-        IrType::Schema(SchemaIrType::Primitive(_, PrimitiveIrType::String))
+        RawType::Schema(RawSchemaType::Primitive(_, PrimitiveType::String))
     );
 }
 
@@ -3013,7 +3027,7 @@ fn test_untagged_single_variant_one_of_ref_produces_container() {
     // A `oneOf` with `null` and a schema reference should produce a
     // `Container(Optional(Ref(...)))`.
     let container = match result {
-        IrType::Schema(SchemaIrType::Container(
+        RawType::Schema(RawSchemaType::Container(
             SchemaTypeInfo {
                 name: "MaybeInner", ..
             },
@@ -3022,10 +3036,10 @@ fn test_untagged_single_variant_one_of_ref_produces_container() {
         other => panic!("expected container `MaybeInner`; got `{other:?}`"),
     };
     let inner = match &container {
-        Container::Optional(Inner { ty, .. }) => ty,
+        RawContainer::Optional(RawInner { ty, .. }) => ty,
         other => panic!("expected optional; got `{other:?}`"),
     };
-    assert_matches!(&**inner, IrType::Ref(_));
+    assert_matches!(&**inner, RawType::Ref(_));
 }
 
 // MARK: Inline containers
@@ -3056,7 +3070,7 @@ fn test_inline_array_produces_inline_container() {
     // Struct fields that are arrays become inline containers,
     // not schema containers.
     let struct_ = match result {
-        IrType::Schema(SchemaIrType::Struct(
+        RawType::Schema(RawSchemaType::Struct(
             SchemaTypeInfo {
                 name: "Container", ..
             },
@@ -3066,9 +3080,9 @@ fn test_inline_array_produces_inline_container() {
     };
     assert_matches!(
         struct_.fields,
-        [IrStructField {
-            name: IrStructFieldName::Name("items"),
-            ty: IrType::Inline(InlineIrType::Container(_, Container::Array(_))),
+        [RawStructField {
+            name: StructFieldName::Name("items"),
+            ty: RawType::Inline(RawInlineType::Container(_, RawContainer::Array(_))),
             ..
         }],
     );
@@ -3099,18 +3113,18 @@ fn test_optional_field_container_description_is_not_parent_schema() {
     let result = transform(&arena, &doc, "Parent", &schema);
 
     let struct_ = match result {
-        IrType::Schema(SchemaIrType::Struct(SchemaTypeInfo { name: "Parent", .. }, struct_)) => {
+        RawType::Schema(RawSchemaType::Struct(SchemaTypeInfo { name: "Parent", .. }, struct_)) => {
             struct_
         }
         other => panic!("expected struct `Parent`; got `{other:?}`"),
     };
     let [
-        IrStructField {
-            name: IrStructFieldName::Name("nickname"),
+        RawStructField {
+            name: StructFieldName::Name("nickname"),
             ty:
-                IrType::Inline(InlineIrType::Container(
+                RawType::Inline(RawInlineType::Container(
                     _,
-                    Container::Optional(Inner { description, .. }),
+                    RawContainer::Optional(RawInner { description, .. }),
                 )),
             ..
         },

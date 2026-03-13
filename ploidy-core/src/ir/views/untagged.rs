@@ -1,27 +1,27 @@
 use petgraph::graph::NodeIndex;
 
 use crate::ir::{
-    IrUntaggedVariantNameHint,
+    UntaggedVariantNameHint,
     graph::CookedGraph,
-    types::{IrUntagged, IrUntaggedVariant},
+    types::{CookedUntagged, CookedUntaggedVariant},
 };
 
-use super::{ViewNode, ir::IrTypeView};
+use super::{ViewNode, ir::TypeView};
 
-/// A graph-aware view of an [`IrUntagged`] union.
+/// A graph-aware view of an [`Untagged`][CookedUntagged] union.
 #[derive(Debug)]
-pub struct IrUntaggedView<'a> {
+pub struct UntaggedView<'a> {
     cooked: &'a CookedGraph<'a>,
     index: NodeIndex<usize>,
-    ty: &'a IrUntagged<'a, NodeIndex<usize>>,
+    ty: &'a CookedUntagged<'a>,
 }
 
-impl<'a> IrUntaggedView<'a> {
+impl<'a> UntaggedView<'a> {
     #[inline]
     pub(in crate::ir) fn new(
         cooked: &'a CookedGraph<'a>,
         index: NodeIndex<usize>,
-        ty: &'a IrUntagged<'a, NodeIndex<usize>>,
+        ty: &'a CookedUntagged<'a>,
     ) -> Self {
         Self { cooked, index, ty }
     }
@@ -33,18 +33,15 @@ impl<'a> IrUntaggedView<'a> {
 
     /// Returns an iterator over this untagged union's variants.
     #[inline]
-    pub fn variants(&self) -> impl Iterator<Item = IrUntaggedVariantView<'_, 'a>> {
-        self.ty
-            .variants
-            .iter()
-            .map(|variant| IrUntaggedVariantView {
-                parent: self,
-                variant,
-            })
+    pub fn variants(&self) -> impl Iterator<Item = UntaggedVariantView<'_, 'a>> {
+        self.ty.variants.iter().map(|variant| UntaggedVariantView {
+            parent: self,
+            variant,
+        })
     }
 }
 
-impl<'a> ViewNode<'a> for IrUntaggedView<'a> {
+impl<'a> ViewNode<'a> for UntaggedView<'a> {
     #[inline]
     fn cooked(&self) -> &'a CookedGraph<'a> {
         self.cooked
@@ -56,29 +53,29 @@ impl<'a> ViewNode<'a> for IrUntaggedView<'a> {
     }
 }
 
-/// A graph-aware view of an [`IrUntaggedVariant`].
+/// A graph-aware view of an [`UntaggedVariant`][CookedUntaggedVariant].
 #[derive(Debug)]
-pub struct IrUntaggedVariantView<'view, 'a> {
-    parent: &'view IrUntaggedView<'a>,
-    variant: &'a IrUntaggedVariant<NodeIndex<usize>>,
+pub struct UntaggedVariantView<'view, 'a> {
+    parent: &'view UntaggedView<'a>,
+    variant: &'a CookedUntaggedVariant,
 }
 
-impl<'view, 'a> IrUntaggedVariantView<'view, 'a> {
+impl<'view, 'a> UntaggedVariantView<'view, 'a> {
     /// Returns a view of this variant's type, if it's not `null`.
     #[inline]
-    pub fn ty(&self) -> Option<SomeIrUntaggedVariant<'a>> {
+    pub fn ty(&self) -> Option<SomeUntaggedVariant<'a>> {
         match self.variant {
-            &IrUntaggedVariant::Some(hint, index) => Some(SomeIrUntaggedVariant {
+            &CookedUntaggedVariant::Some(hint, index) => Some(SomeUntaggedVariant {
                 hint,
-                view: IrTypeView::new(self.parent.cooked, index),
+                view: TypeView::new(self.parent.cooked, index),
             }),
-            IrUntaggedVariant::Null => None,
+            CookedUntaggedVariant::Null => None,
         }
     }
 }
 
 #[derive(Debug)]
-pub struct SomeIrUntaggedVariant<'a> {
-    pub hint: IrUntaggedVariantNameHint,
-    pub view: IrTypeView<'a>,
+pub struct SomeUntaggedVariant<'a> {
+    pub hint: UntaggedVariantNameHint,
+    pub view: TypeView<'a>,
 }

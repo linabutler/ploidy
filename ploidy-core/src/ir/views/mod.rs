@@ -30,30 +30,30 @@ pub mod struct_;
 pub mod tagged;
 pub mod untagged;
 
-use self::{inline::InlineIrTypeView, ir::IrTypeView, operation::IrOperationView};
+use self::{inline::InlineTypeView, ir::TypeView, operation::OperationView};
 
 /// A view of a type in the graph.
 pub trait View<'a> {
     /// Returns an iterator over all the inline types that are
     /// contained within this type.
-    fn inlines(&self) -> impl Iterator<Item = InlineIrTypeView<'a>> + use<'a, Self>;
+    fn inlines(&self) -> impl Iterator<Item = InlineTypeView<'a>> + use<'a, Self>;
 
     /// Returns an iterator over the operations that use this type.
     ///
     /// This is backward propagation: each operation depends on this type.
-    fn used_by(&self) -> impl Iterator<Item = IrOperationView<'a>> + use<'a, Self>;
+    fn used_by(&self) -> impl Iterator<Item = OperationView<'a>> + use<'a, Self>;
 
     /// Returns an iterator over all the types that this type transitively depends on.
     /// This is forward propagation: this type depends on each reachable type.
     ///
     /// Complexity: O(n), where `n` is the number of dependency types.
-    fn dependencies(&self) -> impl Iterator<Item = IrTypeView<'a>> + use<'a, Self>;
+    fn dependencies(&self) -> impl Iterator<Item = TypeView<'a>> + use<'a, Self>;
 
     /// Returns an iterator over all the types that transitively depend on this type.
     /// This is backward propagation: each returned type depends on this type.
     ///
     /// Complexity: O(n), where `n` is the number of dependent types.
-    fn dependents(&self) -> impl Iterator<Item = IrTypeView<'a>> + use<'a, Self>;
+    fn dependents(&self) -> impl Iterator<Item = TypeView<'a>> + use<'a, Self>;
 
     /// Traverses this type's dependencies or dependents breadth-first,
     /// using `filter` to control which nodes are yielded and explored.
@@ -69,19 +69,19 @@ pub trait View<'a> {
         &self,
         reach: Reach,
         filter: F,
-    ) -> impl Iterator<Item = IrTypeView<'a>> + use<'a, Self, F>
+    ) -> impl Iterator<Item = TypeView<'a>> + use<'a, Self, F>
     where
-        F: Fn(EdgeKind, &IrTypeView<'a>) -> Traversal;
+        F: Fn(EdgeKind, &TypeView<'a>) -> Traversal;
 }
 
 pub trait ExtendableView<'a>: View<'a> {
     /// Returns a reference to this type's extended data.
-    fn extensions(&self) -> &IrViewExtensions<Self>
+    fn extensions(&self) -> &ViewExtensions<Self>
     where
         Self: Sized;
 
     /// Returns a mutable reference to this type's extended data.
-    fn extensions_mut(&mut self) -> &mut IrViewExtensions<Self>
+    fn extensions_mut(&mut self) -> &mut ViewExtensions<Self>
     where
         Self: Sized;
 }
@@ -91,7 +91,7 @@ where
     T: ViewNode<'a>,
 {
     #[inline]
-    fn inlines(&self) -> impl Iterator<Item = InlineIrTypeView<'a>> + use<'a, T> {
+    fn inlines(&self) -> impl Iterator<Item = InlineTypeView<'a>> + use<'a, T> {
         let cooked = self.cooked();
         // Only include edges to other inline schemas.
         let filtered = EdgeFiltered::from_fn(&cooked.graph, |e| {
@@ -100,39 +100,39 @@ where
         let mut bfs = Bfs::new(&cooked.graph, self.index());
         std::iter::from_fn(move || bfs.next(&filtered)).filter_map(|index| {
             match cooked.graph[index] {
-                GraphNode::Inline(ty) => Some(InlineIrTypeView::new(cooked, index, ty)),
+                GraphNode::Inline(ty) => Some(InlineTypeView::new(cooked, index, ty)),
                 _ => None,
             }
         })
     }
 
     #[inline]
-    fn used_by(&self) -> impl Iterator<Item = IrOperationView<'a>> + use<'a, T> {
+    fn used_by(&self) -> impl Iterator<Item = OperationView<'a>> + use<'a, T> {
         let cooked = self.cooked();
         let meta = &cooked.metadata.schemas[self.index().index()];
         meta.used_by
             .iter()
-            .map(|op| IrOperationView::new(cooked, op.0))
+            .map(|op| OperationView::new(cooked, op.0))
     }
 
     #[inline]
-    fn dependencies(&self) -> impl Iterator<Item = IrTypeView<'a>> + use<'a, T> {
+    fn dependencies(&self) -> impl Iterator<Item = TypeView<'a>> + use<'a, T> {
         let cooked = self.cooked();
         let meta = &cooked.metadata.schemas[self.index().index()];
         meta.dependencies
             .ones()
             .map(NodeIndex::new)
-            .map(|index| IrTypeView::new(cooked, index))
+            .map(|index| TypeView::new(cooked, index))
     }
 
     #[inline]
-    fn dependents(&self) -> impl Iterator<Item = IrTypeView<'a>> + use<'a, T> {
+    fn dependents(&self) -> impl Iterator<Item = TypeView<'a>> + use<'a, T> {
         let cooked = self.cooked();
         let meta = &cooked.metadata.schemas[self.index().index()];
         meta.dependents
             .ones()
             .map(NodeIndex::new)
-            .map(move |index| IrTypeView::new(cooked, index))
+            .map(move |index| TypeView::new(cooked, index))
     }
 
     #[inline]
@@ -140,9 +140,9 @@ where
         &self,
         reach: Reach,
         filter: F,
-    ) -> impl Iterator<Item = IrTypeView<'a>> + use<'a, T, F>
+    ) -> impl Iterator<Item = TypeView<'a>> + use<'a, T, F>
     where
-        F: Fn(EdgeKind, &IrTypeView<'a>) -> Traversal,
+        F: Fn(EdgeKind, &TypeView<'a>) -> Traversal,
     {
         let cooked = self.cooked();
         let t = Traverse::from_neighbors(
@@ -154,10 +154,10 @@ where
             },
         );
         t.run(move |kind, index| {
-            let view = IrTypeView::new(cooked, index);
+            let view = TypeView::new(cooked, index);
             filter(kind, &view)
         })
-        .map(|index| IrTypeView::new(cooked, index))
+        .map(|index| TypeView::new(cooked, index))
     }
 }
 
@@ -166,13 +166,13 @@ where
     T: ViewNode<'a>,
 {
     #[inline]
-    fn extensions(&self) -> &IrViewExtensions<Self> {
-        IrViewExtensions::new(self)
+    fn extensions(&self) -> &ViewExtensions<Self> {
+        ViewExtensions::new(self)
     }
 
     #[inline]
-    fn extensions_mut(&mut self) -> &mut IrViewExtensions<Self> {
-        IrViewExtensions::new_mut(self)
+    fn extensions_mut(&mut self) -> &mut ViewExtensions<Self> {
+        ViewExtensions::new_mut(self)
     }
 }
 
@@ -235,9 +235,9 @@ where
 /// deduplicated identifier name on every named schema type.
 #[derive(RefCastCustom)]
 #[repr(transparent)]
-pub struct IrViewExtensions<X>(X);
+pub struct ViewExtensions<X>(X);
 
-impl<X> IrViewExtensions<X> {
+impl<X> ViewExtensions<X> {
     #[ref_cast_custom]
     fn new(view: &X) -> &Self;
 
@@ -245,7 +245,7 @@ impl<X> IrViewExtensions<X> {
     fn new_mut(view: &mut X) -> &mut Self;
 }
 
-impl<'a, X: Extendable<'a>> IrViewExtensions<X> {
+impl<'a, X: Extendable<'a>> ViewExtensions<X> {
     /// Returns a reference to a value of an arbitrary type that was
     /// previously inserted into this extended data.
     #[inline]
@@ -274,9 +274,9 @@ impl<'a, X: Extendable<'a>> IrViewExtensions<X> {
     }
 }
 
-impl<X> Debug for IrViewExtensions<X> {
+impl<X> Debug for ViewExtensions<X> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_tuple("IrViewExtensions").finish_non_exhaustive()
+        f.debug_tuple("ViewExtensions").finish_non_exhaustive()
     }
 }
 

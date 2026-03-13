@@ -2,7 +2,7 @@ use std::ops::Deref;
 
 use ploidy_core::{
     codegen::UniqueNames,
-    ir::{CookedGraph, ExtendableView, PrimitiveIrType},
+    ir::{CookedGraph, ExtendableView, PrimitiveType},
 };
 
 use super::{config::CodegenConfig, naming::CodegenIdentScope};
@@ -30,7 +30,7 @@ impl<'a> CodegenGraph<'a> {
         // Decorate `DateTime` primitives with the format.
         for mut view in cooked
             .primitives()
-            .filter(|view| matches!(view.ty(), PrimitiveIrType::DateTime))
+            .filter(|view| matches!(view.ty(), PrimitiveType::DateTime))
         {
             view.extensions_mut().insert(config.date_time_format);
         }

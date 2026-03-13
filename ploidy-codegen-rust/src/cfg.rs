@@ -24,7 +24,7 @@
 use std::collections::BTreeSet;
 
 use itertools::Itertools;
-use ploidy_core::ir::{InlineIrTypeView, IrOperationView, SchemaIrTypeView, View};
+use ploidy_core::ir::{InlineTypeView, OperationView, SchemaTypeView, View};
 use proc_macro2::TokenStream;
 use quote::{ToTokens, quote};
 
@@ -51,7 +51,7 @@ pub enum CfgFeature {
 impl CfgFeature {
     /// Builds a `#[cfg(...)]` attribute for a schema type, based on
     /// its own resource, and the resources of the operations that use it.
-    pub fn for_schema_type(view: &SchemaIrTypeView<'_>) -> Option<Self> {
+    pub fn for_schema_type(view: &SchemaTypeView<'_>) -> Option<Self> {
         // If this type has any transitive ungated root dependents,
         // it can't have a feature gate. An "ungated root" type
         // has no `x-resourceId`, _and_ isn't used by any operation with
@@ -88,7 +88,7 @@ impl CfgFeature {
     }
 
     /// Builds a `#[cfg(...)]` attribute for an inline type.
-    pub fn for_inline_type(view: &InlineIrTypeView<'_>) -> Option<Self> {
+    pub fn for_inline_type(view: &InlineTypeView<'_>) -> Option<Self> {
         // Inline types depended on by ungated root types can't be gated, either.
         // See `for_schema_type` for the definition of an "ungated root".
         let has_ungated_root_dependent = view
@@ -122,7 +122,7 @@ impl CfgFeature {
     }
 
     /// Builds a `#[cfg(...)]` attribute for a client method.
-    pub fn for_operation(view: &IrOperationView<'_>) -> Option<Self> {
+    pub fn for_operation(view: &OperationView<'_>) -> Option<Self> {
         // Collect all features from transitive dependencies, then
         // reduce redundant features.
         let pairs = view
@@ -238,7 +238,7 @@ impl ToTokens for CfgFeature {
 /// depends on feature B's type, then enabling A in `Cargo.toml` already
 /// enables B, so B is redundant.
 fn reduce_transitive_features(
-    pairs: &[(CargoFeature, SchemaIrTypeView<'_>)],
+    pairs: &[(CargoFeature, SchemaTypeView<'_>)],
 ) -> BTreeSet<CargoFeature> {
     pairs
         .iter()

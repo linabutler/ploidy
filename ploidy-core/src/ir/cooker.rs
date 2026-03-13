@@ -5,15 +5,15 @@ use petgraph::graph::NodeIndex;
 use crate::arena::Arena;
 
 use super::{
-    graph::GraphNode,
+    graph::{CookedGraphNode, GraphNode, RawGraphNode},
     types::{
-        Container, InlineIrType, Inner, IrOperation, IrParameter, IrParameterInfo, IrRequest,
-        IrResponse, IrStruct, IrStructField, IrTagged, IrTaggedVariant, IrType, IrUntagged,
-        IrUntaggedVariant, SchemaIrType,
+        CookedContainer, CookedInlineType, CookedOperation, CookedParameter, CookedSchemaType,
+        CookedStruct, CookedTagged, CookedUntagged, RawContainer, RawInlineType, RawOperation,
+        RawParameter, RawSchemaType, RawStruct, RawTagged, RawType, RawUntagged, shape,
     },
 };
 
-/// Turns raw IR types with [`IrType`] references into
+/// Turns raw types with [`RawType`] references into
 /// cooked types with [`NodeIndex`] references.
 pub struct Cooker<'a, F> {
     arena: &'a Arena,
@@ -22,15 +22,15 @@ pub struct Cooker<'a, F> {
 
 impl<'a, F> Cooker<'a, F>
 where
-    F: Fn(&'a IrType<'a>) -> NodeIndex<usize>,
+    F: Fn(&'a RawType<'a>) -> NodeIndex<usize>,
 {
     /// Creates a new cooker with the given arena and reference resolver.
     pub fn new(arena: &'a Arena, resolve: F) -> Self {
         Self { arena, resolve }
     }
 
-    /// Cooks a raw [`GraphNode`] by resolving all type references within it.
-    pub fn node(&self, raw: GraphNode<'a>) -> GraphNode<'a, NodeIndex<usize>> {
+    /// Cooks a [`RawGraphNode`] by resolving all type references within it.
+    pub fn node(&self, raw: RawGraphNode<'a>) -> CookedGraphNode<'a> {
         use GraphNode::*;
         match raw {
             Schema(ty) => Schema(self.arena.alloc(self.schema(ty))),
@@ -38,9 +38,10 @@ where
         }
     }
 
-    /// Cooks an [`IrOperation`] and all the types it references.
-    pub fn operation(&self, raw: &IrOperation<'a>) -> &'a IrOperation<'a, NodeIndex<usize>> {
-        self.arena.alloc(IrOperation {
+    /// Cooks a [`RawOperation`] and all the types it references.
+    pub fn operation(&self, raw: &RawOperation<'a>) -> &'a CookedOperation<'a> {
+        use shape::{Operation, Request, Response};
+        self.arena.alloc(Operation {
             id: raw.id,
             method: raw.method,
             path: raw.path,
@@ -50,47 +51,48 @@ where
                 .arena
                 .alloc_slice_exact(raw.params.iter().map(|p| self.param(p))),
             request: raw.request.as_ref().map(|r| match r {
-                IrRequest::Json(ty) => IrRequest::Json(self.resolve(ty)),
-                IrRequest::Multipart => IrRequest::Multipart,
+                Request::Json(ty) => Request::Json(self.resolve(ty)),
+                Request::Multipart => Request::Multipart,
             }),
             response: raw.response.as_ref().map(|r| match r {
-                IrResponse::Json(ty) => IrResponse::Json(self.resolve(ty)),
+                Response::Json(ty) => Response::Json(self.resolve(ty)),
             }),
         })
     }
 
-    fn schema(&self, raw: &SchemaIrType<'a>) -> SchemaIrType<'a, NodeIndex<usize>> {
-        use SchemaIrType::*;
-        match raw {
-            Enum(info, e) => Enum(*info, *e),
-            Struct(info, s) => Struct(*info, self.struct_(s)),
-            Tagged(info, t) => Tagged(*info, self.tagged(t)),
-            Untagged(info, u) => Untagged(*info, self.untagged(u)),
-            Container(info, c) => Container(*info, self.container(c)),
-            &Primitive(info, p) => Primitive(info, p),
-            &Any(info) => Any(info),
+    fn schema(&self, raw: &RawSchemaType<'a>) -> CookedSchemaType<'a> {
+        use shape::SchemaType::*;
+        match *raw {
+            Enum(info, e) => Enum(info, e),
+            Struct(info, ref s) => Struct(info, self.struct_(s)),
+            Tagged(info, ref t) => Tagged(info, self.tagged(t)),
+            Untagged(info, ref u) => Untagged(info, self.untagged(u)),
+            Container(info, ref c) => Container(info, self.container(c)),
+            Primitive(info, p) => Primitive(info, p),
+            Any(info) => Any(info),
         }
     }
 
-    fn inline(&self, raw: &InlineIrType<'a>) -> InlineIrType<'a, NodeIndex<usize>> {
-        use InlineIrType::*;
-        match raw {
-            Enum(path, e) => Enum(*path, *e),
-            Struct(path, s) => Struct(*path, self.struct_(s)),
-            Tagged(path, t) => Tagged(*path, self.tagged(t)),
-            Untagged(path, u) => Untagged(*path, self.untagged(u)),
-            Container(path, c) => Container(*path, self.container(c)),
-            &Primitive(path, p) => Primitive(path, p),
-            &Any(path) => Any(path),
+    fn inline(&self, raw: &RawInlineType<'a>) -> CookedInlineType<'a> {
+        use shape::InlineType::*;
+        match *raw {
+            Enum(path, e) => Enum(path, e),
+            Struct(path, ref s) => Struct(path, self.struct_(s)),
+            Tagged(path, ref t) => Tagged(path, self.tagged(t)),
+            Untagged(path, ref u) => Untagged(path, self.untagged(u)),
+            Container(path, ref c) => Container(path, self.container(c)),
+            Primitive(path, p) => Primitive(path, p),
+            Any(path) => Any(path),
         }
     }
 
-    fn struct_(&self, raw: &IrStruct<'a>) -> IrStruct<'a, NodeIndex<usize>> {
-        IrStruct {
+    fn struct_(&self, raw: &RawStruct<'a>) -> CookedStruct<'a> {
+        use shape::{Struct, StructField};
+        Struct {
             description: raw.description,
             fields: self
                 .arena
-                .alloc_slice_exact(raw.fields.iter().map(|f| IrStructField {
+                .alloc_slice_exact(raw.fields.iter().map(|f| StructField {
                     name: f.name,
                     ty: self.resolve(f.ty),
                     required: f.required,
@@ -103,13 +105,14 @@ where
         }
     }
 
-    fn tagged(&self, raw: &IrTagged<'a>) -> IrTagged<'a, NodeIndex<usize>> {
-        IrTagged {
+    fn tagged(&self, raw: &RawTagged<'a>) -> CookedTagged<'a> {
+        use shape::{Tagged, TaggedVariant};
+        Tagged {
             description: raw.description,
             tag: raw.tag,
             variants: self
                 .arena
-                .alloc_slice_exact(raw.variants.iter().map(|v| IrTaggedVariant {
+                .alloc_slice_exact(raw.variants.iter().map(|v| TaggedVariant {
                     name: v.name,
                     aliases: v.aliases,
                     ty: self.resolve(v.ty),
@@ -117,36 +120,39 @@ where
         }
     }
 
-    fn untagged(&self, raw: &IrUntagged<'a>) -> IrUntagged<'a, NodeIndex<usize>> {
-        IrUntagged {
+    fn untagged(&self, raw: &RawUntagged<'a>) -> CookedUntagged<'a> {
+        use shape::{Untagged, UntaggedVariant};
+        Untagged {
             description: raw.description,
             variants: self
                 .arena
                 .alloc_slice_exact(raw.variants.iter().map(|v| match v {
-                    IrUntaggedVariant::Some(hint, ty) => {
-                        IrUntaggedVariant::Some(*hint, self.resolve(ty))
+                    &UntaggedVariant::Some(hint, ty) => {
+                        UntaggedVariant::Some(hint, self.resolve(ty))
                     }
-                    IrUntaggedVariant::Null => IrUntaggedVariant::Null,
+                    UntaggedVariant::Null => UntaggedVariant::Null,
                 })),
         }
     }
 
-    fn container(&self, raw: &Container<'a>) -> Container<'a, NodeIndex<usize>> {
+    fn container(&self, raw: &RawContainer<'a>) -> CookedContainer<'a> {
+        use shape::{Container::*, Inner};
         let inner = raw.inner();
         let cooked = Inner {
             description: inner.description,
             ty: self.resolve(inner.ty),
         };
         match raw {
-            Container::Array(_) => Container::Array(cooked),
-            Container::Map(_) => Container::Map(cooked),
-            Container::Optional(_) => Container::Optional(cooked),
+            Array(_) => Array(cooked),
+            Map(_) => Map(cooked),
+            Optional(_) => Optional(cooked),
         }
     }
 
-    fn param(&self, raw: &IrParameter<'a>) -> IrParameter<'a, NodeIndex<usize>> {
-        let (IrParameter::Path(info) | IrParameter::Query(info)) = raw;
-        let cooked = IrParameterInfo {
+    fn param(&self, raw: &RawParameter<'a>) -> CookedParameter<'a> {
+        use shape::{Parameter::*, ParameterInfo};
+        let (Path(info) | Query(info)) = raw;
+        let cooked = ParameterInfo {
             name: info.name,
             ty: self.resolve(info.ty),
             required: info.required,
@@ -154,14 +160,14 @@ where
             style: info.style,
         };
         match raw {
-            IrParameter::Path(_) => IrParameter::Path(cooked),
-            IrParameter::Query(_) => IrParameter::Query(cooked),
+            Path(_) => Path(cooked),
+            Query(_) => Query(cooked),
         }
     }
 
     /// Resolves a raw type reference to a cooked graph index.
     #[inline]
-    fn resolve(&self, ty: &'a IrType<'a>) -> NodeIndex<usize> {
+    fn resolve(&self, ty: &'a RawType<'a>) -> NodeIndex<usize> {
         (self.resolve)(ty)
     }
 }

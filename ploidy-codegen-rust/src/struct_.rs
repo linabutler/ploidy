@@ -2,9 +2,9 @@ use itertools::Itertools;
 use ploidy_core::{
     codegen::UniqueNames,
     ir::{
-        ContainerView, EdgeKind, InlineIrTypeView, IrStructFieldName, IrStructFieldNameHint,
-        IrStructFieldView, IrStructView, IrTypeView, PrimitiveIrType, Reach, SchemaIrTypeView,
-        Traversal, View,
+        ContainerView, EdgeKind, InlineTypeView, PrimitiveType, Reach, SchemaTypeView,
+        StructFieldName, StructFieldNameHint, StructFieldView, StructView, Traversal, TypeView,
+        View,
     },
 };
 use proc_macro2::TokenStream;
@@ -21,11 +21,11 @@ use super::{
 #[derive(Clone, Debug)]
 pub struct CodegenStruct<'a> {
     name: CodegenTypeName<'a>,
-    ty: &'a IrStructView<'a>,
+    ty: &'a StructView<'a>,
 }
 
 impl<'a> CodegenStruct<'a> {
-    pub fn new(name: CodegenTypeName<'a>, ty: &'a IrStructView<'a>) -> Self {
+    pub fn new(name: CodegenTypeName<'a>, ty: &'a StructView<'a>) -> Self {
         Self { name, ty }
     }
 }
@@ -37,7 +37,7 @@ impl ToTokens for CodegenStruct<'_> {
             if self.ty.fields().any(|f| {
                 matches!(
                     f.name(),
-                    IrStructFieldName::Hint(IrStructFieldNameHint::AdditionalProperties)
+                    StructFieldName::Hint(StructFieldNameHint::AdditionalProperties)
                 )
             }) {
                 // Make sure the `additional_properties` field that we emit
@@ -53,11 +53,11 @@ impl ToTokens for CodegenStruct<'_> {
             .filter(|field| !field.tag())
             .map(|field| {
                 let field_name: Ident = match field.name() {
-                    IrStructFieldName::Name(n) => {
+                    StructFieldName::Name(n) => {
                         let name = CodegenIdentUsage::Field(&scope.uniquify(n));
                         parse_quote!(#name)
                     }
-                    IrStructFieldName::Hint(hint) => {
+                    StructFieldName::Hint(hint) => {
                         let name = CodegenStructFieldName(hint);
                         parse_quote!(#name)
                     }
@@ -81,9 +81,9 @@ impl ToTokens for CodegenStruct<'_> {
         // Structs that don't contain any floating-point types
         // can derive `Eq` and `Hash`.
         let is_hashable = self.ty.dependencies().all(|view| match view {
-            IrTypeView::Inline(InlineIrTypeView::Primitive(_, view))
-            | IrTypeView::Schema(SchemaIrTypeView::Primitive(_, view)) => {
-                !matches!(view.ty(), PrimitiveIrType::F32 | PrimitiveIrType::F64)
+            TypeView::Inline(InlineTypeView::Primitive(_, view))
+            | TypeView::Schema(SchemaTypeView::Primitive(_, view)) => {
+                !matches!(view.ty(), PrimitiveType::F32 | PrimitiveType::F64)
             }
             _ => true,
         });
@@ -97,16 +97,16 @@ impl ToTokens for CodegenStruct<'_> {
                 match (kind, view) {
                     (
                         EdgeKind::Reference,
-                        IrTypeView::Schema(SchemaIrTypeView::Container(_, _))
-                        | IrTypeView::Inline(InlineIrTypeView::Container(_, _)),
+                        TypeView::Schema(SchemaTypeView::Container(_, _))
+                        | TypeView::Inline(InlineTypeView::Container(_, _)),
                     ) => {
                         // All container types implement `Default`.
                         Traversal::Ignore
                     }
                     (
                         EdgeKind::Reference | EdgeKind::Inherits,
-                        IrTypeView::Schema(SchemaIrTypeView::Struct(_, view))
-                        | IrTypeView::Inline(InlineIrTypeView::Struct(_, view)),
+                        TypeView::Schema(SchemaTypeView::Struct(_, view))
+                        | TypeView::Inline(InlineTypeView::Struct(_, view)),
                     ) => {
                         // Structs may or may not implement `Default`,
                         // depending on their fields. If this struct
@@ -138,17 +138,17 @@ impl ToTokens for CodegenStruct<'_> {
             .all(|ty| {
                 match ty {
                     // `serde_json::Value` implements `Default`.
-                    IrTypeView::Inline(InlineIrTypeView::Any(..))
-                    | IrTypeView::Schema(SchemaIrTypeView::Any(..)) => true,
+                    TypeView::Inline(InlineTypeView::Any(..))
+                    | TypeView::Schema(SchemaTypeView::Any(..)) => true,
                     // `Url` doesn't implement `Default`, but other primitives do.
-                    IrTypeView::Inline(InlineIrTypeView::Primitive(_, view))
-                    | IrTypeView::Schema(SchemaIrTypeView::Primitive(_, view))
-                        if matches!(view.ty(), PrimitiveIrType::Url) =>
+                    TypeView::Inline(InlineTypeView::Primitive(_, view))
+                    | TypeView::Schema(SchemaTypeView::Primitive(_, view))
+                        if matches!(view.ty(), PrimitiveType::Url) =>
                     {
                         false
                     }
-                    IrTypeView::Inline(InlineIrTypeView::Primitive(..))
-                    | IrTypeView::Schema(SchemaIrTypeView::Primitive(..)) => true,
+                    TypeView::Inline(InlineTypeView::Primitive(..))
+                    | TypeView::Schema(SchemaTypeView::Primitive(..)) => true,
                     // Other types aren't defaultable.
                     _ => false,
                 }
@@ -174,11 +174,11 @@ impl ToTokens for CodegenStruct<'_> {
 /// A field in a struct, ready for code generation.
 #[derive(Debug)]
 struct CodegenField<'view, 'a> {
-    field: &'a IrStructFieldView<'view, 'a>,
+    field: &'a StructFieldView<'view, 'a>,
 }
 
 impl<'view, 'a> CodegenField<'view, 'a> {
-    fn new(field: &'a IrStructFieldView<'view, 'a>) -> Self {
+    fn new(field: &'a StructFieldView<'view, 'a>) -> Self {
         Self { field }
     }
 
@@ -186,10 +186,10 @@ impl<'view, 'a> CodegenField<'view, 'a> {
         // Peel away optional layers until we reach a non-optional type,
         // because `Optional(T)` doesn't determine whether T needs to be boxed.
         let ty = std::iter::successors(Some(self.field.ty()), |ty| match ty {
-            IrTypeView::Schema(SchemaIrTypeView::Container(_, ContainerView::Optional(inner))) => {
+            TypeView::Schema(SchemaTypeView::Container(_, ContainerView::Optional(inner))) => {
                 Some(inner.ty())
             }
-            IrTypeView::Inline(InlineIrTypeView::Container(_, ContainerView::Optional(inner))) => {
+            TypeView::Inline(InlineTypeView::Container(_, ContainerView::Optional(inner))) => {
                 Some(inner.ty())
             }
             _ => None,
@@ -198,16 +198,14 @@ impl<'view, 'a> CodegenField<'view, 'a> {
         .unwrap();
 
         match ty {
-            IrTypeView::Schema(SchemaIrTypeView::Container(_, container))
-            | IrTypeView::Inline(InlineIrTypeView::Container(_, container)) => {
+            TypeView::Schema(SchemaTypeView::Container(_, container))
+            | TypeView::Inline(InlineTypeView::Container(_, container)) => {
                 // Arrays and maps are heap-allocated, providing their own indirection.
                 !matches!(container, ContainerView::Array(_) | ContainerView::Map(_))
             }
             // Leaf types don't contain references.
-            IrTypeView::Inline(InlineIrTypeView::Primitive(..) | InlineIrTypeView::Any(..))
-            | IrTypeView::Schema(SchemaIrTypeView::Primitive(..) | SchemaIrTypeView::Any(..)) => {
-                false
-            }
+            TypeView::Inline(InlineTypeView::Primitive(..) | InlineTypeView::Any(..))
+            | TypeView::Schema(SchemaTypeView::Primitive(..) | SchemaTypeView::Any(..)) => false,
             // For other types, check if there's a cycle back to the struct.
             _ => self.field.needs_indirection(),
         }
@@ -221,14 +219,12 @@ impl ToTokens for CodegenField<'_, '_> {
         // until we reach a non-optional type, to avoid emitting types like `AbsentOr<Option<T>>`.
         let (ty, nullable) =
             std::iter::successors(Some((self.field.ty(), false)), |(ty, _)| match ty {
-                IrTypeView::Schema(SchemaIrTypeView::Container(
-                    _,
-                    ContainerView::Optional(inner),
-                )) => Some((inner.ty(), true)),
-                IrTypeView::Inline(InlineIrTypeView::Container(
-                    _,
-                    ContainerView::Optional(inner),
-                )) => Some((inner.ty(), true)),
+                TypeView::Schema(SchemaTypeView::Container(_, ContainerView::Optional(inner))) => {
+                    Some((inner.ty(), true))
+                }
+                TypeView::Inline(InlineTypeView::Container(_, ContainerView::Optional(inner))) => {
+                    Some((inner.ty(), true))
+                }
                 _ => None,
             })
             .last() // Guaranteed to exist, since our initial item is `Some`.
@@ -257,11 +253,11 @@ impl ToTokens for CodegenField<'_, '_> {
 #[derive(Debug)]
 struct SerdeFieldAttr<'view, 'a> {
     ident: &'a Ident,
-    field: &'a IrStructFieldView<'view, 'a>,
+    field: &'a StructFieldView<'view, 'a>,
 }
 
 impl<'view, 'a> SerdeFieldAttr<'view, 'a> {
-    fn new(ident: &'a Ident, field: &'a IrStructFieldView<'view, 'a>) -> Self {
+    fn new(ident: &'a Ident, field: &'a StructFieldView<'view, 'a>) -> Self {
         Self { ident, field }
     }
 }
@@ -274,7 +270,7 @@ impl ToTokens for SerdeFieldAttr<'_, '_> {
         // isn't meaningful).
         if self.field.flattened() {
             attrs.push(quote! { flatten });
-        } else if let &IrStructFieldName::Name(name) = &self.field.name() {
+        } else if let &StructFieldName::Name(name) = &self.field.name() {
             // `rename` if the OpenAPI field name doesn't match
             // the Rust identifier.
             let f = self.ident.to_string();
@@ -303,7 +299,7 @@ mod tests {
 
     use ploidy_core::{
         arena::Arena,
-        ir::{IrSpec, RawGraph, SchemaIrTypeView},
+        ir::{IrSpec, RawGraph, SchemaTypeView},
         parse::Document,
     };
     use pretty_assertions::assert_eq;
@@ -339,7 +335,7 @@ mod tests {
         let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
         let schema = graph.schemas().find(|s| s.name() == "Pet");
-        let Some(schema @ SchemaIrTypeView::Struct(_, struct_view)) = &schema else {
+        let Some(schema @ SchemaTypeView::Struct(_, struct_view)) = &schema else {
             panic!("expected struct `Pet`; got `{schema:?}`");
         };
 
@@ -398,7 +394,7 @@ mod tests {
         let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
         let schema = graph.schemas().find(|s| s.name() == "Animal");
-        let Some(schema @ SchemaIrTypeView::Struct(_, struct_view)) = &schema else {
+        let Some(schema @ SchemaTypeView::Struct(_, struct_view)) = &schema else {
             panic!("expected struct `Animal`; got `{schema:?}`");
         };
 
@@ -448,7 +444,7 @@ mod tests {
         let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
         let schema = graph.schemas().find(|s| s.name() == "Record");
-        let Some(schema @ SchemaIrTypeView::Struct(_, struct_view)) = &schema else {
+        let Some(schema @ SchemaTypeView::Struct(_, struct_view)) = &schema else {
             panic!("expected struct `Record`; got `{schema:?}`");
         };
 
@@ -499,7 +495,7 @@ mod tests {
         let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
         let schema = graph.schemas().find(|s| s.name() == "Record");
-        let Some(schema @ SchemaIrTypeView::Struct(_, struct_view)) = &schema else {
+        let Some(schema @ SchemaTypeView::Struct(_, struct_view)) = &schema else {
             panic!("expected struct `Record`; got `{schema:?}`");
         };
 
@@ -551,7 +547,7 @@ mod tests {
         let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
         let schema = graph.schemas().find(|s| s.name() == "Record");
-        let Some(schema @ SchemaIrTypeView::Struct(_, struct_view)) = &schema else {
+        let Some(schema @ SchemaTypeView::Struct(_, struct_view)) = &schema else {
             panic!("expected struct `Record`; got `{schema:?}`");
         };
 
@@ -604,7 +600,7 @@ mod tests {
         let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
         let schema = graph.schemas().find(|s| s.name() == "Record");
-        let Some(schema @ SchemaIrTypeView::Struct(_, struct_view)) = &schema else {
+        let Some(schema @ SchemaTypeView::Struct(_, struct_view)) = &schema else {
             panic!("expected struct `Record`; got `{schema:?}`");
         };
 
@@ -654,7 +650,7 @@ mod tests {
         let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
         let schema = graph.schemas().find(|s| s.name() == "User");
-        let Some(schema @ SchemaIrTypeView::Struct(_, struct_view)) = &schema else {
+        let Some(schema @ SchemaTypeView::Struct(_, struct_view)) = &schema else {
             panic!("expected struct `User`; got `{schema:?}`");
         };
 
@@ -705,7 +701,7 @@ mod tests {
         let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
         let schema = graph.schemas().find(|s| s.name() == "Measurement");
-        let Some(schema @ SchemaIrTypeView::Struct(_, struct_view)) = &schema else {
+        let Some(schema @ SchemaTypeView::Struct(_, struct_view)) = &schema else {
             panic!("expected struct `Measurement`; got `{schema:?}`");
         };
 
@@ -754,7 +750,7 @@ mod tests {
         let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
         let schema = graph.schemas().find(|s| s.name() == "Options");
-        let Some(schema @ SchemaIrTypeView::Struct(_, struct_view)) = &schema else {
+        let Some(schema @ SchemaTypeView::Struct(_, struct_view)) = &schema else {
             panic!("expected struct `Options`; got `{schema:?}`");
         };
 
@@ -803,7 +799,7 @@ mod tests {
         let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
         let schema = graph.schemas().find(|s| s.name() == "Outer");
-        let Some(schema @ SchemaIrTypeView::Struct(_, struct_view)) = &schema else {
+        let Some(schema @ SchemaTypeView::Struct(_, struct_view)) = &schema else {
             panic!("expected struct `Outer`; got `{schema:?}`");
         };
 
@@ -856,7 +852,7 @@ mod tests {
         let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
         let schema = graph.schemas().find(|s| s.name() == "Outer");
-        let Some(schema @ SchemaIrTypeView::Struct(_, struct_view)) = &schema else {
+        let Some(schema @ SchemaTypeView::Struct(_, struct_view)) = &schema else {
             panic!("expected struct `Outer`; got `{schema:?}`");
         };
 
@@ -919,7 +915,7 @@ mod tests {
         let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
         let schema = graph.schemas().find(|s| s.name() == "Owner");
-        let Some(schema @ SchemaIrTypeView::Struct(_, struct_view)) = &schema else {
+        let Some(schema @ SchemaTypeView::Struct(_, struct_view)) = &schema else {
             panic!("expected struct `Owner`; got `{schema:?}`");
         };
 
@@ -968,7 +964,7 @@ mod tests {
         let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
         let schema = graph.schemas().find(|s| s.name() == "Container");
-        let Some(schema @ SchemaIrTypeView::Struct(_, struct_view)) = &schema else {
+        let Some(schema @ SchemaTypeView::Struct(_, struct_view)) = &schema else {
             panic!("expected struct `Container`; got `{schema:?}`");
         };
 
@@ -1033,7 +1029,7 @@ mod tests {
         let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
         let schema = graph.schemas().find(|s| s.name() == "Owner");
-        let Some(schema @ SchemaIrTypeView::Struct(_, struct_view)) = &schema else {
+        let Some(schema @ SchemaTypeView::Struct(_, struct_view)) = &schema else {
             panic!("expected struct `Owner`; got `{schema:?}`");
         };
 
@@ -1082,7 +1078,7 @@ mod tests {
         let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
         let schema = graph.schemas().find(|s| s.name() == "Outer");
-        let Some(schema @ SchemaIrTypeView::Struct(_, struct_view)) = &schema else {
+        let Some(schema @ SchemaTypeView::Struct(_, struct_view)) = &schema else {
             panic!("expected struct `Outer`; got `{schema:?}`");
         };
 
@@ -1127,7 +1123,7 @@ mod tests {
         let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
         let schema = graph.schemas().find(|s| s.name() == "Container");
-        let Some(schema @ SchemaIrTypeView::Struct(_, struct_view)) = &schema else {
+        let Some(schema @ SchemaTypeView::Struct(_, struct_view)) = &schema else {
             panic!("expected struct `Container`; got `{schema:?}`");
         };
 
@@ -1179,7 +1175,7 @@ mod tests {
         let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
         let schema = graph.schemas().find(|s| s.name() == "Defaults");
-        let Some(schema @ SchemaIrTypeView::Struct(_, struct_view)) = &schema else {
+        let Some(schema @ SchemaTypeView::Struct(_, struct_view)) = &schema else {
             panic!("expected struct `Defaults`; got `{schema:?}`");
         };
 
@@ -1227,7 +1223,7 @@ mod tests {
         let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
         let schema = graph.schemas().find(|s| s.name() == "Resource");
-        let Some(schema @ SchemaIrTypeView::Struct(_, struct_view)) = &schema else {
+        let Some(schema @ SchemaTypeView::Struct(_, struct_view)) = &schema else {
             panic!("expected struct `Resource`; got `{schema:?}`");
         };
 
@@ -1277,7 +1273,7 @@ mod tests {
         let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
         let schema = graph.schemas().find(|s| s.name() == "Container");
-        let Some(schema @ SchemaIrTypeView::Struct(_, struct_view)) = &schema else {
+        let Some(schema @ SchemaTypeView::Struct(_, struct_view)) = &schema else {
             panic!("expected struct `Container`; got `{schema:?}`");
         };
 
@@ -1346,7 +1342,7 @@ mod tests {
         let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
         let schema = graph.schemas().find(|s| s.name() == "Corgi");
-        let Some(schema @ SchemaIrTypeView::Struct(_, struct_view)) = &schema else {
+        let Some(schema @ SchemaTypeView::Struct(_, struct_view)) = &schema else {
             panic!("expected struct `Corgi`; got `{schema:?}`");
         };
 
@@ -1399,7 +1395,7 @@ mod tests {
         let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
         let schema = graph.schemas().find(|s| s.name() == "Node");
-        let Some(schema @ SchemaIrTypeView::Struct(_, struct_view)) = &schema else {
+        let Some(schema @ SchemaTypeView::Struct(_, struct_view)) = &schema else {
             panic!("expected struct `Node`; got `{schema:?}`");
         };
 
@@ -1447,7 +1443,7 @@ mod tests {
         let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
         let schema = graph.schemas().find(|s| s.name() == "Node");
-        let Some(schema @ SchemaIrTypeView::Struct(_, struct_view)) = &schema else {
+        let Some(schema @ SchemaTypeView::Struct(_, struct_view)) = &schema else {
             panic!("expected struct `Node`; got `{schema:?}`");
         };
 
@@ -1500,7 +1496,7 @@ mod tests {
         let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
         let schema = graph.schemas().find(|s| s.name() == "Node");
-        let Some(schema @ SchemaIrTypeView::Struct(_, struct_view)) = &schema else {
+        let Some(schema @ SchemaTypeView::Struct(_, struct_view)) = &schema else {
             panic!("expected struct `Node`; got `{schema:?}`");
         };
 
@@ -1551,7 +1547,7 @@ mod tests {
         let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
         let schema = graph.schemas().find(|s| s.name() == "Node");
-        let Some(schema @ SchemaIrTypeView::Struct(_, struct_view)) = &schema else {
+        let Some(schema @ SchemaTypeView::Struct(_, struct_view)) = &schema else {
             panic!("expected struct `Node`; got `{schema:?}`");
         };
 
@@ -1615,7 +1611,7 @@ mod tests {
         let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
         let schema = graph.schemas().find(|s| s.name() == "Person");
-        let Some(schema @ SchemaIrTypeView::Struct(_, struct_view)) = &schema else {
+        let Some(schema @ SchemaTypeView::Struct(_, struct_view)) = &schema else {
             panic!("expected struct `Person`; got `{schema:?}`");
         };
 
@@ -1666,7 +1662,7 @@ mod tests {
         let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
         let schema = graph.schemas().find(|s| s.name() == "Config");
-        let Some(schema @ SchemaIrTypeView::Struct(_, struct_view)) = &schema else {
+        let Some(schema @ SchemaTypeView::Struct(_, struct_view)) = &schema else {
             panic!("expected struct `Config`; got `{schema:?}`");
         };
 
@@ -1733,7 +1729,7 @@ mod tests {
         let graph = CodegenGraph::new(raw.cook());
 
         let schema = graph.schemas().find(|s| s.name() == "Dog");
-        let Some(schema @ SchemaIrTypeView::Struct(_, struct_view)) = &schema else {
+        let Some(schema @ SchemaTypeView::Struct(_, struct_view)) = &schema else {
             panic!("expected struct `Dog`; got `{schema:?}`");
         };
 

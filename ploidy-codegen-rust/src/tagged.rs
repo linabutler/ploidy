@@ -1,7 +1,7 @@
 use itertools::Itertools;
 use ploidy_core::{
     codegen::UniqueNames,
-    ir::{InlineIrTypeView, IrTaggedView, IrTypeView, PrimitiveIrType, SchemaIrTypeView},
+    ir::{InlineTypeView, PrimitiveType, SchemaTypeView, TaggedView, TypeView},
 };
 use proc_macro2::TokenStream;
 use quote::{ToTokens, TokenStreamExt, quote};
@@ -15,11 +15,11 @@ use super::{derives::ExtraDerive, doc_attrs, naming::CodegenIdentUsage, ref_::Co
 #[derive(Clone, Debug)]
 pub struct CodegenTagged<'a> {
     name: CodegenTypeName<'a>,
-    ty: &'a IrTaggedView<'a>,
+    ty: &'a TaggedView<'a>,
 }
 
 impl<'a> CodegenTagged<'a> {
-    pub fn new(name: CodegenTypeName<'a>, ty: &'a IrTaggedView<'a>) -> Self {
+    pub fn new(name: CodegenTypeName<'a>, ty: &'a TaggedView<'a>) -> Self {
         Self { name, ty }
     }
 }
@@ -33,9 +33,9 @@ impl ToTokens for CodegenTagged<'_> {
                 .dependencies()
                 .chain(std::iter::once(variant.ty()))
                 .all(|view| match view {
-                    IrTypeView::Inline(InlineIrTypeView::Primitive(_, view))
-                    | IrTypeView::Schema(SchemaIrTypeView::Primitive(_, view)) => {
-                        !matches!(view.ty(), PrimitiveIrType::F32 | PrimitiveIrType::F64)
+                    TypeView::Inline(InlineTypeView::Primitive(_, view))
+                    | TypeView::Schema(SchemaTypeView::Primitive(_, view)) => {
+                        !matches!(view.ty(), PrimitiveType::F32 | PrimitiveType::F64)
                     }
                     _ => true,
                 })
@@ -119,7 +119,7 @@ mod tests {
 
     use ploidy_core::{
         arena::Arena,
-        ir::{IrSpec, RawGraph, SchemaIrTypeView},
+        ir::{IrSpec, RawGraph, SchemaTypeView},
         parse::Document,
     };
     use pretty_assertions::assert_eq;
@@ -163,7 +163,7 @@ mod tests {
         let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
         let schema = graph.schemas().find(|s| s.name() == "Pet");
-        let Some(schema @ SchemaIrTypeView::Tagged(_, tagged)) = &schema else {
+        let Some(schema @ SchemaTypeView::Tagged(_, tagged)) = &schema else {
             panic!("expected tagged union `Pet`; got `{schema:?}`");
         };
 
@@ -230,7 +230,7 @@ mod tests {
         let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
         let schema = graph.schemas().find(|s| s.name() == "Pet");
-        let Some(schema @ SchemaIrTypeView::Tagged(_, tagged)) = &schema else {
+        let Some(schema @ SchemaTypeView::Tagged(_, tagged)) = &schema else {
             panic!("expected tagged union `Pet`; got `{schema:?}`");
         };
 
@@ -292,7 +292,7 @@ mod tests {
         let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
         let schema = graph.schemas().find(|s| s.name() == "Pet");
-        let Some(schema @ SchemaIrTypeView::Tagged(_, tagged)) = &schema else {
+        let Some(schema @ SchemaTypeView::Tagged(_, tagged)) = &schema else {
             panic!("expected tagged union `Pet`; got `{schema:?}`");
         };
 
@@ -353,7 +353,7 @@ mod tests {
         let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
         let schema = graph.schemas().find(|s| s.name() == "Pet");
-        let Some(schema @ SchemaIrTypeView::Tagged(_, tagged)) = &schema else {
+        let Some(schema @ SchemaTypeView::Tagged(_, tagged)) = &schema else {
             panic!("expected tagged union `Pet`; got `{schema:?}`");
         };
 
@@ -431,7 +431,7 @@ mod tests {
         let graph = CodegenGraph::new(raw.cook());
 
         let schema = graph.schemas().find(|s| s.name() == "Pet");
-        let Some(schema @ SchemaIrTypeView::Tagged(_, tagged)) = &schema else {
+        let Some(schema @ SchemaTypeView::Tagged(_, tagged)) = &schema else {
             panic!("expected tagged union `Pet`; got `{schema:?}`");
         };
 
@@ -486,7 +486,7 @@ mod tests {
         let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
         let schema = graph.schemas().find(|s| s.name() == "Pet");
-        let Some(schema @ SchemaIrTypeView::Tagged(_, tagged)) = &schema else {
+        let Some(schema @ SchemaTypeView::Tagged(_, tagged)) = &schema else {
             panic!("expected tagged union `Pet`; got `{schema:?}`");
         };
 
@@ -559,7 +559,7 @@ mod tests {
         let graph = CodegenGraph::new(raw.cook());
 
         let schema = graph.schemas().find(|s| s.name() == "Pet");
-        let Some(schema @ SchemaIrTypeView::Tagged(_, tagged)) = &schema else {
+        let Some(schema @ SchemaTypeView::Tagged(_, tagged)) = &schema else {
             panic!("expected tagged union `Pet`; got `{schema:?}`");
         };
 

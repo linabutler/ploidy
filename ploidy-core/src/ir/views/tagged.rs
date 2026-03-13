@@ -2,25 +2,25 @@ use petgraph::graph::NodeIndex;
 
 use crate::ir::{
     graph::CookedGraph,
-    types::{IrTagged, IrTaggedVariant},
+    types::{CookedTagged, CookedTaggedVariant},
 };
 
-use super::{ViewNode, ir::IrTypeView};
+use super::{ViewNode, ir::TypeView};
 
-/// A graph-aware view of an [`IrTagged`] union.
+/// A graph-aware view of a [`Tagged`][CookedTagged] union.
 #[derive(Debug)]
-pub struct IrTaggedView<'a> {
+pub struct TaggedView<'a> {
     cooked: &'a CookedGraph<'a>,
     index: NodeIndex<usize>,
-    ty: &'a IrTagged<'a, NodeIndex<usize>>,
+    ty: &'a CookedTagged<'a>,
 }
 
-impl<'a> IrTaggedView<'a> {
+impl<'a> TaggedView<'a> {
     #[inline]
     pub(in crate::ir) fn new(
         cooked: &'a CookedGraph<'a>,
         index: NodeIndex<usize>,
-        ty: &'a IrTagged<'a, NodeIndex<usize>>,
+        ty: &'a CookedTagged<'a>,
     ) -> Self {
         Self { cooked, index, ty }
     }
@@ -37,15 +37,15 @@ impl<'a> IrTaggedView<'a> {
 
     /// Returns an iterator over this tagged union's variants.
     #[inline]
-    pub fn variants(&self) -> impl Iterator<Item = IrTaggedVariantView<'a>> {
+    pub fn variants(&self) -> impl Iterator<Item = TaggedVariantView<'a>> {
         self.ty
             .variants
             .iter()
-            .map(move |variant| IrTaggedVariantView::new(self.cooked, variant.ty, variant))
+            .map(move |variant| TaggedVariantView::new(self.cooked, variant.ty, variant))
     }
 }
 
-impl<'a> ViewNode<'a> for IrTaggedView<'a> {
+impl<'a> ViewNode<'a> for TaggedView<'a> {
     #[inline]
     fn cooked(&self) -> &'a CookedGraph<'a> {
         self.cooked
@@ -57,20 +57,20 @@ impl<'a> ViewNode<'a> for IrTaggedView<'a> {
     }
 }
 
-/// A graph-aware view of an [`IrTaggedVariant`].
+/// A graph-aware view of a [`TaggedVariant`][CookedTaggedVariant].
 #[derive(Debug)]
-pub struct IrTaggedVariantView<'a> {
+pub struct TaggedVariantView<'a> {
     cooked: &'a CookedGraph<'a>,
     index: NodeIndex<usize>,
-    variant: &'a IrTaggedVariant<'a, NodeIndex<usize>>,
+    variant: &'a CookedTaggedVariant<'a>,
 }
 
-impl<'a> IrTaggedVariantView<'a> {
+impl<'a> TaggedVariantView<'a> {
     #[inline]
     fn new(
         cooked: &'a CookedGraph<'a>,
         index: NodeIndex<usize>,
-        variant: &'a IrTaggedVariant<'a, NodeIndex<usize>>,
+        variant: &'a CookedTaggedVariant<'a>,
     ) -> Self {
         Self {
             cooked,
@@ -91,12 +91,12 @@ impl<'a> IrTaggedVariantView<'a> {
 
     /// Returns a view of this variant's type.
     #[inline]
-    pub fn ty(&self) -> IrTypeView<'a> {
-        IrTypeView::new(self.cooked, self.variant.ty)
+    pub fn ty(&self) -> TypeView<'a> {
+        TypeView::new(self.cooked, self.variant.ty)
     }
 }
 
-impl<'a> ViewNode<'a> for IrTaggedVariantView<'a> {
+impl<'a> ViewNode<'a> for TaggedVariantView<'a> {
     #[inline]
     fn cooked(&self) -> &'a CookedGraph<'a> {
         self.cooked

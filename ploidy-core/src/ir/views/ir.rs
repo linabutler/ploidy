@@ -1,29 +1,30 @@
 use petgraph::graph::NodeIndex;
 
-use crate::ir::graph::{CookedGraph, GraphNode};
+use crate::ir::graph::{CookedGraph, CookedGraphNode};
 
-use super::{View, container::ContainerView, inline::InlineIrTypeView, schema::SchemaIrTypeView};
+use super::{View, container::ContainerView, inline::InlineTypeView, schema::SchemaTypeView};
 
-/// A graph-aware view of an [`IrType`][crate::ir::IrType].
+/// A graph-aware view of a [schema][crate::ir::CookedSchemaType]
+/// or [inline][crate::ir::CookedInlineType] type.
 #[derive(Debug)]
-pub enum IrTypeView<'a> {
-    Schema(SchemaIrTypeView<'a>),
-    Inline(InlineIrTypeView<'a>),
+pub enum TypeView<'a> {
+    Schema(SchemaTypeView<'a>),
+    Inline(InlineTypeView<'a>),
 }
 
-impl<'a> IrTypeView<'a> {
+impl<'a> TypeView<'a> {
     #[inline]
     pub(in crate::ir) fn new(cooked: &'a CookedGraph<'a>, index: NodeIndex<usize>) -> Self {
         match &cooked.graph[index] {
-            GraphNode::Schema(ty) => Self::Schema(SchemaIrTypeView::new(cooked, index, ty)),
-            GraphNode::Inline(ty) => Self::Inline(InlineIrTypeView::new(cooked, index, ty)),
+            CookedGraphNode::Schema(ty) => Self::Schema(SchemaTypeView::new(cooked, index, ty)),
+            CookedGraphNode::Inline(ty) => Self::Inline(InlineTypeView::new(cooked, index, ty)),
         }
     }
 
     /// If this is a view of a named schema type, returns that schema type;
     /// otherwise, returns an [`Err`] with this view.
     #[inline]
-    pub fn into_schema(self) -> Result<SchemaIrTypeView<'a>, Self> {
+    pub fn into_schema(self) -> Result<SchemaTypeView<'a>, Self> {
         match self {
             Self::Schema(view) => Ok(view),
             other => Err(other),
@@ -35,15 +36,15 @@ impl<'a> IrTypeView<'a> {
     #[inline]
     pub fn as_container(&self) -> Option<&ContainerView<'a>> {
         match self {
-            Self::Schema(SchemaIrTypeView::Container(_, view)) => Some(view),
-            Self::Inline(InlineIrTypeView::Container(_, view)) => Some(view),
+            Self::Schema(SchemaTypeView::Container(_, view)) => Some(view),
+            Self::Inline(InlineTypeView::Container(_, view)) => Some(view),
             _ => None,
         }
     }
 
     /// Returns an iterator over all the types that this type transitively depends on.
     #[inline]
-    pub fn dependencies(&self) -> impl Iterator<Item = IrTypeView<'a>> + use<'a> {
+    pub fn dependencies(&self) -> impl Iterator<Item = TypeView<'a>> + use<'a> {
         either!(match self {
             Self::Schema(v) => v.dependencies(),
             Self::Inline(v) => v.dependencies(),
