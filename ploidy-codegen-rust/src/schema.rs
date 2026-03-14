@@ -96,7 +96,7 @@ mod tests {
 
     use ploidy_core::{
         arena::Arena,
-        ir::{IrSpec, RawGraph, SchemaTypeView},
+        ir::{RawGraph, SchemaTypeView, Spec},
         parse::Document,
     };
     use pretty_assertions::assert_eq;
@@ -138,7 +138,7 @@ mod tests {
         .unwrap();
 
         let arena = Arena::new();
-        let spec = IrSpec::from_doc(&arena, &doc).unwrap();
+        let spec = Spec::from_doc(&arena, &doc).unwrap();
         let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
         let schema = graph.schemas().find(|s| s.name() == "Container");
@@ -215,7 +215,7 @@ mod tests {
         .unwrap();
 
         let arena = Arena::new();
-        let spec = IrSpec::from_doc(&arena, &doc).unwrap();
+        let spec = Spec::from_doc(&arena, &doc).unwrap();
         let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
         let schema = graph.schemas().find(|s| s.name() == "InvalidParameters");
@@ -259,7 +259,7 @@ mod tests {
         .unwrap();
 
         let arena = Arena::new();
-        let spec = IrSpec::from_doc(&arena, &doc).unwrap();
+        let spec = Spec::from_doc(&arena, &doc).unwrap();
         let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
         let schema = graph.schemas().find(|s| s.name() == "Tags");
@@ -294,7 +294,7 @@ mod tests {
         .unwrap();
 
         let arena = Arena::new();
-        let spec = IrSpec::from_doc(&arena, &doc).unwrap();
+        let spec = Spec::from_doc(&arena, &doc).unwrap();
         let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
         let schema = graph.schemas().find(|s| s.name() == "Metadata");
@@ -342,7 +342,7 @@ mod tests {
         .unwrap();
 
         let arena = Arena::new();
-        let spec = IrSpec::from_doc(&arena, &doc).unwrap();
+        let spec = Spec::from_doc(&arena, &doc).unwrap();
         let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
         // `type: ["string", "null"]` becomes `Option<String>`.
@@ -423,7 +423,7 @@ mod tests {
         .unwrap();
 
         let arena = Arena::new();
-        let spec = IrSpec::from_doc(&arena, &doc).unwrap();
+        let spec = Spec::from_doc(&arena, &doc).unwrap();
         let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
         let schema = graph.schemas().find(|s| s.name() == "Tags");

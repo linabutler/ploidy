@@ -14,8 +14,9 @@ use petgraph::{
 };
 use ref_cast::{RefCastCustom, ref_cast_custom};
 
-use super::graph::{
-    CookedGraph, EdgeKind, Extension, ExtensionMap, GraphNode, Traversal, Traverse,
+use super::{
+    graph::{CookedGraph, EdgeKind, Extension, ExtensionMap, Traversal, Traverse},
+    types::GraphType,
 };
 
 pub mod any;
@@ -95,12 +96,12 @@ where
         let cooked = self.cooked();
         // Only include edges to other inline schemas.
         let filtered = EdgeFiltered::from_fn(&cooked.graph, |e| {
-            matches!(cooked.graph[e.target()], GraphNode::Inline(_))
+            matches!(cooked.graph[e.target()], GraphType::Inline(_))
         });
         let mut bfs = Bfs::new(&cooked.graph, self.index());
         std::iter::from_fn(move || bfs.next(&filtered)).filter_map(|index| {
             match cooked.graph[index] {
-                GraphNode::Inline(ty) => Some(InlineTypeView::new(cooked, index, ty)),
+                GraphType::Inline(ty) => Some(InlineTypeView::new(cooked, index, ty)),
                 _ => None,
             }
         })
@@ -110,9 +111,7 @@ where
     fn used_by(&self) -> impl Iterator<Item = OperationView<'a>> + use<'a, T> {
         let cooked = self.cooked();
         let meta = &cooked.metadata.schemas[self.index().index()];
-        meta.used_by
-            .iter()
-            .map(|op| OperationView::new(cooked, op.0))
+        meta.used_by.iter().map(|op| OperationView::new(cooked, op))
     }
 
     #[inline]

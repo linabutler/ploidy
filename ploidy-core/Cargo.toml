@@ -12,7 +12,6 @@ rust-version.workspace = true
 [dependencies]
 atomic_refcell = "0.1"
 bumpalo = { version = "3", features = ["collections"] }
-by_address = "1"
 cargo_toml = { version = "0.22", optional = true }
 either = { workspace = true }
 enum-map = "2"

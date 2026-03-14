@@ -12,23 +12,23 @@ use crate::{
 
 use super::{
     error::IrError,
-    graph::RawGraphNode,
     transform::transform,
     types::{
         InlineTypePath, InlineTypePathRoot, InlineTypePathSegment,
-        ParameterStyle as IrParameterStyle, RawInlineType, RawOperation, RawParameter,
-        RawParameterInfo, RawRequest, RawResponse, RawType, SchemaTypeInfo, TypeInfo,
+        ParameterStyle as IrParameterStyle, SchemaTypeInfo, SpecInlineType, SpecOperation,
+        SpecParameter, SpecParameterInfo, SpecRequest, SpecResponse, SpecSchemaType, SpecType,
+        TypeInfo,
     },
 };
 
 #[derive(Debug)]
-pub struct IrSpec<'a> {
+pub struct Spec<'a> {
     pub info: &'a Info,
-    pub operations: Vec<RawOperation<'a>>,
-    pub schemas: IndexMap<&'a str, RawType<'a>>,
+    pub operations: Vec<SpecOperation<'a>>,
+    pub schemas: IndexMap<&'a str, SpecType<'a>>,
 }
 
-impl<'a> IrSpec<'a> {
+impl<'a> Spec<'a> {
     pub fn from_doc(arena: &'a Arena, doc: &'a Document) -> Result<Self, IrError> {
         let schemas = match &doc.components {
             Some(components) => components
@@ -54,7 +54,7 @@ impl<'a> IrSpec<'a> {
             .paths
             .iter()
             .map(|(path, item)| {
-                let segments = parse::path::parse(path.as_str())?;
+                let segments = parse::path::parse(arena, path.as_str())?;
                 Ok(item
                     .operations()
                     .map(move |(method, op)| (method, segments.clone(), op)))
@@ -72,7 +72,7 @@ impl<'a> IrSpec<'a> {
                             .and_then(|p| p.downcast_ref::<Parameter>())?,
                     };
                     let ty: &_ = match &param.schema {
-                        Some(RefOrSchema::Ref(r)) => arena.alloc(RawType::Ref(&r.path)),
+                        Some(RefOrSchema::Ref(r)) => arena.alloc(SpecType::Ref(&r.path)),
                         Some(RefOrSchema::Other(schema)) => arena.alloc(transform(
                             arena,
                             doc,
@@ -86,7 +86,7 @@ impl<'a> IrSpec<'a> {
                             schema,
                         )),
                         None => arena.alloc(
-                            RawInlineType::Any(InlineTypePath {
+                            SpecInlineType::Any(InlineTypePath {
                                 root: InlineTypePathRoot::Resource(resource),
                                 segments: arena.alloc_slice_copy(&[
                                     InlineTypePathSegment::Operation(id),
@@ -114,7 +114,7 @@ impl<'a> IrSpec<'a> {
                         }
                         _ => None,
                     };
-                    let info = RawParameterInfo {
+                    let info = SpecParameterInfo {
                         name: param.name.as_str(),
                         ty,
                         required: param.required,
@@ -122,8 +122,8 @@ impl<'a> IrSpec<'a> {
                         style,
                     };
                     Some(match param.location {
-                        ParameterLocation::Path => RawParameter::Path(info),
-                        ParameterLocation::Query => RawParameter::Query(info),
+                        ParameterLocation::Path => SpecParameter::Path(info),
+                        ParameterLocation::Query => SpecParameter::Query(info),
                         _ => return None,
                     })
                 }));
@@ -155,12 +155,12 @@ impl<'a> IrSpec<'a> {
                         })
                     })
                     .map(|content| match content {
-                        RequestContent::Multipart => RawRequest::Multipart,
+                        RequestContent::Multipart => SpecRequest::Multipart,
                         RequestContent::Json(RefOrSchema::Ref(r)) => {
-                            RawRequest::Json(arena.alloc(RawType::Ref(&r.path)))
+                            SpecRequest::Json(arena.alloc(SpecType::Ref(&r.path)))
                         }
                         RequestContent::Json(RefOrSchema::Other(schema)) => {
-                            RawRequest::Json(arena.alloc(transform(
+                            SpecRequest::Json(arena.alloc(transform(
                                 arena,
                                 doc,
                                 InlineTypePath {
@@ -173,9 +173,9 @@ impl<'a> IrSpec<'a> {
                                 schema,
                             )))
                         }
-                        RequestContent::Any => RawRequest::Json(
+                        RequestContent::Any => SpecRequest::Json(
                             arena.alloc(
-                                RawInlineType::Any(InlineTypePath {
+                                SpecInlineType::Any(InlineTypePath {
                                     root: InlineTypePathRoot::Resource(resource),
                                     segments: arena.alloc_slice_copy(&[
                                         InlineTypePathSegment::Operation(id),
@@ -227,10 +227,10 @@ impl<'a> IrSpec<'a> {
                         })
                         .map(|content| match content {
                             ResponseContent::Json(RefOrSchema::Ref(r)) => {
-                                RawResponse::Json(arena.alloc(RawType::Ref(&r.path)))
+                                SpecResponse::Json(arena.alloc(SpecType::Ref(&r.path)))
                             }
                             ResponseContent::Json(RefOrSchema::Other(schema)) => {
-                                RawResponse::Json(arena.alloc(transform(
+                                SpecResponse::Json(arena.alloc(transform(
                                     arena,
                                     doc,
                                     InlineTypePath {
@@ -243,9 +243,9 @@ impl<'a> IrSpec<'a> {
                                     schema,
                                 )))
                             }
-                            ResponseContent::Any => RawResponse::Json(
+                            ResponseContent::Any => SpecResponse::Json(
                                 arena.alloc(
-                                    RawInlineType::Any(InlineTypePath {
+                                    SpecInlineType::Any(InlineTypePath {
                                         root: InlineTypePathRoot::Resource(resource),
                                         segments: arena.alloc_slice_copy(&[
                                             InlineTypePathSegment::Operation(id),
@@ -258,11 +258,11 @@ impl<'a> IrSpec<'a> {
                         })
                 };
 
-                Ok(RawOperation {
+                Ok(SpecOperation {
                     resource,
                     id,
                     method,
-                    path: arena.alloc_slice_clone(&path),
+                    path: arena.alloc_slice_copy(&path),
                     description: op.description.as_deref(),
                     params,
                     request,
@@ -272,25 +272,36 @@ impl<'a> IrSpec<'a> {
             .flatten_ok()
             .collect::<Result<_, IrError>>()?;
 
-        Ok(IrSpec {
+        Ok(Spec {
             info: &doc.info,
             operations,
             schemas,
         })
     }
 
-    /// Resolves a [`RawType`] to a [`RawGraphNode`], following
-    /// [`RawType::Ref`]s through the spec.
+    /// Dereferences a [`SpecType`], following type references through the spec.
     #[inline]
-    pub fn resolve(&'a self, mut ty: &'a RawType<'a>) -> RawGraphNode<'a> {
+    pub fn resolve(&'a self, mut ty: &'a SpecType<'a>) -> ResolvedSpecType<'a> {
         loop {
             match ty {
-                RawType::Schema(ty) => return RawGraphNode::Schema(ty),
-                RawType::Inline(ty) => return RawGraphNode::Inline(ty),
-                RawType::Ref(r) => ty = &self.schemas[r.name()],
+                SpecType::Schema(ty) => return ResolvedSpecType::Schema(ty),
+                SpecType::Inline(ty) => return ResolvedSpecType::Inline(ty),
+                SpecType::Ref(r) => ty = &self.schemas[r.name()],
             }
         }
     }
+}
+
+/// A dereferenced type in the spec.
+///
+/// The derived [`Eq`] and [`Hash`][std::hash::Hash] implementations
+/// work on the underlying values, so structurally identical types
+/// compare and hash equal. This is important: all types in a [`Spec`]
+/// are distinct in memory, but can refer to the same logical type.
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub enum ResolvedSpecType<'a> {
+    Schema(&'a SpecSchemaType<'a>),
+    Inline(&'a SpecInlineType<'a>),
 }
 
 #[derive(Clone, Copy, Debug)]

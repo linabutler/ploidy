@@ -7,12 +7,12 @@ use crate::ir::{
 
 use super::ViewNode;
 
-/// A graph-aware view of an [`Enum`].
+/// A graph-aware view of an [enum type][Enum].
 #[derive(Debug)]
 pub struct EnumView<'a> {
     cooked: &'a CookedGraph<'a>,
     index: NodeIndex<usize>,
-    ty: &'a Enum<'a>,
+    ty: Enum<'a>,
 }
 
 impl<'a> EnumView<'a> {
@@ -20,7 +20,7 @@ impl<'a> EnumView<'a> {
     pub(in crate::ir) fn new(
         cooked: &'a CookedGraph<'a>,
         index: NodeIndex<usize>,
-        ty: &'a Enum<'a>,
+        ty: Enum<'a>,
     ) -> Self {
         Self { cooked, index, ty }
     }

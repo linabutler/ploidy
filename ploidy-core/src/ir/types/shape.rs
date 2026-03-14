@@ -1,7 +1,7 @@
 //! Generic structural shapes for IR types, parameterized over
 //! the type reference representation.
 //!
-//! Prefer the [raw and cooked type aliases][super], unless
+//! Prefer the [spec and graph type aliases][super], unless
 //! you're writing generic code that abstracts over type references.
 
 use crate::parse::{Method, path::PathSegment};
@@ -161,7 +161,7 @@ pub enum UntaggedVariant<Ty> {
     Null,
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub struct Operation<'a, Ty> {
     pub id: &'a str,
     pub method: Method,
@@ -193,24 +193,24 @@ impl<'a, Ty> Operation<'a, Ty> {
     }
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub enum Response<Ty> {
     Json(Ty),
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub enum Request<Ty> {
     Json(Ty),
     Multipart,
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub enum Parameter<'a, Ty> {
     Path(ParameterInfo<'a, Ty>),
     Query(ParameterInfo<'a, Ty>),
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub struct ParameterInfo<'a, Ty> {
     pub name: &'a str,
     pub ty: Ty,

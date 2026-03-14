@@ -1,13 +1,13 @@
 use petgraph::graph::NodeIndex;
 
-use crate::ir::{SchemaTypeInfo, graph::CookedGraph, types::CookedSchemaType};
+use crate::ir::{SchemaTypeInfo, graph::CookedGraph, types::GraphSchemaType};
 
 use super::{
     ViewNode, any::AnyView, container::ContainerView, enum_::EnumView, primitive::PrimitiveView,
     struct_::StructView, tagged::TaggedView, untagged::UntaggedView,
 };
 
-/// A graph-aware view of a [`SchemaType`][CookedSchemaType].
+/// A graph-aware view of a [schema type][GraphSchemaType].
 #[derive(Debug)]
 pub enum SchemaTypeView<'a> {
     Enum(SchemaTypeInfo<'a>, EnumView<'a>),
@@ -24,26 +24,26 @@ impl<'a> SchemaTypeView<'a> {
     pub(in crate::ir) fn new(
         cooked: &'a CookedGraph<'a>,
         index: NodeIndex<usize>,
-        ty: &'a CookedSchemaType<'a>,
+        ty: GraphSchemaType<'a>,
     ) -> Self {
         match ty {
-            CookedSchemaType::Enum(info, ty) => Self::Enum(*info, EnumView::new(cooked, index, ty)),
-            CookedSchemaType::Struct(info, ty) => {
-                Self::Struct(*info, StructView::new(cooked, index, ty))
+            GraphSchemaType::Enum(info, ty) => Self::Enum(info, EnumView::new(cooked, index, ty)),
+            GraphSchemaType::Struct(info, ty) => {
+                Self::Struct(info, StructView::new(cooked, index, ty))
             }
-            CookedSchemaType::Tagged(info, ty) => {
-                Self::Tagged(*info, TaggedView::new(cooked, index, ty))
+            GraphSchemaType::Tagged(info, ty) => {
+                Self::Tagged(info, TaggedView::new(cooked, index, ty))
             }
-            CookedSchemaType::Untagged(info, ty) => {
-                Self::Untagged(*info, UntaggedView::new(cooked, index, ty))
+            GraphSchemaType::Untagged(info, ty) => {
+                Self::Untagged(info, UntaggedView::new(cooked, index, ty))
             }
-            CookedSchemaType::Container(info, container) => {
-                Self::Container(*info, ContainerView::new(cooked, index, container))
+            GraphSchemaType::Container(info, container) => {
+                Self::Container(info, ContainerView::new(cooked, index, container))
             }
-            &CookedSchemaType::Primitive(info, p) => {
+            GraphSchemaType::Primitive(info, p) => {
                 Self::Primitive(info, PrimitiveView::new(cooked, index, p))
             }
-            &CookedSchemaType::Any(info) => Self::Any(info, AnyView::new(cooked, index)),
+            GraphSchemaType::Any(info) => Self::Any(info, AnyView::new(cooked, index)),
         }
     }
 

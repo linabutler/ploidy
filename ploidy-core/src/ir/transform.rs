@@ -4,13 +4,14 @@ use rustc_hash::FxHashMap;
 
 use crate::{
     arena::Arena,
+    ir::JsonF64,
     parse::{AdditionalProperties, Document, Format, RefOrSchema, Schema, Ty},
 };
 
 use super::types::{
     Enum, EnumVariant, InlineTypePath, InlineTypePathRoot, InlineTypePathSegment, PrimitiveType,
-    RawContainer, RawInlineType, RawInner, RawSchemaType, RawStruct, RawStructField, RawTagged,
-    RawTaggedVariant, RawType, RawUntagged, RawUntaggedVariant, StructFieldName,
+    SpecContainer, SpecInlineType, SpecInner, SpecSchemaType, SpecStruct, SpecStructField,
+    SpecTagged, SpecTaggedVariant, SpecType, SpecUntagged, SpecUntaggedVariant, StructFieldName,
     StructFieldNameHint, TypeInfo, UntaggedVariantNameHint,
 };
 
@@ -20,7 +21,7 @@ pub fn transform<'a>(
     doc: &'a Document,
     name: impl Into<TypeInfo<'a>>,
     schema: &'a Schema,
-) -> RawType<'a> {
+) -> SpecType<'a> {
     let context = TransformContext::new(arena, doc);
     transform_with_context(&context, name.into(), schema)
 }
@@ -44,7 +45,7 @@ fn transform_with_context<'context, 'a>(
     context: &'context TransformContext<'a>,
     name: impl Into<TypeInfo<'a>>,
     schema: &'a Schema,
-) -> RawType<'a> {
+) -> SpecType<'a> {
     IrTransformer::new(context, name.into(), schema).transform()
 }
 
@@ -74,7 +75,7 @@ impl<'context, 'a> IrTransformer<'context, 'a> {
         self.context.arena
     }
 
-    fn transform(self) -> RawType<'a> {
+    fn transform(self) -> SpecType<'a> {
         self.try_tagged()
             .or_else(Self::try_untagged)
             .or_else(Self::try_any_of)
@@ -83,7 +84,7 @@ impl<'context, 'a> IrTransformer<'context, 'a> {
             .unwrap_or_else(Self::other)
     }
 
-    fn try_tagged(self) -> Result<RawType<'a>, Self> {
+    fn try_tagged(self) -> Result<SpecType<'a>, Self> {
         let (Some(one_of), Some(discriminator)) = (&self.schema.one_of, &self.schema.discriminator)
         else {
             return Err(self);
@@ -104,9 +105,9 @@ impl<'context, 'a> IrTransformer<'context, 'a> {
                             // fall through to `try_untagged`.
                             return Err(self);
                         }
-                        variants.push(RawTaggedVariant {
+                        variants.push(SpecTaggedVariant {
                             name: r.path.name(),
-                            ty: &*self.arena().alloc(RawType::Ref(&r.path)),
+                            ty: self.arena().alloc(SpecType::Ref(&r.path)),
                             aliases: self.arena().alloc_slice_copy(aliases),
                         });
                     }
@@ -118,19 +119,19 @@ impl<'context, 'a> IrTransformer<'context, 'a> {
             variants
         };
 
-        let tagged = RawTagged {
+        let tagged = SpecTagged {
             description: self.schema.description.as_deref(),
             tag: discriminator.property_name.as_str(),
             variants: self.arena().alloc_slice_copy(&variants),
         };
 
         Ok(match self.name {
-            TypeInfo::Schema(info) => RawSchemaType::Tagged(info, tagged).into(),
-            TypeInfo::Inline(path) => RawInlineType::Tagged(path, tagged).into(),
+            TypeInfo::Schema(info) => SpecSchemaType::Tagged(info, tagged).into(),
+            TypeInfo::Inline(path) => SpecInlineType::Tagged(path, tagged).into(),
         })
     }
 
-    fn try_untagged(self) -> Result<RawType<'a>, Self> {
+    fn try_untagged(self) -> Result<SpecType<'a>, Self> {
         let Some(one_of) = &self.schema.one_of else {
             return Err(self);
         };
@@ -141,7 +142,7 @@ impl<'context, 'a> IrTransformer<'context, 'a> {
             .map(|(index, schema)| (index + 1, schema))
             .map(|(index, schema)| {
                 let ty = match schema {
-                    RefOrSchema::Ref(r) => Some(RawType::Ref(&r.path)),
+                    RefOrSchema::Ref(r) => Some(SpecType::Ref(&r.path)),
                     RefOrSchema::Other(s) if matches!(&*s.ty, [Ty::Null]) => None,
                     RefOrSchema::Other(schema) => {
                         let segment = InlineTypePathSegment::Variant(index);
@@ -156,68 +157,76 @@ impl<'context, 'a> IrTransformer<'context, 'a> {
                     }
                 };
                 ty.map(|ty| {
-                    let hint = match &ty {
-                        &RawType::Schema(RawSchemaType::Primitive(_, p))
-                        | &RawType::Inline(RawInlineType::Primitive(_, p)) => {
-                            UntaggedVariantNameHint::Primitive(p)
-                        }
-                        RawType::Schema(RawSchemaType::Container(_, RawContainer::Array(_)))
-                        | RawType::Inline(RawInlineType::Container(_, RawContainer::Array(_))) => {
-                            UntaggedVariantNameHint::Array
-                        }
-                        RawType::Schema(RawSchemaType::Container(_, RawContainer::Map(_)))
-                        | RawType::Inline(RawInlineType::Container(_, RawContainer::Map(_))) => {
-                            UntaggedVariantNameHint::Map
-                        }
-                        _ => UntaggedVariantNameHint::Index(index),
-                    };
-                    RawUntaggedVariant::Some(hint, &*self.arena().alloc(ty))
-                })
-                .unwrap_or(RawUntaggedVariant::Null)
+                        let hint = match ty {
+                            SpecType::Schema(SpecSchemaType::Primitive(_, p))
+                            | SpecType::Inline(SpecInlineType::Primitive(_, p)) => {
+                                UntaggedVariantNameHint::Primitive(p)
+                            }
+                            SpecType::Schema(SpecSchemaType::Container(
+                                _,
+                                SpecContainer::Array(_),
+                            ))
+                            | SpecType::Inline(SpecInlineType::Container(
+                                _,
+                                SpecContainer::Array(_),
+                            )) => UntaggedVariantNameHint::Array,
+                            SpecType::Schema(SpecSchemaType::Container(
+                                _,
+                                SpecContainer::Map(_),
+                            ))
+                            | SpecType::Inline(SpecInlineType::Container(
+                                _,
+                                SpecContainer::Map(_),
+                            )) => UntaggedVariantNameHint::Map,
+                            _ => UntaggedVariantNameHint::Index(index),
+                        };
+                        SpecUntaggedVariant::Some(hint, self.arena().alloc(ty))
+                    })
+                    .unwrap_or(SpecUntaggedVariant::Null)
             })
             .collect_vec();
 
         Ok(match &*variants {
             [] => match self.name {
-                TypeInfo::Schema(info) => RawSchemaType::Any(info).into(),
-                TypeInfo::Inline(path) => RawInlineType::Any(path).into(),
+                TypeInfo::Schema(info) => SpecSchemaType::Any(info).into(),
+                TypeInfo::Inline(path) => SpecInlineType::Any(path).into(),
             },
 
             // Unwrap single-variant untagged unions.
-            [RawUntaggedVariant::Null] => match self.name {
-                TypeInfo::Schema(info) => RawSchemaType::Any(info).into(),
-                TypeInfo::Inline(path) => RawInlineType::Any(path).into(),
+            [SpecUntaggedVariant::Null] => match self.name {
+                TypeInfo::Schema(info) => SpecSchemaType::Any(info).into(),
+                TypeInfo::Inline(path) => SpecInlineType::Any(path).into(),
             },
-            [RawUntaggedVariant::Some(_, ty)] => **ty,
+            [SpecUntaggedVariant::Some(_, ty)] => **ty,
 
             // Simplify two-variant untagged unions, where one is a type
             // and the other is `null`, into optionals.
-            [RawUntaggedVariant::Some(_, ty), RawUntaggedVariant::Null]
-            | [RawUntaggedVariant::Null, RawUntaggedVariant::Some(_, ty)] => {
-                let container = RawContainer::Optional(RawInner {
+            [SpecUntaggedVariant::Some(_, ty), SpecUntaggedVariant::Null]
+            | [SpecUntaggedVariant::Null, SpecUntaggedVariant::Some(_, ty)] => {
+                let container = SpecContainer::Optional(SpecInner {
                     description: self.schema.description.as_deref(),
                     ty: *ty,
                 });
                 match self.name {
-                    TypeInfo::Schema(info) => RawSchemaType::Container(info, container).into(),
-                    TypeInfo::Inline(path) => RawInlineType::Container(path, container).into(),
+                    TypeInfo::Schema(info) => SpecSchemaType::Container(info, container).into(),
+                    TypeInfo::Inline(path) => SpecInlineType::Container(path, container).into(),
                 }
             }
 
             variants => {
-                let untagged = RawUntagged {
+                let untagged = SpecUntagged {
                     description: self.schema.description.as_deref(),
                     variants: self.arena().alloc_slice_copy(variants),
                 };
                 match self.name {
-                    TypeInfo::Schema(info) => RawSchemaType::Untagged(info, untagged).into(),
-                    TypeInfo::Inline(path) => RawInlineType::Untagged(path, untagged).into(),
+                    TypeInfo::Schema(info) => SpecSchemaType::Untagged(info, untagged).into(),
+                    TypeInfo::Inline(path) => SpecInlineType::Untagged(path, untagged).into(),
                 }
             }
         })
     }
 
-    fn try_any_of(self) -> Result<RawType<'a>, Self> {
+    fn try_any_of(self) -> Result<SpecType<'a>, Self> {
         let Some(any_of) = &self.schema.any_of else {
             return Err(self);
         };
@@ -225,7 +234,7 @@ impl<'context, 'a> IrTransformer<'context, 'a> {
             // A single-variant `anyOf` should unwrap to the variant type. This
             // preserves type references that would otherwise become `Any`.
             return Ok(match schema {
-                RefOrSchema::Ref(r) => RawType::Ref(&r.path),
+                RefOrSchema::Ref(r) => SpecType::Ref(&r.path),
                 RefOrSchema::Other(schema) => {
                     let path = match self.name {
                         TypeInfo::Schema(info) => InlineTypePath {
@@ -249,7 +258,7 @@ impl<'context, 'a> IrTransformer<'context, 'a> {
                         // as the field name. For example, a pointer like
                         // `#/components/schemas/Address` becomes `address`.
                         let name = StructFieldName::Name(r.path.name());
-                        let ty: &_ = self.arena().alloc(RawType::Ref(&r.path));
+                        let ty: &_ = self.arena().alloc(SpecType::Ref(&r.path));
                         let desc = self
                             .context
                             .doc
@@ -288,13 +297,13 @@ impl<'context, 'a> IrTransformer<'context, 'a> {
                     TypeInfo::Inline(path) => path.join(self.arena(), &[segment]),
                 };
                 let ty: &_ = self.arena().alloc(
-                    RawInlineType::Container(
+                    SpecInlineType::Container(
                         path,
-                        RawContainer::Optional(RawInner { description, ty }),
+                        SpecContainer::Optional(SpecInner { description, ty }),
                     )
                     .into(),
                 );
-                RawStructField {
+                SpecStructField {
                     name: field_name,
                     ty,
                     required: false,
@@ -304,7 +313,7 @@ impl<'context, 'a> IrTransformer<'context, 'a> {
             })
             .collect_vec();
 
-        let ty = RawStruct {
+        let ty = SpecStruct {
             description: self.schema.description.as_deref(),
             fields: self.arena().alloc_slice({
                 // Combine all the fields: regular properties first,
@@ -317,12 +326,12 @@ impl<'context, 'a> IrTransformer<'context, 'a> {
         };
 
         Ok(match self.name {
-            TypeInfo::Schema(info) => RawSchemaType::Struct(info, ty).into(),
-            TypeInfo::Inline(path) => RawInlineType::Struct(path, ty).into(),
+            TypeInfo::Schema(info) => SpecSchemaType::Struct(info, ty).into(),
+            TypeInfo::Inline(path) => SpecInlineType::Struct(path, ty).into(),
         })
     }
 
-    fn try_enum(self) -> Result<RawType<'a>, Self> {
+    fn try_enum(self) -> Result<SpecType<'a>, Self> {
         let Some(values) = &self.schema.variants else {
             return Err(self);
         };
@@ -330,7 +339,13 @@ impl<'context, 'a> IrTransformer<'context, 'a> {
             if let Some(s) = value.as_str() {
                 Some(EnumVariant::String(s))
             } else if let Some(n) = value.as_number() {
-                Some(EnumVariant::Number(n.clone()))
+                if let Some(n) = n.as_i64() {
+                    Some(EnumVariant::I64(n))
+                } else if let Some(n) = n.as_u64() {
+                    Some(EnumVariant::U64(n))
+                } else {
+                    n.as_f64().map(|f| EnumVariant::F64(JsonF64::new(f)))
+                }
             } else {
                 value.as_bool().map(EnumVariant::Bool)
             }
@@ -340,17 +355,17 @@ impl<'context, 'a> IrTransformer<'context, 'a> {
             variants,
         };
         Ok(match self.name {
-            TypeInfo::Schema(info) => RawSchemaType::Enum(info, ty).into(),
-            TypeInfo::Inline(path) => RawInlineType::Enum(path, ty).into(),
+            TypeInfo::Schema(info) => SpecSchemaType::Enum(info, ty).into(),
+            TypeInfo::Inline(path) => SpecInlineType::Enum(path, ty).into(),
         })
     }
 
-    fn try_struct(self) -> Result<RawType<'a>, Self> {
+    fn try_struct(self) -> Result<SpecType<'a>, Self> {
         if self.schema.properties.is_none() && self.schema.all_of.is_none() {
             return Err(self);
         }
 
-        let ty = RawStruct {
+        let ty = SpecStruct {
             description: self.schema.description.as_deref(),
             fields: self.arena().alloc_slice(itertools::chain!(
                 self.properties(),
@@ -359,12 +374,12 @@ impl<'context, 'a> IrTransformer<'context, 'a> {
             parents: self.arena().alloc_slice(self.parents()),
         };
         Ok(match self.name {
-            TypeInfo::Schema(info) => RawSchemaType::Struct(info, ty).into(),
-            TypeInfo::Inline(path) => RawInlineType::Struct(path, ty).into(),
+            TypeInfo::Schema(info) => SpecSchemaType::Struct(info, ty).into(),
+            TypeInfo::Inline(path) => SpecInlineType::Struct(path, ty).into(),
         })
     }
 
-    fn other(self) -> RawType<'a> {
+    fn other(self) -> SpecType<'a> {
         let mut other = Other {
             variants: Vec::with_capacity(self.schema.ty.len()),
             nullable: false,
@@ -373,70 +388,70 @@ impl<'context, 'a> IrTransformer<'context, 'a> {
         for ty in &self.schema.ty {
             let variant = match (ty, self.schema.format) {
                 (Ty::String, Some(Format::DateTime)) => {
-                    OtherVariant::Primitive(&self.name, PrimitiveType::DateTime)
+                    OtherVariant::Primitive(self.name, PrimitiveType::DateTime)
                 }
                 (Ty::String, Some(Format::Date)) => {
-                    OtherVariant::Primitive(&self.name, PrimitiveType::Date)
+                    OtherVariant::Primitive(self.name, PrimitiveType::Date)
                 }
                 (Ty::String, Some(Format::Uri)) => {
-                    OtherVariant::Primitive(&self.name, PrimitiveType::Url)
+                    OtherVariant::Primitive(self.name, PrimitiveType::Url)
                 }
                 (Ty::String, Some(Format::Uuid)) => {
-                    OtherVariant::Primitive(&self.name, PrimitiveType::Uuid)
+                    OtherVariant::Primitive(self.name, PrimitiveType::Uuid)
                 }
                 (Ty::String, Some(Format::Byte)) => {
-                    OtherVariant::Primitive(&self.name, PrimitiveType::Bytes)
+                    OtherVariant::Primitive(self.name, PrimitiveType::Bytes)
                 }
                 (Ty::String, Some(Format::Binary)) => {
-                    OtherVariant::Primitive(&self.name, PrimitiveType::Binary)
+                    OtherVariant::Primitive(self.name, PrimitiveType::Binary)
                 }
-                (Ty::String, _) => OtherVariant::Primitive(&self.name, PrimitiveType::String),
+                (Ty::String, _) => OtherVariant::Primitive(self.name, PrimitiveType::String),
 
                 (Ty::Integer, Some(Format::Int8)) => {
-                    OtherVariant::Primitive(&self.name, PrimitiveType::I8)
+                    OtherVariant::Primitive(self.name, PrimitiveType::I8)
                 }
                 (Ty::Integer, Some(Format::UInt8)) => {
-                    OtherVariant::Primitive(&self.name, PrimitiveType::U8)
+                    OtherVariant::Primitive(self.name, PrimitiveType::U8)
                 }
                 (Ty::Integer, Some(Format::Int16)) => {
-                    OtherVariant::Primitive(&self.name, PrimitiveType::I16)
+                    OtherVariant::Primitive(self.name, PrimitiveType::I16)
                 }
                 (Ty::Integer, Some(Format::UInt16)) => {
-                    OtherVariant::Primitive(&self.name, PrimitiveType::U16)
+                    OtherVariant::Primitive(self.name, PrimitiveType::U16)
                 }
                 (Ty::Integer, Some(Format::Int32)) => {
-                    OtherVariant::Primitive(&self.name, PrimitiveType::I32)
+                    OtherVariant::Primitive(self.name, PrimitiveType::I32)
                 }
                 (Ty::Integer, Some(Format::UInt32)) => {
-                    OtherVariant::Primitive(&self.name, PrimitiveType::U32)
+                    OtherVariant::Primitive(self.name, PrimitiveType::U32)
                 }
                 (Ty::Integer, Some(Format::Int64)) => {
-                    OtherVariant::Primitive(&self.name, PrimitiveType::I64)
+                    OtherVariant::Primitive(self.name, PrimitiveType::I64)
                 }
                 (Ty::Integer, Some(Format::UInt64)) => {
-                    OtherVariant::Primitive(&self.name, PrimitiveType::U64)
+                    OtherVariant::Primitive(self.name, PrimitiveType::U64)
                 }
                 (Ty::Integer, Some(Format::UnixTime)) => {
-                    OtherVariant::Primitive(&self.name, PrimitiveType::UnixTime)
+                    OtherVariant::Primitive(self.name, PrimitiveType::UnixTime)
                 }
-                (Ty::Integer, _) => OtherVariant::Primitive(&self.name, PrimitiveType::I32),
+                (Ty::Integer, _) => OtherVariant::Primitive(self.name, PrimitiveType::I32),
 
                 (Ty::Number, Some(Format::Float)) => {
-                    OtherVariant::Primitive(&self.name, PrimitiveType::F32)
+                    OtherVariant::Primitive(self.name, PrimitiveType::F32)
                 }
                 (Ty::Number, Some(Format::Double)) => {
-                    OtherVariant::Primitive(&self.name, PrimitiveType::F64)
+                    OtherVariant::Primitive(self.name, PrimitiveType::F64)
                 }
                 (Ty::Number, Some(Format::UnixTime)) => {
-                    OtherVariant::Primitive(&self.name, PrimitiveType::UnixTime)
+                    OtherVariant::Primitive(self.name, PrimitiveType::UnixTime)
                 }
-                (Ty::Number, _) => OtherVariant::Primitive(&self.name, PrimitiveType::F64),
+                (Ty::Number, _) => OtherVariant::Primitive(self.name, PrimitiveType::F64),
 
-                (Ty::Boolean, _) => OtherVariant::Primitive(&self.name, PrimitiveType::Bool),
+                (Ty::Boolean, _) => OtherVariant::Primitive(self.name, PrimitiveType::Bool),
 
                 (Ty::Array, _) => {
                     let items = match &self.schema.items {
-                        Some(RefOrSchema::Ref(r)) => RawType::Ref(&r.path),
+                        Some(RefOrSchema::Ref(r)) => SpecType::Ref(&r.path),
                         Some(RefOrSchema::Other(schema)) => {
                             let segment = InlineTypePathSegment::ArrayItem;
                             let path = match self.name {
@@ -457,12 +472,12 @@ impl<'context, 'a> IrTransformer<'context, 'a> {
                                 },
                                 TypeInfo::Inline(path) => path.join(self.arena(), &[segment]),
                             };
-                            RawInlineType::Any(path).into()
+                            SpecInlineType::Any(path).into()
                         }
                     };
                     OtherVariant::Array(
-                        &self.name,
-                        RawInner {
+                        self.name,
+                        SpecInner {
                             description: self.schema.description.as_deref(),
                             ty: self.arena().alloc(items),
                         },
@@ -472,9 +487,9 @@ impl<'context, 'a> IrTransformer<'context, 'a> {
                 (Ty::Object, _) => {
                     let inner = match &self.schema.additional_properties {
                         Some(AdditionalProperties::RefOrSchema(RefOrSchema::Ref(r))) => {
-                            Some(RawInner {
+                            Some(SpecInner {
                                 description: self.schema.description.as_deref(),
-                                ty: &*self.arena().alloc(RawType::Ref(&r.path)),
+                                ty: self.arena().alloc(SpecType::Ref(&r.path)),
                             })
                         }
                         Some(AdditionalProperties::RefOrSchema(RefOrSchema::Other(schema))) => {
@@ -486,9 +501,9 @@ impl<'context, 'a> IrTransformer<'context, 'a> {
                                 },
                                 TypeInfo::Inline(path) => path.join(self.arena(), &[segment]),
                             };
-                            Some(RawInner {
+                            Some(SpecInner {
                                 description: self.schema.description.as_deref(),
-                                ty: &*self.arena().alloc(transform_with_context(
+                                ty: self.arena().alloc(transform_with_context(
                                     self.context,
                                     path,
                                     schema,
@@ -504,18 +519,18 @@ impl<'context, 'a> IrTransformer<'context, 'a> {
                                 },
                                 TypeInfo::Inline(path) => path.join(self.arena(), &[segment]),
                             };
-                            Some(RawInner {
+                            Some(SpecInner {
                                 description: self.schema.description.as_deref(),
-                                ty: &*self
+                                ty: self
                                     .arena()
-                                    .alloc(RawType::Inline(RawInlineType::Any(path))),
+                                    .alloc(SpecType::Inline(SpecInlineType::Any(path))),
                             })
                         }
                         _ => None,
                     };
                     match inner {
-                        Some(inner) => OtherVariant::Map(&self.name, inner),
-                        None => OtherVariant::Any(&self.name),
+                        Some(inner) => OtherVariant::Map(self.name, inner),
+                        None => OtherVariant::Any(self.name),
                     }
                 }
 
@@ -531,14 +546,14 @@ impl<'context, 'a> IrTransformer<'context, 'a> {
             // An empty `type` array is invalid in JSON Schema,
             // but we treat it as "any type".
             ([], false) => match self.name {
-                TypeInfo::Schema(info) => RawSchemaType::Any(info).into(),
-                TypeInfo::Inline(path) => RawInlineType::Any(path).into(),
+                TypeInfo::Schema(info) => SpecSchemaType::Any(info).into(),
+                TypeInfo::Inline(path) => SpecInlineType::Any(path).into(),
             },
 
             // A `null` variant becomes `Any`.
             ([], true) => match self.name {
-                TypeInfo::Schema(info) => RawSchemaType::Any(info).into(),
-                TypeInfo::Inline(path) => RawInlineType::Any(path).into(),
+                TypeInfo::Schema(info) => SpecSchemaType::Any(info).into(),
+                TypeInfo::Inline(path) => SpecInlineType::Any(path).into(),
             },
 
             // A union with a single, non-`null` variant unwraps to
@@ -548,13 +563,13 @@ impl<'context, 'a> IrTransformer<'context, 'a> {
             // A two-variant union, with one type T and one `null` variant,
             // simplifies to `Optional(T)`.
             ([variant], true) => {
-                let container = RawContainer::Optional(RawInner {
+                let container = SpecContainer::Optional(SpecInner {
                     description: self.schema.description.as_deref(),
-                    ty: &*self.arena().alloc(variant.to_inline_type()),
+                    ty: self.arena().alloc(variant.to_inline_type()),
                 });
                 match self.name {
-                    TypeInfo::Schema(info) => RawSchemaType::Container(info, container).into(),
-                    TypeInfo::Inline(path) => RawInlineType::Container(path, container).into(),
+                    TypeInfo::Schema(info) => SpecSchemaType::Container(info, container).into(),
+                    TypeInfo::Inline(path) => SpecInlineType::Container(path, container).into(),
                 }
             }
 
@@ -565,24 +580,24 @@ impl<'context, 'a> IrTransformer<'context, 'a> {
                     .enumerate()
                     .map(|(index, variant)| (index + 1, variant))
                     .map(|(index, variant)| {
-                        RawUntaggedVariant::Some(
+                        SpecUntaggedVariant::Some(
                             variant
                                 .hint()
                                 .unwrap_or(UntaggedVariantNameHint::Index(index)),
-                            &*self.arena().alloc(variant.to_type()),
+                            self.arena().alloc(variant.to_type()),
                         )
                     })
                     .collect_vec();
                 if nullable {
-                    variants.push(RawUntaggedVariant::Null);
+                    variants.push(SpecUntaggedVariant::Null);
                 }
-                let untagged = RawUntagged {
+                let untagged = SpecUntagged {
                     description: self.schema.description.as_deref(),
                     variants: self.arena().alloc_slice_copy(&variants),
                 };
                 match self.name {
-                    TypeInfo::Schema(info) => RawSchemaType::Untagged(info, untagged).into(),
-                    TypeInfo::Inline(path) => RawInlineType::Untagged(path, untagged).into(),
+                    TypeInfo::Schema(info) => SpecSchemaType::Untagged(info, untagged).into(),
+                    TypeInfo::Inline(path) => SpecInlineType::Untagged(path, untagged).into(),
                 }
             }
         }
@@ -591,15 +606,15 @@ impl<'context, 'a> IrTransformer<'context, 'a> {
     // MARK: Shared lowering
 
     /// Lowers immediate parents from `allOf` into a list of types.
-    fn parents(&self) -> impl Iterator<Item = &'a RawType<'a>> {
+    fn parents(&self) -> impl Iterator<Item = &'a SpecType<'a>> {
         self.schema
             .all_of
             .iter()
             .flatten()
             .enumerate()
             .map(|(index, parent)| (index + 1, parent))
-            .map(move |(index, parent)| match parent {
-                RefOrSchema::Ref(r) => &*self.arena().alloc(RawType::Ref(&r.path)),
+            .map(move |(index, parent)| &*match parent {
+                RefOrSchema::Ref(r) => self.arena().alloc(SpecType::Ref(&r.path)),
                 RefOrSchema::Other(schema) => {
                     let segment = InlineTypePathSegment::Parent(index);
                     let path = match self.name {
@@ -609,8 +624,7 @@ impl<'context, 'a> IrTransformer<'context, 'a> {
                         },
                         TypeInfo::Inline(path) => path.join(self.arena(), &[segment]),
                     };
-                    &*self
-                        .arena()
+                    self.arena()
                         .alloc(transform_with_context(self.context, path, schema))
                 }
             })
@@ -618,7 +632,7 @@ impl<'context, 'a> IrTransformer<'context, 'a> {
 
     /// Lowers regular fields from `properties` into struct fields,
     /// wrapping nullable and optional fields in [`Container::Optional`].
-    fn properties(&self) -> impl Iterator<Item = RawStructField<'a>> {
+    fn properties(&self) -> impl Iterator<Item = SpecStructField<'a>> {
         self.schema
             .properties
             .iter()
@@ -627,7 +641,7 @@ impl<'context, 'a> IrTransformer<'context, 'a> {
                 let field_name = name.as_str();
                 let required = self.schema.required.contains(name);
                 let ty: &_ = match field_schema {
-                    RefOrSchema::Ref(r) => &*self.arena().alloc(RawType::Ref(&r.path)),
+                    RefOrSchema::Ref(r) => self.arena().alloc(SpecType::Ref(&r.path)),
                     RefOrSchema::Other(schema) => {
                         let segment =
                             InlineTypePathSegment::Field(StructFieldName::Name(field_name));
@@ -638,8 +652,7 @@ impl<'context, 'a> IrTransformer<'context, 'a> {
                             },
                             TypeInfo::Inline(path) => path.join(self.arena(), &[segment]),
                         };
-                        &*self
-                            .arena()
+                        self.arena()
                             .alloc(transform_with_context(self.context, path, schema))
                     }
                 };
@@ -679,14 +692,14 @@ impl<'context, 'a> IrTransformer<'context, 'a> {
                         },
                         TypeInfo::Inline(path) => path.join(self.arena(), &[segment]),
                     };
-                    self.arena().alloc(RawType::from(RawInlineType::Container(
+                    self.arena().alloc(SpecType::from(SpecInlineType::Container(
                         path,
-                        RawContainer::Optional(RawInner { description, ty }),
+                        SpecContainer::Optional(SpecInner { description, ty }),
                     )))
                 } else {
                     ty
                 };
-                RawStructField {
+                SpecStructField {
                     name: StructFieldName::Name(field_name),
                     ty,
                     required,
@@ -698,7 +711,7 @@ impl<'context, 'a> IrTransformer<'context, 'a> {
 
     /// Lowers `additionalProperties` into a struct field definition,
     /// if the schema specifies them.
-    fn additional_properties(&self) -> Option<RawStructField<'a>> {
+    fn additional_properties(&self) -> Option<SpecStructField<'a>> {
         let name = StructFieldName::Hint(StructFieldNameHint::AdditionalProperties);
         let path = match self.name {
             TypeInfo::Schema(info) => InlineTypePath {
@@ -713,37 +726,37 @@ impl<'context, 'a> IrTransformer<'context, 'a> {
         };
 
         let inner = match &self.schema.additional_properties {
-            Some(AdditionalProperties::RefOrSchema(RefOrSchema::Ref(r))) => RawInner {
+            Some(AdditionalProperties::RefOrSchema(RefOrSchema::Ref(r))) => SpecInner {
                 description: self.schema.description.as_deref(),
-                ty: &*self.arena().alloc(RawType::Ref(&r.path)),
+                ty: self.arena().alloc(SpecType::Ref(&r.path)),
             },
             Some(AdditionalProperties::RefOrSchema(RefOrSchema::Other(schema))) => {
                 let path = path.join(self.arena(), &[InlineTypePathSegment::MapValue]);
-                RawInner {
+                SpecInner {
                     description: self.schema.description.as_deref(),
-                    ty: &*self
+                    ty: self
                         .arena()
                         .alloc(transform_with_context(self.context, path, schema)),
                 }
             }
             Some(AdditionalProperties::Bool(true)) => {
                 let path = path.join(self.arena(), &[InlineTypePathSegment::MapValue]);
-                RawInner {
+                SpecInner {
                     description: self.schema.description.as_deref(),
-                    ty: &*self
+                    ty: self
                         .arena()
-                        .alloc(RawType::Inline(RawInlineType::Any(path))),
+                        .alloc(SpecType::Inline(SpecInlineType::Any(path))),
                 }
             }
             _ => return None,
         };
 
-        let ty: &_ = self.arena().alloc(RawType::from(RawInlineType::Container(
+        let ty: &_ = self.arena().alloc(SpecType::from(SpecInlineType::Container(
             path,
-            RawContainer::Map(inner),
+            SpecContainer::Map(inner),
         )));
 
-        Some(RawStructField {
+        Some(SpecStructField {
             name,
             ty,
             required: true,
@@ -755,97 +768,98 @@ impl<'context, 'a> IrTransformer<'context, 'a> {
 
 /// A union of variants for representing OpenAPI 3.1-style
 /// `type` arrays.
-struct Other<'name, 'a> {
-    variants: Vec<OtherVariant<'name, 'a>>,
+struct Other<'a> {
+    variants: Vec<OtherVariant<'a>>,
     nullable: bool,
 }
 
 /// A variant of an [`Other`] union.
-enum OtherVariant<'name, 'a> {
-    Primitive(&'name TypeInfo<'a>, PrimitiveType),
-    Array(&'name TypeInfo<'a>, RawInner<'a>),
-    Map(&'name TypeInfo<'a>, RawInner<'a>),
-    Any(&'name TypeInfo<'a>),
+#[derive(Clone, Copy)]
+enum OtherVariant<'a> {
+    Primitive(TypeInfo<'a>, PrimitiveType),
+    Array(TypeInfo<'a>, SpecInner<'a>),
+    Map(TypeInfo<'a>, SpecInner<'a>),
+    Any(TypeInfo<'a>),
 }
 
-impl<'name, 'a> OtherVariant<'name, 'a> {
+impl<'a> OtherVariant<'a> {
     /// Returns the name hint for this variant when used in an untagged union.
-    fn hint(&self) -> Option<UntaggedVariantNameHint> {
+    fn hint(self) -> Option<UntaggedVariantNameHint> {
         Some(match self {
-            &Self::Primitive(_, p) => UntaggedVariantNameHint::Primitive(p),
+            Self::Primitive(_, p) => UntaggedVariantNameHint::Primitive(p),
             Self::Array(..) => UntaggedVariantNameHint::Array,
             Self::Map(..) => UntaggedVariantNameHint::Map,
             Self::Any(_) => return None,
         })
     }
 
-    /// Converts this variant to a [`RawType`].
+    /// Converts this variant to a [`SpecType`].
     ///
     /// This is used to unwrap variants for the single-variant
     /// and untagged union cases.
-    fn to_type(&self) -> RawType<'a> {
+    fn to_type(self) -> SpecType<'a> {
         match self {
-            &Self::Primitive(name, p) => match name {
-                TypeInfo::Schema(info) => RawSchemaType::Primitive(*info, p).into(),
-                TypeInfo::Inline(path) => RawInlineType::Primitive(*path, p).into(),
+            Self::Primitive(name, p) => match name {
+                TypeInfo::Schema(info) => SpecSchemaType::Primitive(info, p).into(),
+                TypeInfo::Inline(path) => SpecInlineType::Primitive(path, p).into(),
             },
             Self::Array(name, inner) => {
-                let container = RawContainer::Array(*inner);
+                let container = SpecContainer::Array(inner);
                 match name {
-                    TypeInfo::Schema(info) => RawSchemaType::Container(*info, container).into(),
-                    TypeInfo::Inline(path) => RawInlineType::Container(*path, container).into(),
+                    TypeInfo::Schema(info) => SpecSchemaType::Container(info, container).into(),
+                    TypeInfo::Inline(path) => SpecInlineType::Container(path, container).into(),
                 }
             }
             Self::Map(name, inner) => {
-                let container = RawContainer::Map(*inner);
+                let container = SpecContainer::Map(inner);
                 match name {
-                    TypeInfo::Schema(info) => RawSchemaType::Container(*info, container).into(),
-                    TypeInfo::Inline(path) => RawInlineType::Container(*path, container).into(),
+                    TypeInfo::Schema(info) => SpecSchemaType::Container(info, container).into(),
+                    TypeInfo::Inline(path) => SpecInlineType::Container(path, container).into(),
                 }
             }
             Self::Any(name) => match name {
-                TypeInfo::Schema(info) => RawSchemaType::Any(*info).into(),
-                TypeInfo::Inline(path) => RawInlineType::Any(*path).into(),
+                TypeInfo::Schema(info) => SpecSchemaType::Any(info).into(),
+                TypeInfo::Inline(path) => SpecInlineType::Any(path).into(),
             },
         }
     }
 
-    /// Converts this variant to an inline [`RawType`].
+    /// Converts this variant to an inline [`SpecType`].
     ///
     /// This is used to rewrite `[T, null]` unions as `Optional(T)`.
-    fn to_inline_type(&self) -> RawType<'a> {
+    fn to_inline_type(self) -> SpecType<'a> {
         match self {
-            &Self::Primitive(name, p) => {
+            Self::Primitive(name, p) => {
                 let path = match name {
                     TypeInfo::Schema(info) => InlineTypePath {
                         root: InlineTypePathRoot::Type(info.name),
                         segments: &[],
                     },
-                    &TypeInfo::Inline(path) => path,
+                    TypeInfo::Inline(path) => path,
                 };
-                RawInlineType::Primitive(path, p).into()
+                SpecInlineType::Primitive(path, p).into()
             }
             Self::Array(name, inner) => {
-                let container = RawContainer::Array(*inner);
+                let container = SpecContainer::Array(inner);
                 let path = match name {
                     TypeInfo::Schema(info) => InlineTypePath {
                         root: InlineTypePathRoot::Type(info.name),
                         segments: &[],
                     },
-                    &&TypeInfo::Inline(path) => path,
+                    TypeInfo::Inline(path) => path,
                 };
-                RawInlineType::Container(path, container).into()
+                SpecInlineType::Container(path, container).into()
             }
             Self::Map(name, inner) => {
-                let container = RawContainer::Map(*inner);
+                let container = SpecContainer::Map(inner);
                 let path = match name {
                     TypeInfo::Schema(info) => InlineTypePath {
                         root: InlineTypePathRoot::Type(info.name),
                         segments: &[],
                     },
-                    &&TypeInfo::Inline(path) => path,
+                    TypeInfo::Inline(path) => path,
                 };
-                RawInlineType::Container(path, container).into()
+                SpecInlineType::Container(path, container).into()
             }
             Self::Any(name) => {
                 let path = match name {
@@ -853,9 +867,9 @@ impl<'name, 'a> OtherVariant<'name, 'a> {
                         root: InlineTypePathRoot::Type(info.name),
                         segments: &[],
                     },
-                    &&TypeInfo::Inline(path) => path,
+                    TypeInfo::Inline(path) => path,
                 };
-                RawInlineType::Any(path).into()
+                SpecInlineType::Any(path).into()
             }
         }
     }

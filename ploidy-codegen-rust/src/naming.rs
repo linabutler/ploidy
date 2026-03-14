@@ -147,7 +147,7 @@ impl Ord for CodegenTypeNameSortKey<'_> {
     fn cmp(&self, other: &Self) -> Ordering {
         match (&self.0, &other.0) {
             (CodegenTypeName::Schema(a), CodegenTypeName::Schema(b)) => a.name().cmp(b.name()),
-            (CodegenTypeName::Inline(a), CodegenTypeName::Inline(b)) => a.path().cmp(b.path()),
+            (CodegenTypeName::Inline(a), CodegenTypeName::Inline(b)) => a.path().cmp(&b.path()),
             (CodegenTypeName::Schema(_), CodegenTypeName::Inline(_)) => Ordering::Less,
             (CodegenTypeName::Inline(_), CodegenTypeName::Schema(_)) => Ordering::Greater,
         }

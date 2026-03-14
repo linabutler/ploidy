@@ -143,7 +143,7 @@ mod tests {
     use cargo_toml::Package;
     use ploidy_core::{
         arena::Arena,
-        ir::{IrSpec, RawGraph},
+        ir::{RawGraph, Spec},
         parse::Document,
     };
 
@@ -177,7 +177,7 @@ mod tests {
         .unwrap();
 
         let arena = Arena::new();
-        let spec = IrSpec::from_doc(&arena, &doc).unwrap();
+        let spec = Spec::from_doc(&arena, &doc).unwrap();
         let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
         let manifest = CodegenCargoManifest::new(&graph, &default_manifest()).to_manifest();
 
@@ -208,7 +208,7 @@ mod tests {
         .unwrap();
 
         let arena = Arena::new();
-        let spec = IrSpec::from_doc(&arena, &doc).unwrap();
+        let spec = Spec::from_doc(&arena, &doc).unwrap();
         let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
         let manifest = CodegenCargoManifest::new(&graph, &default_manifest()).to_manifest();
 
@@ -238,7 +238,7 @@ mod tests {
         .unwrap();
 
         let arena = Arena::new();
-        let spec = IrSpec::from_doc(&arena, &doc).unwrap();
+        let spec = Spec::from_doc(&arena, &doc).unwrap();
         let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
         let manifest = CodegenCargoManifest::new(&graph, &default_manifest()).to_manifest();
 
@@ -277,7 +277,7 @@ mod tests {
         .unwrap();
 
         let arena = Arena::new();
-        let spec = IrSpec::from_doc(&arena, &doc).unwrap();
+        let spec = Spec::from_doc(&arena, &doc).unwrap();
         let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
         let manifest = CodegenCargoManifest::new(&graph, &default_manifest()).to_manifest();
 
@@ -321,7 +321,7 @@ mod tests {
         .unwrap();
 
         let arena = Arena::new();
-        let spec = IrSpec::from_doc(&arena, &doc).unwrap();
+        let spec = Spec::from_doc(&arena, &doc).unwrap();
         let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
         let manifest = CodegenCargoManifest::new(&graph, &default_manifest()).to_manifest();
 
@@ -358,7 +358,7 @@ mod tests {
         .unwrap();
 
         let arena = Arena::new();
-        let spec = IrSpec::from_doc(&arena, &doc).unwrap();
+        let spec = Spec::from_doc(&arena, &doc).unwrap();
         let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
         let manifest = CodegenCargoManifest::new(&graph, &default_manifest()).to_manifest();
 
@@ -393,7 +393,7 @@ mod tests {
         .unwrap();
 
         let arena = Arena::new();
-        let spec = IrSpec::from_doc(&arena, &doc).unwrap();
+        let spec = Spec::from_doc(&arena, &doc).unwrap();
         let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
         let manifest = CodegenCargoManifest::new(&graph, &default_manifest()).to_manifest();
 
@@ -445,7 +445,7 @@ mod tests {
         .unwrap();
 
         let arena = Arena::new();
-        let spec = IrSpec::from_doc(&arena, &doc).unwrap();
+        let spec = Spec::from_doc(&arena, &doc).unwrap();
         let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
         let manifest = CodegenCargoManifest::new(&graph, &default_manifest()).to_manifest();
 
@@ -495,7 +495,7 @@ mod tests {
         .unwrap();
 
         let arena = Arena::new();
-        let spec = IrSpec::from_doc(&arena, &doc).unwrap();
+        let spec = Spec::from_doc(&arena, &doc).unwrap();
         let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
         let manifest = CodegenCargoManifest::new(&graph, &default_manifest()).to_manifest();
 
@@ -551,7 +551,7 @@ mod tests {
         .unwrap();
 
         let arena = Arena::new();
-        let spec = IrSpec::from_doc(&arena, &doc).unwrap();
+        let spec = Spec::from_doc(&arena, &doc).unwrap();
         let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
         let manifest = CodegenCargoManifest::new(&graph, &default_manifest()).to_manifest();
 
@@ -618,7 +618,7 @@ mod tests {
         .unwrap();
 
         let arena = Arena::new();
-        let spec = IrSpec::from_doc(&arena, &doc).unwrap();
+        let spec = Spec::from_doc(&arena, &doc).unwrap();
         let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
         let manifest = CodegenCargoManifest::new(&graph, &default_manifest()).to_manifest();
 
@@ -677,7 +677,7 @@ mod tests {
         .unwrap();
 
         let arena = Arena::new();
-        let spec = IrSpec::from_doc(&arena, &doc).unwrap();
+        let spec = Spec::from_doc(&arena, &doc).unwrap();
         let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
         let manifest = CodegenCargoManifest::new(&graph, &default_manifest()).to_manifest();
 
@@ -745,7 +745,7 @@ mod tests {
         .unwrap();
 
         let arena = Arena::new();
-        let spec = IrSpec::from_doc(&arena, &doc).unwrap();
+        let spec = Spec::from_doc(&arena, &doc).unwrap();
         let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
         let manifest = CodegenCargoManifest::new(&graph, &default_manifest()).to_manifest();
 
@@ -776,7 +776,7 @@ mod tests {
         .unwrap();
 
         let arena = Arena::new();
-        let spec = IrSpec::from_doc(&arena, &doc).unwrap();
+        let spec = Spec::from_doc(&arena, &doc).unwrap();
         let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
         let manifest = CodegenCargoManifest::new(&graph, &default_manifest()).to_manifest();
 
@@ -807,7 +807,7 @@ mod tests {
             .insert("serde".to_owned(), Dependency::Simple("1.0".to_owned()));
 
         let arena = Arena::new();
-        let spec = IrSpec::from_doc(&arena, &doc).unwrap();
+        let spec = Spec::from_doc(&arena, &doc).unwrap();
         let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
         let manifest = CodegenCargoManifest::new(&graph, &manifest).to_manifest();
 

@@ -1,14 +1,14 @@
-//! Tests for [`IrSpec`].
+//! Tests for [`Spec`].
 
 use itertools::Itertools;
 
 use crate::{
     arena::Arena,
     ir::{
-        spec::IrSpec,
+        spec::Spec,
         types::{
-            ParameterStyle, PrimitiveType, RawInlineType, RawOperation, RawParameter,
-            RawParameterInfo, RawRequest, RawResponse, RawType,
+            ParameterStyle, PrimitiveType, SpecInlineType, SpecOperation, SpecParameter,
+            SpecParameterInfo, SpecRequest, SpecResponse, SpecType,
         },
     },
     parse::{Document, Method},
@@ -35,11 +35,11 @@ fn test_parses_single_operation_from_path() {
     .unwrap();
 
     let arena = Arena::new();
-    let ir = IrSpec::from_doc(&arena, &doc).unwrap();
+    let ir = Spec::from_doc(&arena, &doc).unwrap();
 
     assert_matches!(
         &*ir.operations,
-        [RawOperation {
+        [SpecOperation {
             id: "listUsers",
             method: Method::Get,
             resource: None,
@@ -71,16 +71,16 @@ fn test_parses_multiple_operations_from_same_path() {
     .unwrap();
 
     let arena = Arena::new();
-    let ir = IrSpec::from_doc(&arena, &doc).unwrap();
+    let ir = Spec::from_doc(&arena, &doc).unwrap();
 
     assert_matches!(
         &*ir.operations,
         [
-            RawOperation {
+            SpecOperation {
                 method: Method::Get,
                 ..
             },
-            RawOperation {
+            SpecOperation {
                 method: Method::Post,
                 ..
             },
@@ -112,16 +112,16 @@ fn test_parses_operations_from_multiple_paths() {
     .unwrap();
 
     let arena = Arena::new();
-    let ir = IrSpec::from_doc(&arena, &doc).unwrap();
+    let ir = Spec::from_doc(&arena, &doc).unwrap();
 
     assert_matches!(
         &*ir.operations,
         [
-            RawOperation {
+            SpecOperation {
                 id: "listUsers",
                 ..
             },
-            RawOperation {
+            SpecOperation {
                 id: "listPosts",
                 ..
             },
@@ -147,9 +147,9 @@ fn test_parses_path_with_parameter_segments() {
     .unwrap();
 
     let arena = Arena::new();
-    let ir = IrSpec::from_doc(&arena, &doc).unwrap();
+    let ir = Spec::from_doc(&arena, &doc).unwrap();
 
-    let [op @ RawOperation { .. }] = &*ir.operations else {
+    let [op @ SpecOperation { .. }] = &*ir.operations else {
         panic!("expected single operation; got `{:?}`", ir.operations);
     };
     assert_eq!(op.path.len(), 2);
@@ -181,17 +181,17 @@ fn test_parses_path_parameter_string_type() {
     .unwrap();
 
     let arena = Arena::new();
-    let ir = IrSpec::from_doc(&arena, &doc).unwrap();
+    let ir = Spec::from_doc(&arena, &doc).unwrap();
 
-    let [RawOperation { params, .. }] = &*ir.operations else {
+    let [SpecOperation { params, .. }] = &*ir.operations else {
         panic!("expected single operation; got `{:?}`", ir.operations);
     };
     assert_matches!(
         &**params,
-        [RawParameter::Path(RawParameterInfo {
+        [SpecParameter::Path(SpecParameterInfo {
             name: "id",
             required: true,
-            ty: RawType::Inline(RawInlineType::Primitive(_, PrimitiveType::String)),
+            ty: SpecType::Inline(SpecInlineType::Primitive(_, PrimitiveType::String)),
             ..
         })],
     );
@@ -222,16 +222,16 @@ fn test_parses_path_parameter_integer_type() {
     .unwrap();
 
     let arena = Arena::new();
-    let ir = IrSpec::from_doc(&arena, &doc).unwrap();
+    let ir = Spec::from_doc(&arena, &doc).unwrap();
 
-    let [RawOperation { params, .. }] = &*ir.operations else {
+    let [SpecOperation { params, .. }] = &*ir.operations else {
         panic!("expected single operation; got `{:?}`", ir.operations);
     };
     assert_matches!(
         &**params,
-        [RawParameter::Path(RawParameterInfo {
+        [SpecParameter::Path(SpecParameterInfo {
             name: "id",
-            ty: RawType::Inline(RawInlineType::Primitive(_, PrimitiveType::I64)),
+            ty: SpecType::Inline(SpecInlineType::Primitive(_, PrimitiveType::I64)),
             ..
         })],
     );
@@ -266,16 +266,16 @@ fn test_parses_multiple_path_parameters() {
     .unwrap();
 
     let arena = Arena::new();
-    let ir = IrSpec::from_doc(&arena, &doc).unwrap();
+    let ir = Spec::from_doc(&arena, &doc).unwrap();
 
-    let [RawOperation { params, .. }] = &*ir.operations else {
+    let [SpecOperation { params, .. }] = &*ir.operations else {
         panic!("expected single operation; got `{:?}`", ir.operations);
     };
     assert_matches!(
         &**params,
         [
-            RawParameter::Path(RawParameterInfo { name: "userId", .. }),
-            RawParameter::Path(RawParameterInfo { name: "postId", .. }),
+            SpecParameter::Path(SpecParameterInfo { name: "userId", .. }),
+            SpecParameter::Path(SpecParameterInfo { name: "postId", .. }),
         ],
     );
 }
@@ -308,14 +308,14 @@ fn test_parses_query_parameter_form_exploded() {
     .unwrap();
 
     let arena = Arena::new();
-    let ir = IrSpec::from_doc(&arena, &doc).unwrap();
+    let ir = Spec::from_doc(&arena, &doc).unwrap();
 
-    let [RawOperation { params, .. }] = &*ir.operations else {
+    let [SpecOperation { params, .. }] = &*ir.operations else {
         panic!("expected single operation; got `{:?}`", ir.operations);
     };
     assert_matches!(
         &**params,
-        [RawParameter::Query(RawParameterInfo {
+        [SpecParameter::Query(SpecParameterInfo {
             name: "filter",
             required: false,
             style: Some(ParameterStyle::Form { exploded: true }),
@@ -350,14 +350,14 @@ fn test_parses_query_parameter_form_unexploded() {
     .unwrap();
 
     let arena = Arena::new();
-    let ir = IrSpec::from_doc(&arena, &doc).unwrap();
+    let ir = Spec::from_doc(&arena, &doc).unwrap();
 
-    let [RawOperation { params, .. }] = &*ir.operations else {
+    let [SpecOperation { params, .. }] = &*ir.operations else {
         panic!("expected single operation; got `{:?}`", ir.operations);
     };
     assert_matches!(
         &**params,
-        [RawParameter::Query(RawParameterInfo {
+        [SpecParameter::Query(SpecParameterInfo {
             style: Some(ParameterStyle::Form { exploded: false }),
             ..
         })],
@@ -392,14 +392,14 @@ fn test_parses_query_parameter_pipe_delimited() {
     .unwrap();
 
     let arena = Arena::new();
-    let ir = IrSpec::from_doc(&arena, &doc).unwrap();
+    let ir = Spec::from_doc(&arena, &doc).unwrap();
 
-    let [RawOperation { params, .. }] = &*ir.operations else {
+    let [SpecOperation { params, .. }] = &*ir.operations else {
         panic!("expected single operation; got `{:?}`", ir.operations);
     };
     assert_matches!(
         &**params,
-        [RawParameter::Query(RawParameterInfo {
+        [SpecParameter::Query(SpecParameterInfo {
             style: Some(ParameterStyle::PipeDelimited),
             ..
         })],
@@ -434,14 +434,14 @@ fn test_parses_query_parameter_space_delimited() {
     .unwrap();
 
     let arena = Arena::new();
-    let ir = IrSpec::from_doc(&arena, &doc).unwrap();
+    let ir = Spec::from_doc(&arena, &doc).unwrap();
 
-    let [RawOperation { params, .. }] = &*ir.operations else {
+    let [SpecOperation { params, .. }] = &*ir.operations else {
         panic!("expected single operation; got `{:?}`", ir.operations);
     };
     assert_matches!(
         &**params,
-        [RawParameter::Query(RawParameterInfo {
+        [SpecParameter::Query(SpecParameterInfo {
             style: Some(ParameterStyle::SpaceDelimited),
             ..
         })],
@@ -477,14 +477,14 @@ fn test_parses_query_parameter_deep_object() {
     .unwrap();
 
     let arena = Arena::new();
-    let ir = IrSpec::from_doc(&arena, &doc).unwrap();
+    let ir = Spec::from_doc(&arena, &doc).unwrap();
 
-    let [RawOperation { params, .. }] = &*ir.operations else {
+    let [SpecOperation { params, .. }] = &*ir.operations else {
         panic!("expected single operation; got `{:?}`", ir.operations);
     };
     assert_matches!(
         &**params,
-        [RawParameter::Query(RawParameterInfo {
+        [SpecParameter::Query(SpecParameterInfo {
             style: Some(ParameterStyle::DeepObject),
             ..
         })],
@@ -525,17 +525,17 @@ fn test_parses_multiple_query_parameters() {
     .unwrap();
 
     let arena = Arena::new();
-    let ir = IrSpec::from_doc(&arena, &doc).unwrap();
+    let ir = Spec::from_doc(&arena, &doc).unwrap();
 
-    let [RawOperation { params, .. }] = &*ir.operations else {
+    let [SpecOperation { params, .. }] = &*ir.operations else {
         panic!("expected single operation; got `{:?}`", ir.operations);
     };
     assert_matches!(
         &**params,
         [
-            RawParameter::Query(RawParameterInfo { name: "page", .. }),
-            RawParameter::Query(RawParameterInfo { name: "limit", .. }),
-            RawParameter::Query(RawParameterInfo { name: "status", .. }),
+            SpecParameter::Query(SpecParameterInfo { name: "page", .. }),
+            SpecParameter::Query(SpecParameterInfo { name: "limit", .. }),
+            SpecParameter::Query(SpecParameterInfo { name: "status", .. }),
         ],
     );
 }
@@ -565,14 +565,14 @@ fn test_parses_query_parameter_with_description() {
     .unwrap();
 
     let arena = Arena::new();
-    let ir = IrSpec::from_doc(&arena, &doc).unwrap();
+    let ir = Spec::from_doc(&arena, &doc).unwrap();
 
-    let [RawOperation { params, .. }] = &*ir.operations else {
+    let [SpecOperation { params, .. }] = &*ir.operations else {
         panic!("expected single operation; got `{:?}`", ir.operations);
     };
     assert_matches!(
         &**params,
-        [RawParameter::Query(RawParameterInfo {
+        [SpecParameter::Query(SpecParameterInfo {
             description: Some("The page number for pagination"),
             ..
         })],
@@ -611,12 +611,12 @@ fn test_parses_request_body_json_reference() {
     .unwrap();
 
     let arena = Arena::new();
-    let ir = IrSpec::from_doc(&arena, &doc).unwrap();
+    let ir = Spec::from_doc(&arena, &doc).unwrap();
 
     assert_matches!(
         &*ir.operations,
-        [RawOperation {
-            request: Some(RawRequest::Json(_)),
+        [SpecOperation {
+            request: Some(SpecRequest::Json(_)),
             ..
         }],
         "expected JSON request",
@@ -649,12 +649,12 @@ fn test_parses_request_body_json_inline_schema() {
     .unwrap();
 
     let arena = Arena::new();
-    let ir = IrSpec::from_doc(&arena, &doc).unwrap();
+    let ir = Spec::from_doc(&arena, &doc).unwrap();
 
     assert_matches!(
         &*ir.operations,
-        [RawOperation {
-            request: Some(RawRequest::Json(_)),
+        [SpecOperation {
+            request: Some(SpecRequest::Json(_)),
             ..
         }],
         "expected JSON request",
@@ -688,12 +688,12 @@ fn test_parses_request_body_multipart() {
     .unwrap();
 
     let arena = Arena::new();
-    let ir = IrSpec::from_doc(&arena, &doc).unwrap();
+    let ir = Spec::from_doc(&arena, &doc).unwrap();
 
     assert_matches!(
         &*ir.operations,
-        [RawOperation {
-            request: Some(RawRequest::Multipart),
+        [SpecOperation {
+            request: Some(SpecRequest::Multipart),
             ..
         }],
         "expected multipart request",
@@ -723,12 +723,12 @@ fn test_parses_request_body_wildcard_content_type() {
     .unwrap();
 
     let arena = Arena::new();
-    let ir = IrSpec::from_doc(&arena, &doc).unwrap();
+    let ir = Spec::from_doc(&arena, &doc).unwrap();
 
     assert_matches!(
         &*ir.operations,
-        [RawOperation {
-            request: Some(RawRequest::Json(_)),
+        [SpecOperation {
+            request: Some(SpecRequest::Json(_)),
             ..
         }],
         "expected JSON request with wildcard content type",
@@ -753,9 +753,9 @@ fn test_operation_without_request_body() {
     .unwrap();
 
     let arena = Arena::new();
-    let ir = IrSpec::from_doc(&arena, &doc).unwrap();
+    let ir = Spec::from_doc(&arena, &doc).unwrap();
 
-    assert_matches!(&*ir.operations, [RawOperation { request: None, .. }]);
+    assert_matches!(&*ir.operations, [SpecOperation { request: None, .. }]);
 }
 
 // MARK: Response parsing
@@ -789,12 +789,12 @@ fn test_parses_response_json_reference() {
     .unwrap();
 
     let arena = Arena::new();
-    let ir = IrSpec::from_doc(&arena, &doc).unwrap();
+    let ir = Spec::from_doc(&arena, &doc).unwrap();
 
     assert_matches!(
         &*ir.operations,
-        [RawOperation {
-            response: Some(RawResponse::Json(_)),
+        [SpecOperation {
+            response: Some(SpecResponse::Json(_)),
             ..
         }],
         "expected JSON response",
@@ -826,12 +826,12 @@ fn test_parses_response_json_inline_schema() {
     .unwrap();
 
     let arena = Arena::new();
-    let ir = IrSpec::from_doc(&arena, &doc).unwrap();
+    let ir = Spec::from_doc(&arena, &doc).unwrap();
 
     assert_matches!(
         &*ir.operations,
-        [RawOperation {
-            response: Some(RawResponse::Json(_)),
+        [SpecOperation {
+            response: Some(SpecResponse::Json(_)),
             ..
         }],
         "expected JSON response",
@@ -878,19 +878,19 @@ fn test_prioritizes_2xx_status_over_default_response() {
     .unwrap();
 
     let arena = Arena::new();
-    let ir = IrSpec::from_doc(&arena, &doc).unwrap();
+    let ir = Spec::from_doc(&arena, &doc).unwrap();
 
-    let [op @ RawOperation { .. }] = &*ir.operations else {
+    let [op @ SpecOperation { .. }] = &*ir.operations else {
         panic!("expected single operation; got `{:?}`", ir.operations);
     };
     let ty = match &op.response {
-        Some(RawResponse::Json(ty)) => ty,
+        Some(SpecResponse::Json(ty)) => ty,
         other => panic!("expected JSON response; got `{other:?}`"),
     };
 
     // The response should be from the 200 status, not the default.
     let component_ref = match ty {
-        RawType::Ref(component_ref) => component_ref,
+        SpecType::Ref(component_ref) => component_ref,
         other => panic!("expected schema reference; got `{other:?}`"),
     };
     assert_eq!(component_ref.name(), "User");
@@ -921,11 +921,11 @@ fn test_falls_back_to_default_response_when_no_2xx_status() {
     .unwrap();
 
     let arena = Arena::new();
-    let ir = IrSpec::from_doc(&arena, &doc).unwrap();
+    let ir = Spec::from_doc(&arena, &doc).unwrap();
 
     assert_matches!(
         &*ir.operations,
-        [RawOperation {
+        [SpecOperation {
             response: Some(_),
             ..
         }]
@@ -954,12 +954,12 @@ fn test_parses_response_with_wildcard_content_type() {
     .unwrap();
 
     let arena = Arena::new();
-    let ir = IrSpec::from_doc(&arena, &doc).unwrap();
+    let ir = Spec::from_doc(&arena, &doc).unwrap();
 
     assert_matches!(
         &*ir.operations,
-        [RawOperation {
-            response: Some(RawResponse::Json(_)),
+        [SpecOperation {
+            response: Some(SpecResponse::Json(_)),
             ..
         }],
         "expected JSON response with wildcard content type",
@@ -1008,19 +1008,19 @@ fn test_selects_first_2xx_status_when_multiple_exist() {
     .unwrap();
 
     let arena = Arena::new();
-    let ir = IrSpec::from_doc(&arena, &doc).unwrap();
+    let ir = Spec::from_doc(&arena, &doc).unwrap();
 
-    let [op @ RawOperation { .. }] = &*ir.operations else {
+    let [op @ SpecOperation { .. }] = &*ir.operations else {
         panic!("expected single operation; got `{:?}`", ir.operations);
     };
     let ty = match &op.response {
-        Some(RawResponse::Json(ty)) => ty,
+        Some(SpecResponse::Json(ty)) => ty,
         other => panic!("expected JSON response; got `{other:?}`"),
     };
 
     // The response should be from the first 2xx status (200), not 202.
     let component_ref = match ty {
-        RawType::Ref(component_ref) => component_ref,
+        SpecType::Ref(component_ref) => component_ref,
         other => panic!("expected schema reference; got `{other:?}`"),
     };
     assert_eq!(component_ref.name(), "UserList");
@@ -1042,9 +1042,9 @@ fn test_operation_without_response() {
     .unwrap();
 
     let arena = Arena::new();
-    let ir = IrSpec::from_doc(&arena, &doc).unwrap();
+    let ir = Spec::from_doc(&arena, &doc).unwrap();
 
-    assert_matches!(&*ir.operations, [RawOperation { response: None, .. }]);
+    assert_matches!(&*ir.operations, [SpecOperation { response: None, .. }]);
 }
 
 // MARK: `x-resource-name` extension
@@ -1068,11 +1068,11 @@ fn test_parses_custom_resource_name_from_extension() {
     .unwrap();
 
     let arena = Arena::new();
-    let ir = IrSpec::from_doc(&arena, &doc).unwrap();
+    let ir = Spec::from_doc(&arena, &doc).unwrap();
 
     assert_matches!(
         &*ir.operations,
-        [RawOperation {
+        [SpecOperation {
             resource: Some("user_management"),
             ..
         }],
@@ -1105,16 +1105,16 @@ fn test_different_operations_can_have_different_resources() {
     .unwrap();
 
     let arena = Arena::new();
-    let ir = IrSpec::from_doc(&arena, &doc).unwrap();
+    let ir = Spec::from_doc(&arena, &doc).unwrap();
 
     assert_matches!(
         &*ir.operations,
         [
-            RawOperation {
+            SpecOperation {
                 resource: Some("user_management"),
                 ..
             },
-            RawOperation {
+            SpecOperation {
                 resource: Some("content"),
                 ..
             }
@@ -1144,12 +1144,12 @@ fn test_schema_stores_x_resource_id() {
     .unwrap();
 
     let arena = Arena::new();
-    let spec = IrSpec::from_doc(&arena, &doc).unwrap();
+    let spec = Spec::from_doc(&arena, &doc).unwrap();
     let schema = spec.schemas.get("User").unwrap();
 
     assert_matches!(
         schema,
-        RawType::Schema(schema_ty) if schema_ty.resource() == Some("users"),
+        SpecType::Schema(schema_ty) if schema_ty.resource() == Some("users"),
     );
 }
 
@@ -1172,12 +1172,12 @@ fn test_schema_without_x_resource_id_has_none() {
     .unwrap();
 
     let arena = Arena::new();
-    let spec = IrSpec::from_doc(&arena, &doc).unwrap();
+    let spec = Spec::from_doc(&arena, &doc).unwrap();
     let schema = spec.schemas.get("User").unwrap();
 
     assert_matches!(
         schema,
-        RawType::Schema(schema_ty) if schema_ty.resource().is_none(),
+        SpecType::Schema(schema_ty) if schema_ty.resource().is_none(),
     );
 }
 
@@ -1205,12 +1205,12 @@ fn test_operation_without_id_is_skipped() {
     .unwrap();
 
     let arena = Arena::new();
-    let ir = IrSpec::from_doc(&arena, &doc).unwrap();
+    let ir = Spec::from_doc(&arena, &doc).unwrap();
 
     // Only the GET operation with `operationId` should be present.
     assert_matches!(
         &*ir.operations,
-        [RawOperation {
+        [SpecOperation {
             id: "listUsers",
             ..
         }],
@@ -1243,7 +1243,7 @@ fn test_extracts_schemas_from_components() {
     .unwrap();
 
     let arena = Arena::new();
-    let ir = IrSpec::from_doc(&arena, &doc).unwrap();
+    let ir = Spec::from_doc(&arena, &doc).unwrap();
 
     let ids = ir.schemas.keys().copied().collect_vec();
     assert_matches!(&*ids, ["User", "Post"]);
@@ -1261,7 +1261,7 @@ fn test_empty_spec() {
     .unwrap();
 
     let arena = Arena::new();
-    let ir = IrSpec::from_doc(&arena, &doc).unwrap();
+    let ir = Spec::from_doc(&arena, &doc).unwrap();
 
     assert_eq!(ir.schemas.len(), 0);
     assert_eq!(ir.operations.len(), 0);
@@ -1317,11 +1317,11 @@ fn test_operation_with_all_components() {
     .unwrap();
 
     let arena = Arena::new();
-    let ir = IrSpec::from_doc(&arena, &doc).unwrap();
+    let ir = Spec::from_doc(&arena, &doc).unwrap();
 
     assert_matches!(
         &*ir.operations,
-        [RawOperation {
+        [SpecOperation {
             id: "updateUser",
             method: Method::Put,
             resource: Some("users"),
@@ -1354,11 +1354,11 @@ fn test_preserves_operation_descriptions() {
     .unwrap();
 
     let arena = Arena::new();
-    let ir = IrSpec::from_doc(&arena, &doc).unwrap();
+    let ir = Spec::from_doc(&arena, &doc).unwrap();
 
     assert_matches!(
         &*ir.operations,
-        [RawOperation {
+        [SpecOperation {
             description: Some("Retrieves a list of all users in the system"),
             ..
         }],
@@ -1427,30 +1427,30 @@ fn test_complex_spec_with_multiple_operations_and_resources() {
     .unwrap();
 
     let arena = Arena::new();
-    let ir = IrSpec::from_doc(&arena, &doc).unwrap();
+    let ir = Spec::from_doc(&arena, &doc).unwrap();
     assert_eq!(ir.schemas.len(), 1);
     assert_matches!(
         &*ir.operations,
         [
-            RawOperation {
+            SpecOperation {
                 id: "listUsers",
                 method: Method::Get,
                 resource: Some("users"),
                 ..
             },
-            RawOperation {
+            SpecOperation {
                 id: "createUser",
                 method: Method::Post,
                 resource: Some("users"),
                 ..
             },
-            RawOperation {
+            SpecOperation {
                 id: "listPosts",
                 method: Method::Get,
                 resource: Some("posts"),
                 ..
             },
-            RawOperation {
+            SpecOperation {
                 id: "getPost",
                 resource: Some("posts"),
                 ..
@@ -1484,14 +1484,14 @@ fn test_query_parameter_default_style_is_form_exploded() {
     .unwrap();
 
     let arena = Arena::new();
-    let ir = IrSpec::from_doc(&arena, &doc).unwrap();
+    let ir = Spec::from_doc(&arena, &doc).unwrap();
 
-    let [RawOperation { params, .. }] = &*ir.operations else {
+    let [SpecOperation { params, .. }] = &*ir.operations else {
         panic!("expected single operation; got `{:?}`", ir.operations);
     };
     assert_matches!(
         &**params,
-        [RawParameter::Query(RawParameterInfo {
+        [SpecParameter::Query(SpecParameterInfo {
             // When `style` and `explode` are not specified,
             // the default should be an exploded form.
             style: Some(ParameterStyle::Form { exploded: true }),
@@ -1529,12 +1529,12 @@ fn test_mixed_path_and_query_parameters() {
     .unwrap();
 
     let arena = Arena::new();
-    let ir = IrSpec::from_doc(&arena, &doc).unwrap();
+    let ir = Spec::from_doc(&arena, &doc).unwrap();
 
-    let [RawOperation { params, .. }] = &*ir.operations else {
+    let [SpecOperation { params, .. }] = &*ir.operations else {
         panic!("expected single operation; got `{:?}`", ir.operations);
     };
-    assert_matches!(&**params, [RawParameter::Path(_), RawParameter::Query(_)]);
+    assert_matches!(&**params, [SpecParameter::Path(_), SpecParameter::Query(_)]);
 }
 
 #[test]
@@ -1566,9 +1566,9 @@ fn test_ignores_header_and_cookie_parameters() {
     .unwrap();
 
     let arena = Arena::new();
-    let ir = IrSpec::from_doc(&arena, &doc).unwrap();
+    let ir = Spec::from_doc(&arena, &doc).unwrap();
 
-    let [RawOperation { params, .. }] = &*ir.operations else {
+    let [SpecOperation { params, .. }] = &*ir.operations else {
         panic!("expected single operation; got `{:?}`", ir.operations);
     };
     // Header and cookie parameters are ignored for now.

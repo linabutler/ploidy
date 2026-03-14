@@ -73,7 +73,7 @@ mod tests {
     use itertools::Itertools;
     use ploidy_core::{
         arena::Arena,
-        ir::{IrSpec, RawGraph},
+        ir::{RawGraph, Spec},
         parse::Document,
     };
     use pretty_assertions::assert_eq;
@@ -96,7 +96,7 @@ mod tests {
         "})
         .unwrap();
         let arena = Arena::new();
-        let spec = IrSpec::from_doc(&arena, &doc).unwrap();
+        let spec = Spec::from_doc(&arena, &doc).unwrap();
         let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
         let primitives = graph.primitives().collect_vec();
         let [ty] = &*primitives else {
@@ -128,7 +128,7 @@ mod tests {
         "})
         .unwrap();
         let arena = Arena::new();
-        let spec = IrSpec::from_doc(&arena, &doc).unwrap();
+        let spec = Spec::from_doc(&arena, &doc).unwrap();
         let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
         let primitives = graph.primitives().collect_vec();
         let [ty] = &*primitives else {
@@ -160,7 +160,7 @@ mod tests {
         "})
         .unwrap();
         let arena = Arena::new();
-        let spec = IrSpec::from_doc(&arena, &doc).unwrap();
+        let spec = Spec::from_doc(&arena, &doc).unwrap();
         let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
         let primitives = graph.primitives().collect_vec();
         let [ty] = &*primitives else {
@@ -192,7 +192,7 @@ mod tests {
         "})
         .unwrap();
         let arena = Arena::new();
-        let spec = IrSpec::from_doc(&arena, &doc).unwrap();
+        let spec = Spec::from_doc(&arena, &doc).unwrap();
         let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
         let primitives = graph.primitives().collect_vec();
         let [ty] = &*primitives else {
@@ -224,7 +224,7 @@ mod tests {
         "})
         .unwrap();
         let arena = Arena::new();
-        let spec = IrSpec::from_doc(&arena, &doc).unwrap();
+        let spec = Spec::from_doc(&arena, &doc).unwrap();
         let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
         let primitives = graph.primitives().collect_vec();
         let [ty] = &*primitives else {
@@ -256,7 +256,7 @@ mod tests {
         "})
         .unwrap();
         let arena = Arena::new();
-        let spec = IrSpec::from_doc(&arena, &doc).unwrap();
+        let spec = Spec::from_doc(&arena, &doc).unwrap();
         let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
         let primitives = graph.primitives().collect_vec();
         let [ty] = &*primitives else {
@@ -288,7 +288,7 @@ mod tests {
         "})
         .unwrap();
         let arena = Arena::new();
-        let spec = IrSpec::from_doc(&arena, &doc).unwrap();
+        let spec = Spec::from_doc(&arena, &doc).unwrap();
         let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
         let primitives = graph.primitives().collect_vec();
         let [ty] = &*primitives else {
@@ -320,7 +320,7 @@ mod tests {
         "})
         .unwrap();
         let arena = Arena::new();
-        let spec = IrSpec::from_doc(&arena, &doc).unwrap();
+        let spec = Spec::from_doc(&arena, &doc).unwrap();
         let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
         let primitives = graph.primitives().collect_vec();
         let [ty] = &*primitives else {
@@ -352,7 +352,7 @@ mod tests {
         "})
         .unwrap();
         let arena = Arena::new();
-        let spec = IrSpec::from_doc(&arena, &doc).unwrap();
+        let spec = Spec::from_doc(&arena, &doc).unwrap();
         let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
         let primitives = graph.primitives().collect_vec();
         let [ty] = &*primitives else {
@@ -384,7 +384,7 @@ mod tests {
         "})
         .unwrap();
         let arena = Arena::new();
-        let spec = IrSpec::from_doc(&arena, &doc).unwrap();
+        let spec = Spec::from_doc(&arena, &doc).unwrap();
         let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
         let primitives = graph.primitives().collect_vec();
         let [ty] = &*primitives else {
@@ -416,7 +416,7 @@ mod tests {
         "})
         .unwrap();
         let arena = Arena::new();
-        let spec = IrSpec::from_doc(&arena, &doc).unwrap();
+        let spec = Spec::from_doc(&arena, &doc).unwrap();
         let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
         let primitives = graph.primitives().collect_vec();
         let [ty] = &*primitives else {
@@ -447,7 +447,7 @@ mod tests {
         "})
         .unwrap();
         let arena = Arena::new();
-        let spec = IrSpec::from_doc(&arena, &doc).unwrap();
+        let spec = Spec::from_doc(&arena, &doc).unwrap();
         let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
         let primitives = graph.primitives().collect_vec();
         let [ty] = &*primitives else {
@@ -479,7 +479,7 @@ mod tests {
         "})
         .unwrap();
         let arena = Arena::new();
-        let spec = IrSpec::from_doc(&arena, &doc).unwrap();
+        let spec = Spec::from_doc(&arena, &doc).unwrap();
         // Default config for `CodegenGraph` uses RFC 3339.
         let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
         let primitives = graph.primitives().collect_vec();
@@ -513,7 +513,7 @@ mod tests {
         "})
         .unwrap();
         let arena = Arena::new();
-        let spec = IrSpec::from_doc(&arena, &doc).unwrap();
+        let spec = Spec::from_doc(&arena, &doc).unwrap();
         let graph = CodegenGraph::with_config(
             RawGraph::new(&arena, &spec).cook(),
             &CodegenConfig {
@@ -550,7 +550,7 @@ mod tests {
         "})
         .unwrap();
         let arena = Arena::new();
-        let spec = IrSpec::from_doc(&arena, &doc).unwrap();
+        let spec = Spec::from_doc(&arena, &doc).unwrap();
         let graph = CodegenGraph::with_config(
             RawGraph::new(&arena, &spec).cook(),
             &CodegenConfig {
@@ -587,7 +587,7 @@ mod tests {
         "})
         .unwrap();
         let arena = Arena::new();
-        let spec = IrSpec::from_doc(&arena, &doc).unwrap();
+        let spec = Spec::from_doc(&arena, &doc).unwrap();
         let graph = CodegenGraph::with_config(
             RawGraph::new(&arena, &spec).cook(),
             &CodegenConfig {
@@ -624,7 +624,7 @@ mod tests {
         "})
         .unwrap();
         let arena = Arena::new();
-        let spec = IrSpec::from_doc(&arena, &doc).unwrap();
+        let spec = Spec::from_doc(&arena, &doc).unwrap();
         let graph = CodegenGraph::with_config(
             RawGraph::new(&arena, &spec).cook(),
             &CodegenConfig {
@@ -661,7 +661,7 @@ mod tests {
         "})
         .unwrap();
         let arena = Arena::new();
-        let spec = IrSpec::from_doc(&arena, &doc).unwrap();
+        let spec = Spec::from_doc(&arena, &doc).unwrap();
         let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
         let primitives = graph.primitives().collect_vec();
         let [ty] = &*primitives else {
@@ -693,7 +693,7 @@ mod tests {
         "})
         .unwrap();
         let arena = Arena::new();
-        let spec = IrSpec::from_doc(&arena, &doc).unwrap();
+        let spec = Spec::from_doc(&arena, &doc).unwrap();
         let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
         let primitives = graph.primitives().collect_vec();
         let [ty] = &*primitives else {
@@ -725,7 +725,7 @@ mod tests {
         "})
         .unwrap();
         let arena = Arena::new();
-        let spec = IrSpec::from_doc(&arena, &doc).unwrap();
+        let spec = Spec::from_doc(&arena, &doc).unwrap();
         let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
         let primitives = graph.primitives().collect_vec();
         let [ty] = &*primitives else {
@@ -757,7 +757,7 @@ mod tests {
         "})
         .unwrap();
         let arena = Arena::new();
-        let spec = IrSpec::from_doc(&arena, &doc).unwrap();
+        let spec = Spec::from_doc(&arena, &doc).unwrap();
         let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
         let primitives = graph.primitives().collect_vec();
         let [ty] = &*primitives else {
@@ -789,7 +789,7 @@ mod tests {
         "})
         .unwrap();
         let arena = Arena::new();
-        let spec = IrSpec::from_doc(&arena, &doc).unwrap();
+        let spec = Spec::from_doc(&arena, &doc).unwrap();
         let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
         let primitives = graph.primitives().collect_vec();
         let [ty] = &*primitives else {

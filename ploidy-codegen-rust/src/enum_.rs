@@ -26,8 +26,8 @@ impl ToTokens for CodegenEnum<'_> {
         // or have no identifier characters, can't be represented as
         // Rust enum variants.
         let has_unrepresentable = self.ty.variants().iter().any(|variant| match variant {
-            EnumVariant::Number(_) | EnumVariant::Bool(_) => true,
             EnumVariant::String(s) => s.chars().all(|c| !unicode_ident::is_xid_continue(c)),
+            _ => true,
         });
 
         if has_unrepresentable {
@@ -57,7 +57,7 @@ impl ToTokens for CodegenEnum<'_> {
                         display_arms.push(quote! { Self::#variant_name => #name });
                         from_str_arms.push(quote! { #name => Self::#variant_name });
                     }
-                    EnumVariant::Number(_) | EnumVariant::Bool(_) => continue,
+                    _ => continue,
                 }
             }
 
@@ -157,7 +157,7 @@ mod tests {
 
     use ploidy_core::{
         arena::Arena,
-        ir::{IrSpec, RawGraph, SchemaTypeView},
+        ir::{RawGraph, SchemaTypeView, Spec},
         parse::Document,
     };
     use pretty_assertions::assert_eq;
@@ -187,7 +187,7 @@ mod tests {
         .unwrap();
 
         let arena = Arena::new();
-        let spec = IrSpec::from_doc(&arena, &doc).unwrap();
+        let spec = Spec::from_doc(&arena, &doc).unwrap();
         let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
         let schema = graph.schemas().find(|s| s.name() == "Status");
@@ -303,7 +303,7 @@ mod tests {
         .unwrap();
 
         let arena = Arena::new();
-        let spec = IrSpec::from_doc(&arena, &doc).unwrap();
+        let spec = Spec::from_doc(&arena, &doc).unwrap();
         let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
         let schema = graph.schemas().find(|s| s.name() == "Priority");

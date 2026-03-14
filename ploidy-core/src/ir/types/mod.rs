@@ -1,14 +1,18 @@
 //! Language-agnostic intermediate representation types.
 
-use serde_json::Number;
+use std::{
+    cmp::Ordering,
+    hash::{Hash, Hasher},
+};
 
 use crate::arena::Arena;
 
-pub use self::{cooked::*, raw::*};
+pub use self::{graph::*, mapper::*, spec::*};
 
-mod cooked;
-mod raw;
+mod graph;
+mod mapper;
 pub mod shape;
+mod spec;
 
 /// Metadata about a type in the dependency graph.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
@@ -124,10 +128,12 @@ pub struct Enum<'a> {
 }
 
 /// A variant of an enum.
-#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub enum EnumVariant<'a> {
     String(&'a str),
-    Number(Number),
+    I64(i64),
+    U64(u64),
+    F64(JsonF64),
     Bool(bool),
 }
 
@@ -167,4 +173,66 @@ pub enum ParameterStyle {
     PipeDelimited,
     SpaceDelimited,
     DeepObject,
+}
+
+/// A floating-point number that's representable in JSON.
+///
+/// JSON doesn't allow `NaN`, so unlike [`f64`], [`JsonF64`]
+/// implements [`Eq`] and [`Ord`]. [`JsonF64`] is functionally
+/// equivalent to [`serde_json::Number`], but is [`Copy`].
+#[derive(Clone, Copy, Debug)]
+pub struct JsonF64(f64);
+
+impl JsonF64 {
+    pub(crate) fn new(f: f64) -> Self {
+        assert!(!f.is_nan());
+        Self(f)
+    }
+
+    #[inline]
+    pub fn to_f64(self) -> f64 {
+        self.into()
+    }
+}
+
+impl Eq for JsonF64 {}
+
+impl From<JsonF64> for f64 {
+    #[inline]
+    fn from(value: JsonF64) -> Self {
+        value.0
+    }
+}
+
+impl Hash for JsonF64 {
+    #[inline]
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        // `+0.0` and `-0.0` compare equal, but have different bit layouts;
+        // use the `+0.0` hash for both to uphold the property that
+        // `k1 == k2 -> hash(k1) == hash(k2)`.
+        let value = if self.0 == 0.0 { 0.0 } else { self.0 };
+        value.to_bits().hash(state);
+    }
+}
+
+impl Ord for JsonF64 {
+    #[inline]
+    fn cmp(&self, other: &Self) -> Ordering {
+        // JSON numbers can't be `NaN`, so `unwrap()` is OK.
+        self.0.partial_cmp(&other.0).unwrap()
+    }
+}
+
+impl PartialEq for JsonF64 {
+    #[inline]
+    fn eq(&self, other: &Self) -> bool {
+        self.0 == other.0
+    }
+}
+
+impl PartialOrd for JsonF64 {
+    #[inline]
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
 }

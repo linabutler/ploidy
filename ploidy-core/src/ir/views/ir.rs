@@ -1,11 +1,11 @@
 use petgraph::graph::NodeIndex;
 
-use crate::ir::graph::{CookedGraph, CookedGraphNode};
+use crate::ir::{graph::CookedGraph, types::GraphType};
 
 use super::{View, container::ContainerView, inline::InlineTypeView, schema::SchemaTypeView};
 
-/// A graph-aware view of a [schema][crate::ir::CookedSchemaType]
-/// or [inline][crate::ir::CookedInlineType] type.
+/// A graph-aware view of a [schema][crate::ir::GraphSchemaType] or
+/// an [inline][crate::ir::GraphInlineType] type.
 #[derive(Debug)]
 pub enum TypeView<'a> {
     Schema(SchemaTypeView<'a>),
@@ -15,9 +15,9 @@ pub enum TypeView<'a> {
 impl<'a> TypeView<'a> {
     #[inline]
     pub(in crate::ir) fn new(cooked: &'a CookedGraph<'a>, index: NodeIndex<usize>) -> Self {
-        match &cooked.graph[index] {
-            CookedGraphNode::Schema(ty) => Self::Schema(SchemaTypeView::new(cooked, index, ty)),
-            CookedGraphNode::Inline(ty) => Self::Inline(InlineTypeView::new(cooked, index, ty)),
+        match cooked.graph[index] {
+            GraphType::Schema(ty) => Self::Schema(SchemaTypeView::new(cooked, index, ty)),
+            GraphType::Inline(ty) => Self::Inline(InlineTypeView::new(cooked, index, ty)),
         }
     }
 
