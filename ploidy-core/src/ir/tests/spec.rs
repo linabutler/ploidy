@@ -149,10 +149,7 @@ fn test_parses_path_with_parameter_segments() {
     let arena = Arena::new();
     let ir = Spec::from_doc(&arena, &doc).unwrap();
 
-    let [op @ SpecOperation { .. }] = &*ir.operations else {
-        panic!("expected single operation; got `{:?}`", ir.operations);
-    };
-    assert_eq!(op.path.len(), 2);
+    assert_matches!(&*ir.operations, [SpecOperation { path: [_, _], .. }]);
 }
 
 // MARK: Path parameters
@@ -183,17 +180,17 @@ fn test_parses_path_parameter_string_type() {
     let arena = Arena::new();
     let ir = Spec::from_doc(&arena, &doc).unwrap();
 
-    let [SpecOperation { params, .. }] = &*ir.operations else {
-        panic!("expected single operation; got `{:?}`", ir.operations);
-    };
     assert_matches!(
-        &**params,
-        [SpecParameter::Path(SpecParameterInfo {
-            name: "id",
-            required: true,
-            ty: SpecType::Inline(SpecInlineType::Primitive(_, PrimitiveType::String)),
+        &*ir.operations,
+        [SpecOperation {
+            params: [SpecParameter::Path(SpecParameterInfo {
+                name: "id",
+                required: true,
+                ty: SpecType::Inline(SpecInlineType::Primitive(_, PrimitiveType::String)),
+                ..
+            })],
             ..
-        })],
+        }],
     );
 }
 
@@ -224,16 +221,16 @@ fn test_parses_path_parameter_integer_type() {
     let arena = Arena::new();
     let ir = Spec::from_doc(&arena, &doc).unwrap();
 
-    let [SpecOperation { params, .. }] = &*ir.operations else {
-        panic!("expected single operation; got `{:?}`", ir.operations);
-    };
     assert_matches!(
-        &**params,
-        [SpecParameter::Path(SpecParameterInfo {
-            name: "id",
-            ty: SpecType::Inline(SpecInlineType::Primitive(_, PrimitiveType::I64)),
+        &*ir.operations,
+        [SpecOperation {
+            params: [SpecParameter::Path(SpecParameterInfo {
+                name: "id",
+                ty: SpecType::Inline(SpecInlineType::Primitive(_, PrimitiveType::I64)),
+                ..
+            })],
             ..
-        })],
+        }],
     );
 }
 
@@ -268,15 +265,15 @@ fn test_parses_multiple_path_parameters() {
     let arena = Arena::new();
     let ir = Spec::from_doc(&arena, &doc).unwrap();
 
-    let [SpecOperation { params, .. }] = &*ir.operations else {
-        panic!("expected single operation; got `{:?}`", ir.operations);
-    };
     assert_matches!(
-        &**params,
-        [
-            SpecParameter::Path(SpecParameterInfo { name: "userId", .. }),
-            SpecParameter::Path(SpecParameterInfo { name: "postId", .. }),
-        ],
+        &*ir.operations,
+        [SpecOperation {
+            params: [
+                SpecParameter::Path(SpecParameterInfo { name: "userId", .. }),
+                SpecParameter::Path(SpecParameterInfo { name: "postId", .. }),
+            ],
+            ..
+        }],
     );
 }
 
@@ -310,17 +307,17 @@ fn test_parses_query_parameter_form_exploded() {
     let arena = Arena::new();
     let ir = Spec::from_doc(&arena, &doc).unwrap();
 
-    let [SpecOperation { params, .. }] = &*ir.operations else {
-        panic!("expected single operation; got `{:?}`", ir.operations);
-    };
     assert_matches!(
-        &**params,
-        [SpecParameter::Query(SpecParameterInfo {
-            name: "filter",
-            required: false,
-            style: Some(ParameterStyle::Form { exploded: true }),
+        &*ir.operations,
+        [SpecOperation {
+            params: [SpecParameter::Query(SpecParameterInfo {
+                name: "filter",
+                required: false,
+                style: Some(ParameterStyle::Form { exploded: true }),
+                ..
+            })],
             ..
-        })],
+        }],
     );
 }
 
@@ -352,15 +349,15 @@ fn test_parses_query_parameter_form_unexploded() {
     let arena = Arena::new();
     let ir = Spec::from_doc(&arena, &doc).unwrap();
 
-    let [SpecOperation { params, .. }] = &*ir.operations else {
-        panic!("expected single operation; got `{:?}`", ir.operations);
-    };
     assert_matches!(
-        &**params,
-        [SpecParameter::Query(SpecParameterInfo {
-            style: Some(ParameterStyle::Form { exploded: false }),
+        &*ir.operations,
+        [SpecOperation {
+            params: [SpecParameter::Query(SpecParameterInfo {
+                style: Some(ParameterStyle::Form { exploded: false }),
+                ..
+            })],
             ..
-        })],
+        }],
     );
 }
 
@@ -394,15 +391,15 @@ fn test_parses_query_parameter_pipe_delimited() {
     let arena = Arena::new();
     let ir = Spec::from_doc(&arena, &doc).unwrap();
 
-    let [SpecOperation { params, .. }] = &*ir.operations else {
-        panic!("expected single operation; got `{:?}`", ir.operations);
-    };
     assert_matches!(
-        &**params,
-        [SpecParameter::Query(SpecParameterInfo {
-            style: Some(ParameterStyle::PipeDelimited),
+        &*ir.operations,
+        [SpecOperation {
+            params: [SpecParameter::Query(SpecParameterInfo {
+                style: Some(ParameterStyle::PipeDelimited),
+                ..
+            })],
             ..
-        })],
+        }],
     );
 }
 
@@ -436,15 +433,15 @@ fn test_parses_query_parameter_space_delimited() {
     let arena = Arena::new();
     let ir = Spec::from_doc(&arena, &doc).unwrap();
 
-    let [SpecOperation { params, .. }] = &*ir.operations else {
-        panic!("expected single operation; got `{:?}`", ir.operations);
-    };
     assert_matches!(
-        &**params,
-        [SpecParameter::Query(SpecParameterInfo {
-            style: Some(ParameterStyle::SpaceDelimited),
+        &*ir.operations,
+        [SpecOperation {
+            params: [SpecParameter::Query(SpecParameterInfo {
+                style: Some(ParameterStyle::SpaceDelimited),
+                ..
+            })],
             ..
-        })],
+        }],
     );
 }
 
@@ -479,15 +476,15 @@ fn test_parses_query_parameter_deep_object() {
     let arena = Arena::new();
     let ir = Spec::from_doc(&arena, &doc).unwrap();
 
-    let [SpecOperation { params, .. }] = &*ir.operations else {
-        panic!("expected single operation; got `{:?}`", ir.operations);
-    };
     assert_matches!(
-        &**params,
-        [SpecParameter::Query(SpecParameterInfo {
-            style: Some(ParameterStyle::DeepObject),
+        &*ir.operations,
+        [SpecOperation {
+            params: [SpecParameter::Query(SpecParameterInfo {
+                style: Some(ParameterStyle::DeepObject),
+                ..
+            })],
             ..
-        })],
+        }],
     );
 }
 
@@ -527,16 +524,16 @@ fn test_parses_multiple_query_parameters() {
     let arena = Arena::new();
     let ir = Spec::from_doc(&arena, &doc).unwrap();
 
-    let [SpecOperation { params, .. }] = &*ir.operations else {
-        panic!("expected single operation; got `{:?}`", ir.operations);
-    };
     assert_matches!(
-        &**params,
-        [
-            SpecParameter::Query(SpecParameterInfo { name: "page", .. }),
-            SpecParameter::Query(SpecParameterInfo { name: "limit", .. }),
-            SpecParameter::Query(SpecParameterInfo { name: "status", .. }),
-        ],
+        &*ir.operations,
+        [SpecOperation {
+            params: [
+                SpecParameter::Query(SpecParameterInfo { name: "page", .. }),
+                SpecParameter::Query(SpecParameterInfo { name: "limit", .. }),
+                SpecParameter::Query(SpecParameterInfo { name: "status", .. }),
+            ],
+            ..
+        }],
     );
 }
 
@@ -567,15 +564,15 @@ fn test_parses_query_parameter_with_description() {
     let arena = Arena::new();
     let ir = Spec::from_doc(&arena, &doc).unwrap();
 
-    let [SpecOperation { params, .. }] = &*ir.operations else {
-        panic!("expected single operation; got `{:?}`", ir.operations);
-    };
     assert_matches!(
-        &**params,
-        [SpecParameter::Query(SpecParameterInfo {
-            description: Some("The page number for pagination"),
+        &*ir.operations,
+        [SpecOperation {
+            params: [SpecParameter::Query(SpecParameterInfo {
+                description: Some("The page number for pagination"),
+                ..
+            })],
             ..
-        })],
+        }],
     );
 }
 
@@ -619,7 +616,6 @@ fn test_parses_request_body_json_reference() {
             request: Some(SpecRequest::Json(_)),
             ..
         }],
-        "expected JSON request",
     );
 }
 
@@ -657,7 +653,6 @@ fn test_parses_request_body_json_inline_schema() {
             request: Some(SpecRequest::Json(_)),
             ..
         }],
-        "expected JSON request",
     );
 }
 
@@ -696,7 +691,6 @@ fn test_parses_request_body_multipart() {
             request: Some(SpecRequest::Multipart),
             ..
         }],
-        "expected multipart request",
     );
 }
 
@@ -731,7 +725,6 @@ fn test_parses_request_body_wildcard_content_type() {
             request: Some(SpecRequest::Json(_)),
             ..
         }],
-        "expected JSON request with wildcard content type",
     );
 }
 
@@ -797,7 +790,6 @@ fn test_parses_response_json_reference() {
             response: Some(SpecResponse::Json(_)),
             ..
         }],
-        "expected JSON response",
     );
 }
 
@@ -834,7 +826,6 @@ fn test_parses_response_json_inline_schema() {
             response: Some(SpecResponse::Json(_)),
             ..
         }],
-        "expected JSON response",
     );
 }
 
@@ -880,20 +871,14 @@ fn test_prioritizes_2xx_status_over_default_response() {
     let arena = Arena::new();
     let ir = Spec::from_doc(&arena, &doc).unwrap();
 
-    let [op @ SpecOperation { .. }] = &*ir.operations else {
-        panic!("expected single operation; got `{:?}`", ir.operations);
-    };
-    let ty = match &op.response {
-        Some(SpecResponse::Json(ty)) => ty,
-        other => panic!("expected JSON response; got `{other:?}`"),
-    };
-
     // The response should be from the 200 status, not the default.
-    let component_ref = match ty {
-        SpecType::Ref(component_ref) => component_ref,
-        other => panic!("expected schema reference; got `{other:?}`"),
-    };
-    assert_eq!(component_ref.name(), "User");
+    assert_matches!(
+        &*ir.operations,
+        [SpecOperation {
+            response: Some(SpecResponse::Json(SpecType::Ref(component_ref))),
+            ..
+        }] if component_ref.name() == "User",
+    );
 }
 
 #[test]
@@ -928,7 +913,7 @@ fn test_falls_back_to_default_response_when_no_2xx_status() {
         [SpecOperation {
             response: Some(_),
             ..
-        }]
+        }],
     );
 }
 
@@ -962,7 +947,6 @@ fn test_parses_response_with_wildcard_content_type() {
             response: Some(SpecResponse::Json(_)),
             ..
         }],
-        "expected JSON response with wildcard content type",
     );
 }
 
@@ -1010,20 +994,14 @@ fn test_selects_first_2xx_status_when_multiple_exist() {
     let arena = Arena::new();
     let ir = Spec::from_doc(&arena, &doc).unwrap();
 
-    let [op @ SpecOperation { .. }] = &*ir.operations else {
-        panic!("expected single operation; got `{:?}`", ir.operations);
-    };
-    let ty = match &op.response {
-        Some(SpecResponse::Json(ty)) => ty,
-        other => panic!("expected JSON response; got `{other:?}`"),
-    };
-
     // The response should be from the first 2xx status (200), not 202.
-    let component_ref = match ty {
-        SpecType::Ref(component_ref) => component_ref,
-        other => panic!("expected schema reference; got `{other:?}`"),
-    };
-    assert_eq!(component_ref.name(), "UserList");
+    assert_matches!(
+        &*ir.operations,
+        [SpecOperation {
+            response: Some(SpecResponse::Json(SpecType::Ref(component_ref))),
+            ..
+        }] if component_ref.name() == "UserList",
+    );
 }
 
 #[test]
@@ -1117,7 +1095,7 @@ fn test_different_operations_can_have_different_resources() {
             SpecOperation {
                 resource: Some("content"),
                 ..
-            }
+            },
         ],
     );
 }
@@ -1328,9 +1306,9 @@ fn test_operation_with_all_components() {
             description: Some("Update an existing user"),
             request: Some(_),
             response: Some(_),
-            params,
+            params: [_, _],
             ..
-        }] if params.len() == 2,
+        }],
     );
     assert_eq!(ir.schemas.len(), 2);
 }
@@ -1463,6 +1441,8 @@ fn test_complex_spec_with_multiple_operations_and_resources() {
 
 #[test]
 fn test_query_parameter_default_style_is_form_exploded() {
+    // When a query parameter doesn't specify `style` and `explode`,
+    // the default should be an exploded form.
     let doc = Document::from_yaml(indoc::indoc! {"
         openapi: 3.0.0
         info:
@@ -1486,17 +1466,15 @@ fn test_query_parameter_default_style_is_form_exploded() {
     let arena = Arena::new();
     let ir = Spec::from_doc(&arena, &doc).unwrap();
 
-    let [SpecOperation { params, .. }] = &*ir.operations else {
-        panic!("expected single operation; got `{:?}`", ir.operations);
-    };
     assert_matches!(
-        &**params,
-        [SpecParameter::Query(SpecParameterInfo {
-            // When `style` and `explode` are not specified,
-            // the default should be an exploded form.
-            style: Some(ParameterStyle::Form { exploded: true }),
+        &*ir.operations,
+        [SpecOperation {
+            params: [SpecParameter::Query(SpecParameterInfo {
+                style: Some(ParameterStyle::Form { exploded: true }),
+                ..
+            })],
             ..
-        })]
+        }],
     );
 }
 
@@ -1531,10 +1509,13 @@ fn test_mixed_path_and_query_parameters() {
     let arena = Arena::new();
     let ir = Spec::from_doc(&arena, &doc).unwrap();
 
-    let [SpecOperation { params, .. }] = &*ir.operations else {
-        panic!("expected single operation; got `{:?}`", ir.operations);
-    };
-    assert_matches!(&**params, [SpecParameter::Path(_), SpecParameter::Query(_)]);
+    assert_matches!(
+        &*ir.operations,
+        [SpecOperation {
+            params: [SpecParameter::Path(_), SpecParameter::Query(_)],
+            ..
+        }],
+    );
 }
 
 #[test]
@@ -1568,9 +1549,6 @@ fn test_ignores_header_and_cookie_parameters() {
     let arena = Arena::new();
     let ir = Spec::from_doc(&arena, &doc).unwrap();
 
-    let [SpecOperation { params, .. }] = &*ir.operations else {
-        panic!("expected single operation; got `{:?}`", ir.operations);
-    };
     // Header and cookie parameters are ignored for now.
-    assert_eq!(params.len(), 0);
+    assert_matches!(&*ir.operations, [SpecOperation { params: [], .. }]);
 }

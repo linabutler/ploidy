@@ -3,10 +3,12 @@
 use crate::{
     arena::Arena,
     ir::{
-        EnumVariant, InlineTypePathRoot, InlineTypePathSegment, PrimitiveType, SchemaTypeInfo,
-        SpecContainer, SpecInlineType, SpecInner, SpecSchemaType, SpecStructField,
-        SpecTaggedVariant, SpecType, SpecUntaggedVariant, StructFieldName, StructFieldNameHint,
-        UntaggedVariantNameHint, transform::transform,
+        Enum, EnumVariant, InlineTypePath, InlineTypePathRoot, InlineTypePathSegment,
+        PrimitiveType, SchemaTypeInfo, SpecContainer, SpecInlineType, SpecInner, SpecSchemaType,
+        SpecStructField, SpecTaggedVariant, SpecType, SpecUntaggedVariant, StructFieldName,
+        StructFieldNameHint, UntaggedVariantNameHint,
+        shape::{Struct, Tagged, Untagged},
+        transform::transform,
     },
     parse::{Document, Schema},
     tests::assert_matches,
@@ -32,19 +34,19 @@ fn test_enum_string_variants() {
     let arena = Arena::new();
     let result = transform(&arena, &doc, "Status", &schema);
 
-    let enum_ = match result {
-        SpecType::Schema(SpecSchemaType::Enum(SchemaTypeInfo { name: "Status", .. }, enum_)) => {
-            enum_
-        }
-        other => panic!("expected enum `Status`; got `{other:?}`"),
-    };
     assert_matches!(
-        enum_.variants,
-        [
-            EnumVariant::String("active"),
-            EnumVariant::String("inactive"),
-            EnumVariant::String("pending"),
-        ],
+        result,
+        SpecType::Schema(SpecSchemaType::Enum(
+            SchemaTypeInfo { name: "Status", .. },
+            Enum {
+                variants: [
+                    EnumVariant::String("active"),
+                    EnumVariant::String("inactive"),
+                    EnumVariant::String("pending"),
+                ],
+                ..
+            },
+        )),
     );
 }
 
@@ -66,22 +68,22 @@ fn test_enum_number_variants() {
     let arena = Arena::new();
     let result = transform(&arena, &doc, "Priority", &schema);
 
-    let enum_ = match result {
+    assert_matches!(
+        result,
         SpecType::Schema(SpecSchemaType::Enum(
             SchemaTypeInfo {
-                name: "Priority", ..
+                name: "Priority",
+                ..
             },
-            enum_,
-        )) => enum_,
-        other => panic!("expected enum `Priority`; got `{other:?}`"),
-    };
-    assert_matches!(
-        enum_.variants,
-        [
-            EnumVariant::I64(1),
-            EnumVariant::I64(2),
-            EnumVariant::I64(3),
-        ],
+            Enum {
+                variants: [
+                    EnumVariant::I64(1),
+                    EnumVariant::I64(2),
+                    EnumVariant::I64(3)
+                ],
+                ..
+            },
+        )),
     );
 }
 
@@ -103,13 +105,15 @@ fn test_enum_bool_variants() {
     let arena = Arena::new();
     let result = transform(&arena, &doc, "Flag", &schema);
 
-    let enum_ = match result {
-        SpecType::Schema(SpecSchemaType::Enum(SchemaTypeInfo { name: "Flag", .. }, enum_)) => enum_,
-        other => panic!("expected enum `Flag`; got `{other:?}`"),
-    };
     assert_matches!(
-        enum_.variants,
-        [EnumVariant::Bool(true), EnumVariant::Bool(false)],
+        result,
+        SpecType::Schema(SpecSchemaType::Enum(
+            SchemaTypeInfo { name: "Flag", .. },
+            Enum {
+                variants: [EnumVariant::Bool(true), EnumVariant::Bool(false)],
+                ..
+            },
+        )),
     );
 }
 
@@ -131,19 +135,19 @@ fn test_enum_mixed_types() {
     let arena = Arena::new();
     let result = transform(&arena, &doc, "Mixed", &schema);
 
-    let enum_ = match result {
-        SpecType::Schema(SpecSchemaType::Enum(SchemaTypeInfo { name: "Mixed", .. }, enum_)) => {
-            enum_
-        }
-        other => panic!("expected enum `Mixed`; got `{other:?}`"),
-    };
     assert_matches!(
-        enum_.variants,
-        [
-            EnumVariant::String("text"),
-            EnumVariant::I64(42),
-            EnumVariant::Bool(true),
-        ],
+        result,
+        SpecType::Schema(SpecSchemaType::Enum(
+            SchemaTypeInfo { name: "Mixed", .. },
+            Enum {
+                variants: [
+                    EnumVariant::String("text"),
+                    EnumVariant::I64(42),
+                    EnumVariant::Bool(true),
+                ],
+                ..
+            },
+        )),
     );
 }
 
@@ -169,7 +173,7 @@ fn test_primitive_string_formats() {
     let result = transform(&arena, &doc, "Timestamp", &schema);
     assert_matches!(
         result,
-        SpecType::Schema(SpecSchemaType::Primitive(_, PrimitiveType::DateTime))
+        SpecType::Schema(SpecSchemaType::Primitive(_, PrimitiveType::DateTime)),
     );
 
     // `string` with `date` format.
@@ -181,7 +185,7 @@ fn test_primitive_string_formats() {
     let result = transform(&arena, &doc, "Date", &schema);
     assert_matches!(
         result,
-        SpecType::Schema(SpecSchemaType::Primitive(_, PrimitiveType::Date))
+        SpecType::Schema(SpecSchemaType::Primitive(_, PrimitiveType::Date)),
     );
 
     // `string` with `uri` format.
@@ -193,7 +197,7 @@ fn test_primitive_string_formats() {
     let result = transform(&arena, &doc, "Url", &schema);
     assert_matches!(
         result,
-        SpecType::Schema(SpecSchemaType::Primitive(_, PrimitiveType::Url))
+        SpecType::Schema(SpecSchemaType::Primitive(_, PrimitiveType::Url)),
     );
 
     // `string` with `uuid` format.
@@ -205,7 +209,7 @@ fn test_primitive_string_formats() {
     let result = transform(&arena, &doc, "Id", &schema);
     assert_matches!(
         result,
-        SpecType::Schema(SpecSchemaType::Primitive(_, PrimitiveType::Uuid))
+        SpecType::Schema(SpecSchemaType::Primitive(_, PrimitiveType::Uuid)),
     );
 
     // `string` with `byte` format.
@@ -217,7 +221,7 @@ fn test_primitive_string_formats() {
     let result = transform(&arena, &doc, "Data", &schema);
     assert_matches!(
         result,
-        SpecType::Schema(SpecSchemaType::Primitive(_, PrimitiveType::Bytes))
+        SpecType::Schema(SpecSchemaType::Primitive(_, PrimitiveType::Bytes)),
     );
 
     // `string` with `binary` format.
@@ -229,7 +233,7 @@ fn test_primitive_string_formats() {
     let result = transform(&arena, &doc, "RawData", &schema);
     assert_matches!(
         result,
-        SpecType::Schema(SpecSchemaType::Primitive(_, PrimitiveType::Binary))
+        SpecType::Schema(SpecSchemaType::Primitive(_, PrimitiveType::Binary)),
     );
 
     // `string` without format.
@@ -240,7 +244,7 @@ fn test_primitive_string_formats() {
     let result = transform(&arena, &doc, "Text", &schema);
     assert_matches!(
         result,
-        SpecType::Schema(SpecSchemaType::Primitive(_, PrimitiveType::String))
+        SpecType::Schema(SpecSchemaType::Primitive(_, PrimitiveType::String)),
     );
 }
 
@@ -264,7 +268,7 @@ fn test_primitive_integer_formats() {
     let result = transform(&arena, &doc, "Count", &schema);
     assert_matches!(
         result,
-        SpecType::Schema(SpecSchemaType::Primitive(_, PrimitiveType::I32))
+        SpecType::Schema(SpecSchemaType::Primitive(_, PrimitiveType::I32)),
     );
 
     // `integer` with `int64` format.
@@ -276,7 +280,7 @@ fn test_primitive_integer_formats() {
     let result = transform(&arena, &doc, "BigCount", &schema);
     assert_matches!(
         result,
-        SpecType::Schema(SpecSchemaType::Primitive(_, PrimitiveType::I64))
+        SpecType::Schema(SpecSchemaType::Primitive(_, PrimitiveType::I64)),
     );
 
     // `integer` with `unix-time` format.
@@ -288,7 +292,7 @@ fn test_primitive_integer_formats() {
     let result = transform(&arena, &doc, "Timestamp", &schema);
     assert_matches!(
         result,
-        SpecType::Schema(SpecSchemaType::Primitive(_, PrimitiveType::UnixTime))
+        SpecType::Schema(SpecSchemaType::Primitive(_, PrimitiveType::UnixTime)),
     );
 
     // `integer` without format defaults to `int32`.
@@ -299,7 +303,7 @@ fn test_primitive_integer_formats() {
     let result = transform(&arena, &doc, "DefaultInt", &schema);
     assert_matches!(
         result,
-        SpecType::Schema(SpecSchemaType::Primitive(_, PrimitiveType::I32))
+        SpecType::Schema(SpecSchemaType::Primitive(_, PrimitiveType::I32)),
     );
 }
 
@@ -323,7 +327,7 @@ fn test_primitive_number_formats() {
     let result = transform(&arena, &doc, "Price", &schema);
     assert_matches!(
         result,
-        SpecType::Schema(SpecSchemaType::Primitive(_, PrimitiveType::F32))
+        SpecType::Schema(SpecSchemaType::Primitive(_, PrimitiveType::F32)),
     );
 
     // `number` with `double` format.
@@ -335,7 +339,7 @@ fn test_primitive_number_formats() {
     let result = transform(&arena, &doc, "BigPrice", &schema);
     assert_matches!(
         result,
-        SpecType::Schema(SpecSchemaType::Primitive(_, PrimitiveType::F64))
+        SpecType::Schema(SpecSchemaType::Primitive(_, PrimitiveType::F64)),
     );
 
     // `number` with `unix-time` format.
@@ -347,7 +351,7 @@ fn test_primitive_number_formats() {
     let result = transform(&arena, &doc, "FloatTime", &schema);
     assert_matches!(
         result,
-        SpecType::Schema(SpecSchemaType::Primitive(_, PrimitiveType::UnixTime))
+        SpecType::Schema(SpecSchemaType::Primitive(_, PrimitiveType::UnixTime)),
     );
 
     // `number` without format defaults to `double`.
@@ -358,7 +362,7 @@ fn test_primitive_number_formats() {
     let result = transform(&arena, &doc, "DefaultNumber", &schema);
     assert_matches!(
         result,
-        SpecType::Schema(SpecSchemaType::Primitive(_, PrimitiveType::F64))
+        SpecType::Schema(SpecSchemaType::Primitive(_, PrimitiveType::F64)),
     );
 }
 
@@ -387,18 +391,16 @@ fn test_array_with_ref_items() {
     let arena = Arena::new();
     let result = transform(&arena, &doc, "Items", &schema);
 
-    let container = match result {
+    assert_matches!(
+        result,
         SpecType::Schema(SpecSchemaType::Container(
             SchemaTypeInfo { name: "Items", .. },
-            container,
-        )) => container,
-        other => panic!("expected container `Items`; got `{other:?}`"),
-    };
-    let items = match &container {
-        SpecContainer::Array(SpecInner { ty, .. }) => ty,
-        other => panic!("expected array; got `{other:?}`"),
-    };
-    assert_matches!(&**items, SpecType::Ref(_));
+            SpecContainer::Array(SpecInner {
+                ty: SpecType::Ref(_),
+                ..
+            }),
+        )),
+    );
 }
 
 #[test]
@@ -420,22 +422,18 @@ fn test_array_with_inline_items() {
     let arena = Arena::new();
     let result = transform(&arena, &doc, "Strings", &schema);
 
-    let container = match result {
+    assert_matches!(
+        result,
         SpecType::Schema(SpecSchemaType::Container(
             SchemaTypeInfo {
-                name: "Strings", ..
+                name: "Strings",
+                ..
             },
-            container,
-        )) => container,
-        other => panic!("expected container `Strings`; got `{other:?}`"),
-    };
-    let items = match &container {
-        SpecContainer::Array(SpecInner { ty, .. }) => ty,
-        other => panic!("expected array; got `{other:?}`"),
-    };
-    assert_matches!(
-        &**items,
-        SpecType::Inline(SpecInlineType::Primitive(_, PrimitiveType::String))
+            SpecContainer::Array(SpecInner {
+                ty: SpecType::Inline(SpecInlineType::Primitive(_, PrimitiveType::String)),
+                ..
+            }),
+        )),
     );
 }
 
@@ -464,27 +462,26 @@ fn test_struct_with_own_properties() {
 
     let result = transform(&arena, &doc, "Person", &schema);
 
-    let struct_ = match result {
+    assert_matches!(
+        result,
         SpecType::Schema(SpecSchemaType::Struct(
             SchemaTypeInfo { name: "Person", .. },
-            struct_,
-        )) => struct_,
-        other => panic!("expected struct `Person`; got `{other:?}`"),
-    };
-    assert_matches!(
-        struct_.fields,
-        [
-            SpecStructField {
-                name: StructFieldName::Name("name"),
-                ty: SpecType::Inline(SpecInlineType::Primitive(_, PrimitiveType::String)),
+            Struct {
+                fields: [
+                    SpecStructField {
+                        name: StructFieldName::Name("name"),
+                        ty: SpecType::Inline(SpecInlineType::Primitive(_, PrimitiveType::String)),
+                        ..
+                    },
+                    SpecStructField {
+                        name: StructFieldName::Name("age"),
+                        ty: SpecType::Inline(SpecInlineType::Primitive(_, PrimitiveType::I32)),
+                        ..
+                    },
+                ],
                 ..
             },
-            SpecStructField {
-                name: StructFieldName::Name("age"),
-                ty: SpecType::Inline(SpecInlineType::Primitive(_, PrimitiveType::I32)),
-                ..
-            },
-        ],
+        )),
     );
 }
 
@@ -514,31 +511,30 @@ fn test_struct_with_additional_properties_ref() {
     let arena = Arena::new();
     let result = transform(&arena, &doc, "Config", &schema);
 
-    let struct_ = match result {
+    assert_matches!(
+        result,
         SpecType::Schema(SpecSchemaType::Struct(
             SchemaTypeInfo { name: "Config", .. },
-            struct_,
-        )) => struct_,
-        other => panic!("expected struct `Config`; got `{other:?}`"),
-    };
-    let [
-        _,
-        SpecStructField {
-            name: StructFieldName::Hint(StructFieldNameHint::AdditionalProperties),
-            flattened: true,
-            required: true,
-            ty,
-            ..
-        },
-    ] = struct_.fields
-    else {
-        panic!("expected two fields; got `{:?}`", struct_.fields);
-    };
-    assert_matches!(
-        ty,
-        SpecType::Inline(
-            SpecInlineType::Container(_, SpecContainer::Map(inner)),
-        ) if matches!(inner.ty, SpecType::Ref(_)),
+            Struct {
+                fields: [
+                    _,
+                    SpecStructField {
+                        name: StructFieldName::Hint(StructFieldNameHint::AdditionalProperties),
+                        flattened: true,
+                        required: true,
+                        ty: SpecType::Inline(SpecInlineType::Container(
+                            _,
+                            SpecContainer::Map(SpecInner {
+                                ty: SpecType::Ref(_),
+                                ..
+                            }),
+                        )),
+                        ..
+                    },
+                ],
+                ..
+            },
+        )),
     );
 }
 
@@ -568,58 +564,51 @@ fn test_struct_with_additional_properties_inline() {
     let result = transform(&arena, &doc, "Config", &schema);
 
     // When `additionalProperties` is present alongside `properties`,
-    // the result should be a struct with a flattened map field.
-    let struct_ = match result {
+    // the result should be a struct with a flattened, inline map field.
+    assert_matches!(
+        result,
         SpecType::Schema(SpecSchemaType::Struct(
             SchemaTypeInfo { name: "Config", .. },
-            struct_,
-        )) => struct_,
-        other => panic!("expected struct `Config`; got `{other:?}`"),
-    };
-    let [
-        SpecStructField {
-            name: StructFieldName::Name("name"),
-            flattened: false,
-            ..
-        },
-        SpecStructField {
-            name: StructFieldName::Hint(StructFieldNameHint::AdditionalProperties),
-            flattened: true,
-            required: true,
-            ty,
-            ..
-        },
-    ] = struct_.fields
-    else {
-        panic!("expected two fields; got `{:?}`", struct_.fields);
-    };
-
-    // The container path should be `Type("Config") / Field(AdditionalProperties)`.
-    let SpecType::Inline(SpecInlineType::Container(container_path, SpecContainer::Map(inner))) = ty
-    else {
-        panic!("expected map; got `{ty:?}`");
-    };
-    assert_matches!(container_path.root, InlineTypePathRoot::Type("Config"));
-    assert_matches!(
-        container_path.segments,
-        [InlineTypePathSegment::Field(StructFieldName::Hint(
-            StructFieldNameHint::AdditionalProperties,
-        ))]
-    );
-
-    // The inline value type path should append `MapValue`.
-    let SpecType::Inline(SpecInlineType::Struct(value_path, _)) = inner.ty else {
-        panic!("expected inline struct; got `{:?}`", inner.ty);
-    };
-    assert_matches!(value_path.root, InlineTypePathRoot::Type("Config"));
-    assert_matches!(
-        value_path.segments,
-        [
-            InlineTypePathSegment::Field(StructFieldName::Hint(
-                StructFieldNameHint::AdditionalProperties,
-            )),
-            InlineTypePathSegment::MapValue,
-        ]
+            Struct {
+                fields: [
+                    SpecStructField {
+                        name: StructFieldName::Name("name"),
+                        flattened: false,
+                        ..
+                    },
+                    SpecStructField {
+                        name: StructFieldName::Hint(StructFieldNameHint::AdditionalProperties),
+                        flattened: true,
+                        required: true,
+                        ty: SpecType::Inline(SpecInlineType::Container(
+                            InlineTypePath {
+                                root: InlineTypePathRoot::Type("Config"),
+                                segments: [InlineTypePathSegment::Field(StructFieldName::Hint(
+                                    StructFieldNameHint::AdditionalProperties,
+                                ))],
+                            },
+                            SpecContainer::Map(SpecInner {
+                                ty: SpecType::Inline(SpecInlineType::Struct(
+                                    InlineTypePath {
+                                        root: InlineTypePathRoot::Type("Config"),
+                                        segments: [
+                                            InlineTypePathSegment::Field(StructFieldName::Hint(
+                                                StructFieldNameHint::AdditionalProperties,
+                                            )),
+                                            InlineTypePathSegment::MapValue,
+                                        ],
+                                    },
+                                    _,
+                                )),
+                                ..
+                            }),
+                        )),
+                        ..
+                    },
+                ],
+                ..
+            },
+        )),
     );
 }
 
@@ -644,24 +633,30 @@ fn test_struct_with_additional_properties_true() {
 
     // Empty `properties` with `additionalProperties: true` produces a
     // struct with a single flattened map field of type `Any`.
-    let struct_ = match result {
+    assert_matches!(
+        result,
         SpecType::Schema(SpecSchemaType::Struct(
             SchemaTypeInfo {
-                name: "DynamicMap", ..
+                name: "DynamicMap",
+                ..
             },
-            struct_,
-        )) => struct_,
-        other => panic!("expected struct `DynamicMap`; got `{other:?}`"),
-    };
-    assert_matches!(
-        struct_.fields,
-        [SpecStructField {
-            name: StructFieldName::Hint(StructFieldNameHint::AdditionalProperties),
-            flattened: true,
-            required: true,
-            ty: SpecType::Inline(SpecInlineType::Container(_, SpecContainer::Map(inner))),
-            ..
-        }] if matches!(inner.ty, SpecType::Inline(SpecInlineType::Any(_)))
+            Struct {
+                fields: [SpecStructField {
+                    name: StructFieldName::Hint(StructFieldNameHint::AdditionalProperties),
+                    flattened: true,
+                    required: true,
+                    ty: SpecType::Inline(SpecInlineType::Container(
+                        _,
+                        SpecContainer::Map(SpecInner {
+                            ty: SpecType::Inline(SpecInlineType::Any(_)),
+                            ..
+                        }),
+                    )),
+                    ..
+                }],
+                ..
+            },
+        )),
     );
 }
 
@@ -694,7 +689,7 @@ fn test_struct_without_properties_falls_through() {
                 ..
             },
             SpecContainer::Map(_),
-        ))
+        )),
     );
 }
 
@@ -722,26 +717,26 @@ fn test_struct_with_required_fields() {
     let arena = Arena::new();
     let result = transform(&arena, &doc, "User", &schema);
 
-    let struct_ = match result {
-        SpecType::Schema(SpecSchemaType::Struct(SchemaTypeInfo { name: "User", .. }, struct_)) => {
-            struct_
-        }
-        other => panic!("expected struct `User`; got `{other:?}`"),
-    };
     assert_matches!(
-        struct_.fields,
-        [
-            SpecStructField {
-                name: StructFieldName::Name("name"),
-                required: true,
+        result,
+        SpecType::Schema(SpecSchemaType::Struct(
+            SchemaTypeInfo { name: "User", .. },
+            Struct {
+                fields: [
+                    SpecStructField {
+                        name: StructFieldName::Name("name"),
+                        required: true,
+                        ..
+                    },
+                    SpecStructField {
+                        name: StructFieldName::Name("email"),
+                        required: false,
+                        ..
+                    },
+                ],
                 ..
             },
-            SpecStructField {
-                name: StructFieldName::Name("email"),
-                required: false,
-                ..
-            },
-        ],
+        )),
     );
 }
 
@@ -770,30 +765,29 @@ fn test_struct_with_nullable_field_ref() {
     let arena = Arena::new();
     let result = transform(&arena, &doc, "Container", &schema);
 
-    let struct_ = match result {
+    assert_matches!(
+        result,
         SpecType::Schema(SpecSchemaType::Struct(
             SchemaTypeInfo {
-                name: "Container", ..
+                name: "Container",
+                ..
             },
-            struct_,
-        )) => struct_,
-        other => panic!("expected struct `Container`; got `{other:?}`"),
-    };
-    let [
-        SpecStructField {
-            name: StructFieldName::Name("value"),
-            ty:
-                SpecType::Inline(SpecInlineType::Container(
-                    _,
-                    SpecContainer::Optional(SpecInner { ty: inner, .. }),
-                )),
-            ..
-        },
-    ] = struct_.fields
-    else {
-        panic!("expected single nullable field; got `{:?}`", struct_.fields);
-    };
-    assert_matches!(&**inner, SpecType::Ref(_));
+            Struct {
+                fields: [SpecStructField {
+                    name: StructFieldName::Name("value"),
+                    ty: SpecType::Inline(SpecInlineType::Container(
+                        _,
+                        SpecContainer::Optional(SpecInner {
+                            ty: SpecType::Ref(_),
+                            ..
+                        }),
+                    )),
+                    ..
+                }],
+                ..
+            },
+        )),
+    );
 }
 
 #[test]
@@ -817,32 +811,31 @@ fn test_struct_with_nullable_field_inline() {
     let arena = Arena::new();
     let result = transform(&arena, &doc, "Container", &schema);
 
-    let struct_ = match result {
+    assert_matches!(
+        result,
         SpecType::Schema(SpecSchemaType::Struct(
             SchemaTypeInfo {
-                name: "Container", ..
+                name: "Container",
+                ..
             },
-            struct_,
-        )) => struct_,
-        other => panic!("expected struct `Container`; got `{other:?}`"),
-    };
-    let [
-        SpecStructField {
-            name: StructFieldName::Name("value"),
-            ty:
-                SpecType::Inline(SpecInlineType::Container(
-                    _,
-                    SpecContainer::Optional(SpecInner { ty: inner, .. }),
-                )),
-            ..
-        },
-    ] = struct_.fields
-    else {
-        panic!("expected single nullable field; got `{:?}`", struct_.fields);
-    };
-    assert_matches!(
-        &**inner,
-        SpecType::Inline(SpecInlineType::Primitive(_, PrimitiveType::String))
+            Struct {
+                fields: [SpecStructField {
+                    name: StructFieldName::Name("value"),
+                    ty: SpecType::Inline(SpecInlineType::Container(
+                        _,
+                        SpecContainer::Optional(SpecInner {
+                            ty: SpecType::Inline(SpecInlineType::Primitive(
+                                _,
+                                PrimitiveType::String
+                            )),
+                            ..
+                        }),
+                    )),
+                    ..
+                }],
+                ..
+            },
+        )),
     );
 }
 
@@ -870,36 +863,32 @@ fn test_struct_with_nullable_field_openapi_31_syntax() {
 
     // OpenAPI 3.1 `type: [T, 'null']` syntax should produce an `Optional(T)` field,
     // identical to OpenAPI 3.0 `nullable: true`.
-    let struct_ = match result {
+    assert_matches!(
+        result,
         SpecType::Schema(SpecSchemaType::Struct(
             SchemaTypeInfo {
-                name: "Container", ..
+                name: "Container",
+                ..
             },
-            struct_,
-        )) => struct_,
-        other => panic!("expected struct `Container`; got `{other:?}`"),
-    };
-    let [
-        SpecStructField {
-            name: StructFieldName::Name("value"),
-            ty:
-                SpecType::Inline(SpecInlineType::Container(
-                    _,
-                    SpecContainer::Optional(SpecInner { ty: inner, .. }),
-                )),
-            required: true,
-            ..
-        },
-    ] = struct_.fields
-    else {
-        panic!(
-            "expected single required nullable field; got `{:?}`",
-            struct_.fields
-        );
-    };
-    assert_matches!(
-        &**inner,
-        SpecType::Inline(SpecInlineType::Primitive(_, PrimitiveType::String))
+            Struct {
+                fields: [SpecStructField {
+                    name: StructFieldName::Name("value"),
+                    ty: SpecType::Inline(SpecInlineType::Container(
+                        _,
+                        SpecContainer::Optional(SpecInner {
+                            ty: SpecType::Inline(SpecInlineType::Primitive(
+                                _,
+                                PrimitiveType::String
+                            )),
+                            ..
+                        }),
+                    )),
+                    required: true,
+                    ..
+                }],
+                ..
+            },
+        )),
     );
 }
 
@@ -928,20 +917,19 @@ fn test_struct_ref_field_description() {
     let arena = Arena::new();
     let result = transform(&arena, &doc, "Entity", &schema);
 
-    let struct_ = match result {
+    assert_matches!(
+        result,
         SpecType::Schema(SpecSchemaType::Struct(
             SchemaTypeInfo { name: "Entity", .. },
-            struct_,
-        )) => struct_,
-        other => panic!("expected struct `Entity`; got `{other:?}`"),
-    };
-    assert_matches!(
-        struct_.fields,
-        [SpecStructField {
-            name: StructFieldName::Name("id"),
-            description: Some("An identifier"),
-            ..
-        }],
+            Struct {
+                fields: [SpecStructField {
+                    name: StructFieldName::Name("id"),
+                    description: Some("An identifier"),
+                    ..
+                }],
+                ..
+            },
+        )),
     );
 }
 
@@ -966,19 +954,19 @@ fn test_struct_inline_field_description() {
     let arena = Arena::new();
     let result = transform(&arena, &doc, "User", &schema);
 
-    let struct_ = match result {
-        SpecType::Schema(SpecSchemaType::Struct(SchemaTypeInfo { name: "User", .. }, struct_)) => {
-            struct_
-        }
-        other => panic!("expected struct `User`; got `{other:?}`"),
-    };
     assert_matches!(
-        struct_.fields,
-        [SpecStructField {
-            name: StructFieldName::Name("name"),
-            description: Some("A user's name"),
-            ..
-        }],
+        result,
+        SpecType::Schema(SpecSchemaType::Struct(
+            SchemaTypeInfo { name: "User", .. },
+            Struct {
+                fields: [SpecStructField {
+                    name: StructFieldName::Name("name"),
+                    description: Some("A user's name"),
+                    ..
+                }],
+                ..
+            },
+        )),
     );
 }
 
@@ -1010,35 +998,49 @@ fn test_struct_inline_all_of_becomes_parent() {
     let arena = Arena::new();
     let result = transform(&arena, &doc, "Person", &schema);
 
-    let struct_ = match result {
+    assert_matches!(
+        result,
         SpecType::Schema(SpecSchemaType::Struct(
             SchemaTypeInfo { name: "Person", .. },
-            struct_,
-        )) => struct_,
-        other => panic!("expected struct `Person`; got `{other:?}`"),
-    };
-
-    // The struct's own field is `email`; inherited fields come from parents.
-    assert_matches!(
-        struct_.fields,
-        [SpecStructField {
-            name: StructFieldName::Name("email"),
-            ..
-        }],
-    );
-
-    // The inline `allOf` schemas become inline parent types.
-    assert_matches!(
-        struct_.parents,
-        [
-            SpecType::Inline(SpecInlineType::Struct(path1, parent1)),
-            SpecType::Inline(SpecInlineType::Struct(path2, parent2)),
-        ] if path1.root == InlineTypePathRoot::Type("Person")
-            && path1.segments == [InlineTypePathSegment::Parent(1)]
-            && matches!(parent1.fields, [SpecStructField { name: StructFieldName::Name("name"), .. }])
-            && path2.root == InlineTypePathRoot::Type("Person")
-            && path2.segments == [InlineTypePathSegment::Parent(2)]
-            && matches!(parent2.fields, [SpecStructField { name: StructFieldName::Name("age"), .. }]),
+            Struct {
+                // The struct's own field is `email`; inherited fields
+                // come from parents.
+                fields: [SpecStructField {
+                    name: StructFieldName::Name("email"),
+                    ..
+                }],
+                // The inline `allOf` schemas become inline parent types.
+                parents: [
+                    SpecType::Inline(SpecInlineType::Struct(
+                        InlineTypePath {
+                            root: InlineTypePathRoot::Type("Person"),
+                            segments: [InlineTypePathSegment::Parent(1)],
+                        },
+                        Struct {
+                            fields: [SpecStructField {
+                                name: StructFieldName::Name("name"),
+                                ..
+                            }],
+                            ..
+                        },
+                    )),
+                    SpecType::Inline(SpecInlineType::Struct(
+                        InlineTypePath {
+                            root: InlineTypePathRoot::Type("Person"),
+                            segments: [InlineTypePathSegment::Parent(2)],
+                        },
+                        Struct {
+                            fields: [SpecStructField {
+                                name: StructFieldName::Name("age"),
+                                ..
+                            }],
+                            ..
+                        },
+                    )),
+                ],
+                ..
+            },
+        )),
     );
 }
 
@@ -1071,26 +1073,33 @@ fn test_struct_mixed_all_of_ref_and_inline() {
     let arena = Arena::new();
     let result = transform(&arena, &doc, "Child", &schema);
 
-    let struct_ = match result {
-        SpecType::Schema(SpecSchemaType::Struct(SchemaTypeInfo { name: "Child", .. }, struct_)) => {
-            struct_
-        }
-        other => panic!("expected struct `Child`; got `{other:?}`"),
-    };
-
-    // No own fields; all fields come from parents.
-    assert!(struct_.fields.is_empty());
-
-    // Parents include both the named and inline schemas.
     assert_matches!(
-        struct_.parents,
-        [
-            SpecType::Ref(r),
-            SpecType::Inline(SpecInlineType::Struct(path, parent)),
-        ] if r.name() == "Base"
-            && path.root == InlineTypePathRoot::Type("Child")
-            && path.segments == [InlineTypePathSegment::Parent(2)]
-            && matches!(parent.fields, [SpecStructField { name: StructFieldName::Name("name"), .. }])
+        result,
+        SpecType::Schema(SpecSchemaType::Struct(
+            SchemaTypeInfo { name: "Child", .. },
+            Struct {
+                // No own fields; all fields come from parents.
+                fields: [],
+                // Parents include both the named and inline schemas.
+                parents: [
+                    SpecType::Ref(r),
+                    SpecType::Inline(SpecInlineType::Struct(
+                        InlineTypePath {
+                            root: InlineTypePathRoot::Type("Child"),
+                            segments: [InlineTypePathSegment::Parent(2)],
+                        },
+                        Struct {
+                            fields: [SpecStructField {
+                                name: StructFieldName::Name("name"),
+                                ..
+                            }],
+                            ..
+                        },
+                    )),
+                ],
+                ..
+            },
+        )) if r.name() == "Base",
     );
 }
 
@@ -1132,25 +1141,28 @@ fn test_tagged_with_mapping() {
     let arena = Arena::new();
     let result = transform(&arena, &doc, "Animal", &schema);
 
-    let tagged = match result {
-        SpecType::Schema(SpecSchemaType::Tagged(SchemaTypeInfo { name: "Animal", .. }, tagged)) => {
-            tagged
-        }
-        other => panic!("expected tagged union `Animal`; got `{other:?}`"),
-    };
-    assert_eq!(tagged.tag, "type");
-    let [
-        dog_variant @ SpecTaggedVariant { name: "Dog", .. },
-        cat_variant @ SpecTaggedVariant { name: "Cat", .. },
-    ] = tagged.variants
-    else {
-        panic!(
-            "expected and `Cat` variants `Dog`; got `{:?}`",
-            tagged.variants,
-        );
-    };
-    assert_matches!(dog_variant.aliases, ["dog"]);
-    assert_eq!(cat_variant.aliases, ["cat"]);
+    assert_matches!(
+        result,
+        SpecType::Schema(SpecSchemaType::Tagged(
+            SchemaTypeInfo { name: "Animal", .. },
+            Tagged {
+                tag: "type",
+                variants: [
+                    SpecTaggedVariant {
+                        name: "Dog",
+                        aliases: ["dog"],
+                        ..
+                    },
+                    SpecTaggedVariant {
+                        name: "Cat",
+                        aliases: ["cat"],
+                        ..
+                    },
+                ],
+                ..
+            },
+        )),
+    );
 }
 
 #[test]
@@ -1189,19 +1201,21 @@ fn test_tagged_filters_non_refs() {
 
     // Inline schemas can't have discriminator mappings, so `Animal`
     // should lower to an untagged union with two variants.
-    let untagged = match result {
+    assert_matches!(
+        result,
         SpecType::Schema(SpecSchemaType::Untagged(
             SchemaTypeInfo { name: "Animal", .. },
-            untagged,
-        )) => untagged,
-        other => panic!("expected untagged union `Animal`; got `{other:?}`"),
-    };
-    assert_matches!(
-        untagged.variants,
-        [
-            SpecUntaggedVariant::Some(UntaggedVariantNameHint::Index(1), SpecType::Ref(_)),
-            SpecUntaggedVariant::Some(UntaggedVariantNameHint::Index(2), SpecType::Inline(_)),
-        ],
+            Untagged {
+                variants: [
+                    SpecUntaggedVariant::Some(UntaggedVariantNameHint::Index(1), SpecType::Ref(_)),
+                    SpecUntaggedVariant::Some(
+                        UntaggedVariantNameHint::Index(2),
+                        SpecType::Inline(_)
+                    ),
+                ],
+                ..
+            },
+        )),
     );
 }
 
@@ -1236,23 +1250,20 @@ fn test_tagged_multiple_aliases() {
     let arena = Arena::new();
     let result = transform(&arena, &doc, "Result", &schema);
 
-    let tagged = match result {
-        SpecType::Schema(SpecSchemaType::Tagged(SchemaTypeInfo { name: "Result", .. }, tagged)) => {
-            tagged
-        }
-        other => panic!("expected tagged union `Result`; got `{other:?}`"),
-    };
-    let [
-        SpecTaggedVariant {
-            name: "Success",
-            aliases,
-            ..
-        },
-    ] = tagged.variants
-    else {
-        panic!("expected variant `Success`; got `{:?}`", tagged.variants);
-    };
-    assert_matches!(&**aliases, ["good", "ok", "success"]);
+    assert_matches!(
+        result,
+        SpecType::Schema(SpecSchemaType::Tagged(
+            SchemaTypeInfo { name: "Result", .. },
+            Tagged {
+                variants: [SpecTaggedVariant {
+                    name: "Success",
+                    aliases: ["good", "ok", "success"],
+                    ..
+                }],
+                ..
+            },
+        )),
+    );
 }
 
 #[test]
@@ -1293,19 +1304,18 @@ fn test_tagged_missing_variant() {
 
     // `Cat` has no discriminator tag, so `Animal` should lower to
     // an untagged union with two variants.
-    let untagged = match result {
+    assert_matches!(
+        result,
         SpecType::Schema(SpecSchemaType::Untagged(
             SchemaTypeInfo { name: "Animal", .. },
-            untagged,
-        )) => untagged,
-        other => panic!("expected untagged union `Animal`; got `{other:?}`"),
-    };
-    assert_matches!(
-        untagged.variants,
-        [
-            SpecUntaggedVariant::Some(UntaggedVariantNameHint::Index(1), SpecType::Ref(_)),
-            SpecUntaggedVariant::Some(UntaggedVariantNameHint::Index(2), SpecType::Ref(_)),
-        ],
+            Untagged {
+                variants: [
+                    SpecUntaggedVariant::Some(UntaggedVariantNameHint::Index(1), SpecType::Ref(_)),
+                    SpecUntaggedVariant::Some(UntaggedVariantNameHint::Index(2), SpecType::Ref(_)),
+                ],
+                ..
+            },
+        )),
     );
 }
 
@@ -1339,16 +1349,20 @@ fn test_tagged_description() {
     let arena = Arena::new();
     let result = transform(&arena, &doc, "Animal", &schema);
 
-    let tagged = match result {
-        SpecType::Schema(SpecSchemaType::Tagged(SchemaTypeInfo { name: "Animal", .. }, tagged)) => {
-            tagged
-        }
-        other => panic!("expected tagged union `Animal`; got `{other:?}`"),
-    };
-    assert_eq!(tagged.description, Some("A tagged union of animals"));
     assert_matches!(
-        tagged.variants,
-        [SpecTaggedVariant { name: "Dog", aliases, .. }] if aliases == &["dog"],
+        result,
+        SpecType::Schema(SpecSchemaType::Tagged(
+            SchemaTypeInfo { name: "Animal", .. },
+            Tagged {
+                description: Some("A tagged union of animals"),
+                tag: "type",
+                variants: [SpecTaggedVariant {
+                    name: "Dog",
+                    aliases: ["dog"],
+                    ..
+                }],
+            },
+        )),
     );
 }
 
@@ -1379,22 +1393,21 @@ fn test_untagged_basic() {
     let arena = Arena::new();
     let result = transform(&arena, &doc, "StringOrNumber", &schema);
 
-    let untagged = match result {
+    assert_matches!(
+        result,
         SpecType::Schema(SpecSchemaType::Untagged(
             SchemaTypeInfo {
                 name: "StringOrNumber",
                 ..
             },
-            untagged,
-        )) => untagged,
-        other => panic!("expected untagged union `StringOrNumber`; got `{other:?}`"),
-    };
-    assert_matches!(
-        untagged.variants,
-        [
-            SpecUntaggedVariant::Some(UntaggedVariantNameHint::Index(1), SpecType::Ref(_)),
-            SpecUntaggedVariant::Some(UntaggedVariantNameHint::Index(2), SpecType::Ref(_)),
-        ],
+            Untagged {
+                variants: [
+                    SpecUntaggedVariant::Some(UntaggedVariantNameHint::Index(1), SpecType::Ref(_)),
+                    SpecUntaggedVariant::Some(UntaggedVariantNameHint::Index(2), SpecType::Ref(_)),
+                ],
+                ..
+            },
+        )),
     );
 }
 
@@ -1493,20 +1506,19 @@ fn test_untagged_variant_numbering() {
     let result = transform(&arena, &doc, "ABC", &schema);
 
     // Variants should have 1-based indices in their name hints.
-    let untagged = match result {
+    assert_matches!(
+        result,
         SpecType::Schema(SpecSchemaType::Untagged(
             SchemaTypeInfo { name: "ABC", .. },
-            untagged,
-        )) => untagged,
-        other => panic!("expected untagged union `ABC`; got `{other:?}`"),
-    };
-    assert_matches!(
-        untagged.variants,
-        [
-            SpecUntaggedVariant::Some(UntaggedVariantNameHint::Index(1), _),
-            SpecUntaggedVariant::Some(UntaggedVariantNameHint::Index(2), _),
-            SpecUntaggedVariant::Some(UntaggedVariantNameHint::Index(3), _),
-        ],
+            Untagged {
+                variants: [
+                    SpecUntaggedVariant::Some(UntaggedVariantNameHint::Index(1), _),
+                    SpecUntaggedVariant::Some(UntaggedVariantNameHint::Index(2), _),
+                    SpecUntaggedVariant::Some(UntaggedVariantNameHint::Index(3), _),
+                ],
+                ..
+            },
+        )),
     );
 }
 
@@ -1529,17 +1541,16 @@ fn test_untagged_null_detection() {
     let arena = Arena::new();
     let result = transform(&arena, &doc, "StringOrNull", &schema);
 
-    let container = match result {
+    assert_matches!(
+        result,
         SpecType::Schema(SpecSchemaType::Container(
             SchemaTypeInfo {
                 name: "StringOrNull",
                 ..
             },
-            container,
-        )) => container,
-        other => panic!("expected container `StringOrNull`; got `{other:?}`"),
-    };
-    assert_matches!(&container, SpecContainer::Optional(_));
+            SpecContainer::Optional(_),
+        )),
+    );
 }
 
 // MARK: `try_any_of()`
@@ -1576,31 +1587,31 @@ fn test_any_of_fields_marked_flattened_not_required() {
     let result = transform(&arena, &doc, "Contact", &schema);
 
     // Both fields should be flattened.
-    let struct_ = match result {
+    assert_matches!(
+        result,
         SpecType::Schema(SpecSchemaType::Struct(
             SchemaTypeInfo {
-                name: "Contact", ..
-            },
-            struct_,
-        )) => struct_,
-        other => panic!("expected struct `Contact`; got `{other:?}`"),
-    };
-    assert_matches!(
-        struct_.fields,
-        [
-            SpecStructField {
-                name: StructFieldName::Name("Address"),
-                flattened: true,
-                required: false,
+                name: "Contact",
                 ..
             },
-            SpecStructField {
-                name: StructFieldName::Name("Email"),
-                flattened: true,
-                required: false,
+            Struct {
+                fields: [
+                    SpecStructField {
+                        name: StructFieldName::Name("Address"),
+                        flattened: true,
+                        required: false,
+                        ..
+                    },
+                    SpecStructField {
+                        name: StructFieldName::Name("Email"),
+                        flattened: true,
+                        required: false,
+                        ..
+                    },
+                ],
                 ..
             },
-        ],
+        )),
     );
 }
 
@@ -1632,27 +1643,27 @@ fn test_any_of_ref_uses_type_name() {
 
     // Both fields should be named `Address`, since they reference the same
     // type.
-    let struct_ = match result {
+    assert_matches!(
+        result,
         SpecType::Schema(SpecSchemaType::Struct(
             SchemaTypeInfo {
-                name: "Contact", ..
-            },
-            struct_,
-        )) => struct_,
-        other => panic!("expected struct `Contact`; got `{other:?}`"),
-    };
-    assert_matches!(
-        struct_.fields,
-        [
-            SpecStructField {
-                name: StructFieldName::Name("Address"),
+                name: "Contact",
                 ..
             },
-            SpecStructField {
-                name: StructFieldName::Name("Address"),
+            Struct {
+                fields: [
+                    SpecStructField {
+                        name: StructFieldName::Name("Address"),
+                        ..
+                    },
+                    SpecStructField {
+                        name: StructFieldName::Name("Address"),
+                        ..
+                    },
+                ],
                 ..
             },
-        ],
+        )),
     );
 }
 
@@ -1682,26 +1693,26 @@ fn test_any_of_inline_uses_index_hint() {
     let result = transform(&arena, &doc, "Mixed", &schema);
 
     // Both inline schemas should have index hints.
-    let struct_ = match result {
-        SpecType::Schema(SpecSchemaType::Struct(SchemaTypeInfo { name: "Mixed", .. }, struct_)) => {
-            struct_
-        }
-        other => panic!("expected struct `Mixed`; got `{other:?}`"),
-    };
     assert_matches!(
-        struct_.fields,
-        [
-            SpecStructField {
-                name: StructFieldName::Hint(StructFieldNameHint::Index(1)),
-                flattened: true,
+        result,
+        SpecType::Schema(SpecSchemaType::Struct(
+            SchemaTypeInfo { name: "Mixed", .. },
+            Struct {
+                fields: [
+                    SpecStructField {
+                        name: StructFieldName::Hint(StructFieldNameHint::Index(1)),
+                        flattened: true,
+                        ..
+                    },
+                    SpecStructField {
+                        name: StructFieldName::Hint(StructFieldNameHint::Index(2)),
+                        flattened: true,
+                        ..
+                    },
+                ],
                 ..
             },
-            SpecStructField {
-                name: StructFieldName::Hint(StructFieldNameHint::Index(2)),
-                flattened: true,
-                ..
-            },
-        ],
+        )),
     );
 }
 
@@ -1741,34 +1752,34 @@ fn test_any_of_with_properties() {
 
     // `Extra2` is an own field; `Extra1` and `Extra3` are flattened.
     // Own fields should precede the flattened fields.
-    let struct_ = match result {
+    assert_matches!(
+        result,
         SpecType::Schema(SpecSchemaType::Struct(
             SchemaTypeInfo {
-                name: "Combined", ..
-            },
-            struct_,
-        )) => struct_,
-        other => panic!("expected struct `Combined`; got `{other:?}`"),
-    };
-    assert_matches!(
-        struct_.fields,
-        [
-            SpecStructField {
-                name: StructFieldName::Name("Extra2"),
-                flattened: false,
+                name: "Combined",
                 ..
             },
-            SpecStructField {
-                name: StructFieldName::Name("Extra1"),
-                flattened: true,
+            Struct {
+                fields: [
+                    SpecStructField {
+                        name: StructFieldName::Name("Extra2"),
+                        flattened: false,
+                        ..
+                    },
+                    SpecStructField {
+                        name: StructFieldName::Name("Extra1"),
+                        flattened: true,
+                        ..
+                    },
+                    SpecStructField {
+                        name: StructFieldName::Name("Extra3"),
+                        flattened: true,
+                        ..
+                    },
+                ],
                 ..
             },
-            SpecStructField {
-                name: StructFieldName::Name("Extra3"),
-                flattened: true,
-                ..
-            },
-        ],
+        )),
     );
 }
 
@@ -1800,29 +1811,29 @@ fn test_any_of_nullable_refs() {
     let result = transform(&arena, &doc, "Container", &schema);
 
     // Both nullable schemas should be flattened.
-    let struct_ = match result {
+    assert_matches!(
+        result,
         SpecType::Schema(SpecSchemaType::Struct(
             SchemaTypeInfo {
-                name: "Container", ..
-            },
-            struct_,
-        )) => struct_,
-        other => panic!("expected struct `Container`; got `{other:?}`"),
-    };
-    assert_matches!(
-        struct_.fields,
-        [
-            SpecStructField {
-                name: StructFieldName::Name("NullableString1"),
-                flattened: true,
+                name: "Container",
                 ..
             },
-            SpecStructField {
-                name: StructFieldName::Name("NullableString2"),
-                flattened: true,
+            Struct {
+                fields: [
+                    SpecStructField {
+                        name: StructFieldName::Name("NullableString1"),
+                        flattened: true,
+                        ..
+                    },
+                    SpecStructField {
+                        name: StructFieldName::Name("NullableString2"),
+                        flattened: true,
+                        ..
+                    },
+                ],
                 ..
             },
-        ],
+        )),
     );
 }
 
@@ -1864,35 +1875,34 @@ fn test_any_of_with_all_of() {
     let arena = Arena::new();
     let result = transform(&arena, &doc, "Combined", &schema);
 
-    let struct_ = match result {
-        SpecType::Schema(SpecSchemaType::Struct(
-            SchemaTypeInfo {
-                name: "Combined", ..
-            },
-            struct_,
-        )) => struct_,
-        other => panic!("expected struct `Combined`; got `{other:?}`"),
-    };
-
     // Only flattened `anyOf` fields should be stored directly; the inherited
     // `id` field is accessed via graph traversal through `parents()`.
     assert_matches!(
-        struct_.fields,
-        [
-            SpecStructField {
-                name: StructFieldName::Name("Extra1"),
-                flattened: true,
+        result,
+        SpecType::Schema(SpecSchemaType::Struct(
+            SchemaTypeInfo {
+                name: "Combined",
                 ..
             },
-            SpecStructField {
-                name: StructFieldName::Name("Extra2"),
-                flattened: true,
+            Struct {
+                fields: [
+                    SpecStructField {
+                        name: StructFieldName::Name("Extra1"),
+                        flattened: true,
+                        ..
+                    },
+                    SpecStructField {
+                        name: StructFieldName::Name("Extra2"),
+                        flattened: true,
+                        ..
+                    },
+                ],
+                // Parent reference to `Base` should be present.
+                parents: [_],
                 ..
             },
-        ],
+        )),
     );
-    // Parent reference to `Base` should be present.
-    assert_eq!(struct_.parents.len(), 1);
 }
 
 // MARK: Edge cases
@@ -1916,7 +1926,7 @@ fn test_boolean_primitive_transformation() {
 
     assert_matches!(
         result,
-        SpecType::Schema(SpecSchemaType::Primitive(_, PrimitiveType::Bool))
+        SpecType::Schema(SpecSchemaType::Primitive(_, PrimitiveType::Bool)),
     );
 }
 
@@ -1941,7 +1951,7 @@ fn test_unhandled_string_format_falls_back_to_string() {
 
     assert_matches!(
         result,
-        SpecType::Schema(SpecSchemaType::Primitive(_, PrimitiveType::String))
+        SpecType::Schema(SpecSchemaType::Primitive(_, PrimitiveType::String)),
     );
 }
 
@@ -1982,20 +1992,19 @@ fn test_array_without_items_produces_array_of_any() {
     let arena = Arena::new();
     let result = transform(&arena, &doc, "ArrayAny", &schema);
 
-    let container = match result {
+    assert_matches!(
+        result,
         SpecType::Schema(SpecSchemaType::Container(
             SchemaTypeInfo {
-                name: "ArrayAny", ..
+                name: "ArrayAny",
+                ..
             },
-            container,
-        )) => container,
-        other => panic!("expected container `ArrayAny`; got `{other:?}`"),
-    };
-    let items = match &container {
-        SpecContainer::Array(SpecInner { ty, .. }) => ty,
-        other => panic!("expected array; got `{other:?}`"),
-    };
-    assert_matches!(&**items, SpecType::Inline(SpecInlineType::Any(_)));
+            SpecContainer::Array(SpecInner {
+                ty: SpecType::Inline(SpecInlineType::Any(_)),
+                ..
+            }),
+        )),
+    );
 }
 
 #[test]
@@ -2017,17 +2026,16 @@ fn test_object_with_empty_properties_produces_struct() {
     let result = transform(&arena, &doc, "EmptyObject", &schema);
 
     // An `object` schema without properties should become an empty struct.
-    let struct_ = match result {
+    assert_matches!(
+        result,
         SpecType::Schema(SpecSchemaType::Struct(
             SchemaTypeInfo {
                 name: "EmptyObject",
                 ..
             },
-            struct_,
-        )) => struct_,
-        other => panic!("expected struct `EmptyObject`; got `{other:?}`"),
-    };
-    assert_matches!(struct_.fields, []);
+            Struct { fields: [], .. },
+        )),
+    );
 }
 
 #[test]
@@ -2070,23 +2078,18 @@ fn test_type_and_null_in_type_array_creates_nullable() {
 
     // As a special case, `type: [T, "null"]` should produce a
     // `Container(Optional(T))`.
-    let container = match result {
+    assert_matches!(
+        result,
         SpecType::Schema(SpecSchemaType::Container(
             SchemaTypeInfo {
                 name: "StringOrNull",
                 ..
             },
-            container,
-        )) => container,
-        other => panic!("expected container `StringOrNull`; got `{other:?}`"),
-    };
-    let inner = match &container {
-        SpecContainer::Optional(SpecInner { ty, .. }) => ty,
-        other => panic!("expected nullable; got `{other:?}`"),
-    };
-    assert_matches!(
-        &**inner,
-        SpecType::Inline(SpecInlineType::Primitive(_, PrimitiveType::String))
+            SpecContainer::Optional(SpecInner {
+                ty: SpecType::Inline(SpecInlineType::Primitive(_, PrimitiveType::String)),
+                ..
+            }),
+        )),
     );
 }
 
@@ -2109,31 +2112,24 @@ fn test_type_array_and_null_creates_nullable_array() {
     let arena = Arena::new();
     let result = transform(&arena, &doc, "StringArrayOrNull", &schema);
 
-    let container = match result {
+    assert_matches!(
+        result,
         SpecType::Schema(SpecSchemaType::Container(
             SchemaTypeInfo {
                 name: "StringArrayOrNull",
                 ..
             },
-            container,
-        )) => container,
-        other => panic!("expected container `StringArrayOrNull`; got `{other:?}`"),
-    };
-    let inner = match &container {
-        SpecContainer::Optional(SpecInner { ty, .. }) => ty,
-        other => panic!("expected optional; got `{other:?}`"),
-    };
-    let inner_container = match &**inner {
-        SpecType::Inline(SpecInlineType::Container(_, container)) => container,
-        other => panic!("expected inline container; got `{other:?}`"),
-    };
-    let items = match inner_container {
-        SpecContainer::Array(SpecInner { ty, .. }) => ty,
-        other => panic!("expected array; got `{other:?}`"),
-    };
-    assert_matches!(
-        &**items,
-        SpecType::Inline(SpecInlineType::Primitive(_, PrimitiveType::String))
+            SpecContainer::Optional(SpecInner {
+                ty: SpecType::Inline(SpecInlineType::Container(
+                    _,
+                    SpecContainer::Array(SpecInner {
+                        ty: SpecType::Inline(SpecInlineType::Primitive(_, PrimitiveType::String)),
+                        ..
+                    }),
+                )),
+                ..
+            }),
+        )),
     );
 }
 
@@ -2156,31 +2152,24 @@ fn test_type_object_and_null_creates_nullable_map() {
     let arena = Arena::new();
     let result = transform(&arena, &doc, "IntMapOrNull", &schema);
 
-    let container = match result {
+    assert_matches!(
+        result,
         SpecType::Schema(SpecSchemaType::Container(
             SchemaTypeInfo {
                 name: "IntMapOrNull",
                 ..
             },
-            container,
-        )) => container,
-        other => panic!("expected container `IntMapOrNull`; got `{other:?}`"),
-    };
-    let inner = match &container {
-        SpecContainer::Optional(SpecInner { ty, .. }) => ty,
-        other => panic!("expected optional; got `{other:?}`"),
-    };
-    let inner_container = match &**inner {
-        SpecType::Inline(SpecInlineType::Container(_, container)) => container,
-        other => panic!("expected inline container; got `{other:?}`"),
-    };
-    let values = match inner_container {
-        SpecContainer::Map(SpecInner { ty, .. }) => ty,
-        other => panic!("expected map; got `{other:?}`"),
-    };
-    assert_matches!(
-        &**values,
-        SpecType::Inline(SpecInlineType::Primitive(_, PrimitiveType::I32))
+            SpecContainer::Optional(SpecInner {
+                ty: SpecType::Inline(SpecInlineType::Container(
+                    _,
+                    SpecContainer::Map(SpecInner {
+                        ty: SpecType::Inline(SpecInlineType::Primitive(_, PrimitiveType::I32)),
+                        ..
+                    }),
+                )),
+                ..
+            }),
+        )),
     );
 }
 
@@ -2201,28 +2190,27 @@ fn test_multiple_types_string_and_integer_untagged() {
     let arena = Arena::new();
     let result = transform(&arena, &doc, "StringOrInt", &schema);
 
-    let untagged = match result {
+    assert_matches!(
+        result,
         SpecType::Schema(SpecSchemaType::Untagged(
             SchemaTypeInfo {
                 name: "StringOrInt",
                 ..
             },
-            untagged,
-        )) => untagged,
-        other => panic!("expected untagged union `StringOrInt`; got `{other:?}`"),
-    };
-    assert_matches!(
-        untagged.variants,
-        [
-            SpecUntaggedVariant::Some(
-                UntaggedVariantNameHint::Primitive(PrimitiveType::String),
-                SpecType::Schema(SpecSchemaType::Primitive(_, PrimitiveType::String)),
-            ),
-            SpecUntaggedVariant::Some(
-                UntaggedVariantNameHint::Primitive(PrimitiveType::I32),
-                SpecType::Schema(SpecSchemaType::Primitive(_, PrimitiveType::I32)),
-            ),
-        ],
+            Untagged {
+                variants: [
+                    SpecUntaggedVariant::Some(
+                        UntaggedVariantNameHint::Primitive(PrimitiveType::String),
+                        SpecType::Schema(SpecSchemaType::Primitive(_, PrimitiveType::String)),
+                    ),
+                    SpecUntaggedVariant::Some(
+                        UntaggedVariantNameHint::Primitive(PrimitiveType::I32),
+                        SpecType::Schema(SpecSchemaType::Primitive(_, PrimitiveType::I32)),
+                    ),
+                ],
+                ..
+            },
+        )),
     );
 }
 
@@ -2253,57 +2241,51 @@ fn test_deeply_nested_inline_types() {
     let arena = Arena::new();
     let result = transform(&arena, &doc, "Outer", &schema);
 
-    let struct_ = match result {
-        SpecType::Schema(SpecSchemaType::Struct(SchemaTypeInfo { name: "Outer", .. }, struct_)) => {
-            struct_
-        }
-        other => panic!("expected struct `Outer`; got `{other:?}`"),
-    };
-    let [
-        SpecStructField {
-            name: StructFieldName::Name("items"),
-            ty:
-                SpecType::Inline(SpecInlineType::Container(
-                    path,
-                    SpecContainer::Array(SpecInner { ty: items, .. }),
-                )),
-            ..
-        },
-    ] = struct_.fields
-    else {
-        panic!("expected named inline array; got `{:?}`", struct_.fields);
-    };
-
-    // Container type path should be correct.
-    assert_matches!(path.root, InlineTypePathRoot::Type("Outer"));
     assert_matches!(
-        path.segments,
-        [InlineTypePathSegment::Field(StructFieldName::Name("items"))],
-    );
-
-    let (path, inner_struct) = match &**items {
-        SpecType::Inline(SpecInlineType::Struct(path, inner_struct)) => (path, inner_struct),
-        other => panic!("expected inline struct; got `{other:?}`"),
-    };
-
-    // Inner struct path should have correct segments.
-    assert_matches!(path.root, InlineTypePathRoot::Type("Outer"));
-    assert_matches!(
-        path.segments,
-        [
-            InlineTypePathSegment::Field(StructFieldName::Name("items")),
-            InlineTypePathSegment::ArrayItem,
-        ],
-    );
-
-    // Inner struct should have correct fields.
-    assert_matches!(
-        inner_struct.fields,
-        [SpecStructField {
-            name: StructFieldName::Name("field"),
-            ty: SpecType::Inline(SpecInlineType::Primitive(_, PrimitiveType::String)),
-            ..
-        },]
+        result,
+        SpecType::Schema(SpecSchemaType::Struct(
+            SchemaTypeInfo { name: "Outer", .. },
+            Struct {
+                fields: [SpecStructField {
+                    name: StructFieldName::Name("items"),
+                    ty: SpecType::Inline(SpecInlineType::Container(
+                        InlineTypePath {
+                            root: InlineTypePathRoot::Type("Outer"),
+                            segments: [InlineTypePathSegment::Field(StructFieldName::Name(
+                                "items",
+                            ))],
+                        },
+                        SpecContainer::Array(SpecInner {
+                            ty: SpecType::Inline(SpecInlineType::Struct(
+                                InlineTypePath {
+                                    root: InlineTypePathRoot::Type("Outer"),
+                                    segments: [
+                                        InlineTypePathSegment::Field(StructFieldName::Name(
+                                            "items",
+                                        )),
+                                        InlineTypePathSegment::ArrayItem,
+                                    ],
+                                },
+                                Struct {
+                                    fields: [SpecStructField {
+                                        name: StructFieldName::Name("field"),
+                                        ty: SpecType::Inline(SpecInlineType::Primitive(
+                                            _,
+                                            PrimitiveType::String
+                                        )),
+                                        ..
+                                    }],
+                                    ..
+                                },
+                            )),
+                            ..
+                        }),
+                    )),
+                    ..
+                }],
+                ..
+            },
+        )),
     );
 }
 
@@ -2327,16 +2309,16 @@ fn test_enum_with_only_null_json_values_produces_empty_enum() {
 
     // `null` values are filtered out from enum variants, producing an enum
     // with zero variants.
-    let enum_ = match result {
+    assert_matches!(
+        result,
         SpecType::Schema(SpecSchemaType::Enum(
             SchemaTypeInfo {
-                name: "NullEnum", ..
+                name: "NullEnum",
+                ..
             },
-            enum_,
-        )) => enum_,
-        other => panic!("expected enum `NullEnum`; got `{other:?}`"),
-    };
-    assert_matches!(enum_.variants, []);
+            Enum { variants: [], .. },
+        )),
+    );
 }
 
 #[test]
@@ -2361,23 +2343,22 @@ fn test_additional_properties_false_creates_struct() {
     let arena = Arena::new();
     let result = transform(&arena, &doc, "StrictObject", &schema);
 
-    let struct_ = match result {
+    assert_matches!(
+        result,
         SpecType::Schema(SpecSchemaType::Struct(
             SchemaTypeInfo {
                 name: "StrictObject",
                 ..
             },
-            struct_,
-        )) => struct_,
-        other => panic!("expected struct `StrictObject`; got `{other:?}`"),
-    };
-    assert_matches!(
-        struct_.fields,
-        [SpecStructField {
-            name: StructFieldName::Name("name"),
-            ty: SpecType::Inline(SpecInlineType::Primitive(_, PrimitiveType::String)),
-            ..
-        }],
+            Struct {
+                fields: [SpecStructField {
+                    name: StructFieldName::Name("name"),
+                    ty: SpecType::Inline(SpecInlineType::Primitive(_, PrimitiveType::String)),
+                    ..
+                }],
+                ..
+            },
+        )),
     );
 }
 
@@ -2405,25 +2386,25 @@ fn test_array_inline_path_construction() {
     let arena = Arena::new();
     let result = transform(&arena, &doc, "Container", &schema);
 
-    let container = match result {
+    assert_matches!(
+        result,
         SpecType::Schema(SpecSchemaType::Container(
             SchemaTypeInfo {
-                name: "Container", ..
+                name: "Container",
+                ..
             },
-            container,
-        )) => container,
-        other => panic!("expected container `Container`; got `{other:?}`"),
-    };
-    let items = match &container {
-        SpecContainer::Array(SpecInner { ty, .. }) => ty,
-        other => panic!("expected array; got `{other:?}`"),
-    };
-    let path = match &**items {
-        SpecType::Inline(SpecInlineType::Struct(path, _)) => path,
-        other => panic!("expected inline struct; got `{other:?}`"),
-    };
-    assert_matches!(path.root, InlineTypePathRoot::Type("Container"));
-    assert_matches!(path.segments, [InlineTypePathSegment::ArrayItem]);
+            SpecContainer::Array(SpecInner {
+                ty: SpecType::Inline(SpecInlineType::Struct(
+                    InlineTypePath {
+                        root: InlineTypePathRoot::Type("Container"),
+                        segments: [InlineTypePathSegment::ArrayItem],
+                    },
+                    _,
+                )),
+                ..
+            }),
+        )),
+    );
 }
 
 #[test]
@@ -2448,25 +2429,25 @@ fn test_map_inline_path_construction() {
     let arena = Arena::new();
     let result = transform(&arena, &doc, "Dictionary", &schema);
 
-    let container = match result {
+    assert_matches!(
+        result,
         SpecType::Schema(SpecSchemaType::Container(
             SchemaTypeInfo {
-                name: "Dictionary", ..
+                name: "Dictionary",
+                ..
             },
-            container,
-        )) => container,
-        other => panic!("expected container `Dictionary`; got `{other:?}`"),
-    };
-    let value = match &container {
-        SpecContainer::Map(SpecInner { ty, .. }) => ty,
-        other => panic!("expected map; got `{other:?}`"),
-    };
-    let path = match &**value {
-        SpecType::Inline(SpecInlineType::Struct(path, _)) => path,
-        other => panic!("expected inline struct; got `{other:?}`"),
-    };
-    assert_matches!(path.root, InlineTypePathRoot::Type("Dictionary"));
-    assert_matches!(path.segments, [InlineTypePathSegment::MapValue]);
+            SpecContainer::Map(SpecInner {
+                ty: SpecType::Inline(SpecInlineType::Struct(
+                    InlineTypePath {
+                        root: InlineTypePathRoot::Type("Dictionary"),
+                        segments: [InlineTypePathSegment::MapValue],
+                    },
+                    _,
+                )),
+                ..
+            }),
+        )),
+    );
 }
 
 #[test]
@@ -2493,31 +2474,27 @@ fn test_struct_inline_path_construction() {
     let arena = Arena::new();
     let result = transform(&arena, &doc, "Outer", &schema);
 
-    let struct_ = match result {
-        SpecType::Schema(SpecSchemaType::Struct(SchemaTypeInfo { name: "Outer", .. }, struct_)) => {
-            struct_
-        }
-        other => panic!("expected struct `Outer`; got `{other:?}`"),
-    };
-    let [
-        SpecStructField {
-            name: StructFieldName::Name("nested"),
-            ty: SpecType::Inline(SpecInlineType::Struct(path, _)),
-            ..
-        },
-    ] = struct_.fields
-    else {
-        panic!(
-            "expected single inline struct field; got `{:?}`",
-            struct_.fields,
-        );
-    };
-    assert_matches!(path.root, InlineTypePathRoot::Type("Outer"));
     assert_matches!(
-        path.segments,
-        [InlineTypePathSegment::Field(StructFieldName::Name(
-            "nested"
-        ))],
+        result,
+        SpecType::Schema(SpecSchemaType::Struct(
+            SchemaTypeInfo { name: "Outer", .. },
+            Struct {
+                fields: [SpecStructField {
+                    name: StructFieldName::Name("nested"),
+                    ty: SpecType::Inline(SpecInlineType::Struct(
+                        InlineTypePath {
+                            root: InlineTypePathRoot::Type("Outer"),
+                            segments: [InlineTypePathSegment::Field(StructFieldName::Name(
+                                "nested",
+                            ))],
+                        },
+                        _,
+                    )),
+                    ..
+                }],
+                ..
+            },
+        )),
     );
 }
 
@@ -2563,55 +2540,46 @@ fn test_inline_tagged_union_in_struct_field() {
     let arena = Arena::new();
     let result = transform(&arena, &doc, "Container", &schema);
 
-    let struct_ = match result {
+    assert_matches!(
+        result,
         SpecType::Schema(SpecSchemaType::Struct(
             SchemaTypeInfo {
-                name: "Container", ..
+                name: "Container",
+                ..
             },
-            struct_,
-        )) => struct_,
-        other => panic!("expected struct `Container`; got `{other:?}`"),
-    };
-
-    let [
-        SpecStructField {
-            name: StructFieldName::Name("animal"),
-            ty: SpecType::Inline(SpecInlineType::Tagged(path, tagged)),
-            ..
-        },
-    ] = struct_.fields
-    else {
-        panic!(
-            "expected single inline tagged union field; got `{:?}`",
-            struct_.fields,
-        );
-    };
-
-    // Verify the path.
-    assert_matches!(path.root, InlineTypePathRoot::Type("Container"));
-    assert_matches!(
-        path.segments,
-        [InlineTypePathSegment::Field(StructFieldName::Name(
-            "animal"
-        ))],
+            Struct {
+                fields: [SpecStructField {
+                    name: StructFieldName::Name("animal"),
+                    ty: SpecType::Inline(SpecInlineType::Tagged(
+                        InlineTypePath {
+                            root: InlineTypePathRoot::Type("Container"),
+                            segments: [InlineTypePathSegment::Field(StructFieldName::Name(
+                                "animal",
+                            ))],
+                        },
+                        Tagged {
+                            tag: "kind",
+                            variants: [
+                                SpecTaggedVariant {
+                                    name: "Cat",
+                                    aliases: ["cat"],
+                                    ..
+                                },
+                                SpecTaggedVariant {
+                                    name: "Dog",
+                                    aliases: ["dog"],
+                                    ..
+                                },
+                            ],
+                            ..
+                        },
+                    )),
+                    ..
+                }],
+                ..
+            },
+        )),
     );
-
-    // Verify the tag.
-    assert_eq!(tagged.tag, "kind");
-
-    // Verify the variants.
-    let [
-        cat_variant @ SpecTaggedVariant { name: "Cat", .. },
-        dog_variant @ SpecTaggedVariant { name: "Dog", .. },
-    ] = tagged.variants
-    else {
-        panic!(
-            "expected `Cat` and `Dog` variants; got `{:?}`",
-            tagged.variants
-        );
-    };
-    assert_eq!(cat_variant.aliases, ["cat"]);
-    assert_eq!(dog_variant.aliases, ["dog"]);
 }
 
 // MARK: Recursive schemas
@@ -2647,31 +2615,31 @@ fn test_recursive_all_of_ref_nullable() {
     let arena = Arena::new();
     let result = transform(&arena, &doc, "Node", schema);
 
-    // Should successfully produce a struct.
-    let struct_ = match result {
-        SpecType::Schema(SpecSchemaType::Struct(SchemaTypeInfo { name: "Node", .. }, struct_)) => {
-            struct_
-        }
-        other => panic!("expected struct `Node`; got `{other:?}`"),
-    };
-
-    // Verify the struct has the expected fields.
     assert_matches!(
-        struct_.fields,
-        [
-            SpecStructField {
-                name: StructFieldName::Name("value"),
-                ty: SpecType::Inline(SpecInlineType::Primitive(_, PrimitiveType::String)),
-                required: true,
+        result,
+        SpecType::Schema(SpecSchemaType::Struct(
+            SchemaTypeInfo { name: "Node", .. },
+            Struct {
+                fields: [
+                    SpecStructField {
+                        name: StructFieldName::Name("value"),
+                        ty: SpecType::Inline(SpecInlineType::Primitive(_, PrimitiveType::String)),
+                        required: true,
+                        ..
+                    },
+                    SpecStructField {
+                        name: StructFieldName::Name("next"),
+                        ty: SpecType::Inline(SpecInlineType::Container(
+                            _,
+                            SpecContainer::Optional(_),
+                        )),
+                        required: true,
+                        ..
+                    },
+                ],
                 ..
             },
-            SpecStructField {
-                name: StructFieldName::Name("next"),
-                ty: SpecType::Inline(SpecInlineType::Container(_, SpecContainer::Optional(_))),
-                required: true,
-                ..
-            },
-        ],
+        )),
     );
 }
 
@@ -2701,31 +2669,34 @@ fn test_recursive_all_of_ref() {
     let arena = Arena::new();
     let result = transform(&arena, &doc, "Node", schema);
 
-    // Should successfully produce a struct.
-    let struct_ = match result {
-        SpecType::Schema(SpecSchemaType::Struct(SchemaTypeInfo { name: "Node", .. }, struct_)) => {
-            struct_
-        }
-        other => panic!("expected struct `Node`; got `{other:?}`"),
-    };
-
-    // Verify the struct has the expected fields.
     assert_matches!(
-        struct_.fields,
-        [
-            SpecStructField {
-                name: StructFieldName::Name("value"),
-                ty: SpecType::Inline(SpecInlineType::Container(_, SpecContainer::Optional(_))),
-                required: false,
+        result,
+        SpecType::Schema(SpecSchemaType::Struct(
+            SchemaTypeInfo { name: "Node", .. },
+            Struct {
+                fields: [
+                    SpecStructField {
+                        name: StructFieldName::Name("value"),
+                        ty: SpecType::Inline(SpecInlineType::Container(
+                            _,
+                            SpecContainer::Optional(_),
+                        )),
+                        required: false,
+                        ..
+                    },
+                    SpecStructField {
+                        name: StructFieldName::Name("next"),
+                        ty: SpecType::Inline(SpecInlineType::Container(
+                            _,
+                            SpecContainer::Optional(_),
+                        )),
+                        required: false,
+                        ..
+                    },
+                ],
                 ..
             },
-            SpecStructField {
-                name: StructFieldName::Name("next"),
-                ty: SpecType::Inline(SpecInlineType::Container(_, SpecContainer::Optional(_))),
-                required: false,
-                ..
-            },
-        ],
+        )),
     );
 }
 
@@ -2761,29 +2732,24 @@ fn test_recursive_multi_all_of_ref_no_stack_overflow() {
     let arena = Arena::new();
     let result = transform(&arena, &doc, "Node", schema);
 
-    // Should successfully produce a struct.
-    let struct_ = match result {
-        SpecType::Schema(SpecSchemaType::Struct(SchemaTypeInfo { name: "Node", .. }, struct_)) => {
-            struct_
-        }
-        other => panic!("expected struct `Node`; got `{other:?}`"),
-    };
-
-    // The struct should have `value` and `next` fields.
-    assert_eq!(struct_.fields.len(), 2);
     assert_matches!(
-        &struct_.fields[0],
-        SpecStructField {
-            name: StructFieldName::Name("value"),
-            ..
-        }
-    );
-    assert_matches!(
-        &struct_.fields[1],
-        SpecStructField {
-            name: StructFieldName::Name("next"),
-            ..
-        }
+        result,
+        SpecType::Schema(SpecSchemaType::Struct(
+            SchemaTypeInfo { name: "Node", .. },
+            Struct {
+                fields: [
+                    SpecStructField {
+                        name: StructFieldName::Name("value"),
+                        ..
+                    },
+                    SpecStructField {
+                        name: StructFieldName::Name("next"),
+                        ..
+                    },
+                ],
+                ..
+            },
+        )),
     );
 }
 
@@ -2808,22 +2774,18 @@ fn test_named_array_schema_produces_container() {
     let arena = Arena::new();
     let result = transform(&arena, &doc, "StringList", &schema);
 
-    let container = match result {
+    assert_matches!(
+        result,
         SpecType::Schema(SpecSchemaType::Container(
             SchemaTypeInfo {
-                name: "StringList", ..
+                name: "StringList",
+                ..
             },
-            container,
-        )) => container,
-        other => panic!("expected container `StringList`; got `{other:?}`"),
-    };
-    let items = match &container {
-        SpecContainer::Array(SpecInner { ty, .. }) => ty,
-        other => panic!("expected array; got `{other:?}`"),
-    };
-    assert_matches!(
-        &**items,
-        SpecType::Inline(SpecInlineType::Primitive(_, PrimitiveType::String))
+            SpecContainer::Array(SpecInner {
+                ty: SpecType::Inline(SpecInlineType::Primitive(_, PrimitiveType::String)),
+                ..
+            }),
+        )),
     );
 }
 
@@ -2862,21 +2824,20 @@ fn test_named_array_with_inline_one_of_items_produces_container() {
 
     // A named array schema should produce a `Container` for the array,
     // wrapped in a `SpecSchemaType` that preserves the schema's identity.
-    let container = match result {
+    // The inline `oneOf` should produce an inline untagged union.
+    assert_matches!(
+        result,
         SpecType::Schema(SpecSchemaType::Container(
             SchemaTypeInfo {
-                name: "Animals", ..
+                name: "Animals",
+                ..
             },
-            container,
-        )) => container,
-        other => panic!("expected container `Animals`; got `{other:?}`"),
-    };
-    let items = match &container {
-        SpecContainer::Array(SpecInner { ty, .. }) => ty,
-        other => panic!("expected array; got `{other:?}`"),
-    };
-    // The inline `oneOf` should produce an inline untagged union.
-    assert_matches!(&**items, SpecType::Inline(SpecInlineType::Untagged(..)));
+            SpecContainer::Array(SpecInner {
+                ty: SpecType::Inline(SpecInlineType::Untagged(..)),
+                ..
+            }),
+        )),
+    );
 }
 
 #[test]
@@ -2898,16 +2859,16 @@ fn test_named_map_schema_produces_container() {
     let arena = Arena::new();
     let result = transform(&arena, &doc, "Metadata", &schema);
 
-    let container = match result {
+    assert_matches!(
+        result,
         SpecType::Schema(SpecSchemaType::Container(
             SchemaTypeInfo {
-                name: "Metadata", ..
+                name: "Metadata",
+                ..
             },
-            container,
-        )) => container,
-        other => panic!("expected container `Metadata`; got `{other:?}`"),
-    };
-    assert_matches!(&container, SpecContainer::Map(_));
+            SpecContainer::Map(_),
+        )),
+    );
 }
 
 #[test]
@@ -2927,23 +2888,18 @@ fn test_named_nullable_schema_produces_container() {
     let arena = Arena::new();
     let result = transform(&arena, &doc, "NullableString", &schema);
 
-    let container = match result {
+    assert_matches!(
+        result,
         SpecType::Schema(SpecSchemaType::Container(
             SchemaTypeInfo {
                 name: "NullableString",
                 ..
             },
-            container,
-        )) => container,
-        other => panic!("expected container `NullableString`; got `{other:?}`"),
-    };
-    let inner = match &container {
-        SpecContainer::Optional(SpecInner { ty, .. }) => ty,
-        other => panic!("expected optional; got `{other:?}`"),
-    };
-    assert_matches!(
-        &**inner,
-        SpecType::Inline(SpecInlineType::Primitive(_, PrimitiveType::String))
+            SpecContainer::Optional(SpecInner {
+                ty: SpecType::Inline(SpecInlineType::Primitive(_, PrimitiveType::String)),
+                ..
+            }),
+        )),
     );
 }
 
@@ -2967,18 +2923,16 @@ fn test_named_container_preserves_description() {
     let arena = Arena::new();
     let result = transform(&arena, &doc, "Ids", &schema);
 
-    let container = match result {
+    assert_matches!(
+        result,
         SpecType::Schema(SpecSchemaType::Container(
             SchemaTypeInfo { name: "Ids", .. },
-            container,
-        )) => container,
-        other => panic!("expected container `Ids`; got `{other:?}`"),
-    };
-    let description = match &container {
-        SpecContainer::Array(SpecInner { description, .. }) => *description,
-        other => panic!("expected array; got `{other:?}`"),
-    };
-    assert_eq!(description, Some("A list of identifiers"));
+            SpecContainer::Array(SpecInner {
+                description: Some("A list of identifiers"),
+                ..
+            }),
+        )),
+    );
 }
 
 #[test]
@@ -3002,7 +2956,7 @@ fn test_named_primitive_does_not_produce_container() {
     // and don't benefit from a type alias.
     assert_matches!(
         result,
-        SpecType::Schema(SpecSchemaType::Primitive(_, PrimitiveType::String))
+        SpecType::Schema(SpecSchemaType::Primitive(_, PrimitiveType::String)),
     );
 }
 
@@ -3034,20 +2988,19 @@ fn test_untagged_single_variant_one_of_ref_produces_container() {
 
     // A `oneOf` with `null` and a schema reference should produce a
     // `Container(Optional(Ref(...)))`.
-    let container = match result {
+    assert_matches!(
+        result,
         SpecType::Schema(SpecSchemaType::Container(
             SchemaTypeInfo {
-                name: "MaybeInner", ..
+                name: "MaybeInner",
+                ..
             },
-            container,
-        )) => container,
-        other => panic!("expected container `MaybeInner`; got `{other:?}`"),
-    };
-    let inner = match &container {
-        SpecContainer::Optional(SpecInner { ty, .. }) => ty,
-        other => panic!("expected optional; got `{other:?}`"),
-    };
-    assert_matches!(&**inner, SpecType::Ref(_));
+            SpecContainer::Optional(SpecInner {
+                ty: SpecType::Ref(_),
+                ..
+            }),
+        )),
+    );
 }
 
 // MARK: Inline containers
@@ -3077,22 +3030,22 @@ fn test_inline_array_produces_inline_container() {
 
     // Struct fields that are arrays become inline containers,
     // not schema containers.
-    let struct_ = match result {
+    assert_matches!(
+        result,
         SpecType::Schema(SpecSchemaType::Struct(
             SchemaTypeInfo {
-                name: "Container", ..
+                name: "Container",
+                ..
             },
-            struct_,
-        )) => struct_,
-        other => panic!("expected struct `Container`; got `{other:?}`"),
-    };
-    assert_matches!(
-        struct_.fields,
-        [SpecStructField {
-            name: StructFieldName::Name("items"),
-            ty: SpecType::Inline(SpecInlineType::Container(_, SpecContainer::Array(_))),
-            ..
-        }],
+            Struct {
+                fields: [SpecStructField {
+                    name: StructFieldName::Name("items"),
+                    ty: SpecType::Inline(SpecInlineType::Container(_, SpecContainer::Array(_))),
+                    ..
+                }],
+                ..
+            },
+        )),
     );
 }
 
@@ -3120,29 +3073,24 @@ fn test_optional_field_container_description_is_not_parent_schema() {
     let arena = Arena::new();
     let result = transform(&arena, &doc, "Parent", &schema);
 
-    let struct_ = match result {
+    assert_matches!(
+        result,
         SpecType::Schema(SpecSchemaType::Struct(
             SchemaTypeInfo { name: "Parent", .. },
-            struct_,
-        )) => struct_,
-        other => panic!("expected struct `Parent`; got `{other:?}`"),
-    };
-    let [
-        SpecStructField {
-            name: StructFieldName::Name("nickname"),
-            ty:
-                SpecType::Inline(SpecInlineType::Container(
-                    _,
-                    SpecContainer::Optional(SpecInner { description, .. }),
-                )),
-            ..
-        },
-    ] = struct_.fields
-    else {
-        panic!(
-            "expected optional field `nickname`; got `{:?}`",
-            struct_.fields
-        );
-    };
-    assert_matches!(description, Some("The nickname"));
+            Struct {
+                fields: [SpecStructField {
+                    name: StructFieldName::Name("nickname"),
+                    ty: SpecType::Inline(SpecInlineType::Container(
+                        _,
+                        SpecContainer::Optional(SpecInner {
+                            description: Some("The nickname"),
+                            ..
+                        }),
+                    )),
+                    ..
+                }],
+                ..
+            },
+        )),
+    );
 }

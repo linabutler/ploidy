@@ -127,13 +127,14 @@ impl BadPath {
 mod test {
     use super::*;
 
+    use crate::tests::assert_matches;
+
     #[test]
     fn test_root_path() {
         let arena = Arena::new();
         let result = parse(&arena, "/").unwrap();
 
-        assert_eq!(result.len(), 1);
-        assert_eq!(result[0].fragments(), &[]);
+        assert_matches!(&*result, [PathSegment([])]);
     }
 
     #[test]
@@ -141,8 +142,7 @@ mod test {
         let arena = Arena::new();
         let result = parse(&arena, "/users").unwrap();
 
-        assert_eq!(result.len(), 1);
-        assert_eq!(result[0].fragments(), &[PathFragment::Literal("users")]);
+        assert_matches!(&*result, [PathSegment([PathFragment::Literal("users")])]);
     }
 
     #[test]
@@ -150,9 +150,13 @@ mod test {
         let arena = Arena::new();
         let result = parse(&arena, "/users/").unwrap();
 
-        assert_eq!(result.len(), 2);
-        assert_eq!(result[0].fragments(), &[PathFragment::Literal("users")]);
-        assert_eq!(result[1].fragments(), &[]);
+        assert_matches!(
+            &*result,
+            [
+                PathSegment([PathFragment::Literal("users")]),
+                PathSegment([]),
+            ],
+        );
     }
 
     #[test]
@@ -160,9 +164,13 @@ mod test {
         let arena = Arena::new();
         let result = parse(&arena, "/users/{userId}").unwrap();
 
-        assert_eq!(result.len(), 2);
-        assert_eq!(result[0].fragments(), &[PathFragment::Literal("users")]);
-        assert_eq!(result[1].fragments(), &[PathFragment::Param("userId")]);
+        assert_matches!(
+            &*result,
+            [
+                PathSegment([PathFragment::Literal("users")]),
+                PathSegment([PathFragment::Param("userId")]),
+            ],
+        );
     }
 
     #[test]
@@ -170,11 +178,15 @@ mod test {
         let arena = Arena::new();
         let result = parse(&arena, "/api/v1/resources/{resourceId}").unwrap();
 
-        assert_eq!(result.len(), 4);
-        assert_eq!(result[0].fragments(), &[PathFragment::Literal("api")]);
-        assert_eq!(result[1].fragments(), &[PathFragment::Literal("v1")]);
-        assert_eq!(result[2].fragments(), &[PathFragment::Literal("resources")]);
-        assert_eq!(result[3].fragments(), &[PathFragment::Param("resourceId")]);
+        assert_matches!(
+            &*result,
+            [
+                PathSegment([PathFragment::Literal("api")]),
+                PathSegment([PathFragment::Literal("v1")]),
+                PathSegment([PathFragment::Literal("resources")]),
+                PathSegment([PathFragment::Param("resourceId")]),
+            ],
+        );
     }
 
     #[test]
@@ -182,11 +194,15 @@ mod test {
         let arena = Arena::new();
         let result = parse(&arena, "/users/{userId}/posts/{postId}").unwrap();
 
-        assert_eq!(result.len(), 4);
-        assert_eq!(result[0].fragments(), &[PathFragment::Literal("users")]);
-        assert_eq!(result[1].fragments(), &[PathFragment::Param("userId")]);
-        assert_eq!(result[2].fragments(), &[PathFragment::Literal("posts")]);
-        assert_eq!(result[3].fragments(), &[PathFragment::Param("postId")]);
+        assert_matches!(
+            &*result,
+            [
+                PathSegment([PathFragment::Literal("users")]),
+                PathSegment([PathFragment::Param("userId")]),
+                PathSegment([PathFragment::Literal("posts")]),
+                PathSegment([PathFragment::Param("postId")]),
+            ],
+        );
     }
 
     #[test]
@@ -198,19 +214,20 @@ mod test {
         )
         .unwrap();
 
-        assert_eq!(result.len(), 7);
-        assert_eq!(result[0].fragments(), &[PathFragment::Literal("v1")]);
-        assert_eq!(result[1].fragments(), &[PathFragment::Literal("storage")]);
-        assert_eq!(result[2].fragments(), &[PathFragment::Literal("workspace")]);
-        assert_eq!(result[3].fragments(), &[PathFragment::Param("workspace")]);
-        assert_eq!(result[4].fragments(), &[PathFragment::Literal("documents")]);
-        assert_eq!(result[5].fragments(), &[PathFragment::Literal("download")]);
-        assert_eq!(
-            result[6].fragments(),
-            &[
-                PathFragment::Param("documentId"),
-                PathFragment::Literal(".pdf")
-            ]
+        assert_matches!(
+            &*result,
+            [
+                PathSegment([PathFragment::Literal("v1")]),
+                PathSegment([PathFragment::Literal("storage")]),
+                PathSegment([PathFragment::Literal("workspace")]),
+                PathSegment([PathFragment::Param("workspace")]),
+                PathSegment([PathFragment::Literal("documents")]),
+                PathSegment([PathFragment::Literal("download")]),
+                PathSegment([
+                    PathFragment::Param("documentId"),
+                    PathFragment::Literal(".pdf"),
+                ]),
+            ],
         );
     }
 
@@ -223,20 +240,21 @@ mod test {
         )
         .unwrap();
 
-        assert_eq!(result.len(), 7);
-        assert_eq!(result[0].fragments(), &[PathFragment::Literal("v1")]);
-        assert_eq!(result[1].fragments(), &[PathFragment::Literal("storage")]);
-        assert_eq!(result[2].fragments(), &[PathFragment::Literal("workspace")]);
-        assert_eq!(result[3].fragments(), &[PathFragment::Param("workspace")]);
-        assert_eq!(result[4].fragments(), &[PathFragment::Literal("documents")]);
-        assert_eq!(result[5].fragments(), &[PathFragment::Literal("download")]);
-        assert_eq!(
-            result[6].fragments(),
-            &[
-                PathFragment::Literal("report-"),
-                PathFragment::Param("documentId"),
-                PathFragment::Literal(".pdf")
-            ]
+        assert_matches!(
+            &*result,
+            [
+                PathSegment([PathFragment::Literal("v1")]),
+                PathSegment([PathFragment::Literal("storage")]),
+                PathSegment([PathFragment::Literal("workspace")]),
+                PathSegment([PathFragment::Param("workspace")]),
+                PathSegment([PathFragment::Literal("documents")]),
+                PathSegment([PathFragment::Literal("download")]),
+                PathSegment([
+                    PathFragment::Literal("report-"),
+                    PathFragment::Param("documentId"),
+                    PathFragment::Literal(".pdf"),
+                ]),
+            ],
         );
     }
 

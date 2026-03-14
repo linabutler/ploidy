@@ -86,7 +86,6 @@ struct MyView {
 
 - Use semantic names (`'view` for views, `'graph` for graphs) when multiple lifetimes coexist; `'a` is fine for single-lifetime cases.
 - Never elide lifetimes that distinguish borrowed sources.
-- **Deref coercion:** Use `&*vec` for `&[T]`, `&*r` for `&T`, `&**ref_to_box` for `&T` from `&Box<T>`.
 
 ### Data Structures
 
@@ -156,7 +155,7 @@ if f.discriminator() { continue; }
 - **Naming:** `test_<behavior>_<condition>`, grouped with `// MARK:` comments.
 - **No new helper functions.** Inline all fixtures directly. Use existing helpers, don't add new ones without asking.
 - **YAML fixtures:** Always use `Document::from_yaml(indoc::indoc! { ... })` for OpenAPI documents. Never construct `Document` directly.
-- **Assertions:** Use `assert_matches!` from `crate::tests` for pattern matching. Include actual value in `let-else` panic messages: `panic!("expected X; got `{ty:?}`")`.
+- **Assertions:** Prefer one structural pattern match with `assert_matches!` over multi-step match/`let-else` chains. Only use `let-else` when the bound variable is needed for subsequent method calls. Include actual value in `let-else` panic messages: `panic!("expected X; got `{ty:?}`")`.
 - **Throwaway tests:** When behavior is unclear, write a quick test to prove it rather than theorizing. Delete or convert once done.
 
 ---
