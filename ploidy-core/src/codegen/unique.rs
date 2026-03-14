@@ -101,7 +101,7 @@ impl<'a> UniqueNamesScope<'a> {
     /// assert_eq!(scope.uniquify("httpResponse"), "httpResponse3");
     /// ```
     pub fn uniquify<'b>(&mut self, name: &'b str) -> Cow<'b, str> {
-        match self.space.entry(&*self.arena.alloc_slice(
+        match self.space.entry(self.arena.alloc_slice(
             WordSegments::new(name).map(|name| UniCase::new(&*self.arena.alloc_str(name))),
         )) {
             Entry::Occupied(mut entry) => {

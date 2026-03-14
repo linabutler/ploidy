@@ -4,7 +4,7 @@ use itertools::Itertools;
 
 use crate::{
     arena::Arena,
-    ir::{IrSpec, RawGraph, SchemaTypeView, StructFieldName, View},
+    ir::{RawGraph, SchemaTypeView, Spec, StructFieldName, View},
     parse::Document,
     tests::assert_matches,
 };
@@ -34,7 +34,7 @@ fn test_graph_basic_construction() {
     .unwrap();
 
     let arena = Arena::new();
-    let spec = IrSpec::from_doc(&arena, &doc).unwrap();
+    let spec = Spec::from_doc(&arena, &doc).unwrap();
     let graph = RawGraph::new(&arena, &spec).cook();
 
     // Should be able to iterate over schemas.
@@ -72,7 +72,7 @@ fn test_graph_deduplication() {
     .unwrap();
 
     let arena = Arena::new();
-    let spec = IrSpec::from_doc(&arena, &doc).unwrap();
+    let spec = Spec::from_doc(&arena, &doc).unwrap();
     let graph = RawGraph::new(&arena, &spec).cook();
 
     // Should have all 3 schemas, with `Shared` appearing only once.
@@ -104,7 +104,7 @@ fn test_graph_struct_field_edges() {
     .unwrap();
 
     let arena = Arena::new();
-    let spec = IrSpec::from_doc(&arena, &doc).unwrap();
+    let spec = Spec::from_doc(&arena, &doc).unwrap();
     let graph = RawGraph::new(&arena, &spec).cook();
 
     // Both schemas should be present.
@@ -145,7 +145,7 @@ fn test_graph_tagged_variant_edges() {
     .unwrap();
 
     let arena = Arena::new();
-    let spec = IrSpec::from_doc(&arena, &doc).unwrap();
+    let spec = Spec::from_doc(&arena, &doc).unwrap();
     let graph = RawGraph::new(&arena, &spec).cook();
 
     // Should have all schemas.
@@ -181,7 +181,7 @@ fn test_graph_untagged_variant_edges() {
     .unwrap();
 
     let arena = Arena::new();
-    let spec = IrSpec::from_doc(&arena, &doc).unwrap();
+    let spec = Spec::from_doc(&arena, &doc).unwrap();
     let graph = RawGraph::new(&arena, &spec).cook();
 
     // Should have all schemas.
@@ -215,7 +215,7 @@ fn test_graph_array_edge() {
     .unwrap();
 
     let arena = Arena::new();
-    let spec = IrSpec::from_doc(&arena, &doc).unwrap();
+    let spec = Spec::from_doc(&arena, &doc).unwrap();
     let graph = RawGraph::new(&arena, &spec).cook();
 
     // Should have both schemas.
@@ -249,7 +249,7 @@ fn test_graph_map_edge() {
     .unwrap();
 
     let arena = Arena::new();
-    let spec = IrSpec::from_doc(&arena, &doc).unwrap();
+    let spec = Spec::from_doc(&arena, &doc).unwrap();
     let graph = RawGraph::new(&arena, &spec).cook();
 
     // Should have both schemas.
@@ -282,7 +282,7 @@ fn test_graph_nullable_edge() {
     .unwrap();
 
     let arena = Arena::new();
-    let spec = IrSpec::from_doc(&arena, &doc).unwrap();
+    let spec = Spec::from_doc(&arena, &doc).unwrap();
     let graph = RawGraph::new(&arena, &spec).cook();
 
     // Should have both schemas.
@@ -316,7 +316,7 @@ fn test_graph_ref_resolution() {
     .unwrap();
 
     let arena = Arena::new();
-    let spec = IrSpec::from_doc(&arena, &doc).unwrap();
+    let spec = Spec::from_doc(&arena, &doc).unwrap();
     let graph = RawGraph::new(&arena, &spec).cook();
 
     // Should have both `Parent` and `Child` schemas.
@@ -350,7 +350,7 @@ fn test_circular_refs_simple_cycle() {
     .unwrap();
 
     let arena = Arena::new();
-    let spec = IrSpec::from_doc(&arena, &doc).unwrap();
+    let spec = Spec::from_doc(&arena, &doc).unwrap();
     let graph = RawGraph::new(&arena, &spec).cook();
 
     // The field pointing to B should need indirection due to the cycle.
@@ -384,7 +384,7 @@ fn test_circular_refs_self_reference() {
     .unwrap();
 
     let arena = Arena::new();
-    let spec = IrSpec::from_doc(&arena, &doc).unwrap();
+    let spec = Spec::from_doc(&arena, &doc).unwrap();
     let graph = RawGraph::new(&arena, &spec).cook();
 
     // Self-references should be detected as cycles.
@@ -428,7 +428,7 @@ fn test_circular_refs_complex_cycle() {
     .unwrap();
 
     let arena = Arena::new();
-    let spec = IrSpec::from_doc(&arena, &doc).unwrap();
+    let spec = Spec::from_doc(&arena, &doc).unwrap();
     let graph = RawGraph::new(&arena, &spec).cook();
 
     // At least one edge in the cycle should need indirection.
@@ -469,7 +469,7 @@ fn test_circular_refs_no_cycles() {
     .unwrap();
 
     let arena = Arena::new();
-    let spec = IrSpec::from_doc(&arena, &doc).unwrap();
+    let spec = Spec::from_doc(&arena, &doc).unwrap();
     let graph = RawGraph::new(&arena, &spec).cook();
 
     // Tree structure without direct or indirect self-references
@@ -520,7 +520,7 @@ fn test_circular_refs_multiple_sccs() {
     .unwrap();
 
     let arena = Arena::new();
-    let spec = IrSpec::from_doc(&arena, &doc).unwrap();
+    let spec = Spec::from_doc(&arena, &doc).unwrap();
     let graph = RawGraph::new(&arena, &spec).cook();
 
     // Both cycles should be detected.
@@ -574,7 +574,7 @@ fn test_circular_refs_through_containers() {
     .unwrap();
 
     let arena = Arena::new();
-    let spec = IrSpec::from_doc(&arena, &doc).unwrap();
+    let spec = Spec::from_doc(&arena, &doc).unwrap();
     let graph = RawGraph::new(&arena, &spec).cook();
 
     // Cycles through containers should be detected.
@@ -622,7 +622,7 @@ fn test_circular_refs_diamond_no_false_positive() {
     .unwrap();
 
     let arena = Arena::new();
-    let spec = IrSpec::from_doc(&arena, &doc).unwrap();
+    let spec = Spec::from_doc(&arena, &doc).unwrap();
     let graph = RawGraph::new(&arena, &spec).cook();
 
     // Diamond inheritance shouldn't be marked as circular.
@@ -672,7 +672,7 @@ fn test_circular_refs_tarjan_correctness() {
     .unwrap();
 
     let arena = Arena::new();
-    let spec = IrSpec::from_doc(&arena, &doc).unwrap();
+    let spec = Spec::from_doc(&arena, &doc).unwrap();
     let graph = RawGraph::new(&arena, &spec).cook();
 
     // A and B should be in a cycle.
@@ -725,7 +725,7 @@ fn test_needs_indirection_through_nullable() {
     .unwrap();
 
     let arena = Arena::new();
-    let spec = IrSpec::from_doc(&arena, &doc).unwrap();
+    let spec = Spec::from_doc(&arena, &doc).unwrap();
     let graph = RawGraph::new(&arena, &spec).cook();
 
     let a_schema = graph.schemas().find(|s| s.name() == "A").unwrap();
@@ -760,7 +760,7 @@ fn test_needs_indirection_through_array() {
     .unwrap();
 
     let arena = Arena::new();
-    let spec = IrSpec::from_doc(&arena, &doc).unwrap();
+    let spec = Spec::from_doc(&arena, &doc).unwrap();
     let graph = RawGraph::new(&arena, &spec).cook();
 
     let node_schema = graph.schemas().find(|s| s.name() == "Node").unwrap();
@@ -795,7 +795,7 @@ fn test_needs_indirection_through_map() {
     .unwrap();
 
     let arena = Arena::new();
-    let spec = IrSpec::from_doc(&arena, &doc).unwrap();
+    let spec = Spec::from_doc(&arena, &doc).unwrap();
     let graph = RawGraph::new(&arena, &spec).cook();
 
     let node_schema = graph.schemas().find(|s| s.name() == "Node").unwrap();
@@ -835,7 +835,7 @@ fn test_indirect_and_direct_siblings() {
     .unwrap();
 
     let arena = Arena::new();
-    let spec = IrSpec::from_doc(&arena, &doc).unwrap();
+    let spec = Spec::from_doc(&arena, &doc).unwrap();
     let graph = RawGraph::new(&arena, &spec).cook();
 
     let container_schema = graph.schemas().find(|s| s.name() == "Container").unwrap();
@@ -897,7 +897,7 @@ fn test_operations_transitive() {
     .unwrap();
 
     let arena = Arena::new();
-    let spec = IrSpec::from_doc(&arena, &doc).unwrap();
+    let spec = Spec::from_doc(&arena, &doc).unwrap();
     let graph = RawGraph::new(&arena, &spec).cook();
 
     // Both `UserList` and `User` have no `x-resourceId`, and
@@ -957,7 +957,7 @@ fn test_operations_multiple() {
     .unwrap();
 
     let arena = Arena::new();
-    let spec = IrSpec::from_doc(&arena, &doc).unwrap();
+    let spec = Spec::from_doc(&arena, &doc).unwrap();
     let graph = RawGraph::new(&arena, &spec).cook();
 
     // `User` has no `x-resourceId`, and neither operation has `x-resource-name`.
@@ -1040,7 +1040,7 @@ fn test_dependencies_propagation() {
     .unwrap();
 
     let arena = Arena::new();
-    let spec = IrSpec::from_doc(&arena, &doc).unwrap();
+    let spec = Spec::from_doc(&arena, &doc).unwrap();
     let graph = RawGraph::new(&arena, &spec).cook();
 
     // Dependencies are computed transitively through different edge types:
@@ -1161,7 +1161,7 @@ fn test_used_by_propagation() {
     .unwrap();
 
     let arena = Arena::new();
-    let spec = IrSpec::from_doc(&arena, &doc).unwrap();
+    let spec = Spec::from_doc(&arena, &doc).unwrap();
     let graph = RawGraph::new(&arena, &spec).cook();
 
     // Propagation through cycles: `Cat` and `Pet` are in a cycle.
@@ -1238,7 +1238,7 @@ fn test_depends_on_simple_chain() {
     .unwrap();
 
     let arena = Arena::new();
-    let spec = IrSpec::from_doc(&arena, &doc).unwrap();
+    let spec = Spec::from_doc(&arena, &doc).unwrap();
     let graph = RawGraph::new(&arena, &spec).cook();
 
     let a = graph.schemas().find(|s| s.name() == "A").unwrap();
@@ -1282,7 +1282,7 @@ fn test_depends_on_cycle() {
     .unwrap();
 
     let arena = Arena::new();
-    let spec = IrSpec::from_doc(&arena, &doc).unwrap();
+    let spec = Spec::from_doc(&arena, &doc).unwrap();
     let graph = RawGraph::new(&arena, &spec).cook();
 
     let a = graph.schemas().find(|s| s.name() == "A").unwrap();
@@ -1322,7 +1322,7 @@ fn test_depends_on_independent() {
     .unwrap();
 
     let arena = Arena::new();
-    let spec = IrSpec::from_doc(&arena, &doc).unwrap();
+    let spec = Spec::from_doc(&arena, &doc).unwrap();
     let graph = RawGraph::new(&arena, &spec).cook();
 
     let a = graph.schemas().find(|s| s.name() == "A").unwrap();
@@ -1364,7 +1364,7 @@ fn test_dependents_simple_chain() {
     .unwrap();
 
     let arena = Arena::new();
-    let spec = IrSpec::from_doc(&arena, &doc).unwrap();
+    let spec = Spec::from_doc(&arena, &doc).unwrap();
     let graph = RawGraph::new(&arena, &spec).cook();
 
     let c = graph.schemas().find(|s| s.name() == "C").unwrap();
@@ -1426,7 +1426,7 @@ fn test_dependents_multiple_dependents() {
     .unwrap();
 
     let arena = Arena::new();
-    let spec = IrSpec::from_doc(&arena, &doc).unwrap();
+    let spec = Spec::from_doc(&arena, &doc).unwrap();
     let graph = RawGraph::new(&arena, &spec).cook();
 
     let c = graph.schemas().find(|s| s.name() == "C").unwrap();
@@ -1469,7 +1469,7 @@ fn test_dependents_cycle() {
     .unwrap();
 
     let arena = Arena::new();
-    let spec = IrSpec::from_doc(&arena, &doc).unwrap();
+    let spec = Spec::from_doc(&arena, &doc).unwrap();
     let graph = RawGraph::new(&arena, &spec).cook();
 
     // In a cycle, all nodes transitively depend on each other,
@@ -1526,7 +1526,7 @@ fn test_dependents_is_inverse_of_dependencies() {
     .unwrap();
 
     let arena = Arena::new();
-    let spec = IrSpec::from_doc(&arena, &doc).unwrap();
+    let spec = Spec::from_doc(&arena, &doc).unwrap();
     let graph = RawGraph::new(&arena, &spec).cook();
 
     let container = graph.schemas().find(|s| s.name() == "Container").unwrap();
@@ -1586,7 +1586,7 @@ fn test_dependencies_diamond() {
     .unwrap();
 
     let arena = Arena::new();
-    let spec = IrSpec::from_doc(&arena, &doc).unwrap();
+    let spec = Spec::from_doc(&arena, &doc).unwrap();
     let graph = RawGraph::new(&arena, &spec).cook();
 
     let a = graph.schemas().find(|s| s.name() == "A").unwrap();
@@ -1641,7 +1641,7 @@ fn test_operation_with_no_types() {
     .unwrap();
 
     let arena = Arena::new();
-    let spec = IrSpec::from_doc(&arena, &doc).unwrap();
+    let spec = Spec::from_doc(&arena, &doc).unwrap();
     let graph = RawGraph::new(&arena, &spec).cook();
 
     let op = graph
@@ -1699,7 +1699,7 @@ fn test_parents_returns_immediate_parents() {
     .unwrap();
 
     let arena = Arena::new();
-    let spec = IrSpec::from_doc(&arena, &doc).unwrap();
+    let spec = Spec::from_doc(&arena, &doc).unwrap();
     let graph = RawGraph::new(&arena, &spec).cook();
 
     let user = graph.schemas().find(|s| s.name() == "User").unwrap();
@@ -1751,7 +1751,7 @@ fn test_all_of_inheritance_with_fields() {
     .unwrap();
 
     let arena = Arena::new();
-    let spec = IrSpec::from_doc(&arena, &doc).unwrap();
+    let spec = Spec::from_doc(&arena, &doc).unwrap();
     let graph = RawGraph::new(&arena, &spec).cook();
 
     let child = graph.schemas().find(|s| s.name() == "Child").unwrap();
@@ -1832,7 +1832,7 @@ fn test_circular_refs_excludes_inherits_edges() {
     .unwrap();
 
     let arena = Arena::new();
-    let spec = IrSpec::from_doc(&arena, &doc).unwrap();
+    let spec = Spec::from_doc(&arena, &doc).unwrap();
     let graph = RawGraph::new(&arena, &spec).cook();
 
     let parent = graph.schemas().find(|s| s.name() == "Parent").unwrap();
@@ -1885,7 +1885,7 @@ fn test_multiple_parents() {
     .unwrap();
 
     let arena = Arena::new();
-    let spec = IrSpec::from_doc(&arena, &doc).unwrap();
+    let spec = Spec::from_doc(&arena, &doc).unwrap();
     let graph = RawGraph::new(&arena, &spec).cook();
 
     let combined = graph.schemas().find(|s| s.name() == "Combined").unwrap();
@@ -1959,7 +1959,7 @@ fn test_circular_all_of_terminates() {
     .unwrap();
 
     let arena = Arena::new();
-    let spec = IrSpec::from_doc(&arena, &doc).unwrap();
+    let spec = Spec::from_doc(&arena, &doc).unwrap();
     let graph = RawGraph::new(&arena, &spec).cook();
 
     let a = graph.schemas().find(|s| s.name() == "A").unwrap();

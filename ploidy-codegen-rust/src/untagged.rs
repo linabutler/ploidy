@@ -77,7 +77,7 @@ mod tests {
 
     use ploidy_core::{
         arena::Arena,
-        ir::{IrSpec, RawGraph, SchemaTypeView},
+        ir::{RawGraph, SchemaTypeView, Spec},
         parse::Document,
     };
     use pretty_assertions::assert_eq;
@@ -104,7 +104,7 @@ mod tests {
         .unwrap();
 
         let arena = Arena::new();
-        let spec = IrSpec::from_doc(&arena, &doc).unwrap();
+        let spec = Spec::from_doc(&arena, &doc).unwrap();
         let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
         let schema = graph.schemas().find(|s| s.name() == "StringOrInt");
@@ -155,7 +155,7 @@ mod tests {
         .unwrap();
 
         let arena = Arena::new();
-        let spec = IrSpec::from_doc(&arena, &doc).unwrap();
+        let spec = Spec::from_doc(&arena, &doc).unwrap();
         let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
         let schema = graph.schemas().find(|s| s.name() == "Animal");
@@ -198,7 +198,7 @@ mod tests {
         .unwrap();
 
         let arena = Arena::new();
-        let spec = IrSpec::from_doc(&arena, &doc).unwrap();
+        let spec = Spec::from_doc(&arena, &doc).unwrap();
         let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
         let schema = graph.schemas().find(|s| s.name() == "StringOrInt");
@@ -241,7 +241,7 @@ mod tests {
         .unwrap();
 
         let arena = Arena::new();
-        let spec = IrSpec::from_doc(&arena, &doc).unwrap();
+        let spec = Spec::from_doc(&arena, &doc).unwrap();
         let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
         let schema = graph.schemas().find(|s| s.name() == "StringOrFloat");
@@ -283,7 +283,7 @@ mod tests {
         .unwrap();
 
         let arena = Arena::new();
-        let spec = IrSpec::from_doc(&arena, &doc).unwrap();
+        let spec = Spec::from_doc(&arena, &doc).unwrap();
         let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
         let schema = graph.schemas().find(|s| s.name() == "StringOrDouble");

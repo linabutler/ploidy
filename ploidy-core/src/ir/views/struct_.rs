@@ -6,19 +6,19 @@ use petgraph::{
 use rustc_hash::FxHashSet;
 
 use crate::ir::{
-    CookedInlineType,
-    graph::{CookedGraph, CookedGraphNode, EdgeKind},
-    types::{CookedSchemaType, CookedStruct, CookedStructField, StructFieldName},
+    GraphInlineType,
+    graph::{CookedGraph, EdgeKind},
+    types::{GraphSchemaType, GraphStruct, GraphStructField, GraphType, StructFieldName},
 };
 
 use super::{ViewNode, ir::TypeView};
 
-/// A graph-aware view of a [`Struct`][CookedStruct].
+/// A graph-aware view of a [struct type][GraphStruct].
 #[derive(Debug)]
 pub struct StructView<'a> {
     cooked: &'a CookedGraph<'a>,
     index: NodeIndex<usize>,
-    ty: &'a CookedStruct<'a>,
+    ty: GraphStruct<'a>,
 }
 
 impl<'a> StructView<'a> {
@@ -26,7 +26,7 @@ impl<'a> StructView<'a> {
     pub(in crate::ir) fn new(
         cooked: &'a CookedGraph<'a>,
         index: NodeIndex<usize>,
-        ty: &'a CookedStruct<'a>,
+        ty: GraphStruct<'a>,
     ) -> Self {
         Self { cooked, index, ty }
     }
@@ -50,9 +50,9 @@ impl<'a> StructView<'a> {
         let mut dfs = DfsPostOrder::new(&inherits, self.index);
         let ancestors = std::iter::from_fn(move || dfs.next(&inherits))
             .filter(move |&index| index != self.index)
-            .filter_map(|index| match &self.cooked.graph[index] {
-                CookedGraphNode::Schema(CookedSchemaType::Struct(_, s))
-                | CookedGraphNode::Inline(CookedInlineType::Struct(_, s)) => Some(s),
+            .filter_map(|index| match self.cooked.graph[index] {
+                GraphType::Schema(GraphSchemaType::Struct(_, s))
+                | GraphType::Inline(GraphInlineType::Struct(_, s)) => Some(s),
                 _ => None,
             });
 
@@ -109,11 +109,11 @@ impl<'a> ViewNode<'a> for StructView<'a> {
     }
 }
 
-/// A graph-aware view of a [`StructField`][CookedStructField].
+/// A graph-aware view of a [struct field][GraphStructField].
 #[derive(Debug)]
 pub struct StructFieldView<'view, 'a> {
     parent: &'view StructView<'a>,
-    field: &'a CookedStructField<'a>,
+    field: &'a GraphStructField<'a>,
     inherited: bool,
 }
 
@@ -153,8 +153,8 @@ impl<'view, 'a> StructFieldView<'view, 'a> {
             .graph
             .neighbors_directed(self.parent.index, Direction::Incoming)
             .filter_map(|index| match self.parent.cooked.graph[index] {
-                CookedGraphNode::Schema(CookedSchemaType::Tagged(_, tagged))
-                | CookedGraphNode::Inline(CookedInlineType::Tagged(_, tagged)) => Some(tagged),
+                GraphType::Schema(GraphSchemaType::Tagged(_, tagged))
+                | GraphType::Inline(GraphInlineType::Tagged(_, tagged)) => Some(tagged),
                 _ => None,
             })
             .any(|neighbor| neighbor.tag == name)

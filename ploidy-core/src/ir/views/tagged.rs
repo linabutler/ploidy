@@ -2,17 +2,17 @@ use petgraph::graph::NodeIndex;
 
 use crate::ir::{
     graph::CookedGraph,
-    types::{CookedTagged, CookedTaggedVariant},
+    types::{GraphTagged, GraphTaggedVariant},
 };
 
 use super::{ViewNode, ir::TypeView};
 
-/// A graph-aware view of a [`Tagged`][CookedTagged] union.
+/// A graph-aware view of a [tagged union type][GraphTagged].
 #[derive(Debug)]
 pub struct TaggedView<'a> {
     cooked: &'a CookedGraph<'a>,
     index: NodeIndex<usize>,
-    ty: &'a CookedTagged<'a>,
+    ty: GraphTagged<'a>,
 }
 
 impl<'a> TaggedView<'a> {
@@ -20,7 +20,7 @@ impl<'a> TaggedView<'a> {
     pub(in crate::ir) fn new(
         cooked: &'a CookedGraph<'a>,
         index: NodeIndex<usize>,
-        ty: &'a CookedTagged<'a>,
+        ty: GraphTagged<'a>,
     ) -> Self {
         Self { cooked, index, ty }
     }
@@ -57,12 +57,12 @@ impl<'a> ViewNode<'a> for TaggedView<'a> {
     }
 }
 
-/// A graph-aware view of a [`TaggedVariant`][CookedTaggedVariant].
+/// A graph-aware view of a [tagged union variant][GraphTaggedVariant].
 #[derive(Debug)]
 pub struct TaggedVariantView<'a> {
     cooked: &'a CookedGraph<'a>,
     index: NodeIndex<usize>,
-    variant: &'a CookedTaggedVariant<'a>,
+    variant: &'a GraphTaggedVariant<'a>,
 }
 
 impl<'a> TaggedVariantView<'a> {
@@ -70,7 +70,7 @@ impl<'a> TaggedVariantView<'a> {
     fn new(
         cooked: &'a CookedGraph<'a>,
         index: NodeIndex<usize>,
-        variant: &'a CookedTaggedVariant<'a>,
+        variant: &'a GraphTaggedVariant<'a>,
     ) -> Self {
         Self {
             cooked,

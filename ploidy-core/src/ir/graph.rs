@@ -1,12 +1,10 @@
 use std::{
     any::{Any, TypeId},
-    borrow::Cow,
     collections::VecDeque,
     fmt::Debug,
 };
 
 use atomic_refcell::AtomicRefCell;
-use by_address::ByAddress;
 use enum_map::{Enum, EnumMap, enum_map};
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
@@ -24,27 +22,26 @@ use rustc_hash::{FxHashMap, FxHashSet};
 use crate::{arena::Arena, parse::Info};
 
 use super::{
-    cooker::Cooker,
-    spec::IrSpec,
+    spec::{ResolvedSpecType, Spec},
     types::{
-        CookedInlineType, CookedOperation, CookedSchemaType, InlineTypePath, InlineTypePathRoot,
-        InlineTypePathSegment, RawInlineType, RawSchemaType, RawStruct, RawTagged,
-        RawTaggedVariant, RawType, RawUntaggedVariant, SchemaTypeInfo, StructFieldName,
-        shape::{InlineType, SchemaType},
+        GraphInlineType, GraphOperation, GraphSchemaType, GraphStruct, GraphTagged,
+        GraphTaggedVariant, GraphType, InlineTypePath, InlineTypePathRoot, InlineTypePathSegment,
+        SchemaTypeInfo, SpecInlineType, SpecSchemaType, SpecType, SpecUntaggedVariant,
+        StructFieldName, TypeMapper,
     },
     views::{operation::OperationView, primitive::PrimitiveView, schema::SchemaTypeView},
 };
 
 /// The mutable, sparse graph used for transformations.
-type RawDiGraph<'a> = StableDiGraph<RawGraphNode<'a>, EdgeKind, usize>;
+type RawDiGraph<'a> = StableDiGraph<GraphType<'a>, EdgeKind, usize>;
 
 /// The immutable, dense graph used for code generation.
-type CookedDiGraph<'a> = DiGraph<CookedGraphNode<'a>, EdgeKind, usize>;
+type CookedDiGraph<'a> = DiGraph<GraphType<'a>, EdgeKind, usize>;
 
-/// A mutable intermediate dependency graph of all the types in an [`IrSpec`],
+/// A mutable intermediate dependency graph of all the types in a [`Spec`],
 /// backed by a sparse [`StableDiGraph`].
 ///
-/// This graph is constructed directly from an [`IrSpec`], and represents
+/// This graph is constructed directly from a [`Spec`], and represents
 /// type relationships as they exist in the spec. Transformations like
 /// [`inline_tagged_variants`][Self::inline_tagged_variants] rewrite this graph
 /// in place.
@@ -54,28 +51,26 @@ type CookedDiGraph<'a> = DiGraph<CookedGraphNode<'a>, EdgeKind, usize>;
 #[derive(Debug)]
 pub struct RawGraph<'a> {
     arena: &'a Arena,
-    spec: &'a IrSpec<'a>,
+    spec: &'a Spec<'a>,
     graph: RawDiGraph<'a>,
-    indices: FxHashMap<RawGraphNode<'a>, NodeIndex<usize>>,
-    /// Maps schema names to their graph indices.
-    schemas: FxHashMap<&'a str, NodeIndex<usize>>,
+    ops: &'a [&'a GraphOperation<'a>],
 }
 
 impl<'a> RawGraph<'a> {
-    pub fn new(arena: &'a Arena, spec: &'a IrSpec<'a>) -> Self {
-        let mut graph = RawDiGraph::default();
-        let mut indices = FxHashMap::default();
-        let mut schemas = FxHashMap::default();
-
+    pub fn new(arena: &'a Arena, spec: &'a Spec<'a>) -> Self {
         // All roots (named schemas, parameters, request and response bodies),
         // and all the types within them (inline schemas and primitives).
-        let tys = IrTypeVisitor::new(
+        let tys = SpecTypeVisitor::new(
             spec.schemas
                 .values()
                 .chain(spec.operations.iter().flat_map(|op| op.types().copied())),
         );
 
-        // Add nodes for all types, and edges for references between them.
+        // Build the nodes and edges.
+        let mut indices = FxHashMap::default();
+        let mut schemas = FxHashMap::default();
+        let mut nodes = vec![];
+        let mut edges = vec![];
         for (parent, kind, child) in tys {
             use std::collections::hash_map::Entry;
             let source = spec.resolve(child);
@@ -85,12 +80,13 @@ impl<'a> RawGraph<'a> {
                     // We might see the same schema multiple times if it's
                     // referenced multiple times in the spec. Only add
                     // a new node for the schema if we haven't seen it before.
-                    let index = graph.add_node(*entry.key());
+                    let index = NodeIndex::new(nodes.len());
+                    nodes.push(*entry.key());
                     entry.insert(index)
                 }
             };
             // Track schema names for later lookup.
-            if let GraphNode::Schema(ty) = source {
+            if let ResolvedSpecType::Schema(ty) = source {
                 schemas.entry(ty.name()).or_insert(to);
             }
             if let Some(parent) = parent {
@@ -98,23 +94,46 @@ impl<'a> RawGraph<'a> {
                 let &mut from = match indices.entry(destination) {
                     Entry::Occupied(entry) => entry.into_mut(),
                     Entry::Vacant(entry) => {
-                        let index = graph.add_node(*entry.key());
+                        let index = NodeIndex::new(nodes.len());
+                        nodes.push(*entry.key());
                         entry.insert(index)
                     }
                 };
-                if let GraphNode::Schema(ty) = destination {
+                if let ResolvedSpecType::Schema(ty) = destination {
                     schemas.entry(ty.name()).or_insert(from);
                 }
-                graph.add_edge(from, to, kind);
+                edges.push((from, to, kind));
             }
         }
+
+        // Construct a graph from the nodes and edges,
+        // mapping schema type references to graph indices.
+        let mut graph = RawDiGraph::with_capacity(nodes.len(), edges.len());
+        let mapper = TypeMapper::new(arena, |ty: &SpecType<'_>| match ty {
+            SpecType::Schema(s) => indices[&ResolvedSpecType::Schema(s)],
+            SpecType::Inline(i) => indices[&ResolvedSpecType::Inline(i)],
+            SpecType::Ref(r) => schemas[r.name()],
+        });
+        for node in nodes {
+            let mapped = match node {
+                ResolvedSpecType::Schema(ty) => GraphType::Schema(mapper.schema(ty)),
+                ResolvedSpecType::Inline(ty) => GraphType::Inline(mapper.inline(ty)),
+            };
+            let index = graph.add_node(mapped);
+            debug_assert_eq!(index, indices[&node]);
+        }
+        for (from, to, kind) in edges {
+            graph.add_edge(from, to, kind);
+        }
+
+        // Map schema type references in operations.
+        let ops = arena.alloc_slice_exact(spec.operations.iter().map(|op| mapper.operation(op)));
 
         Self {
             arena,
             spec,
             graph,
-            indices,
-            schemas,
+            ops,
         }
     }
 
@@ -141,13 +160,16 @@ impl<'a> RawGraph<'a> {
         struct TaggedPlan<'a> {
             tagged_index: NodeIndex<usize>,
             info: SchemaTypeInfo<'a>,
-            modified_tagged: RawTagged<'a>,
+            tagged: GraphTagged<'a>,
             inlines: Vec<VariantInline<'a>>,
         }
         struct VariantInline<'a> {
-            ty: &'a RawType<'a>,
+            at: usize,
+            node: GraphType<'a>,
             variant_index: NodeIndex<usize>,
-            parent_indices: Vec<NodeIndex<usize>>,
+            parent_indices: &'a [NodeIndex<usize>],
+            name: &'a str,
+            aliases: &'a [&'a str],
         }
 
         // Compute the set of types used (as query params, request and response
@@ -157,14 +179,10 @@ impl<'a> RawGraph<'a> {
         // _and_ an operation wouldn't be inlined, causing the Rust generator to
         // incorrectly exclude the tag field from the struct.
         let used_by_ops: FixedBitSet = self
-            .spec
-            .operations
+            .ops
             .iter()
             .flat_map(|op| op.types())
-            .filter_map(|ty| {
-                let node = self.resolve(ty);
-                self.indices.get(&node).map(|node| node.index())
-            })
+            .map(|node| node.index())
             .collect();
 
         // Collect all inlining decisions before mutating the graph,
@@ -173,21 +191,19 @@ impl<'a> RawGraph<'a> {
             .graph
             .node_indices()
             .filter_map(|index| {
-                let RawGraphNode::Schema(RawSchemaType::Tagged(info, tagged)) = self.graph[index]
+                let GraphType::Schema(GraphSchemaType::Tagged(info, tagged)) = self.graph[index]
                 else {
                     return None;
                 };
-                let mut new_variants = Cow::Borrowed(tagged.variants);
                 let mut inlines = vec![];
 
                 for (at, variant) in tagged.variants.iter().enumerate() {
-                    let variant_node = self.resolve(variant.ty);
-                    let RawGraphNode::Schema(RawSchemaType::Struct(variant_info, variant_struct)) =
-                        variant_node
+                    let variant_index = variant.ty;
+                    let GraphType::Schema(GraphSchemaType::Struct(variant_info, variant_struct)) =
+                        self.graph[variant_index]
                     else {
                         continue;
                     };
-                    let variant_index = self.indices[&variant_node];
 
                     // A struct variant only needs inlining if it has multiple
                     // distinct uses. Skip if (1) no operation uses the struct,
@@ -199,7 +215,7 @@ impl<'a> RawGraph<'a> {
                             self.graph
                                 .neighbors_directed(variant_index, Direction::Incoming)
                                 .find_map(|neighbor| match self.graph[neighbor] {
-                                    RawGraphNode::Schema(RawSchemaType::Tagged(_, t)) => Some(t),
+                                    GraphType::Schema(GraphSchemaType::Tagged(_, t)) => Some(t),
                                     _ => None,
                                 })
                         }) else {
@@ -214,7 +230,7 @@ impl<'a> RawGraph<'a> {
                             .all(|neighbor| {
                                 matches!(
                                     self.graph[neighbor],
-                                    RawGraphNode::Schema(RawSchemaType::Tagged(_, t))
+                                    GraphType::Schema(GraphSchemaType::Tagged(_, t))
                                         if t.tag == first.tag,
                                 )
                             });
@@ -233,8 +249,8 @@ impl<'a> RawGraph<'a> {
                         let mut dfs = DfsPostOrder::new(&inherits, variant_index);
                         std::iter::from_fn(|| dfs.next(&inherits))
                             .flat_map(|ancestor| match self.graph[ancestor] {
-                                RawGraphNode::Schema(RawSchemaType::Struct(_, s))
-                                | RawGraphNode::Inline(RawInlineType::Struct(_, s)) => s.fields,
+                                GraphType::Schema(GraphSchemaType::Struct(_, s))
+                                | GraphType::Inline(GraphInlineType::Struct(_, s)) => s.fields,
                                 _ => &[],
                             })
                             .any(|f| {
@@ -249,54 +265,37 @@ impl<'a> RawGraph<'a> {
 
                     // Build our new inline type, with the same attributes
                     // as the schema type, but a distinct inline type path.
-                    let ty: &_ = self.arena.alloc(RawType::Inline(RawInlineType::Struct(
+                    let node = GraphType::Inline(GraphInlineType::Struct(
                         InlineTypePath {
                             root: InlineTypePathRoot::Type(info.name),
                             segments: self.arena.alloc_slice_copy(&[
                                 InlineTypePathSegment::TaggedVariant(variant_info.name),
                             ]),
                         },
-                        RawStruct {
+                        GraphStruct {
                             description: variant_struct.description,
                             fields: variant_struct.fields,
                             parents: variant_struct.parents,
                         },
-                    )));
-
-                    let parent_indices = variant_struct
-                        .parents
-                        .iter()
-                        .map(|parent| {
-                            let parent_node = self.resolve(parent);
-                            self.indices[&parent_node]
-                        })
-                        .collect_vec();
+                    ));
 
                     inlines.push(VariantInline {
-                        ty,
+                        at,
+                        node,
                         variant_index,
-                        parent_indices,
-                    });
-
-                    new_variants.to_mut()[at] = RawTaggedVariant {
+                        parent_indices: variant_struct.parents,
                         name: variant.name,
                         aliases: variant.aliases,
-                        ty,
-                    };
+                    });
                 }
-                if new_variants == tagged.variants {
-                    // No variants to rewrite.
+                if inlines.is_empty() {
                     return None;
                 }
 
                 Some(TaggedPlan {
                     tagged_index: index,
-                    info: *info,
-                    modified_tagged: RawTagged {
-                        description: tagged.description,
-                        tag: tagged.tag,
-                        variants: self.arena.alloc_slice_copy(&new_variants),
-                    },
+                    info,
+                    tagged,
                     inlines,
                 })
             })
@@ -304,19 +303,25 @@ impl<'a> RawGraph<'a> {
 
         // Apply the plans to the graph.
         for plan in plans {
+            let mut new_variants = plan.tagged.variants.to_vec();
+
             // Add nodes for the inlined types, and connect them to
             // the original schema variants, so that they'll inherit
             // the same transitive dependencies and SCC membership.
             for entry in &plan.inlines {
-                let node = self.resolve(entry.ty);
-                let node_index = self.graph.add_node(node);
-                self.indices.insert(node, node_index);
+                let node_index = self.graph.add_node(entry.node);
                 self.graph
                     .add_edge(node_index, entry.variant_index, EdgeKind::Reference);
-                for &parent_index in &entry.parent_indices {
+                for &parent_index in entry.parent_indices {
                     self.graph
                         .add_edge(node_index, parent_index, EdgeKind::Inherits);
                 }
+
+                new_variants[entry.at] = GraphTaggedVariant {
+                    name: entry.name,
+                    aliases: entry.aliases,
+                    ty: node_index,
+                };
             }
 
             // Rewrite reference edges from the tagged union
@@ -330,21 +335,19 @@ impl<'a> RawGraph<'a> {
             for edge_id in edges_to_remove {
                 self.graph.remove_edge(edge_id);
             }
-            for variant in plan.modified_tagged.variants {
-                let variant_node = self.resolve(variant.ty);
-                let variant_index = self.indices[&variant_node];
+            for variant in &new_variants {
                 self.graph
-                    .add_edge(plan.tagged_index, variant_index, EdgeKind::Reference);
+                    .add_edge(plan.tagged_index, variant.ty, EdgeKind::Reference);
             }
 
-            // ...And replace the node for the tagged union itself.
-            let new_node = RawGraphNode::Schema(
-                self.arena
-                    .alloc(RawSchemaType::Tagged(plan.info, plan.modified_tagged)),
-            );
-            let old_node = std::mem::replace(&mut self.graph[plan.tagged_index], new_node);
-            self.indices.remove(&old_node);
-            self.indices.insert(new_node, plan.tagged_index);
+            // Replace the node for the tagged union itself.
+            let modified_tagged = GraphTagged {
+                description: plan.tagged.description,
+                tag: plan.tagged.tag,
+                variants: self.arena.alloc_slice_copy(&new_variants),
+            };
+            self.graph[plan.tagged_index] =
+                GraphType::Schema(GraphSchemaType::Tagged(plan.info, modified_tagged));
         }
 
         self
@@ -355,20 +358,9 @@ impl<'a> RawGraph<'a> {
     pub fn cook(&self) -> CookedGraph<'a> {
         CookedGraph::new(self)
     }
-
-    /// Resolves an [`RawType`] to a [`RawGraphNode`], following
-    /// [`RawType::Ref`]s through the spec.
-    #[inline]
-    fn resolve(&self, ty: &'a RawType<'a>) -> RawGraphNode<'a> {
-        match ty {
-            RawType::Schema(ty) => RawGraphNode::Schema(ty),
-            RawType::Inline(ty) => RawGraphNode::Inline(ty),
-            RawType::Ref(r) => self.graph[self.schemas[r.name()]],
-        }
-    }
 }
 
-/// The final dependency graph of all the types in an [`IrSpec`],
+/// The final dependency graph of all the types in a [`Spec`],
 /// backed by a dense [`DiGraph`].
 ///
 /// This graph has all transformations applied, and is ready for
@@ -377,7 +369,7 @@ impl<'a> RawGraph<'a> {
 pub struct CookedGraph<'a> {
     pub(super) graph: CookedDiGraph<'a>,
     info: &'a Info,
-    ops: &'a [&'a CookedOperation<'a>],
+    ops: &'a [&'a GraphOperation<'a>],
     /// Additional metadata for each node.
     pub(super) metadata: CookedGraphMetadata<'a>,
 }
@@ -388,34 +380,30 @@ impl<'a> CookedGraph<'a> {
         let indices: FxHashMap<_, _> = raw
             .graph
             .node_indices()
-            .zip(0..)
-            .map(|(raw, cooked)| (raw, NodeIndex::new(cooked)))
+            .enumerate()
+            .map(|(cooked, raw)| (raw, NodeIndex::new(cooked)))
             .collect();
 
-        // Cook each node, translating raw types to their
-        // assigned cooked indices.
-        let cooker = Cooker::new(raw.arena, |ty| {
-            let raw = match ty {
-                RawType::Schema(s) => raw.indices[&RawGraphNode::Schema(s)],
-                RawType::Inline(i) => raw.indices[&RawGraphNode::Inline(i)],
-                RawType::Ref(r) => raw.schemas[r.name()],
-            };
-            indices[&raw]
-        });
+        // Map sparse graph indices to dense cooked indices.
+        let mapper = TypeMapper::new(raw.arena, |index| indices[&index]);
 
         // Build a dense graph.
         let mut graph = CookedDiGraph::with_capacity(indices.len(), raw.graph.edge_count());
         for index in raw.graph.node_indices() {
             let node = raw.graph[index];
-            let cooked = graph.add_node(cooker.node(node));
-            assert_eq!(indices[&index], cooked);
+            let mapped = match node {
+                GraphType::Schema(ty) => GraphType::Schema(mapper.schema(&ty)),
+                GraphType::Inline(ty) => GraphType::Inline(mapper.inline(&ty)),
+            };
+            let cooked = graph.add_node(mapped);
+            debug_assert_eq!(indices[&index], cooked);
         }
 
         // Add edges, preserving original insertion order.
         for index in raw.graph.node_indices() {
             let from = indices[&index];
-            // `RawDiGraph::edges` yields edges in reverse insertion order;
-            // collect and reverse to preserve the original order.
+            // `RawDiGraph::edges` yields edges in reverse insertion
+            // order; collect and reverse to preserve the original order.
             let edges = raw
                 .graph
                 .edges(index)
@@ -451,15 +439,15 @@ impl<'a> CookedGraph<'a> {
                 operations: FxHashMap::default(),
             };
 
-            // Cook each operation.
-            let operations: &_ = raw
+            // Remap schema type references in operations.
+            let ops: &_ = raw
                 .arena
-                .alloc_slice_exact(raw.spec.operations.iter().map(|op| cooker.operation(op)));
+                .alloc_slice_exact(raw.ops.iter().map(|&op| mapper.operation(op)));
 
             // Precompute the set of type indices that each operation
             // references directly.
-            for &op in operations {
-                metadata.operations.entry(ByAddress(op)).or_default().types =
+            for &&op in ops {
+                metadata.operations.entry(op).or_default().types =
                     op.types().map(|node| node.index()).collect();
             }
 
@@ -506,8 +494,8 @@ impl<'a> CookedGraph<'a> {
 
             // Backward propagation: propagate each operation to all the
             // types that it uses, directly and transitively.
-            for &op in operations {
-                let meta = &metadata.operations[&ByAddress(op)];
+            for &&op in ops {
+                let meta = &metadata.operations[&op];
 
                 // Collect all the types that this operation depends on.
                 let mut transitive_deps = FixedBitSet::with_capacity(graph.node_count());
@@ -518,11 +506,11 @@ impl<'a> CookedGraph<'a> {
 
                 // Mark each type as being used by this operation.
                 for node in transitive_deps.ones() {
-                    metadata.schemas[node].used_by.insert(ByAddress(op));
+                    metadata.schemas[node].used_by.insert(op);
                 }
             }
 
-            (metadata, operations)
+            (metadata, ops)
         };
 
         Self {
@@ -546,7 +534,7 @@ impl<'a> CookedGraph<'a> {
         self.graph
             .node_indices()
             .filter_map(|index| match self.graph[index] {
-                CookedGraphNode::Schema(ty) => Some(SchemaTypeView::new(self, index, ty)),
+                GraphType::Schema(ty) => Some(SchemaTypeView::new(self, index, ty)),
                 _ => None,
             })
     }
@@ -557,9 +545,9 @@ impl<'a> CookedGraph<'a> {
         self.graph
             .node_indices()
             .filter_map(|index| match self.graph[index] {
-                CookedGraphNode::Schema(CookedSchemaType::Primitive(_, p))
-                | CookedGraphNode::Inline(CookedInlineType::Primitive(_, p)) => {
-                    Some(PrimitiveView::new(self, index, *p))
+                GraphType::Schema(GraphSchemaType::Primitive(_, p))
+                | GraphType::Inline(GraphInlineType::Primitive(_, p)) => {
+                    Some(PrimitiveView::new(self, index, p))
                 }
                 _ => None,
             })
@@ -571,24 +559,6 @@ impl<'a> CookedGraph<'a> {
         self.ops.iter().map(move |&op| OperationView::new(self, op))
     }
 }
-
-/// A node in the type graph.
-///
-/// The derived [`Hash`][std::hash::Hash] and [`Eq`] implementations
-/// work on the underlying values, so structurally identical types
-/// will be equal. This is important: all types in an [`IrSpec`] are
-/// distinct in memory, but can refer to the same logical type.
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-pub enum GraphNode<'a, Ty> {
-    Schema(&'a SchemaType<'a, Ty>),
-    Inline(&'a InlineType<'a, Ty>),
-}
-
-/// A node in a [`RawGraph`].
-pub type RawGraphNode<'a> = GraphNode<'a, &'a RawType<'a>>;
-
-/// A node in a [`CookedGraph`].
-pub type CookedGraphNode<'a> = GraphNode<'a, NodeIndex<usize>>;
 
 /// An edge between two types in the type graph.
 #[derive(Clone, Copy, Debug, Enum, Eq, Hash, PartialEq)]
@@ -606,7 +576,7 @@ pub struct CookedGraphMetadata<'a> {
     /// Nodes in the same SCC form a cycle.
     pub scc_indices: Vec<usize>,
     pub schemas: Vec<GraphNodeMeta<'a>>,
-    pub operations: FxHashMap<ByAddress<&'a CookedOperation<'a>>, GraphOperationMeta>,
+    pub operations: FxHashMap<GraphOperation<'a>, GraphOperationMeta>,
 }
 
 /// Precomputed metadata for an operation that references
@@ -622,7 +592,7 @@ pub struct GraphOperationMeta {
 #[derive(Default)]
 pub(super) struct GraphNodeMeta<'a> {
     /// Operations that use this type.
-    pub used_by: FxHashSet<ByAddress<&'a CookedOperation<'a>>>,
+    pub used_by: FxHashSet<GraphOperation<'a>>,
     /// Indices of other types that this type transitively depends on.
     pub dependencies: FixedBitSet,
     /// Indices of other types that transitively depend on this type.
@@ -641,16 +611,16 @@ impl Debug for GraphNodeMeta<'_> {
     }
 }
 
-/// Visits all the types and references contained within a type.
+/// Visits all the types and references contained within a [`SpecType`].
 #[derive(Debug)]
-struct IrTypeVisitor<'a> {
-    stack: Vec<(Option<&'a RawType<'a>>, EdgeKind, &'a RawType<'a>)>,
+struct SpecTypeVisitor<'a> {
+    stack: Vec<(Option<&'a SpecType<'a>>, EdgeKind, &'a SpecType<'a>)>,
 }
 
-impl<'a> IrTypeVisitor<'a> {
-    /// Creates a visitor with `root` on the stack of types to visit.
+impl<'a> SpecTypeVisitor<'a> {
+    /// Creates a visitor with `roots` on the stack of types to visit.
     #[inline]
-    fn new(roots: impl Iterator<Item = &'a RawType<'a>>) -> Self {
+    fn new(roots: impl Iterator<Item = &'a SpecType<'a>>) -> Self {
         let mut stack = roots
             .map(|root| (None, EdgeKind::Reference, root))
             .collect_vec();
@@ -659,14 +629,14 @@ impl<'a> IrTypeVisitor<'a> {
     }
 }
 
-impl<'a> Iterator for IrTypeVisitor<'a> {
-    type Item = (Option<&'a RawType<'a>>, EdgeKind, &'a RawType<'a>);
+impl<'a> Iterator for SpecTypeVisitor<'a> {
+    type Item = (Option<&'a SpecType<'a>>, EdgeKind, &'a SpecType<'a>);
 
     fn next(&mut self) -> Option<Self::Item> {
         let (parent, kind, top) = self.stack.pop()?;
         match top {
-            RawType::Schema(RawSchemaType::Struct(_, ty))
-            | RawType::Inline(RawInlineType::Struct(_, ty)) => {
+            SpecType::Schema(SpecSchemaType::Struct(_, ty))
+            | SpecType::Inline(SpecInlineType::Struct(_, ty)) => {
                 self.stack.extend(
                     itertools::chain!(
                         ty.fields
@@ -680,13 +650,13 @@ impl<'a> Iterator for IrTypeVisitor<'a> {
                     .rev(),
                 );
             }
-            RawType::Schema(RawSchemaType::Untagged(_, ty))
-            | RawType::Inline(RawInlineType::Untagged(_, ty)) => {
+            SpecType::Schema(SpecSchemaType::Untagged(_, ty))
+            | SpecType::Inline(SpecInlineType::Untagged(_, ty)) => {
                 self.stack.extend(
                     ty.variants
                         .iter()
                         .filter_map(|variant| match variant {
-                            RawUntaggedVariant::Some(_, ty) => {
+                            SpecUntaggedVariant::Some(_, ty) => {
                                 Some((Some(top), EdgeKind::Reference, *ty))
                             }
                             _ => None,
@@ -694,8 +664,8 @@ impl<'a> Iterator for IrTypeVisitor<'a> {
                         .rev(),
                 );
             }
-            RawType::Schema(RawSchemaType::Tagged(_, ty))
-            | RawType::Inline(RawInlineType::Tagged(_, ty)) => {
+            SpecType::Schema(SpecSchemaType::Tagged(_, ty))
+            | SpecType::Inline(SpecInlineType::Tagged(_, ty)) => {
                 self.stack.extend(
                     ty.variants
                         .iter()
@@ -703,18 +673,18 @@ impl<'a> Iterator for IrTypeVisitor<'a> {
                         .rev(),
                 );
             }
-            RawType::Schema(RawSchemaType::Container(_, container))
-            | RawType::Inline(RawInlineType::Container(_, container)) => {
+            SpecType::Schema(SpecSchemaType::Container(_, container))
+            | SpecType::Inline(SpecInlineType::Container(_, container)) => {
                 self.stack
                     .push((Some(top), EdgeKind::Reference, container.inner().ty));
             }
-            RawType::Schema(
-                RawSchemaType::Enum(..) | RawSchemaType::Primitive(..) | RawSchemaType::Any(_),
+            SpecType::Schema(
+                SpecSchemaType::Enum(..) | SpecSchemaType::Primitive(..) | SpecSchemaType::Any(_),
             )
-            | RawType::Inline(
-                RawInlineType::Enum(..) | RawInlineType::Primitive(..) | RawInlineType::Any(_),
+            | SpecType::Inline(
+                SpecInlineType::Enum(..) | SpecInlineType::Primitive(..) | SpecInlineType::Any(_),
             ) => (),
-            RawType::Ref(_) => (),
+            SpecType::Ref(_) => (),
         }
         Some((parent, kind, top))
     }

@@ -64,7 +64,7 @@ mod tests {
     use itertools::Itertools;
     use ploidy_core::{
         arena::Arena,
-        ir::{IrSpec, RawGraph},
+        ir::{RawGraph, Spec},
         parse::Document,
     };
     use pretty_assertions::assert_eq;
@@ -110,7 +110,7 @@ mod tests {
         .unwrap();
 
         let arena = Arena::new();
-        let spec = IrSpec::from_doc(&arena, &doc).unwrap();
+        let spec = Spec::from_doc(&arena, &doc).unwrap();
         let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
         let ops = graph.operations().collect_vec();
@@ -186,7 +186,7 @@ mod tests {
         .unwrap();
 
         let arena = Arena::new();
-        let spec = IrSpec::from_doc(&arena, &doc).unwrap();
+        let spec = Spec::from_doc(&arena, &doc).unwrap();
         let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
         let ops = graph.operations().collect_vec();

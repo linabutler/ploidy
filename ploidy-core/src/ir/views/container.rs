@@ -1,13 +1,13 @@
 use petgraph::graph::NodeIndex;
 
 use crate::ir::{
-    graph::{CookedGraph, CookedGraphNode},
-    types::{CookedContainer, CookedInlineType, CookedSchemaType},
+    graph::CookedGraph,
+    types::{GraphContainer, GraphInlineType, GraphSchemaType, GraphType},
 };
 
 use super::{TypeView, ViewNode};
 
-/// A graph-aware view of a container type.
+/// A graph-aware view of a [container type][GraphContainer].
 #[derive(Debug)]
 pub enum ContainerView<'a> {
     Array(InnerView<'a>),
@@ -56,8 +56,8 @@ impl<'a> InnerView<'a> {
     #[inline]
     pub fn description(&self) -> Option<&'a str> {
         match self.cooked.graph[self.container] {
-            CookedGraphNode::Schema(CookedSchemaType::Container(_, container))
-            | CookedGraphNode::Inline(CookedInlineType::Container(_, container)) => {
+            GraphType::Schema(GraphSchemaType::Container(_, container))
+            | GraphType::Inline(GraphInlineType::Container(_, container)) => {
                 container.inner().description
             }
             _ => None,
@@ -70,7 +70,7 @@ impl<'a> ContainerView<'a> {
     pub(in crate::ir) fn new(
         cooked: &'a CookedGraph<'a>,
         index: NodeIndex<usize>,
-        container: &'a CookedContainer<'a>,
+        container: GraphContainer<'a>,
     ) -> Self {
         let inner = InnerView {
             cooked,
@@ -78,9 +78,9 @@ impl<'a> ContainerView<'a> {
             inner: container.inner().ty,
         };
         match container {
-            CookedContainer::Array(_) => Self::Array(inner),
-            CookedContainer::Map(_) => Self::Map(inner),
-            CookedContainer::Optional(_) => Self::Optional(inner),
+            GraphContainer::Array(_) => Self::Array(inner),
+            GraphContainer::Map(_) => Self::Map(inner),
+            GraphContainer::Optional(_) => Self::Optional(inner),
         }
     }
 

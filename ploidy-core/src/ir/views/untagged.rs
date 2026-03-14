@@ -3,17 +3,17 @@ use petgraph::graph::NodeIndex;
 use crate::ir::{
     UntaggedVariantNameHint,
     graph::CookedGraph,
-    types::{CookedUntagged, CookedUntaggedVariant},
+    types::{GraphUntagged, GraphUntaggedVariant},
 };
 
 use super::{ViewNode, ir::TypeView};
 
-/// A graph-aware view of an [`Untagged`][CookedUntagged] union.
+/// A graph-aware view of an [untagged union type][GraphUntagged].
 #[derive(Debug)]
 pub struct UntaggedView<'a> {
     cooked: &'a CookedGraph<'a>,
     index: NodeIndex<usize>,
-    ty: &'a CookedUntagged<'a>,
+    ty: GraphUntagged<'a>,
 }
 
 impl<'a> UntaggedView<'a> {
@@ -21,7 +21,7 @@ impl<'a> UntaggedView<'a> {
     pub(in crate::ir) fn new(
         cooked: &'a CookedGraph<'a>,
         index: NodeIndex<usize>,
-        ty: &'a CookedUntagged<'a>,
+        ty: GraphUntagged<'a>,
     ) -> Self {
         Self { cooked, index, ty }
     }
@@ -53,11 +53,11 @@ impl<'a> ViewNode<'a> for UntaggedView<'a> {
     }
 }
 
-/// A graph-aware view of an [`UntaggedVariant`][CookedUntaggedVariant].
+/// A graph-aware view of an [untagged union variant][GraphUntaggedVariant].
 #[derive(Debug)]
 pub struct UntaggedVariantView<'view, 'a> {
     parent: &'view UntaggedView<'a>,
-    variant: &'a CookedUntaggedVariant,
+    variant: &'a GraphUntaggedVariant,
 }
 
 impl<'view, 'a> UntaggedVariantView<'view, 'a> {
@@ -65,11 +65,11 @@ impl<'view, 'a> UntaggedVariantView<'view, 'a> {
     #[inline]
     pub fn ty(&self) -> Option<SomeUntaggedVariant<'a>> {
         match self.variant {
-            &CookedUntaggedVariant::Some(hint, index) => Some(SomeUntaggedVariant {
+            &GraphUntaggedVariant::Some(hint, index) => Some(SomeUntaggedVariant {
                 hint,
                 view: TypeView::new(self.parent.cooked, index),
             }),
-            CookedUntaggedVariant::Null => None,
+            GraphUntaggedVariant::Null => None,
         }
     }
 }

@@ -4,7 +4,7 @@ use crate::ir::{CookedGraph, PrimitiveType};
 
 use super::ViewNode;
 
-/// A graph-aware view of a [`PrimitiveType`].
+/// A graph-aware view of a [primitive type][PrimitiveType].
 #[derive(Debug)]
 pub struct PrimitiveView<'a> {
     cooked: &'a CookedGraph<'a>,

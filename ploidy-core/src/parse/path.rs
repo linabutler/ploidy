@@ -1,39 +1,46 @@
-use std::borrow::Cow;
-
 use miette::SourceSpan;
 use winnow::{
-    Parser,
+    Parser, Stateful,
     combinator::eof,
     error::{ContextError, ParseError},
 };
+
+use crate::arena::Arena;
+
+/// Parser input threaded with an allocation [`Arena`].
+type Input<'a> = Stateful<&'a str, &'a Arena>;
 
 /// Parses a path template, like `/v1/pets/{petId}/toy`.
 ///
 /// The grammar for path templating is adapted directly from
 /// https://spec.openapis.org/oas/v3.2.0.html#x4-8-2-path-templating.
-pub fn parse<'a>(input: &'a str) -> Result<Vec<PathSegment<'a>>, BadPath> {
+pub fn parse<'a>(arena: &'a Arena, input: &'a str) -> Result<Vec<PathSegment<'a>>, BadPath> {
+    let stateful = Input {
+        input,
+        state: arena,
+    };
     (self::parser::template, eof)
         .map(|(segments, _)| segments)
-        .parse(input)
+        .parse(stateful)
         .map_err(BadPath::from_parse_error)
 }
 
 /// A slash-delimited path segment that contains zero or more
 /// template fragments.
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
-pub struct PathSegment<'input>(Vec<PathFragment<'input>>);
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+pub struct PathSegment<'input>(&'input [PathFragment<'input>]);
 
 impl<'input> PathSegment<'input> {
-    pub fn fragments(&self) -> &[PathFragment<'input>] {
-        &self.0
+    pub fn fragments(&self) -> &'input [PathFragment<'input>] {
+        self.0
     }
 }
 
 /// A fragment within a path segment.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub enum PathFragment<'input> {
     /// Literal text.
-    Literal(Cow<'input, str>),
+    Literal(&'input str),
     /// Template parameter name.
     Param(&'input str),
 }
@@ -41,13 +48,15 @@ pub enum PathFragment<'input> {
 mod parser {
     use super::*;
 
+    use std::borrow::Cow;
+
     use winnow::{
         Parser,
         combinator::{alt, delimited, repeat},
         token::take_while,
     };
 
-    pub fn template<'a>(input: &mut &'a str) -> winnow::Result<Vec<PathSegment<'a>>> {
+    pub fn template<'a>(input: &mut Input<'a>) -> winnow::Result<Vec<PathSegment<'a>>> {
         alt((
             ('/', segment, template)
                 .map(|(_, head, tail)| std::iter::once(head).chain(tail).collect()),
@@ -57,21 +66,23 @@ mod parser {
         .parse_next(input)
     }
 
-    fn segment<'a>(input: &mut &'a str) -> winnow::Result<PathSegment<'a>> {
-        repeat(1.., fragment).map(PathSegment).parse_next(input)
+    fn segment<'a>(input: &mut Input<'a>) -> winnow::Result<PathSegment<'a>> {
+        repeat(1.., fragment)
+            .map(|fragments: Vec<_>| PathSegment(input.state.alloc_slice_copy(&fragments)))
+            .parse_next(input)
     }
 
-    fn fragment<'a>(input: &mut &'a str) -> winnow::Result<PathFragment<'a>> {
+    fn fragment<'a>(input: &mut Input<'a>) -> winnow::Result<PathFragment<'a>> {
         alt((param, literal)).parse_next(input)
     }
 
-    pub fn param<'a>(input: &mut &'a str) -> winnow::Result<PathFragment<'a>> {
+    pub fn param<'a>(input: &mut Input<'a>) -> winnow::Result<PathFragment<'a>> {
         delimited('{', take_while(1.., |c| c != '{' && c != '}'), '}')
             .map(PathFragment::Param)
             .parse_next(input)
     }
 
-    pub fn literal<'a>(input: &mut &'a str) -> winnow::Result<PathFragment<'a>> {
+    pub fn literal<'a>(input: &mut Input<'a>) -> winnow::Result<PathFragment<'a>> {
         take_while(1.., |c| {
             matches!(c,
                 'A'..='Z' | 'a'..='z' | '0'..='9' |
@@ -80,11 +91,14 @@ mod parser {
                 '*' | '+' | ',' | ';' | '=' | '%'
             )
         })
-        .verify_map(|text| {
-            percent_encoding::percent_decode_str(text)
+        .verify_map(|text: &str| {
+            let decoded = percent_encoding::percent_decode_str(text)
                 .decode_utf8()
-                .ok()
-                .map(PathFragment::Literal)
+                .ok()?;
+            Some(PathFragment::Literal(match decoded {
+                Cow::Borrowed(s) => s,
+                Cow::Owned(s) => input.state.alloc_str(&s),
+            }))
         })
         .parse_next(input)
     }
@@ -100,10 +114,10 @@ pub struct BadPath {
 }
 
 impl BadPath {
-    fn from_parse_error(error: ParseError<&str, ContextError>) -> Self {
-        let input = *error.input();
+    fn from_parse_error(error: ParseError<Input<'_>, ContextError>) -> Self {
+        let stateful = error.input();
         Self {
-            code: input.to_owned(),
+            code: stateful.input.to_owned(),
             span: error.char_span().into(),
         }
     }
@@ -115,7 +129,8 @@ mod test {
 
     #[test]
     fn test_root_path() {
-        let result = parse("/").unwrap();
+        let arena = Arena::new();
+        let result = parse(&arena, "/").unwrap();
 
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].fragments(), &[]);
@@ -123,151 +138,120 @@ mod test {
 
     #[test]
     fn test_simple_literal() {
-        let result = parse("/users").unwrap();
+        let arena = Arena::new();
+        let result = parse(&arena, "/users").unwrap();
 
         assert_eq!(result.len(), 1);
-        assert_eq!(
-            result[0].fragments(),
-            &[PathFragment::Literal("users".into())]
-        );
+        assert_eq!(result[0].fragments(), &[PathFragment::Literal("users")]);
     }
 
     #[test]
     fn test_trailing_slash() {
-        let result = parse("/users/").unwrap();
+        let arena = Arena::new();
+        let result = parse(&arena, "/users/").unwrap();
 
         assert_eq!(result.len(), 2);
-        assert_eq!(
-            result[0].fragments(),
-            &[PathFragment::Literal("users".into())]
-        );
+        assert_eq!(result[0].fragments(), &[PathFragment::Literal("users")]);
         assert_eq!(result[1].fragments(), &[]);
     }
 
     #[test]
     fn test_simple_template() {
-        let result = parse("/users/{userId}").unwrap();
+        let arena = Arena::new();
+        let result = parse(&arena, "/users/{userId}").unwrap();
 
         assert_eq!(result.len(), 2);
-        assert_eq!(
-            result[0].fragments(),
-            &[PathFragment::Literal("users".into())]
-        );
+        assert_eq!(result[0].fragments(), &[PathFragment::Literal("users")]);
         assert_eq!(result[1].fragments(), &[PathFragment::Param("userId")]);
     }
 
     #[test]
     fn test_nested_path() {
-        let result = parse("/api/v1/resources/{resourceId}").unwrap();
+        let arena = Arena::new();
+        let result = parse(&arena, "/api/v1/resources/{resourceId}").unwrap();
 
         assert_eq!(result.len(), 4);
-        assert_eq!(
-            result[0].fragments(),
-            &[PathFragment::Literal("api".into())]
-        );
-        assert_eq!(result[1].fragments(), &[PathFragment::Literal("v1".into())]);
-        assert_eq!(
-            result[2].fragments(),
-            &[PathFragment::Literal("resources".into())]
-        );
+        assert_eq!(result[0].fragments(), &[PathFragment::Literal("api")]);
+        assert_eq!(result[1].fragments(), &[PathFragment::Literal("v1")]);
+        assert_eq!(result[2].fragments(), &[PathFragment::Literal("resources")]);
         assert_eq!(result[3].fragments(), &[PathFragment::Param("resourceId")]);
     }
 
     #[test]
     fn test_multiple_templates() {
-        let result = parse("/users/{userId}/posts/{postId}").unwrap();
+        let arena = Arena::new();
+        let result = parse(&arena, "/users/{userId}/posts/{postId}").unwrap();
 
         assert_eq!(result.len(), 4);
-        assert_eq!(
-            result[0].fragments(),
-            &[PathFragment::Literal("users".into())]
-        );
+        assert_eq!(result[0].fragments(), &[PathFragment::Literal("users")]);
         assert_eq!(result[1].fragments(), &[PathFragment::Param("userId")]);
-        assert_eq!(
-            result[2].fragments(),
-            &[PathFragment::Literal("posts".into())]
-        );
+        assert_eq!(result[2].fragments(), &[PathFragment::Literal("posts")]);
         assert_eq!(result[3].fragments(), &[PathFragment::Param("postId")]);
     }
 
     #[test]
     fn test_literal_with_extension() {
-        let result =
-            parse("/v1/storage/workspace/{workspace}/documents/download/{documentId}.pdf").unwrap();
+        let arena = Arena::new();
+        let result = parse(
+            &arena,
+            "/v1/storage/workspace/{workspace}/documents/download/{documentId}.pdf",
+        )
+        .unwrap();
 
         assert_eq!(result.len(), 7);
-        assert_eq!(result[0].fragments(), &[PathFragment::Literal("v1".into())]);
-        assert_eq!(
-            result[1].fragments(),
-            &[PathFragment::Literal("storage".into())]
-        );
-        assert_eq!(
-            result[2].fragments(),
-            &[PathFragment::Literal("workspace".into())]
-        );
+        assert_eq!(result[0].fragments(), &[PathFragment::Literal("v1")]);
+        assert_eq!(result[1].fragments(), &[PathFragment::Literal("storage")]);
+        assert_eq!(result[2].fragments(), &[PathFragment::Literal("workspace")]);
         assert_eq!(result[3].fragments(), &[PathFragment::Param("workspace")]);
-        assert_eq!(
-            result[4].fragments(),
-            &[PathFragment::Literal("documents".into())]
-        );
-        assert_eq!(
-            result[5].fragments(),
-            &[PathFragment::Literal("download".into())]
-        );
+        assert_eq!(result[4].fragments(), &[PathFragment::Literal("documents")]);
+        assert_eq!(result[5].fragments(), &[PathFragment::Literal("download")]);
         assert_eq!(
             result[6].fragments(),
             &[
                 PathFragment::Param("documentId"),
-                PathFragment::Literal(".pdf".into())
+                PathFragment::Literal(".pdf")
             ]
         );
     }
 
     #[test]
     fn test_mixed_literal_and_param() {
-        let result =
-            parse("/v1/storage/workspace/{workspace}/documents/download/report-{documentId}.pdf")
-                .unwrap();
+        let arena = Arena::new();
+        let result = parse(
+            &arena,
+            "/v1/storage/workspace/{workspace}/documents/download/report-{documentId}.pdf",
+        )
+        .unwrap();
 
         assert_eq!(result.len(), 7);
-        assert_eq!(result[0].fragments(), &[PathFragment::Literal("v1".into())]);
-        assert_eq!(
-            result[1].fragments(),
-            &[PathFragment::Literal("storage".into())]
-        );
-        assert_eq!(
-            result[2].fragments(),
-            &[PathFragment::Literal("workspace".into())]
-        );
+        assert_eq!(result[0].fragments(), &[PathFragment::Literal("v1")]);
+        assert_eq!(result[1].fragments(), &[PathFragment::Literal("storage")]);
+        assert_eq!(result[2].fragments(), &[PathFragment::Literal("workspace")]);
         assert_eq!(result[3].fragments(), &[PathFragment::Param("workspace")]);
-        assert_eq!(
-            result[4].fragments(),
-            &[PathFragment::Literal("documents".into())]
-        );
-        assert_eq!(
-            result[5].fragments(),
-            &[PathFragment::Literal("download".into())]
-        );
+        assert_eq!(result[4].fragments(), &[PathFragment::Literal("documents")]);
+        assert_eq!(result[5].fragments(), &[PathFragment::Literal("download")]);
         assert_eq!(
             result[6].fragments(),
             &[
-                PathFragment::Literal("report-".into()),
+                PathFragment::Literal("report-"),
                 PathFragment::Param("documentId"),
-                PathFragment::Literal(".pdf".into())
+                PathFragment::Literal(".pdf")
             ]
         );
     }
 
     #[test]
     fn test_double_slash() {
+        let arena = Arena::new();
         // Empty path segments aren't allowed.
-        assert!(parse("/users//a").is_err());
+        assert!(parse(&arena, "/users//a").is_err());
     }
 
     #[test]
     fn test_invalid_chars_in_template() {
+        let arena = Arena::new();
         // Parameter names can contain any character except for
         // `{` and `}`, per the `template-expression-param-name` terminal.
-        assert!(parse("/users/{user/{id}}").is_err());
+        assert!(parse(&arena, "/users/{user/{id}}").is_err());
     }
 }

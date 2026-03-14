@@ -4,7 +4,7 @@ use ploidy_codegen_rust::{CodegenCargoManifest, CodegenErrorModule, CodegenGraph
 use ploidy_core::{
     arena::Arena,
     codegen::write_to_disk,
-    ir::{IrSpec, RawGraph},
+    ir::{RawGraph, Spec},
     parse::Document,
 };
 
@@ -35,7 +35,7 @@ fn main() -> Result<()> {
             println!("OpenAPI: {} (version {})", doc.info.title, doc.info.version);
 
             let arena = Arena::new();
-            let spec = IrSpec::from_doc(&arena, &doc).into_diagnostic()?;
+            let spec = Spec::from_doc(&arena, &doc).into_diagnostic()?;
             let mut raw = RawGraph::new(&arena, &spec);
             raw.inline_tagged_variants();
 

@@ -1,4 +1,3 @@
-mod cooker;
 mod error;
 mod graph;
 mod spec;
@@ -10,7 +9,7 @@ mod views;
 mod tests;
 
 pub use graph::{CookedGraph, EdgeKind, RawGraph, Traversal};
-pub use spec::IrSpec;
+pub use spec::Spec;
 pub use types::*;
 
 pub use views::{

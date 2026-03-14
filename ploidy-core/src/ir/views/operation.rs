@@ -1,6 +1,5 @@
 use std::marker::PhantomData;
 
-use by_address::ByAddress;
 use enum_map::enum_map;
 use fixedbitset::FixedBitSet;
 use petgraph::{
@@ -11,10 +10,10 @@ use petgraph::{
 
 use crate::{
     ir::{
-        graph::{CookedGraph, EdgeKind, GraphNode, Traversal, Traverse},
+        graph::{CookedGraph, EdgeKind, Traversal, Traverse},
         types::{
-            CookedOperation, CookedParameter, CookedParameterInfo, CookedRequest, CookedResponse,
-            ParameterStyle,
+            GraphOperation, GraphParameter, GraphParameterInfo, GraphRequest, GraphResponse,
+            GraphType, ParameterStyle,
         },
     },
     parse::{Method, path::PathSegment},
@@ -22,16 +21,16 @@ use crate::{
 
 use super::{Reach, View, inline::InlineTypeView, ir::TypeView};
 
-/// A graph-aware view of an [`Operation`][crate::ir::CookedOperation].
+/// A graph-aware view of an [operation][GraphOperation].
 #[derive(Debug)]
 pub struct OperationView<'a> {
     cooked: &'a CookedGraph<'a>,
-    op: &'a CookedOperation<'a>,
+    op: &'a GraphOperation<'a>,
 }
 
 impl<'a> OperationView<'a> {
     #[inline]
-    pub(in crate::ir) fn new(cooked: &'a CookedGraph<'a>, op: &'a CookedOperation<'a>) -> Self {
+    pub(in crate::ir) fn new(cooked: &'a CookedGraph<'a>, op: &'a GraphOperation<'a>) -> Self {
         Self { cooked, op }
     }
 
@@ -59,7 +58,7 @@ impl<'a> OperationView<'a> {
     #[inline]
     pub fn query(&self) -> impl Iterator<Item = ParameterView<'a, QueryParameter>> + '_ {
         self.op.params.iter().filter_map(move |param| match param {
-            CookedParameter::Query(info) => Some(ParameterView::new(self.cooked, info)),
+            GraphParameter::Query(info) => Some(ParameterView::new(self.cooked, info)),
             _ => None,
         })
     }
@@ -68,8 +67,8 @@ impl<'a> OperationView<'a> {
     #[inline]
     pub fn request(&self) -> Option<RequestView<'a>> {
         self.op.request.as_ref().map(|ty| match ty {
-            CookedRequest::Json(index) => RequestView::Json(TypeView::new(self.cooked, *index)),
-            CookedRequest::Multipart => RequestView::Multipart,
+            GraphRequest::Json(index) => RequestView::Json(TypeView::new(self.cooked, *index)),
+            GraphRequest::Multipart => RequestView::Multipart,
         })
     }
 
@@ -77,7 +76,7 @@ impl<'a> OperationView<'a> {
     #[inline]
     pub fn response(&self) -> Option<ResponseView<'a>> {
         self.op.response.as_ref().map(|ty| match ty {
-            CookedResponse::Json(index) => ResponseView::Json(TypeView::new(self.cooked, *index)),
+            GraphResponse::Json(index) => ResponseView::Json(TypeView::new(self.cooked, *index)),
         })
     }
 
@@ -97,10 +96,10 @@ impl<'a> View<'a> for OperationView<'a> {
         let cooked = self.cooked;
         // Only include edges to other inline schemas.
         let filtered = EdgeFiltered::from_fn(&cooked.graph, |e| {
-            matches!(cooked.graph[e.target()], GraphNode::Inline(_))
+            matches!(cooked.graph[e.target()], GraphType::Inline(_))
         });
         let mut bfs = {
-            let meta = &self.cooked.metadata.operations[&ByAddress(self.op)];
+            let meta = &self.cooked.metadata.operations[self.op];
             let stack = meta
                 .types
                 .ones()
@@ -109,7 +108,7 @@ impl<'a> View<'a> for OperationView<'a> {
                     // Exclude operation types that aren't inline schemas;
                     // those types, and their inlines, are already emitted
                     // as named schema types.
-                    matches!(cooked.graph[index], GraphNode::Inline(_))
+                    matches!(cooked.graph[index], GraphType::Inline(_))
                 })
                 .collect();
             let mut discovered = self.cooked.graph.visit_map();
@@ -120,7 +119,7 @@ impl<'a> View<'a> for OperationView<'a> {
         };
         std::iter::from_fn(move || bfs.next(&filtered)).filter_map(|index| {
             match cooked.graph[index] {
-                GraphNode::Inline(ty) => Some(InlineTypeView::new(cooked, index, ty)),
+                GraphType::Inline(ty) => Some(InlineTypeView::new(cooked, index, ty)),
                 _ => None,
             }
         })
@@ -135,7 +134,7 @@ impl<'a> View<'a> for OperationView<'a> {
 
     #[inline]
     fn dependencies(&self) -> impl Iterator<Item = TypeView<'a>> + use<'a> {
-        let meta = &self.cooked.metadata.operations[&ByAddress(self.op)];
+        let meta = &self.cooked.metadata.operations[self.op];
         let mut types = meta.types.clone();
         // Collect the transitive dependencies of each of the operation's
         // direct dependencies.
@@ -168,7 +167,7 @@ impl<'a> View<'a> for OperationView<'a> {
             Reach::Dependents => std::iter::empty(),
             Reach::Dependencies => {
                 let cooked = self.cooked;
-                let meta = &cooked.metadata.operations[&ByAddress(self.op)];
+                let meta = &cooked.metadata.operations[self.op];
                 let traverse = Traverse::from_roots(
                     &cooked.graph,
                     enum_map! {
@@ -206,7 +205,7 @@ impl<'view, 'a> OperationViewPath<'view, 'a> {
             .params
             .iter()
             .filter_map(move |param| match param {
-                CookedParameter::Path(info) => Some(ParameterView::new(self.0.cooked, info)),
+                GraphParameter::Path(info) => Some(ParameterView::new(self.0.cooked, info)),
                 _ => None,
             })
     }
@@ -216,7 +215,7 @@ impl<'view, 'a> OperationViewPath<'view, 'a> {
 #[derive(Debug)]
 pub struct ParameterView<'a, T> {
     cooked: &'a CookedGraph<'a>,
-    info: &'a CookedParameterInfo<'a>,
+    info: &'a GraphParameterInfo<'a>,
     phantom: PhantomData<T>,
 }
 
@@ -224,7 +223,7 @@ impl<'a, T> ParameterView<'a, T> {
     #[inline]
     pub(in crate::ir) fn new(
         cooked: &'a CookedGraph<'a>,
-        info: &'a CookedParameterInfo<'a>,
+        info: &'a GraphParameterInfo<'a>,
     ) -> Self {
         Self {
             cooked,
