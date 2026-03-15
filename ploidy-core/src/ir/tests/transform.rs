@@ -2201,11 +2201,53 @@ fn test_multiple_types_string_and_integer_untagged() {
                 variants: [
                     SpecUntaggedVariant::Some(
                         UntaggedVariantNameHint::Primitive(PrimitiveType::String),
-                        SpecType::Schema(SpecSchemaType::Primitive(_, PrimitiveType::String)),
+                        SpecType::Inline(SpecInlineType::Primitive(_, PrimitiveType::String)),
                     ),
                     SpecUntaggedVariant::Some(
                         UntaggedVariantNameHint::Primitive(PrimitiveType::I32),
-                        SpecType::Schema(SpecSchemaType::Primitive(_, PrimitiveType::I32)),
+                        SpecType::Inline(SpecInlineType::Primitive(_, PrimitiveType::I32)),
+                    ),
+                ],
+                ..
+            },
+        )),
+    );
+}
+
+#[test]
+fn test_type_array_with_format_produces_inline_variants() {
+    let doc = Document::from_yaml(indoc::indoc! {"
+        openapi: 3.1.0
+        info:
+          title: Test
+          version: 1.0.0
+    "})
+    .unwrap();
+    let schema: Schema = serde_yaml::from_str(indoc::indoc! {"
+        type: [string, integer]
+        format: date-time
+    "})
+    .unwrap();
+
+    let arena = Arena::new();
+    let result = transform(&arena, &doc, "DateOrUnix", &schema);
+
+    assert_matches!(
+        result,
+        SpecType::Schema(SpecSchemaType::Untagged(
+            SchemaTypeInfo {
+                name: "DateOrUnix",
+                ..
+            },
+            Untagged {
+                variants: [
+                    SpecUntaggedVariant::Some(
+                        UntaggedVariantNameHint::Primitive(PrimitiveType::DateTime),
+                        SpecType::Inline(SpecInlineType::Primitive(_, PrimitiveType::DateTime)),
+                    ),
+                    SpecUntaggedVariant::Some(
+                        UntaggedVariantNameHint::Primitive(PrimitiveType::I32),
+                        SpecType::Inline(SpecInlineType::Primitive(_, PrimitiveType::I32)),
                     ),
                 ],
                 ..

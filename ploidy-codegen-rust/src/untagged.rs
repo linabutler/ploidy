@@ -128,6 +128,46 @@ mod tests {
     }
 
     #[test]
+    fn test_untagged_union_type_array() {
+        let doc = Document::from_yaml(indoc::indoc! {"
+            openapi: 3.1.0
+            info:
+              title: Test API
+              version: 1.0.0
+            paths: {}
+            components:
+              schemas:
+                DateOrUnix:
+                  type: [string, integer]
+                  format: date-time
+        "})
+        .unwrap();
+
+        let arena = Arena::new();
+        let spec = Spec::from_doc(&arena, &doc).unwrap();
+        let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
+
+        let schema = graph.schemas().find(|s| s.name() == "DateOrUnix");
+        let Some(schema @ SchemaTypeView::Untagged(_, untagged_view)) = &schema else {
+            panic!("expected untagged union `DateOrUnix`; got `{schema:?}`");
+        };
+
+        let name = CodegenTypeName::Schema(schema);
+        let untagged = CodegenUntagged::new(name, untagged_view);
+
+        let actual: syn::ItemEnum = parse_quote!(#untagged);
+        let expected: syn::ItemEnum = parse_quote! {
+            #[derive(Debug, Clone, PartialEq, Eq, Hash, ::ploidy_util::serde::Serialize, ::ploidy_util::serde::Deserialize)]
+            #[serde(crate = "::ploidy_util::serde", untagged)]
+            pub enum DateOrUnix {
+                DateTime(::ploidy_util::chrono::DateTime<::ploidy_util::chrono::Utc>),
+                I32(i32)
+            }
+        };
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
     fn test_untagged_union_with_refs() {
         let doc = Document::from_yaml(indoc::indoc! {"
             openapi: 3.0.0

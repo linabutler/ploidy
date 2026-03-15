@@ -584,7 +584,7 @@ impl<'context, 'a> IrTransformer<'context, 'a> {
                             variant
                                 .hint()
                                 .unwrap_or(UntaggedVariantNameHint::Index(index)),
-                            self.arena().alloc(variant.to_type()),
+                            self.arena().alloc(variant.to_inline_type()),
                         )
                     })
                     .collect_vec();
