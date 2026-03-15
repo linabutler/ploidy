@@ -1,3 +1,10 @@
+//! An OpenAPI type.
+//!
+//! A [`TypeView`] represents an arbitrary type in the graph. Each type is
+//! either a named top-level [`Schema`][SchemaTypeView] definition from
+//! `components/schemas`, or an anonymous [`Inline`][InlineTypeView] schema
+//! nested inside another type or operation.
+
 use petgraph::graph::NodeIndex;
 
 use crate::ir::{graph::CookedGraph, types::GraphType};

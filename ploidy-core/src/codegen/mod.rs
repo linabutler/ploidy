@@ -1,3 +1,29 @@
+//! Code generation output and file writing.
+//!
+//! This module defines the [`Code`] trait, which represents a
+//! single generated output file with a relative path and a
+//! content string.
+//!
+//! [`IntoCode`] converts codegen types into [`Code`]. Any type
+//! that implements [`Code`] automatically implements
+//! [`IntoCode`], so codegen types can implement either trait.
+//!
+//! [`write_to_disk`] takes an output directory and any [`IntoCode`]
+//! value, creates intermediate directories as needed, and writes the file.
+//!
+//! # Feature-gated blanket implementations
+//!
+//! Two blanket implementations of [`Code`] are available behind
+//! feature flags:
+//!
+//! - **`proc-macro2`**: `(T, TokenStream)` where `T: AsRef<str>`
+//!   formats the token stream with [prettyplease] and writes it
+//!   to the path given by `T`.
+//! - **`cargo_toml`**: `(&str, Manifest<T>)` serializes a Cargo
+//!   manifest to TOML and writes it to the given path.
+//!
+//! [prettyplease]: https://docs.rs/prettyplease/latest/prettyplease/
+
 use std::path::Path;
 
 use miette::{Context, IntoDiagnostic};

@@ -1,8 +1,8 @@
 //! Generic structural shapes for IR types, parameterized over
 //! the type reference representation.
 //!
-//! Prefer the [spec and graph type aliases][super], unless
-//! you're writing generic code that abstracts over type references.
+//! Prefer the spec and graph type aliases, unless you're
+//! writing generic code that abstracts over type references.
 
 use crate::parse::{Method, path::PathSegment};
 

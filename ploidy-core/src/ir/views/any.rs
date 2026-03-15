@@ -1,3 +1,10 @@
+//! Any type: a schema with no type constraints.
+//!
+//! An [`AnyView`] represents an arbitrary JSON value: a schema without
+//! `type`, `properties`, or composition keywords. Codegen maps this to a
+//! dynamic type in the target language, like [`serde_json::Value`] in Rust,
+//! `Any` in Python, or `any` in TypeScript.
+
 use petgraph::graph::NodeIndex;
 
 use crate::ir::CookedGraph;

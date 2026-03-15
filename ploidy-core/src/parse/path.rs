@@ -13,7 +13,9 @@ type Input<'a> = Stateful<&'a str, &'a Arena>;
 /// Parses a path template, like `/v1/pets/{petId}/toy`.
 ///
 /// The grammar for path templating is adapted directly from
-/// https://spec.openapis.org/oas/v3.2.0.html#x4-8-2-path-templating.
+/// [the OpenAPI spec][spec].
+///
+/// [spec]: https://spec.openapis.org/oas/v3.2.0.html#x4-8-2-path-templating
 pub fn parse<'a>(arena: &'a Arena, input: &'a str) -> Result<Vec<PathSegment<'a>>, BadPath> {
     let stateful = Input {
         input,
@@ -31,6 +33,7 @@ pub fn parse<'a>(arena: &'a Arena, input: &'a str) -> Result<Vec<PathSegment<'a>
 pub struct PathSegment<'input>(&'input [PathFragment<'input>]);
 
 impl<'input> PathSegment<'input> {
+    /// Returns the template fragments within this segment.
     pub fn fragments(&self) -> &'input [PathFragment<'input>] {
         self.0
     }
@@ -104,6 +107,7 @@ mod parser {
     }
 }
 
+/// An error returned when a path template can't be parsed.
 #[derive(Debug, miette::Diagnostic, thiserror::Error)]
 #[error("invalid URL path template")]
 pub struct BadPath {

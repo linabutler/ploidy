@@ -1,8 +1,29 @@
 //! Graph-aware views of IR types.
 //!
-//! These views provide a representation of schema and inline types
-//! for code generation. Each view decorates an IR type with
-//! additional information from the type graph.
+//! Views are cheap, read-only types that pair a node with its cooked graph,
+//! so they can answer questions about an IR type and its relationships.
+//! The submodules document the OpenAPI concept that each view represents.
+//!
+//! # The `View` trait
+//!
+//! All view types implement [`View`], which provides graph traversal methods:
+//!
+//! * [`View::inlines()`] iterates over inline types nested within this type.
+//!   Use this to emit inline type definitions alongside their parent.
+//! * [`View::used_by()`] iterates over operations that reference this type.
+//!   Useful for generating per-operation imports or feature gates.
+//! * [`View::dependencies()`] iterates over all types that this type
+//!   transitively depends on. Use this for import lists, feature gates,
+//!   and topological ordering.
+//! * [`View::dependents()`] iterates over all types that transitively depend on
+//!   this type. Useful for impact analysis or invalidation.
+//! * [`View::traverse()`] traverses the graph breadth-first with a filter that
+//!   controls which nodes to yield and explore.
+//!
+//! # Extensions
+//!
+//! [`ExtendableView`] attaches a type-erased extension map to each view node.
+//! Codegen backends use this to store and retrieve arbitrary metadata.
 
 use std::{any::TypeId, fmt::Debug};
 
@@ -75,6 +96,11 @@ pub trait View<'a> {
         F: Fn(EdgeKind, &TypeView<'a>) -> Traversal;
 }
 
+/// A view of a graph type with extended data.
+///
+/// Codegen backends use extended data to decorate types with extra information.
+/// For example, Rust codegen stores a unique identifier on each schema type,
+/// so that names never collide after case conversion.
 pub trait ExtendableView<'a>: View<'a> {
     /// Returns a reference to this type's extended data.
     fn extensions(&self) -> &ViewExtensions<Self>
@@ -175,34 +201,12 @@ where
     }
 }
 
-pub trait ViewNode<'a> {
+pub(crate) trait ViewNode<'a> {
     fn cooked(&self) -> &'a CookedGraph<'a>;
     fn index(&self) -> NodeIndex<usize>;
 }
 
-pub trait Extendable<'graph> {
-    // These lifetime requirements might look redundant, but they're not:
-    // we're shortening the lifetime of the `AtomicRef` from `'graph` to `'view`,
-    // to prevent overlapping mutable borrows of the underlying `AtomicRefCell`
-    // at compile time.
-    //
-    // (`AtomicRefCell` panics on these illegal borrows at runtime, which is
-    // always memory-safe; we just want some extra type safety).
-    //
-    // This approach handles the obvious case of overlapping borrows from
-    // `ext()` and `ext_mut()`, and the `AtomicRefCell` avoids plumbing
-    // mutable references to the graph through every IR layer.
-
-    fn ext<'view>(&'view self) -> AtomicRef<'view, ExtensionMap>
-    where
-        'graph: 'view;
-
-    fn ext_mut<'view>(&'view mut self) -> AtomicRefMut<'view, ExtensionMap>
-    where
-        'graph: 'view;
-}
-
-impl<'graph, T> Extendable<'graph> for T
+impl<'graph, T> internal::Extendable<'graph> for T
 where
     T: ViewNode<'graph>,
 {
@@ -227,11 +231,7 @@ where
     }
 }
 
-/// Extended data attached to a type in the graph.
-///
-/// Generators can use extended data to decorate types with extra information,
-/// like name mappings. For example, the Rust generator stores a normalized,
-/// deduplicated identifier name on every named schema type.
+/// Extended data attached to a graph type.
 #[derive(RefCastCustom)]
 #[repr(transparent)]
 pub struct ViewExtensions<X>(X);
@@ -244,7 +244,7 @@ impl<X> ViewExtensions<X> {
     fn new_mut(view: &mut X) -> &mut Self;
 }
 
-impl<'a, X: Extendable<'a>> ViewExtensions<X> {
+impl<'a, X: internal::Extendable<'a>> ViewExtensions<X> {
     /// Returns a reference to a value of an arbitrary type that was
     /// previously inserted into this extended data.
     #[inline]
@@ -286,4 +286,32 @@ pub enum Reach {
     Dependencies,
     /// Traverse in toward types that depend on this node.
     Dependents,
+}
+
+mod internal {
+    use atomic_refcell::{AtomicRef, AtomicRefMut};
+
+    use super::ExtensionMap;
+
+    pub trait Extendable<'graph> {
+        // These lifetime requirements might look redundant, but they're not:
+        // we're shortening the lifetime of the `AtomicRef` from `'graph` to `'view`,
+        // to prevent overlapping mutable borrows of the underlying `AtomicRefCell`
+        // at compile time.
+        //
+        // (`AtomicRefCell` panics on these illegal borrows at runtime, which is
+        // always memory-safe; we just want some extra type safety).
+        //
+        // This approach handles the obvious case of overlapping borrows from
+        // `ext()` and `ext_mut()`, and the `AtomicRefCell` avoids plumbing
+        // mutable references to the graph through every IR layer.
+
+        fn ext<'view>(&'view self) -> AtomicRef<'view, ExtensionMap>
+        where
+            'graph: 'view;
+
+        fn ext_mut<'view>(&'view mut self) -> AtomicRefMut<'view, ExtensionMap>
+        where
+            'graph: 'view;
+    }
 }

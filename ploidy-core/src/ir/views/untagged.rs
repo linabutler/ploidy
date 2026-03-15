@@ -1,3 +1,30 @@
+//! Untagged unions: `type` arrays and `oneOf` without a discriminator.
+//!
+//! In OpenAPI, a `oneOf` schema without a `discriminator` defines
+//! an untagged union: there's no explicit tag, so deserialization tries
+//! each variant in order until one matches. In OpenAPI 3.1+, an array of
+//! `type`s also expresses an untagged union:
+//!
+//! ```yaml
+//! components:
+//!   schemas:
+//!     StringOrInt:
+//!       oneOf:
+//!         - type: string
+//!         - type: integer
+//!     DateOrUnix:
+//!       type: [string, integer]
+//!       format: date-time
+//! ```
+//!
+//! Ploidy represents this as an [`UntaggedView`] with a list of variants.
+//! Each variant is either a typed value or `null`, modeled as
+//! [`Option<SomeUntaggedVariant>`]. The typed case pairs an
+//! [`UntaggedVariantNameHint`] with a [`TypeView`]; the hint helps codegen
+//! produce readable variant names when the schema has no explicit name.
+//!
+//! [`Option<SomeUntaggedVariant>`]: SomeUntaggedVariant
+
 use petgraph::graph::NodeIndex;
 
 use crate::ir::{
@@ -26,6 +53,7 @@ impl<'a> UntaggedView<'a> {
         Self { cooked, index, ty }
     }
 
+    /// Returns the description, if present in the schema.
     #[inline]
     pub fn description(&self) -> Option<&'a str> {
         self.ty.description
@@ -74,8 +102,12 @@ impl<'view, 'a> UntaggedVariantView<'view, 'a> {
     }
 }
 
+/// A non-`null` variant of an untagged union, pairing a name hint
+/// with the variant's type.
 #[derive(Debug)]
 pub struct SomeUntaggedVariant<'a> {
+    /// A hint for generating a readable variant name.
     pub hint: UntaggedVariantNameHint,
+    /// A view of this variant's type.
     pub view: TypeView<'a>,
 }

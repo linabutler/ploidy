@@ -1,3 +1,20 @@
+//! Enum types: schemas with a fixed set of literal values.
+//!
+//! In OpenAPI, a schema with `enum` restricts a value to
+//! one of a fixed set of literals:
+//!
+//! ```yaml
+//! components:
+//!   schemas:
+//!     Status:
+//!       type: string
+//!       enum: [active, paused, canceled]
+//! ```
+//!
+//! Ploidy represents this as an [`EnumView`]. Each variant carries a
+//! literal value: string, number, or boolean. See [`EnumVariant`]
+//! for the full set.
+
 use petgraph::graph::NodeIndex;
 
 use crate::ir::{
@@ -25,11 +42,13 @@ impl<'a> EnumView<'a> {
         Self { cooked, index, ty }
     }
 
+    /// Returns the description, if present in the schema.
     #[inline]
     pub fn description(&self) -> Option<&'a str> {
         self.ty.description
     }
 
+    /// Returns the enum's variants.
     #[inline]
     pub fn variants(&self) -> &'a [EnumVariant<'a>] {
         self.ty.variants

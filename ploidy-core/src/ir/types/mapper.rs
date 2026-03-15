@@ -11,6 +11,9 @@ use crate::ir::types::shape::{
 
 /// Translates shape types parameterized by `T` references into
 /// shape types parameterized by `U` references.
+///
+/// Mapping isn't recursive: the mapper translates references within
+/// each type, but doesn't follow them to map the types they point to.
 pub struct TypeMapper<'a, F, T, U> {
     arena: &'a Arena,
     map: F,

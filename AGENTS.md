@@ -11,11 +11,14 @@ After making changes, **always** run in order:
 ```bash
 cargo check --workspace
 cargo test --workspace --no-fail-fast --all-features
+cargo doc --workspace --no-deps
 cargo clippy --workspace --all-targets --fix --allow-dirty --allow-staged --no-deps # Auto-fixes lint suggestions
 cargo +nightly fmt --all
 ```
 
-**Task is not complete until all commands pass.** If any fails: fix, re-run from step 1, repeat.
+Proofread new documentation and comments for tone and style.
+
+**Task is not complete until all commands pass and proofreader approves.** If any fails: fix, re-run from step 1, repeat.
 
 **If failing 3+ times:** Stop, re-read errors carefully, check if failure is in your code or pre-existing, ask for guidance if stuck.
 
@@ -94,10 +97,16 @@ struct MyView {
 - `Box<T>` only to break recursive types; `Vec`/`HashMap` provide their own indirection.
 - `.collect_vec()` (from `itertools`) instead of `.collect::<Vec<_>>()` or `let v: Vec<_> = … .collect()`.
 
-### Documentation (`///`)
+### Documentation (`///` and `//!`)
 
+**Tone:**
+- Match Rust stdlib's tone: precise, terse, declarative. No filler, no hedging, no marketing.
+- Proofread with Strunk & White's *Elements of Style*: omit needless words, use active voice, prefer positive statements.
+
+**Style rules:**
 - Complete sentences, indicative mood ("Returns", not "Return"), backticks for code items.
 - Describe args/returns in prose, never separate sections.
+- Document interface (what/why), not implementation details (how).
 - Wrap at 80 chars.
 
 ```rust

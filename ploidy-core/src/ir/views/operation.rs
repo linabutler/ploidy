@@ -1,3 +1,59 @@
+//! Operations: per-path methods with parameter, request, and response schemas.
+//!
+//! In OpenAPI, each path item defines operations for HTTP methods like
+//! `GET` and `POST`. An operation has path and query parameters, an
+//! optional request body, and an optional response body:
+//!
+//! ```yaml
+//! paths:
+//!   /pets/{pet_id}:
+//!     post:
+//!       operationId: updatePet
+//!       parameters:
+//!         - name: pet_id
+//!           in: path
+//!           required: true
+//!           schema:
+//!             type: string
+//!         - name: expand
+//!           in: query
+//!           schema:
+//!             type: boolean
+//!       requestBody:
+//!         content:
+//!           application/json:
+//!             schema:
+//!               $ref: '#/components/schemas/PetUpdate'
+//!       responses:
+//!         '200':
+//!           content:
+//!             application/json:
+//!               schema:
+//!                 $ref: '#/components/schemas/Pet'
+//! ```
+//!
+//! Ploidy represents this as an [`OperationView`] with:
+//!
+//! * An [ID], an [HTTP method], and a [path template] with
+//!   segments and path parameters.
+//! * [Query parameters], each with a name, type, and
+//!   optional serialization style.
+//! * An optional [request] and [response] body, each wrapping
+//!   a [`TypeView`] of the body schema.
+//! * An optional [resource name] from the `x-resource-name` extension,
+//!   used to group operations by resource.
+//!
+//! Unlike types, operations are not nodes in Ploidy's dependency graph,
+//! but they implement [`View`] for traversal.
+//!
+//! [ID]: OperationView::id
+//! [HTTP method]: OperationView::method
+//! [path template]: OperationView::path
+//! [Query parameters]: OperationView::query
+//! [request]: OperationView::request
+//! [response]: OperationView::response
+//! [resource name]: OperationView::resource
+
 use std::marker::PhantomData;
 
 use enum_map::enum_map;
@@ -34,21 +90,25 @@ impl<'a> OperationView<'a> {
         Self { cooked, op }
     }
 
+    /// Returns the `operationId`.
     #[inline]
     pub fn id(&self) -> &'a str {
         self.op.id
     }
 
+    /// Returns the HTTP method.
     #[inline]
     pub fn method(&self) -> Method {
         self.op.method
     }
 
+    /// Returns a view of this operation's path template.
     #[inline]
     pub fn path(&self) -> OperationViewPath<'_, 'a> {
         OperationViewPath(self)
     }
 
+    /// Returns the description, if present in the spec.
     #[inline]
     pub fn description(&self) -> Option<&'a str> {
         self.op.description
@@ -192,6 +252,7 @@ impl<'a> View<'a> for OperationView<'a> {
 pub struct OperationViewPath<'view, 'a>(&'view OperationView<'a>);
 
 impl<'view, 'a> OperationViewPath<'view, 'a> {
+    /// Returns an iterator over this path's segments.
     #[inline]
     pub fn segments(self) -> std::slice::Iter<'view, PathSegment<'a>> {
         self.0.op.path.iter()
@@ -232,21 +293,25 @@ impl<'a, T> ParameterView<'a, T> {
         }
     }
 
+    /// Returns the parameter name.
     #[inline]
     pub fn name(&self) -> &'a str {
         self.info.name
     }
 
+    /// Returns a view of the parameter's type.
     #[inline]
     pub fn ty(&self) -> TypeView<'a> {
         TypeView::new(self.cooked, self.info.ty)
     }
 
+    /// Returns `true` if this parameter is required.
     #[inline]
     pub fn required(&self) -> bool {
         self.info.required
     }
 
+    /// Returns the serialization style, if specified.
     #[inline]
     pub fn style(&self) -> Option<ParameterStyle> {
         self.info.style

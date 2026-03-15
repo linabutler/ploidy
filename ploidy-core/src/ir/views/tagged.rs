@@ -1,3 +1,38 @@
+//! Tagged unions: `oneOf` with a discriminator.
+//!
+//! In OpenAPI, a `oneOf` schema with a `discriminator` defines
+//! a tagged union, where the discriminator property is a tag
+//! that selects the concrete type:
+//!
+//! ```yaml
+//! components:
+//!   schemas:
+//!     Shape:
+//!       oneOf:
+//!         - $ref: '#/components/schemas/Circle'
+//!         - $ref: '#/components/schemas/Square'
+//!       discriminator:
+//!         propertyName: kind
+//! ```
+//!
+//! The `kind` field in the JSON payload determines the variant.
+//! Ploidy represents this as a [`TaggedView`] with a [tag] and [variants].
+//! Each [`TaggedVariantView`] carries:
+//!
+//! * A [name]: the discriminator value that selects this variant
+//!   (e.g., `"Circle"`).
+//! * Optional [aliases]: additional discriminator values that
+//!   also select this variant, defined via the discriminator's
+//!   `mapping` in the spec.
+//! * A [type]: the schema that the variant deserializes into,
+//!   accessed as a [`TypeView`].
+//!
+//! [tag]: TaggedView::tag
+//! [variants]: TaggedView::variants
+//! [name]: TaggedVariantView::name
+//! [aliases]: TaggedVariantView::aliases
+//! [type]: TaggedVariantView::ty
+
 use petgraph::graph::NodeIndex;
 
 use crate::ir::{
@@ -25,11 +60,13 @@ impl<'a> TaggedView<'a> {
         Self { cooked, index, ty }
     }
 
+    /// Returns the description, if present in the schema.
     #[inline]
     pub fn description(&self) -> Option<&'a str> {
         self.ty.description
     }
 
+    /// Returns the discriminator property name.
     #[inline]
     pub fn tag(&self) -> &'a str {
         self.ty.tag
@@ -79,11 +116,15 @@ impl<'a> TaggedVariantView<'a> {
         }
     }
 
+    /// Returns the discriminator value that selects this
+    /// variant.
     #[inline]
     pub fn name(&self) -> &'a str {
         self.variant.name
     }
 
+    /// Returns additional discriminator values that also
+    /// select this variant.
     #[inline]
     pub fn aliases(&self) -> &'a [&'a str] {
         self.variant.aliases

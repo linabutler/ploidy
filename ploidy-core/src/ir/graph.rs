@@ -27,7 +27,7 @@ use super::{
         GraphInlineType, GraphOperation, GraphSchemaType, GraphStruct, GraphTagged,
         GraphTaggedVariant, GraphType, InlineTypePath, InlineTypePathRoot, InlineTypePathSegment,
         SchemaTypeInfo, SpecInlineType, SpecSchemaType, SpecType, SpecUntaggedVariant,
-        StructFieldName, TypeMapper,
+        StructFieldName, mapper::TypeMapper,
     },
     views::{operation::OperationView, primitive::PrimitiveView, schema::SchemaTypeView},
 };
@@ -571,7 +571,7 @@ pub enum EdgeKind {
 
 /// Precomputed metadata for schema types and operations in the graph.
 #[derive(Debug, Default)]
-pub struct CookedGraphMetadata<'a> {
+pub(super) struct CookedGraphMetadata<'a> {
     /// Maps each node index to its strongly connected component index.
     /// Nodes in the same SCC form a cycle.
     pub scc_indices: Vec<usize>,
@@ -582,7 +582,7 @@ pub struct CookedGraphMetadata<'a> {
 /// Precomputed metadata for an operation that references
 /// types in the graph.
 #[derive(Debug, Default)]
-pub struct GraphOperationMeta {
+pub(super) struct GraphOperationMeta {
     /// Indices of all the types that this operation directly depends on:
     /// parameters, request body, and response body.
     pub types: FixedBitSet,

@@ -7,10 +7,10 @@ use std::{
 
 use crate::arena::Arena;
 
-pub use self::{graph::*, mapper::*, spec::*};
+pub use self::{graph::*, spec::*};
 
 mod graph;
-mod mapper;
+pub(crate) mod mapper;
 pub mod shape;
 mod spec;
 

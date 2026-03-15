@@ -1,3 +1,36 @@
+//! Container types: arrays, maps, and optionals.
+//!
+//! In OpenAPI, `type: array` with `items` defines a list,
+//! and `type: object` without `properties` and with
+//! `additionalProperties` defines a map. Schemas with
+//! `nullable: true` (OpenAPI 3.0), `type: [T, "null"]`
+//! (OpenAPI 3.1), or `oneOf` with a `null` branch all
+//! become optionals:
+//!
+//! ```yaml
+//! components:
+//!   schemas:
+//!     Tags:
+//!       type: array
+//!       items:
+//!         type: string
+//!     Metadata:
+//!       type: object
+//!       additionalProperties:
+//!         type: string
+//!     NullableName:
+//!       type: [string, null]
+//! ```
+//!
+//! Ploidy represents all three as [`ContainerView`] variants—
+//! [`Array`][array], [`Map`][map], and [`Optional`][opt]—
+//! each wrapping an [`InnerView`] that provides access to
+//! the contained type.
+//!
+//! [array]: ContainerView::Array
+//! [map]: ContainerView::Map
+//! [opt]: ContainerView::Optional
+
 use petgraph::graph::NodeIndex;
 
 use crate::ir::{
@@ -37,7 +70,7 @@ impl<'a> ViewNode<'a> for ContainerView<'a> {
     }
 }
 
-/// A graph-aware view of the inner type of a [`Container`].
+/// A graph-aware view of the inner type of a [container][ContainerView].
 #[derive(Debug)]
 pub struct InnerView<'a> {
     cooked: &'a CookedGraph<'a>,

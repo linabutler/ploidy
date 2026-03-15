@@ -1,3 +1,10 @@
+//! Primitives: scalar types.
+//!
+//! Primitives are leaf nodes that don't reference other types in the graph.
+//! Codegen maps each [`PrimitiveType`] variant to a language-specific type:
+//! for example, [`PrimitiveType::String`] becomes a [`String`] in Rust.
+//! See [`PrimitiveType`] for the full list of variants.
+
 use petgraph::graph::NodeIndex;
 
 use crate::ir::{CookedGraph, PrimitiveType};

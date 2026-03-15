@@ -1,3 +1,10 @@
+//! Named schema types.
+//!
+//! A [`SchemaTypeView`] pairs each OpenAPI type view with a [`SchemaTypeInfo`],
+//! which carries the schema's name and optional `x-resourceId` for grouping.
+//! Ploidy extracts named schema types from the `components/schemas` section
+//! of the source [`Spec`][crate::ir::Spec].
+
 use petgraph::graph::NodeIndex;
 
 use crate::ir::{SchemaTypeInfo, graph::CookedGraph, types::GraphSchemaType};
@@ -47,6 +54,7 @@ impl<'a> SchemaTypeView<'a> {
         }
     }
 
+    /// Returns the schema name from `components/schemas`.
     #[inline]
     pub fn name(&self) -> &'a str {
         let (Self::Enum(SchemaTypeInfo { name, .. }, ..)

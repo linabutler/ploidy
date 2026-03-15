@@ -1,3 +1,48 @@
+//! Struct types: object schemas and `allOf` composition.
+//!
+//! In OpenAPI, a `type: object` schema with `properties` describes a record
+//! with named fields. A schema can also inherit fields from other schemas via
+//! `allOf`, which is how OpenAPI models composition and inheritance:
+//!
+//! ```yaml
+//! components:
+//!   schemas:
+//!     Address:
+//!       type: object
+//!       required: [city]
+//!       properties:
+//!         city:
+//!           type: string
+//!         zip:
+//!           type: string
+//!     Office:
+//!       allOf:
+//!         - $ref: '#/components/schemas/Address'
+//!         - type: object
+//!           required: [floor]
+//!           properties:
+//!             floor:
+//!               type: integer
+//! ```
+//!
+//! Ploidy represents both cases as a [`StructView`]. A struct has
+//! its own fields plus fields inherited from its `allOf` parents.
+//! Each field carries properties that guide codegen:
+//!
+//! * **Required vs. optional.** A field listed in `required` is
+//!   non-optional; others are wrapped in [`ContainerView::Optional`].
+//! * **Flattened.** Fields originating from `anyOf` parents are
+//!   flattened into the struct as optional fields.
+//! * **Tag.** A field is a tag if its name matches the discriminator of a
+//!   [tagged union] that references this struct as a variant.
+//! * **Indirection.** A field needs indirection (e.g., [`Box<T>`] in Rust)
+//!   when it and any of its parent structs form a cycle in the type graph.
+//! * **Inherited.** A field that comes from an `allOf` parent rather than
+//!   this struct's own `properties`.
+//!
+//! [`ContainerView::Optional`]: super::container::ContainerView::Optional
+//! [tagged union]: super::tagged::TaggedView
+
 use petgraph::{
     Direction,
     graph::NodeIndex,
@@ -31,6 +76,7 @@ impl<'a> StructView<'a> {
         Self { cooked, index, ty }
     }
 
+    /// Returns the description, if present in the schema.
     #[inline]
     pub fn description(&self) -> Option<&'a str> {
         self.ty.description
@@ -118,6 +164,7 @@ pub struct StructFieldView<'view, 'a> {
 }
 
 impl<'view, 'a> StructFieldView<'view, 'a> {
+    /// Returns the field name.
     #[inline]
     pub fn name(&self) -> StructFieldName<'a> {
         self.field.name
@@ -129,11 +176,13 @@ impl<'view, 'a> StructFieldView<'view, 'a> {
         TypeView::new(self.parent.cooked, self.field.ty)
     }
 
+    /// Returns `true` if this field is listed in `required`.
     #[inline]
     pub fn required(&self) -> bool {
         self.field.required
     }
 
+    /// Returns the description, if present in the schema.
     #[inline]
     pub fn description(&self) -> Option<&'a str> {
         self.field.description
@@ -160,6 +209,8 @@ impl<'view, 'a> StructFieldView<'view, 'a> {
             .any(|neighbor| neighbor.tag == name)
     }
 
+    /// Returns `true` if this field is flattened from an
+    /// `anyOf` parent.
     #[inline]
     pub fn flattened(&self) -> bool {
         self.field.flattened

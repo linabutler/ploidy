@@ -1,3 +1,29 @@
+//! Inline types.
+//!
+//! [`InlineTypeView`] mirrors [`SchemaTypeView`][schema] for anonymous schemas
+//! that are nested inside other schemas or operations:
+//!
+//! ```yaml
+//! components:
+//!   schemas:
+//!     Pet:
+//!       type: object
+//!       properties:
+//!         address:
+//!           type: object
+//!           properties:
+//!             street:
+//!               type: string
+//! ```
+//!
+//! Here, `address` isn't a named schema in `components/schemas`, so Ploidy
+//! assigns it the inline path `Type("Pet") / Field("address")`. Each
+//! [`InlineTypeView`] variant pairs an OpenAPI type view with an
+//! [`InlineTypePath`] like this one, which codegen uses to derive a
+//! stable generated name.
+//!
+//! [schema]: super::schema::SchemaTypeView
+
 use petgraph::graph::NodeIndex;
 
 use crate::ir::{InlineTypePath, graph::CookedGraph, types::GraphInlineType};
@@ -47,6 +73,8 @@ impl<'a> InlineTypeView<'a> {
         }
     }
 
+    /// Returns the path describing where this inline type was found
+    /// in the spec.
     #[inline]
     pub fn path(&self) -> InlineTypePath<'a> {
         let (Self::Enum(path, _)

@@ -21,14 +21,29 @@ use super::{
     },
 };
 
+/// The intermediate representation of an OpenAPI document.
+///
+/// A [`Spec`] is a type tree lowered from a parsed document, with references
+/// still unresolved. Construct one with [`Spec::from_doc()`], then pass it to
+/// [`RawGraph::new()`] to build the type graph.
+///
+/// [`RawGraph::new()`]: crate::ir::RawGraph::new
 #[derive(Debug)]
 pub struct Spec<'a> {
+    /// The document's `info` section: title, OpenAPI version, etc.
     pub info: &'a Info,
+    /// All operations extracted from the document's `paths` section.
     pub operations: Vec<SpecOperation<'a>>,
+    /// Named schemas from `components/schemas`, keyed by name.
     pub schemas: IndexMap<&'a str, SpecType<'a>>,
 }
 
 impl<'a> Spec<'a> {
+    /// Builds a [`Spec`] from a parsed OpenAPI [`Document`].
+    ///
+    /// Lowers each schema and operation to IR types, allocating all
+    /// long-lived data in the `arena`. Returns an error if the document is
+    /// malformed.
     pub fn from_doc(arena: &'a Arena, doc: &'a Document) -> Result<Self, IrError> {
         let schemas = match &doc.components {
             Some(components) => components
@@ -279,9 +294,9 @@ impl<'a> Spec<'a> {
         })
     }
 
-    /// Dereferences a [`SpecType`], following type references through the spec.
+    /// Resolves a [`SpecType`], following type references through the spec.
     #[inline]
-    pub fn resolve(&'a self, mut ty: &'a SpecType<'a>) -> ResolvedSpecType<'a> {
+    pub(super) fn resolve(&'a self, mut ty: &'a SpecType<'a>) -> ResolvedSpecType<'a> {
         loop {
             match ty {
                 SpecType::Schema(ty) => return ResolvedSpecType::Schema(ty),
@@ -295,11 +310,11 @@ impl<'a> Spec<'a> {
 /// A dereferenced type in the spec.
 ///
 /// The derived [`Eq`] and [`Hash`][std::hash::Hash] implementations
-/// work on the underlying values, so structurally identical types
-/// compare and hash equal. This is important: all types in a [`Spec`]
-/// are distinct in memory, but can refer to the same logical type.
+/// use structural equality, not pointer identity. Multiple [`SpecType`]s
+/// in a [`Spec`] may resolve to the same logical type, so value-based
+/// comparison is necessary.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-pub enum ResolvedSpecType<'a> {
+pub(super) enum ResolvedSpecType<'a> {
     Schema(&'a SpecSchemaType<'a>),
     Inline(&'a SpecInlineType<'a>),
 }
