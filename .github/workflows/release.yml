@@ -77,7 +77,7 @@ jobs:
           rustup target add "$TARGET"
 
       - name: Restore Cargo packages and metadata
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@v5
         with:
           path: |
             ~/.cargo/registry/index/
