@@ -1267,59 +1267,6 @@ fn test_tagged_multiple_aliases() {
 }
 
 #[test]
-fn test_tagged_missing_variant() {
-    let doc = Document::from_yaml(indoc::indoc! {"
-        openapi: 3.0.0
-        info:
-          title: Test API
-          version: 1.0.0
-        components:
-          schemas:
-            Dog:
-              type: object
-              properties:
-                bark:
-                  type: string
-            Cat:
-              type: object
-              properties:
-                meow:
-                  type: string
-    "})
-    .unwrap();
-    // Only `Dog` is in the mapping; `Cat` isn't.
-    let schema: Schema = serde_yaml::from_str(indoc::indoc! {"
-        oneOf:
-          - $ref: '#/components/schemas/Dog'
-          - $ref: '#/components/schemas/Cat'
-        discriminator:
-          propertyName: type
-          mapping:
-            dog: '#/components/schemas/Dog'
-    "})
-    .unwrap();
-
-    let arena = Arena::new();
-    let result = transform(&arena, &doc, "Animal", &schema);
-
-    // `Cat` has no discriminator tag, so `Animal` should lower to
-    // an untagged union with two variants.
-    assert_matches!(
-        result,
-        SpecType::Schema(SpecSchemaType::Untagged(
-            SchemaTypeInfo { name: "Animal", .. },
-            Untagged {
-                variants: [
-                    SpecUntaggedVariant::Some(UntaggedVariantNameHint::Index(1), SpecType::Ref(_)),
-                    SpecUntaggedVariant::Some(UntaggedVariantNameHint::Index(2), SpecType::Ref(_)),
-                ],
-                ..
-            },
-        )),
-    );
-}
-
-#[test]
 fn test_tagged_description() {
     let doc = Document::from_yaml(indoc::indoc! {"
         openapi: 3.0.0
@@ -1361,6 +1308,126 @@ fn test_tagged_description() {
                     aliases: ["dog"],
                     ..
                 }],
+            },
+        )),
+    );
+}
+
+#[test]
+fn test_tagged_without_mapping() {
+    let doc = Document::from_yaml(indoc::indoc! {"
+        openapi: 3.0.0
+        info:
+          title: Test API
+          version: 1.0.0
+        components:
+          schemas:
+            Dog:
+              type: object
+              properties:
+                bark:
+                  type: string
+            Cat:
+              type: object
+              properties:
+                meow:
+                  type: string
+    "})
+    .unwrap();
+    // A discriminator without an explicit `mapping` should default to
+    // the schema name.
+    let schema: Schema = serde_yaml::from_str(indoc::indoc! {"
+        oneOf:
+          - $ref: '#/components/schemas/Dog'
+          - $ref: '#/components/schemas/Cat'
+        discriminator:
+          propertyName: petType
+    "})
+    .unwrap();
+
+    let arena = Arena::new();
+    let result = transform(&arena, &doc, "Pet", &schema);
+
+    assert_matches!(
+        result,
+        SpecType::Schema(SpecSchemaType::Tagged(
+            SchemaTypeInfo { name: "Pet", .. },
+            Tagged {
+                tag: "petType",
+                variants: [
+                    SpecTaggedVariant {
+                        name: "Dog",
+                        aliases: ["Dog"],
+                        ..
+                    },
+                    SpecTaggedVariant {
+                        name: "Cat",
+                        aliases: ["Cat"],
+                        ..
+                    },
+                ],
+                ..
+            },
+        )),
+    );
+}
+
+#[test]
+fn test_tagged_with_partial_mapping() {
+    let doc = Document::from_yaml(indoc::indoc! {"
+        openapi: 3.0.0
+        info:
+          title: Test API
+          version: 1.0.0
+        components:
+          schemas:
+            Dog:
+              type: object
+              properties:
+                bark:
+                  type: string
+            Cat:
+              type: object
+              properties:
+                meow:
+                  type: string
+    "})
+    .unwrap();
+    // Only `Dog` has an explicit mapping; `Cat` should default to
+    // its schema name.
+    let schema: Schema = serde_yaml::from_str(indoc::indoc! {"
+        oneOf:
+          - $ref: '#/components/schemas/Dog'
+          - $ref: '#/components/schemas/Cat'
+        discriminator:
+          propertyName: type
+          mapping:
+            dog: '#/components/schemas/Dog'
+    "})
+    .unwrap();
+
+    let arena = Arena::new();
+    let result = transform(&arena, &doc, "Animal", &schema);
+
+    assert_matches!(
+        result,
+        SpecType::Schema(SpecSchemaType::Tagged(
+            SchemaTypeInfo { name: "Animal", .. },
+            Tagged {
+                tag: "type",
+                variants: [
+                    SpecTaggedVariant {
+                        name: "Dog",
+                        aliases: ["dog"],
+                        ..
+                    },
+                    SpecTaggedVariant {
+                        name: "Cat",
+                        aliases: ["Cat"],
+                        ..
+                    },
+                ],
+                ..
             },
         )),
     );

@@ -385,6 +385,70 @@ mod tests {
         assert_eq!(actual, expected);
     }
 
+    #[test]
+    fn test_tagged_union_without_mapping() {
+        let doc = Document::from_yaml(indoc::indoc! {"
+            openapi: 3.0.0
+            info:
+              title: Test API
+              version: 1.0.0
+            components:
+              schemas:
+                Dog:
+                  type: object
+                  properties:
+                    bark:
+                      type: string
+                Cat:
+                  type: object
+                  properties:
+                    meow:
+                      type: string
+                Pet:
+                  oneOf:
+                    - $ref: '#/components/schemas/Dog'
+                    - $ref: '#/components/schemas/Cat'
+                  discriminator:
+                    propertyName: petType
+        "})
+        .unwrap();
+
+        let arena = Arena::new();
+        let spec = Spec::from_doc(&arena, &doc).unwrap();
+        let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
+
+        let schema = graph.schemas().find(|s| s.name() == "Pet");
+        let Some(schema @ SchemaTypeView::Tagged(_, tagged)) = &schema else {
+            panic!("expected tagged union `Pet`; got `{schema:?}`");
+        };
+
+        let name = CodegenTypeName::Schema(schema);
+        let codegen = CodegenTagged::new(name, tagged);
+
+        let actual: syn::File = parse_quote!(#codegen);
+        let expected: syn::File = parse_quote! {
+            #[derive(Debug, Clone, PartialEq, Eq, Hash, ::ploidy_util::serde::Serialize, ::ploidy_util::serde::Deserialize)]
+            #[serde(crate = "::ploidy_util::serde", tag = "petType")]
+            pub enum Pet {
+                #[serde(rename = "Dog")]
+                Dog(crate::types::Dog),
+                #[serde(rename = "Cat")]
+                Cat(crate::types::Cat),
+            }
+            impl ::std::convert::From<crate::types::Dog> for Pet {
+                fn from(value: crate::types::Dog) -> Self {
+                    Self::Dog(value)
+                }
+            }
+            impl ::std::convert::From<crate::types::Cat> for Pet {
+                fn from(value: crate::types::Cat) -> Self {
+                    Self::Cat(value)
+                }
+            }
+        };
+        assert_eq!(actual, expected);
+    }
+
     // MARK: Inlined variants
 
     #[test]
