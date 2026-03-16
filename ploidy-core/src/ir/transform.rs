@@ -99,12 +99,13 @@ impl<'context, 'a> IrTransformer<'context, 'a> {
             for schema in one_of {
                 match schema {
                     RefOrSchema::Ref(r) => {
-                        let aliases = inverted.get(&r.path).map(|s| s.as_slice()).unwrap_or(&[]);
-                        if aliases.is_empty() {
-                            // Variant missing from discriminator mapping;
-                            // fall through to `try_untagged`.
-                            return Err(self);
-                        }
+                        let aliases =
+                            match inverted.get(&r.path).map(|s| s.as_slice()).unwrap_or(&[]) {
+                                // When a discriminator value doesn't have
+                                // an explicit `mapping`, use the schema name.
+                                [] => &[&*self.arena().alloc_str(r.path.name())],
+                                aliases => aliases,
+                            };
                         variants.push(SpecTaggedVariant {
                             name: r.path.name(),
                             ty: self.arena().alloc(SpecType::Ref(&r.path)),
