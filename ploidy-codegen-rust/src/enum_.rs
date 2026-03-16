@@ -22,16 +22,8 @@ impl<'a> CodegenEnum<'a> {
 
 impl ToTokens for CodegenEnum<'_> {
     fn to_tokens(&self, tokens: &mut TokenStream) {
-        // Non-string variants, and string variants that are either empty
-        // or have no identifier characters, can't be represented as
-        // Rust enum variants.
-        let has_unrepresentable = self.ty.variants().iter().any(|variant| match variant {
-            EnumVariant::String(s) => s.chars().all(|c| !unicode_ident::is_xid_continue(c)),
-            _ => true,
-        });
-
-        if has_unrepresentable {
-            // If any variant can't be represented as a Rust enum,
+        if !self.ty.representable() {
+            // If any variant can't be represented as a Rust enum variant,
             // emit a type alias for the enum instead.
             let type_name: Ident = {
                 let name = &self.name;
@@ -43,7 +35,7 @@ impl ToTokens for CodegenEnum<'_> {
                 pub type #type_name = ::std::string::String;
             });
         } else {
-            // Otherwise, emit a plain Rust enum.
+            // Otherwise, emit a Rust unit enum.
             let mut variants = Vec::new();
             let mut display_arms = Vec::new();
             let mut from_str_arms = Vec::new();
@@ -148,6 +140,25 @@ impl ToTokens for CodegenEnum<'_> {
                 }
             });
         }
+    }
+}
+
+/// Rust-specific extensions to [`EnumView`].
+pub(crate) trait EnumViewExt {
+    /// Returns `true` if all variants of this enum can be represented as
+    /// unit variants in Rust. Enums with unrepresentable variants become
+    /// Rust strings instead.
+    fn representable(&self) -> bool;
+}
+
+impl EnumViewExt for EnumView<'_> {
+    fn representable(&self) -> bool {
+        self.variants().iter().all(|variant| match variant {
+            // Only non-empty string variants with at least one identifier
+            // character are representable as Rust enum variants.
+            EnumVariant::String(s) => s.chars().any(unicode_ident::is_xid_continue),
+            _ => false,
+        })
     }
 }
 

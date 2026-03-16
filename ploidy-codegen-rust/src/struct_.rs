@@ -14,6 +14,7 @@ use syn::{Ident, parse_quote};
 use super::{
     derives::ExtraDerive,
     doc_attrs,
+    enum_::EnumViewExt,
     naming::{CodegenIdentScope, CodegenIdentUsage, CodegenStructFieldName, CodegenTypeName},
     ref_::CodegenRef,
 };
@@ -149,6 +150,11 @@ impl ToTokens for CodegenStruct<'_> {
                     }
                     TypeView::Inline(InlineTypeView::Primitive(..))
                     | TypeView::Schema(SchemaTypeView::Primitive(..)) => true,
+                    // Representable enums derive `Default` via their
+                    // `Other` variants; unrepresentable enums become
+                    // `String` type aliases, which also implement `Default`.
+                    TypeView::Inline(InlineTypeView::Enum(..))
+                    | TypeView::Schema(SchemaTypeView::Enum(..)) => true,
                     // Other types aren't defaultable.
                     _ => false,
                 }
@@ -279,7 +285,26 @@ impl ToTokens for SerdeFieldAttr<'_, '_> {
             }
         }
 
-        if !self.field.required() {
+        if let ref ty @ TypeView::Schema(SchemaTypeView::Enum(_, ref view))
+        | ref ty @ TypeView::Inline(InlineTypeView::Enum(_, ref view)) = self.field.ty()
+            && view.representable()
+        {
+            // Enum fields default to the catch-all `Other` variant,
+            // which returns an error when serialized. Since this
+            // default isn't meaningful, skip serializing them.
+            // This only matches direct enum types; optional fields have
+            // `Container(Optional(Enum))` as their type, so they
+            // fall through to the `AbsentOr::is_absent` branch below.
+            attrs.push(quote! { default });
+            attrs.push({
+                let inner = CodegenRef::new(ty);
+                let path: syn::Path = parse_quote!(#inner::is_other);
+                // `.to_token_stream().to_string()` cuddles each `::` in spaces;
+                // manually stringify the path for cleaner output.
+                let joined = path.segments.iter().map(|s| &s.ident).join("::");
+                quote! { skip_serializing_if = #joined }
+            });
+        } else if !self.field.required() {
             // `CodegenField` always emits `AbsentOr` for optional fields.
             attrs.push(quote! { default });
             attrs.push(
@@ -1746,6 +1771,275 @@ mod tests {
             pub struct Dog {
                 pub kind: ::std::string::String,
                 pub bark: ::std::string::String,
+            }
+        };
+        assert_eq!(actual, expected);
+    }
+
+    // MARK: Enum fields
+
+    #[test]
+    fn test_struct_required_enum_field_skips_other() {
+        let doc = Document::from_yaml(indoc::indoc! {"
+            openapi: 3.0.0
+            info:
+              title: Test API
+              version: 1.0.0
+            paths: {}
+            components:
+              schemas:
+                Status:
+                  type: string
+                  enum:
+                    - active
+                    - inactive
+                Pet:
+                  type: object
+                  required:
+                    - name
+                    - status
+                  properties:
+                    name:
+                      type: string
+                    status:
+                      $ref: '#/components/schemas/Status'
+        "})
+        .unwrap();
+
+        let arena = Arena::new();
+        let spec = Spec::from_doc(&arena, &doc).unwrap();
+        let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
+
+        let schema = graph.schemas().find(|s| s.name() == "Pet");
+        let Some(schema @ SchemaTypeView::Struct(_, struct_view)) = &schema else {
+            panic!("expected struct `Pet`; got `{schema:?}`");
+        };
+
+        let name = CodegenTypeName::Schema(schema);
+        let codegen = CodegenStruct::new(name, struct_view);
+
+        let actual: syn::ItemStruct = parse_quote!(#codegen);
+        let expected: syn::ItemStruct = parse_quote! {
+            #[derive(Debug, Clone, PartialEq, Eq, Hash, Default, ::ploidy_util::serde::Serialize, ::ploidy_util::serde::Deserialize)]
+            #[serde(crate = "::ploidy_util::serde")]
+            pub struct Pet {
+                pub name: ::std::string::String,
+                #[serde(default, skip_serializing_if = "crate::types::Status::is_other",)]
+                pub status: crate::types::Status,
+            }
+        };
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn test_struct_optional_enum_field_uses_absent() {
+        let doc = Document::from_yaml(indoc::indoc! {"
+            openapi: 3.0.0
+            info:
+              title: Test API
+              version: 1.0.0
+            paths: {}
+            components:
+              schemas:
+                Status:
+                  type: string
+                  enum:
+                    - active
+                    - inactive
+                Pet:
+                  type: object
+                  required:
+                    - name
+                  properties:
+                    name:
+                      type: string
+                    status:
+                      $ref: '#/components/schemas/Status'
+        "})
+        .unwrap();
+
+        let arena = Arena::new();
+        let spec = Spec::from_doc(&arena, &doc).unwrap();
+        let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
+
+        let schema = graph.schemas().find(|s| s.name() == "Pet");
+        let Some(schema @ SchemaTypeView::Struct(_, struct_view)) = &schema else {
+            panic!("expected struct `Pet`; got `{schema:?}`");
+        };
+
+        let name = CodegenTypeName::Schema(schema);
+        let codegen = CodegenStruct::new(name, struct_view);
+
+        let actual: syn::ItemStruct = parse_quote!(#codegen);
+        let expected: syn::ItemStruct = parse_quote! {
+            #[derive(Debug, Clone, PartialEq, Eq, Hash, Default, ::ploidy_util::serde::Serialize, ::ploidy_util::serde::Deserialize)]
+            #[serde(crate = "::ploidy_util::serde")]
+            pub struct Pet {
+                pub name: ::std::string::String,
+                #[serde(default, skip_serializing_if = "::ploidy_util::absent::AbsentOr::is_absent",)]
+                pub status: ::ploidy_util::absent::AbsentOr<crate::types::Status>,
+            }
+        };
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn test_struct_required_inline_enum_field_skips_other() {
+        let doc = Document::from_yaml(indoc::indoc! {"
+            openapi: 3.0.0
+            info:
+              title: Test API
+              version: 1.0.0
+            paths: {}
+            components:
+              schemas:
+                Pet:
+                  type: object
+                  required:
+                    - name
+                    - status
+                  properties:
+                    name:
+                      type: string
+                    status:
+                      type: string
+                      enum:
+                        - active
+                        - inactive
+        "})
+        .unwrap();
+
+        let arena = Arena::new();
+        let spec = Spec::from_doc(&arena, &doc).unwrap();
+        let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
+
+        let schema = graph.schemas().find(|s| s.name() == "Pet");
+        let Some(schema @ SchemaTypeView::Struct(_, struct_view)) = &schema else {
+            panic!("expected struct `Pet`; got `{schema:?}`");
+        };
+
+        let name = CodegenTypeName::Schema(schema);
+        let codegen = CodegenStruct::new(name, struct_view);
+
+        let actual: syn::ItemStruct = parse_quote!(#codegen);
+        let expected: syn::ItemStruct = parse_quote! {
+            #[derive(Debug, Clone, PartialEq, Eq, Hash, Default, ::ploidy_util::serde::Serialize, ::ploidy_util::serde::Deserialize)]
+            #[serde(crate = "::ploidy_util::serde")]
+            pub struct Pet {
+                pub name: ::std::string::String,
+                #[serde(default, skip_serializing_if = "crate::types::pet::types::Status::is_other",)]
+                pub status: crate::types::pet::types::Status,
+            }
+        };
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn test_struct_required_nullable_enum_field_uses_option() {
+        let doc = Document::from_yaml(indoc::indoc! {"
+            openapi: 3.0.0
+            info:
+              title: Test API
+              version: 1.0.0
+            paths: {}
+            components:
+              schemas:
+                Status:
+                  type: string
+                  enum:
+                    - active
+                    - inactive
+                  nullable: true
+                Pet:
+                  type: object
+                  required:
+                    - name
+                    - status
+                  properties:
+                    name:
+                      type: string
+                    status:
+                      $ref: '#/components/schemas/Status'
+        "})
+        .unwrap();
+
+        let arena = Arena::new();
+        let spec = Spec::from_doc(&arena, &doc).unwrap();
+        let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
+
+        let schema = graph.schemas().find(|s| s.name() == "Pet");
+        let Some(schema @ SchemaTypeView::Struct(_, struct_view)) = &schema else {
+            panic!("expected struct `Pet`; got `{schema:?}`");
+        };
+
+        let name = CodegenTypeName::Schema(schema);
+        let codegen = CodegenStruct::new(name, struct_view);
+
+        // Required nullable enum fields become `Option<T>` without
+        // `skip_serializing_if`, since their type is
+        // `Container::Optional`, not `Enum`.
+        let actual: syn::ItemStruct = parse_quote!(#codegen);
+        let expected: syn::ItemStruct = parse_quote! {
+            #[derive(Debug, Clone, PartialEq, Eq, Hash, Default, ::ploidy_util::serde::Serialize, ::ploidy_util::serde::Deserialize)]
+            #[serde(crate = "::ploidy_util::serde")]
+            pub struct Pet {
+                pub name: ::std::string::String,
+                pub status: ::std::option::Option<crate::types::Status>,
+            }
+        };
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn test_struct_required_unrepresentable_enum_field_no_skip() {
+        let doc = Document::from_yaml(indoc::indoc! {"
+            openapi: 3.0.0
+            info:
+              title: Test API
+              version: 1.0.0
+            paths: {}
+            components:
+              schemas:
+                Priority:
+                  type: integer
+                  enum:
+                    - 1
+                    - 2
+                    - 3
+                Pet:
+                  type: object
+                  required:
+                    - name
+                    - priority
+                  properties:
+                    name:
+                      type: string
+                    priority:
+                      $ref: '#/components/schemas/Priority'
+        "})
+        .unwrap();
+
+        let arena = Arena::new();
+        let spec = Spec::from_doc(&arena, &doc).unwrap();
+        let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
+
+        let schema = graph.schemas().find(|s| s.name() == "Pet");
+        let Some(schema @ SchemaTypeView::Struct(_, struct_view)) = &schema else {
+            panic!("expected struct `Pet`; got `{schema:?}`");
+        };
+
+        let name = CodegenTypeName::Schema(schema);
+        let codegen = CodegenStruct::new(name, struct_view);
+
+        // Unrepresentable enums become `String` type aliases,
+        // so no `skip_serializing_if` is added.
+        let actual: syn::ItemStruct = parse_quote!(#codegen);
+        let expected: syn::ItemStruct = parse_quote! {
+            #[derive(Debug, Clone, PartialEq, Eq, Hash, Default, ::ploidy_util::serde::Serialize, ::ploidy_util::serde::Deserialize)]
+            #[serde(crate = "::ploidy_util::serde")]
+            pub struct Pet {
+                pub name: ::std::string::String,
+                pub priority: crate::types::Priority,
             }
         };
         assert_eq!(actual, expected);
