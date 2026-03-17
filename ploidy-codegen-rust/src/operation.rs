@@ -1,14 +1,11 @@
 use itertools::Itertools;
 use ploidy_core::{
     codegen::UniqueNames,
-    ir::{
-        ContainerView, OperationView, ParameterStyle, ParameterView, PathParameter, QueryParameter,
-        RequestView, ResponseView,
-    },
+    ir::{OperationView, ParameterView, PathParameter, RequestView, ResponseView},
     parse::{Method, path::PathFragment},
 };
 use proc_macro2::{Span, TokenStream};
-use quote::{ToTokens, TokenStreamExt, quote};
+use quote::{ToTokens, TokenStreamExt, format_ident, quote};
 use syn::Ident;
 
 use super::{
@@ -27,8 +24,9 @@ impl<'a> CodegenOperation<'a> {
         Self { op }
     }
 
-    /// Generates code to build the request URL, with path parameters substituted.
-    fn url(&self, params: &[(CodegenIdent, ParameterView<'_, PathParameter>)]) -> TokenStream {
+    /// Generates code to build and interpolate path parameters into
+    /// the request URL.
+    fn url(&self, params: &[(CodegenIdent, ParameterView<'_, '_, PathParameter>)]) -> TokenStream {
         let segments = self
             .op
             .path()
@@ -87,45 +85,17 @@ impl<'a> CodegenOperation<'a> {
         }
     }
 
-    /// Generates code to append query parameters.
-    fn query(&self, params: &[(CodegenIdent, ParameterView<'_, QueryParameter>)]) -> TokenStream {
-        let appends = params
-            .iter()
-            .map(|(ident, param)| {
-                let name = param.name();
-                let style = match param.style() {
-                    Some(ParameterStyle::DeepObject) => {
-                        quote!(::ploidy_util::QueryStyle::DeepObject)
-                    }
-                    Some(ParameterStyle::SpaceDelimited) => {
-                        quote!(::ploidy_util::QueryStyle::SpaceDelimited)
-                    }
-                    Some(ParameterStyle::PipeDelimited) => {
-                        quote!(::ploidy_util::QueryStyle::PipeDelimited)
-                    }
-                    Some(ParameterStyle::Form { exploded }) => {
-                        quote!(::ploidy_util::QueryStyle::Form { exploded: #exploded })
-                    }
-                    None => quote!(::ploidy_util::QueryStyle::default()),
-                };
-                let usage = CodegenIdentUsage::Param(ident);
-                Some(quote! {
-                    .style(#style)
-                    .append(#name, &#usage)?
-                })
-            })
-            .collect_vec();
-        match &*appends {
-            [] => quote! {},
-            appends => quote! {
+    /// Generates code to append query parameters to the URL.
+    fn query(&self) -> Option<TokenStream> {
+        self.op.query().next().is_some().then(|| {
+            quote! {
                 let url = {
                     let mut url = url;
-                    let serializer = ::ploidy_util::QuerySerializer::new(&mut url);
-                    serializer #(#appends)*;
+                    query.append_to(&mut url)?;
                     url
                 };
-            },
-        }
+            }
+        })
     }
 }
 
@@ -135,7 +105,12 @@ impl ToTokens for CodegenOperation<'_> {
         let method_name = CodegenIdentUsage::Method(&operation_id);
 
         let unique = UniqueNames::new();
-        let mut scope = CodegenIdentScope::with_reserved(&unique, &["url", "request", "form"]);
+        let mut scope = CodegenIdentScope::with_reserved(
+            &unique,
+            // `query`, `request`, and `form` are argument names;
+            // `url` and `response` are local variables.
+            &["query", "request", "form", "url", "response"],
+        );
         let mut params = vec![];
 
         let paths = self
@@ -149,24 +124,12 @@ impl ToTokens for CodegenOperation<'_> {
             params.push(quote! { #usage: &str });
         }
 
-        let queries = self
-            .op
-            .query()
-            .map(|param| (scope.uniquify(param.name()), param))
-            .collect_vec();
-        for (ident, param) in &queries {
-            let view = param.ty();
-            let ty = if param.required()
-                || matches!(view.as_container(), Some(ContainerView::Optional(_)))
-            {
-                let path = CodegenRef::new(&view);
-                quote!(#path)
-            } else {
-                let path = CodegenRef::new(&view);
-                quote! { ::std::option::Option<#path> }
-            };
-            let usage = CodegenIdentUsage::Param(ident);
-            params.push(quote! { #usage: #ty });
+        if self.op.query().next().is_some() {
+            // Include the `query` argument if we have
+            // at least one query parameter.
+            let op_ident = CodegenIdent::new(self.op.id());
+            let query_type_name = format_ident!("{}Query", CodegenIdentUsage::Type(&op_ident));
+            params.push(quote! { query: &parameters::#query_type_name });
         }
 
         if let Some(request) = self.op.request() {
@@ -189,9 +152,11 @@ impl ToTokens for CodegenOperation<'_> {
         };
 
         let build_url = self.url(&paths);
-        let build_query = self.query(&queries);
+
+        let build_query = self.query();
 
         let http_method = CodegenMethod(self.op.method());
+
         let build_request = match self.op.request() {
             Some(RequestView::Json(_)) => quote! {
                 let response = self.client
@@ -265,5 +230,382 @@ impl ToTokens for CodegenMethod {
             Method::Patch => Ident::new("patch", Span::call_site()),
             Method::Delete => Ident::new("delete", Span::call_site()),
         });
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    use ploidy_core::{
+        arena::Arena,
+        ir::{RawGraph, Spec},
+        parse::Document,
+    };
+    use pretty_assertions::assert_eq;
+    use syn::parse_quote;
+
+    use crate::CodegenGraph;
+
+    // MARK: With query params
+
+    #[test]
+    fn test_operation_with_path_and_query_params() {
+        let doc = Document::from_yaml(indoc::indoc! {"
+            openapi: 3.0.0
+            info:
+              title: Test API
+              version: 1.0.0
+            paths:
+              /items/{item_id}:
+                get:
+                  operationId: getItem
+                  parameters:
+                    - name: item_id
+                      in: path
+                      required: true
+                      schema:
+                        type: string
+                    - name: expand
+                      in: query
+                      schema:
+                        type: boolean
+                  responses:
+                    '200':
+                      description: OK
+        "})
+        .unwrap();
+
+        let arena = Arena::new();
+        let spec = Spec::from_doc(&arena, &doc).unwrap();
+        let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
+
+        let op = graph.operations().next().unwrap();
+        let codegen = CodegenOperation::new(&op);
+
+        let actual: syn::ImplItemFn = parse_quote!(#codegen);
+        let expected: syn::ImplItemFn = parse_quote! {
+            pub async fn get_item(
+                &self,
+                item_id: &str,
+                query: &parameters::GetItemQuery
+            ) -> Result<(), crate::error::Error> {
+                let url = {
+                    let mut url = self.base_url.clone();
+                    url
+                        .path_segments_mut()
+                        .map_err(|()| crate::error::Error::UrlCannotBeABase)?
+                        .pop_if_empty()
+                        .push("items")
+                        .push(item_id);
+                    url
+                };
+                let url = {
+                    let mut url = url;
+                    query.append_to(&mut url)?;
+                    url
+                };
+                let response = self
+                    .client
+                    .get(url)
+                    .headers(self.headers.clone())
+                    .send()
+                    .await?
+                    .error_for_status()?;
+                let _ = response;
+                Ok(())
+            }
+        };
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn test_operation_with_query_params_only() {
+        let doc = Document::from_yaml(indoc::indoc! {"
+            openapi: 3.0.0
+            info:
+              title: Test API
+              version: 1.0.0
+            paths:
+              /items:
+                get:
+                  operationId: getItems
+                  parameters:
+                    - name: limit
+                      in: query
+                      schema:
+                        type: integer
+                        format: int32
+                  responses:
+                    '200':
+                      description: OK
+        "})
+        .unwrap();
+
+        let arena = Arena::new();
+        let spec = Spec::from_doc(&arena, &doc).unwrap();
+        let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
+
+        let op = graph.operations().next().unwrap();
+        let codegen = CodegenOperation::new(&op);
+
+        let actual: syn::ImplItemFn = parse_quote!(#codegen);
+        let expected: syn::ImplItemFn = parse_quote! {
+            pub async fn get_items(
+                &self,
+                query: &parameters::GetItemsQuery
+            ) -> Result<(), crate::error::Error> {
+                let url = {
+                    let mut url = self.base_url.clone();
+                    url
+                        .path_segments_mut()
+                        .map_err(|()| crate::error::Error::UrlCannotBeABase)?
+                        .pop_if_empty()
+                        .push("items");
+                    url
+                };
+                let url = {
+                    let mut url = url;
+                    query.append_to(&mut url)?;
+                    url
+                };
+                let response = self
+                    .client
+                    .get(url)
+                    .headers(self.headers.clone())
+                    .send()
+                    .await?
+                    .error_for_status()?;
+                let _ = response;
+                Ok(())
+            }
+        };
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn test_path_param_named_query_does_not_shadow() {
+        let doc = Document::from_yaml(indoc::indoc! {"
+            openapi: 3.0.0
+            info:
+              title: Test API
+              version: 1.0.0
+            paths:
+              /search/{query}:
+                get:
+                  operationId: search
+                  parameters:
+                    - name: query
+                      in: path
+                      required: true
+                      schema:
+                        type: string
+                    - name: limit
+                      in: query
+                      schema:
+                        type: integer
+                        format: int32
+                  responses:
+                    '200':
+                      description: OK
+        "})
+        .unwrap();
+
+        let arena = Arena::new();
+        let spec = Spec::from_doc(&arena, &doc).unwrap();
+        let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
+
+        let op = graph.operations().next().unwrap();
+        let codegen = CodegenOperation::new(&op);
+
+        let actual: syn::ImplItemFn = parse_quote!(#codegen);
+        let expected: syn::ImplItemFn = parse_quote! {
+            pub async fn search(
+                &self,
+                query2: &str,
+                query: &parameters::SearchQuery
+            ) -> Result<(), crate::error::Error> {
+                let url = {
+                    let mut url = self.base_url.clone();
+                    url
+                        .path_segments_mut()
+                        .map_err(|()| crate::error::Error::UrlCannotBeABase)?
+                        .pop_if_empty()
+                        .push("search")
+                        .push(query2);
+                    url
+                };
+                let url = {
+                    let mut url = url;
+                    query.append_to(&mut url)?;
+                    url
+                };
+                let response = self
+                    .client
+                    .get(url)
+                    .headers(self.headers.clone())
+                    .send()
+                    .await?
+                    .error_for_status()?;
+                let _ = response;
+                Ok(())
+            }
+        };
+        assert_eq!(actual, expected);
+    }
+
+    // MARK: With query params and request body
+
+    #[test]
+    fn test_operation_with_query_params_and_request_body() {
+        let doc = Document::from_yaml(indoc::indoc! {"
+            openapi: 3.0.0
+            info:
+              title: Test API
+              version: 1.0.0
+            paths:
+              /items/{item_id}:
+                put:
+                  operationId: updateItem
+                  parameters:
+                    - name: item_id
+                      in: path
+                      required: true
+                      schema:
+                        type: string
+                    - name: dry_run
+                      in: query
+                      schema:
+                        type: boolean
+                  requestBody:
+                    content:
+                      application/json:
+                        schema:
+                          $ref: '#/components/schemas/Item'
+                  responses:
+                    '200':
+                      description: OK
+                      content:
+                        application/json:
+                          schema:
+                            $ref: '#/components/schemas/Item'
+            components:
+              schemas:
+                Item:
+                  type: object
+                  properties:
+                    name:
+                      type: string
+        "})
+        .unwrap();
+
+        let arena = Arena::new();
+        let spec = Spec::from_doc(&arena, &doc).unwrap();
+        let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
+
+        let op = graph.operations().next().unwrap();
+        let codegen = CodegenOperation::new(&op);
+
+        let actual: syn::ImplItemFn = parse_quote!(#codegen);
+        let expected: syn::ImplItemFn = parse_quote! {
+            pub async fn update_item(
+                &self,
+                item_id: &str,
+                query: &parameters::UpdateItemQuery,
+                request: impl Into<crate::types::Item>
+            ) -> Result<crate::types::Item, crate::error::Error> {
+                let url = {
+                    let mut url = self.base_url.clone();
+                    url
+                        .path_segments_mut()
+                        .map_err(|()| crate::error::Error::UrlCannotBeABase)?
+                        .pop_if_empty()
+                        .push("items")
+                        .push(item_id);
+                    url
+                };
+                let url = {
+                    let mut url = url;
+                    query.append_to(&mut url)?;
+                    url
+                };
+                let response = self
+                    .client
+                    .put(url)
+                    .headers(self.headers.clone())
+                    .json(&request.into())
+                    .send()
+                    .await?
+                    .error_for_status()?;
+                let body = response.bytes().await?;
+                let deserializer = &mut ::ploidy_util::serde_json::Deserializer::from_slice(&body);
+                let result = ::ploidy_util::serde_path_to_error::deserialize(deserializer)
+                    .map_err(crate::error::JsonError::from)?;
+                Ok(result)
+            }
+        };
+        assert_eq!(actual, expected);
+    }
+
+    // MARK: Without query params
+
+    #[test]
+    fn test_operation_without_query_params() {
+        let doc = Document::from_yaml(indoc::indoc! {"
+            openapi: 3.0.0
+            info:
+              title: Test API
+              version: 1.0.0
+            paths:
+              /items/{item_id}:
+                get:
+                  operationId: getItem
+                  parameters:
+                    - name: item_id
+                      in: path
+                      required: true
+                      schema:
+                        type: string
+                  responses:
+                    '200':
+                      description: OK
+        "})
+        .unwrap();
+
+        let arena = Arena::new();
+        let spec = Spec::from_doc(&arena, &doc).unwrap();
+        let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
+
+        let op = graph.operations().next().unwrap();
+        let codegen = CodegenOperation::new(&op);
+
+        let actual: syn::ImplItemFn = parse_quote!(#codegen);
+        let expected: syn::ImplItemFn = parse_quote! {
+            pub async fn get_item(
+                &self,
+                item_id: &str
+            ) -> Result<(), crate::error::Error> {
+                let url = {
+                    let mut url = self.base_url.clone();
+                    url
+                        .path_segments_mut()
+                        .map_err(|()| crate::error::Error::UrlCannotBeABase)?
+                        .pop_if_empty()
+                        .push("items")
+                        .push(item_id);
+                    url
+                };
+                let response = self
+                    .client
+                    .get(url)
+                    .headers(self.headers.clone())
+                    .send()
+                    .await?
+                    .error_for_status()?;
+                let _ = response;
+                Ok(())
+            }
+        };
+        assert_eq!(actual, expected);
     }
 }

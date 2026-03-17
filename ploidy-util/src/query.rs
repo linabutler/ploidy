@@ -24,30 +24,28 @@
 //!
 //! // Serialize parameters with the default style: `form`, exploded.
 //! let mut url = Url::parse("https://api.example.com/pets").unwrap();
+//! let style = QueryStyle::default();
 //! QuerySerializer::new(&mut url)
-//!     .append("kind", &[Kind::Dog, Kind::Cat])?
-//!     .append("limit", &10)?;
+//!     .append("kind", &[Kind::Dog, Kind::Cat], style)?
+//!     .append("limit", &10, style)?;
 //! assert_eq!(url.as_str(), "https://api.example.com/pets?kind=dog&kind=cat&limit=10");
 //!
 //! // ...Or as comma-separated values:
 //! let mut url = Url::parse("https://api.example.com/pets").unwrap();
 //! QuerySerializer::new(&mut url)
-//!     .style(QueryStyle::Form { exploded: false })
-//!     .append("kind", &[Kind::Dog, Kind::Cat])?;
+//!     .append("kind", &[Kind::Dog, Kind::Cat], QueryStyle::Form { exploded: false })?;
 //! assert_eq!(url.as_str(), "https://api.example.com/pets?kind=dog,cat");
 //!
 //! // ...Or use `spaceDelimited` values:
 //! let mut url = Url::parse("https://api.example.com/pets").unwrap();
 //! QuerySerializer::new(&mut url)
-//!     .style(QueryStyle::SpaceDelimited)
-//!     .append("kind", &[Kind::Dog, Kind::Cat])?;
+//!     .append("kind", &[Kind::Dog, Kind::Cat], QueryStyle::SpaceDelimited)?;
 //! assert_eq!(url.as_str(), "https://api.example.com/pets?kind=dog%20cat");
 //!
 //! // ...Or `pipeDelimited` values:
 //! let mut url = Url::parse("https://api.example.com/pets").unwrap();
 //! QuerySerializer::new(&mut url)
-//!     .style(QueryStyle::PipeDelimited)
-//!     .append("kind", &[Kind::Dog, Kind::Cat])?;
+//!     .append("kind", &[Kind::Dog, Kind::Cat], QueryStyle::PipeDelimited)?;
 //! assert_eq!(url.as_str(), "https://api.example.com/pets?kind=dog%7Ccat");
 //!
 //! // ...Or `deepObject` for nested structures:
@@ -66,8 +64,7 @@
 //!
 //! let mut url = Url::parse("https://api.example.com/search").unwrap();
 //! QuerySerializer::new(&mut url)
-//!     .style(QueryStyle::DeepObject)
-//!     .append("filter", &filter)?;
+//!     .append("filter", &filter, QueryStyle::DeepObject)?;
 //! assert!(url.query_pairs().eq([
 //!     ("filter[kind][0]".into(), "dog".into()),
 //!     ("filter[kind][1]".into(), "cat".into()),
@@ -116,30 +113,23 @@ impl Default for QueryStyle {
 
 /// A serializer that formats and appends URL query parameters
 /// according to OpenAPI styles.
-pub struct QuerySerializer<'a> {
-    url: &'a mut Url,
-    style: QueryStyle,
-}
+pub struct QuerySerializer<'a>(&'a mut Url);
 
 impl<'a> QuerySerializer<'a> {
     /// Creates a new serializer.
     pub fn new(url: &'a mut Url) -> Self {
-        Self {
-            url,
-            style: QueryStyle::default(),
-        }
-    }
-
-    /// Sets the formatting style.
-    pub fn style(mut self, style: QueryStyle) -> Self {
-        self.style = style;
-        self
+        Self(url)
     }
 
     /// Serializes and appends a query parameter to the URL.
-    pub fn append<T: Serialize>(self, name: &str, value: &T) -> Result<Self, QueryParamError> {
+    pub fn append<T: Serialize>(
+        &mut self,
+        name: &str,
+        value: &T,
+        style: QueryStyle,
+    ) -> Result<&mut Self, QueryParamError> {
         use ParamSerializerState::*;
-        let style = match self.style {
+        let state = match style {
             QueryStyle::DeepObject => DeepObject,
             QueryStyle::Form { exploded: true } => ExplodedForm,
             QueryStyle::Form { exploded: false } => NonExplodedForm(vec![]),
@@ -147,7 +137,7 @@ impl<'a> QuerySerializer<'a> {
             QueryStyle::SpaceDelimited => Delimited(" ", vec![]),
         };
         let mut path = KeyPath::new(name);
-        let mut serializer = QueryParamSerializer::new(self.url, &mut path, style);
+        let mut serializer = QueryParamSerializer::new(self.0, &mut path, state);
         value.serialize(&mut serializer)?;
         serializer.flush();
         Ok(self)
@@ -879,7 +869,9 @@ mod tests {
     #[test]
     fn test_integer() {
         let mut url = Url::parse("http://example.com/").unwrap();
-        QuerySerializer::new(&mut url).append("limit", &42).unwrap();
+        QuerySerializer::new(&mut url)
+            .append("limit", &42, QueryStyle::default())
+            .unwrap();
         assert_eq!(url.query(), Some("limit=42"));
     }
 
@@ -887,7 +879,7 @@ mod tests {
     fn test_string() {
         let mut url = Url::parse("http://example.com/").unwrap();
         QuerySerializer::new(&mut url)
-            .append("name", &"Alice")
+            .append("name", &"Alice", QueryStyle::default())
             .unwrap();
         assert_eq!(url.query(), Some("name=Alice"));
     }
@@ -896,7 +888,7 @@ mod tests {
     fn test_bool() {
         let mut url = Url::parse("http://example.com/").unwrap();
         QuerySerializer::new(&mut url)
-            .append("active", &true)
+            .append("active", &true, QueryStyle::default())
             .unwrap();
         assert_eq!(url.query(), Some("active=true"));
     }
@@ -906,7 +898,7 @@ mod tests {
         let mut url = Url::parse("http://example.com/").unwrap();
         let value = Some(42);
         QuerySerializer::new(&mut url)
-            .append("limit", &value)
+            .append("limit", &value, QueryStyle::default())
             .unwrap();
         assert_eq!(url.query(), Some("limit=42"));
     }
@@ -916,7 +908,7 @@ mod tests {
         let mut url = Url::parse("http://example.com/").unwrap();
         let value: Option<i32> = None;
         QuerySerializer::new(&mut url)
-            .append("limit", &value)
+            .append("limit", &value, QueryStyle::default())
             .unwrap();
         assert_eq!(url.query(), None);
     }
@@ -926,7 +918,7 @@ mod tests {
         let mut url = Url::parse("http://example.com/").unwrap();
         let values = vec![1, 2, 3];
         QuerySerializer::new(&mut url)
-            .append("ids", &values)
+            .append("ids", &values, QueryStyle::default())
             .unwrap();
         assert_eq!(url.query(), Some("ids=1&ids=2&ids=3"));
     }
@@ -936,8 +928,7 @@ mod tests {
         let mut url = Url::parse("http://example.com/").unwrap();
         let values = vec![1, 2, 3];
         QuerySerializer::new(&mut url)
-            .style(QueryStyle::Form { exploded: false })
-            .append("ids", &values)
+            .append("ids", &values, QueryStyle::Form { exploded: false })
             .unwrap();
         assert_eq!(url.query(), Some("ids=1,2,3"));
     }
@@ -947,8 +938,7 @@ mod tests {
         let mut url = Url::parse("http://example.com/").unwrap();
         let values = vec![1, 2, 3];
         QuerySerializer::new(&mut url)
-            .style(QueryStyle::SpaceDelimited)
-            .append("ids", &values)
+            .append("ids", &values, QueryStyle::SpaceDelimited)
             .unwrap();
         assert_eq!(url.query(), Some("ids=1%202%203"));
     }
@@ -958,8 +948,7 @@ mod tests {
         let mut url = Url::parse("http://example.com/").unwrap();
         let values = vec![1, 2, 3];
         QuerySerializer::new(&mut url)
-            .style(QueryStyle::PipeDelimited)
-            .append("ids", &values)
+            .append("ids", &values, QueryStyle::PipeDelimited)
             .unwrap();
         assert_eq!(url.query(), Some("ids=1%7C2%7C3"));
     }
@@ -969,7 +958,7 @@ mod tests {
         let mut url = Url::parse("http://example.com/").unwrap();
         let values: Vec<i32> = vec![];
         QuerySerializer::new(&mut url)
-            .append("ids", &values)
+            .append("ids", &values, QueryStyle::default())
             .unwrap();
         assert_eq!(url.query(), None);
     }
@@ -988,7 +977,7 @@ mod tests {
             last_name: "Doe".to_owned(),
         };
         QuerySerializer::new(&mut url)
-            .append("person", &person)
+            .append("person", &person, QueryStyle::default())
             .unwrap();
         assert_eq!(url.query(), Some("first_name=John&last_name=Doe"));
     }
@@ -1007,8 +996,7 @@ mod tests {
             last_name: "Doe".to_owned(),
         };
         QuerySerializer::new(&mut url)
-            .style(QueryStyle::Form { exploded: false })
-            .append("person", &person)
+            .append("person", &person, QueryStyle::Form { exploded: false })
             .unwrap();
         assert_eq!(url.query(), Some("person=first_name,John,last_name,Doe"));
     }
@@ -1028,8 +1016,7 @@ mod tests {
             location: "bar".to_owned(),
         };
         QuerySerializer::new(&mut url)
-            .style(QueryStyle::DeepObject)
-            .append("filter", &filter)
+            .append("filter", &filter, QueryStyle::DeepObject)
             .unwrap();
         assert_eq!(
             url.query(),
@@ -1041,10 +1028,11 @@ mod tests {
     fn test_multiple_params_chained() {
         let mut url = Url::parse("http://example.com/").unwrap();
         let tags = vec!["dog", "cat"];
+        let style = QueryStyle::default();
         QuerySerializer::new(&mut url)
-            .append("limit", &10)
+            .append("limit", &10, style)
             .unwrap()
-            .append("tags", &tags)
+            .append("tags", &tags, style)
             .unwrap();
         assert_eq!(url.query(), Some("limit=10&tags=dog&tags=cat"));
     }
@@ -1053,7 +1041,7 @@ mod tests {
     fn test_string_with_special_chars() {
         let mut url = Url::parse("http://example.com/").unwrap();
         QuerySerializer::new(&mut url)
-            .append("name", &"John Doe & Co.")
+            .append("name", &"John Doe & Co.", QueryStyle::default())
             .unwrap();
         assert_eq!(url.query(), Some("name=John+Doe+%26+Co."));
     }
@@ -1063,8 +1051,7 @@ mod tests {
         let mut url = Url::parse("http://example.com/").unwrap();
         let values = vec!["hello world", "foo&bar"];
         QuerySerializer::new(&mut url)
-            .style(QueryStyle::Form { exploded: false })
-            .append("tags", &values)
+            .append("tags", &values, QueryStyle::Form { exploded: false })
             .unwrap();
         assert_eq!(url.query(), Some("tags=hello%20world,foo%26bar"));
     }
@@ -1092,8 +1079,7 @@ mod tests {
             },
         };
         QuerySerializer::new(&mut url)
-            .style(QueryStyle::DeepObject)
-            .append("person", &person)
+            .append("person", &person, QueryStyle::DeepObject)
             .unwrap();
         assert_eq!(
             url.query(),
@@ -1117,8 +1103,7 @@ mod tests {
             tags: vec!["new".to_owned(), "sale".to_owned()],
         };
         QuerySerializer::new(&mut url)
-            .style(QueryStyle::DeepObject)
-            .append("filter", &filter)
+            .append("filter", &filter, QueryStyle::DeepObject)
             .unwrap();
         assert_eq!(
             url.query(),
@@ -1143,7 +1128,7 @@ mod tests {
             optional: None,
         };
         QuerySerializer::new(&mut url)
-            .append("params", &params)
+            .append("params", &params, QueryStyle::default())
             .unwrap();
         assert_eq!(url.query(), Some("required=42"));
     }
@@ -1159,7 +1144,7 @@ mod tests {
 
         let mut url = Url::parse("http://example.com/").unwrap();
         QuerySerializer::new(&mut url)
-            .append("status", &Status::Active)
+            .append("status", &Status::Active, QueryStyle::default())
             .unwrap();
         assert_eq!(url.query(), Some("status=Active"));
     }
@@ -1168,7 +1153,7 @@ mod tests {
     fn test_unicode_string() {
         let mut url = Url::parse("http://example.com/").unwrap();
         QuerySerializer::new(&mut url)
-            .append("name", &"日本語")
+            .append("name", &"日本語", QueryStyle::default())
             .unwrap();
         assert_eq!(url.query(), Some("name=%E6%97%A5%E6%9C%AC%E8%AA%9E"));
     }
@@ -1177,9 +1162,8 @@ mod tests {
     fn test_deep_object_rejects_arrays() {
         let mut url = Url::parse("http://example.com/").unwrap();
         let values = vec![1, 2, 3];
-        let result = QuerySerializer::new(&mut url)
-            .style(QueryStyle::DeepObject)
-            .append("ids", &values);
+        let mut serializer = QuerySerializer::new(&mut url);
+        let result = serializer.append("ids", &values, QueryStyle::DeepObject);
         assert!(matches!(
             result,
             Err(QueryParamError::UnspecifiedStyleExploded)
@@ -1202,8 +1186,7 @@ mod tests {
             b: 150,
         };
         QuerySerializer::new(&mut url)
-            .style(QueryStyle::SpaceDelimited)
-            .append("color", &color)
+            .append("color", &color, QueryStyle::SpaceDelimited)
             .unwrap();
 
         // Per OpenAPI spec: `color=R%20100%20G%20200%20B%20150`.
@@ -1226,8 +1209,7 @@ mod tests {
             b: 150,
         };
         QuerySerializer::new(&mut url)
-            .style(QueryStyle::PipeDelimited)
-            .append("color", &color)
+            .append("color", &color, QueryStyle::PipeDelimited)
             .unwrap();
 
         // Per OpenAPI spec: `color=R%7C100%7CG%7C200%7CB%7C150`.
@@ -1239,7 +1221,7 @@ mod tests {
         let mut url = Url::parse("http://example.com/").unwrap();
         let coords = (42, 24, 10);
         QuerySerializer::new(&mut url)
-            .append("coords", &coords)
+            .append("coords", &coords, QueryStyle::default())
             .unwrap();
         assert_eq!(url.query(), Some("coords=42&coords=24&coords=10"));
     }
@@ -1249,8 +1231,7 @@ mod tests {
         let mut url = Url::parse("http://example.com/").unwrap();
         let coords = (42, 24, 10);
         QuerySerializer::new(&mut url)
-            .style(QueryStyle::Form { exploded: false })
-            .append("coords", &coords)
+            .append("coords", &coords, QueryStyle::Form { exploded: false })
             .unwrap();
         assert_eq!(url.query(), Some("coords=42,24,10"));
     }
@@ -1260,8 +1241,7 @@ mod tests {
         let mut url = Url::parse("http://example.com/").unwrap();
         let coords = (42, 24, 10);
         QuerySerializer::new(&mut url)
-            .style(QueryStyle::SpaceDelimited)
-            .append("coords", &coords)
+            .append("coords", &coords, QueryStyle::SpaceDelimited)
             .unwrap();
         assert_eq!(url.query(), Some("coords=42%2024%2010"));
     }
@@ -1271,8 +1251,7 @@ mod tests {
         let mut url = Url::parse("http://example.com/").unwrap();
         let coords = (42, 24, 10);
         QuerySerializer::new(&mut url)
-            .style(QueryStyle::PipeDelimited)
-            .append("coords", &coords)
+            .append("coords", &coords, QueryStyle::PipeDelimited)
             .unwrap();
         assert_eq!(url.query(), Some("coords=42%7C24%7C10"));
     }

@@ -56,8 +56,6 @@
 
 use std::marker::PhantomData;
 
-use enum_map::enum_map;
-use fixedbitset::FixedBitSet;
 use petgraph::{
     Direction,
     graph::NodeIndex,
@@ -116,9 +114,9 @@ impl<'a> OperationView<'a> {
 
     /// Returns an iterator over this operation's query parameters.
     #[inline]
-    pub fn query(&self) -> impl Iterator<Item = ParameterView<'a, QueryParameter>> + '_ {
+    pub fn query(&self) -> impl Iterator<Item = ParameterView<'_, 'a, QueryParameter>> {
         self.op.params.iter().filter_map(move |param| match param {
-            GraphParameter::Query(info) => Some(ParameterView::new(self.cooked, info)),
+            GraphParameter::Query(info) => Some(ParameterView::new(self, info)),
             _ => None,
         })
     }
@@ -228,14 +226,7 @@ impl<'a> View<'a> for OperationView<'a> {
             Reach::Dependencies => {
                 let cooked = self.cooked;
                 let meta = &cooked.metadata.operations[self.op];
-                let traverse = Traverse::from_roots(
-                    &cooked.graph,
-                    enum_map! {
-                        EdgeKind::Reference => meta.types.clone(),
-                        EdgeKind::Inherits => FixedBitSet::new(),
-                    },
-                    Direction::Outgoing,
-                );
+                let traverse = Traverse::at_roots(&cooked.graph, &meta.types, Direction::Outgoing);
                 traverse
                     .run(move |kind, index| {
                         let view = TypeView::new(cooked, index);
@@ -260,13 +251,13 @@ impl<'view, 'a> OperationViewPath<'view, 'a> {
 
     /// Returns an iterator over this operation's path parameters.
     #[inline]
-    pub fn params(self) -> impl Iterator<Item = ParameterView<'a, PathParameter>> + 'view {
+    pub fn params(self) -> impl Iterator<Item = ParameterView<'view, 'a, PathParameter>> {
         self.0
             .op
             .params
             .iter()
             .filter_map(move |param| match param {
-                GraphParameter::Path(info) => Some(ParameterView::new(self.0.cooked, info)),
+                GraphParameter::Path(info) => Some(ParameterView::new(self.0, info)),
                 _ => None,
             })
     }
@@ -274,20 +265,20 @@ impl<'view, 'a> OperationViewPath<'view, 'a> {
 
 /// A graph-aware view of an operation parameter.
 #[derive(Debug)]
-pub struct ParameterView<'a, T> {
-    cooked: &'a CookedGraph<'a>,
+pub struct ParameterView<'view, 'a, T> {
+    op: &'view OperationView<'a>,
     info: &'a GraphParameterInfo<'a>,
     phantom: PhantomData<T>,
 }
 
-impl<'a, T> ParameterView<'a, T> {
+impl<'view, 'a, T> ParameterView<'view, 'a, T> {
     #[inline]
     pub(in crate::ir) fn new(
-        cooked: &'a CookedGraph<'a>,
+        op: &'view OperationView<'a>,
         info: &'a GraphParameterInfo<'a>,
     ) -> Self {
         Self {
-            cooked,
+            op,
             info,
             phantom: PhantomData,
         }
@@ -302,7 +293,7 @@ impl<'a, T> ParameterView<'a, T> {
     /// Returns a view of the parameter's type.
     #[inline]
     pub fn ty(&self) -> TypeView<'a> {
-        TypeView::new(self.cooked, self.info.ty)
+        TypeView::new(self.op.cooked, self.info.ty)
     }
 
     /// Returns `true` if this parameter is required.
@@ -315,6 +306,63 @@ impl<'a, T> ParameterView<'a, T> {
     #[inline]
     pub fn style(&self) -> Option<ParameterStyle> {
         self.info.style
+    }
+}
+
+impl<'view, 'a, T> View<'a> for ParameterView<'view, 'a, T> {
+    fn inlines(&self) -> impl Iterator<Item = InlineTypeView<'a>> + use<'view, 'a, T> {
+        let cooked = self.op.cooked;
+        let filtered = EdgeFiltered::from_fn(&cooked.graph, |e| {
+            matches!(cooked.graph[e.target()], GraphType::Inline(_))
+        });
+        let mut bfs = Bfs::new(&cooked.graph, self.info.ty);
+        std::iter::from_fn(move || bfs.next(&filtered)).filter_map(|index| {
+            match cooked.graph[index] {
+                GraphType::Inline(ty) => Some(InlineTypeView::new(cooked, index, ty)),
+                _ => None,
+            }
+        })
+    }
+
+    fn used_by(&self) -> impl Iterator<Item = OperationView<'a>> + use<'view, 'a, T> {
+        std::iter::once(OperationView::new(self.op.cooked, self.op.op))
+    }
+
+    fn dependencies(&self) -> impl Iterator<Item = TypeView<'a>> + use<'view, 'a, T> {
+        let cooked = self.op.cooked;
+        let meta = &cooked.metadata.schemas[self.info.ty.index()];
+        // Include the parameter's own type and its transitive dependencies.
+        std::iter::once(self.info.ty)
+            .chain(meta.dependencies.ones().map(NodeIndex::new))
+            .map(|index| TypeView::new(cooked, index))
+    }
+
+    /// Returns an empty iterator; other types don't depend on parameters.
+    fn dependents(&self) -> impl Iterator<Item = TypeView<'a>> + use<'view, 'a, T> {
+        std::iter::empty()
+    }
+
+    fn traverse<F>(
+        &self,
+        reach: Reach,
+        filter: F,
+    ) -> impl Iterator<Item = TypeView<'a>> + use<'view, 'a, T, F>
+    where
+        F: Fn(EdgeKind, &TypeView<'a>) -> Traversal,
+    {
+        either!(match reach {
+            Reach::Dependents => std::iter::empty(),
+            Reach::Dependencies => {
+                let cooked = self.op.cooked;
+                let traverse = Traverse::at_root(&cooked.graph, self.info.ty, Direction::Outgoing);
+                traverse
+                    .run(move |kind, index| {
+                        let view = TypeView::new(cooked, index);
+                        filter(kind, &view)
+                    })
+                    .map(|index| TypeView::new(cooked, index))
+            }
+        })
     }
 }
 

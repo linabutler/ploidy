@@ -2,9 +2,8 @@ use itertools::Itertools;
 use ploidy_core::{
     codegen::UniqueNames,
     ir::{
-        ContainerView, EdgeKind, InlineTypeView, PrimitiveType, Reach, SchemaTypeView,
-        StructFieldName, StructFieldNameHint, StructFieldView, StructView, Traversal, TypeView,
-        View,
+        ContainerView, InlineTypeView, SchemaTypeView, StructFieldName, StructFieldNameHint,
+        StructFieldView, StructView, TypeView,
     },
 };
 use proc_macro2::TokenStream;
@@ -14,6 +13,7 @@ use syn::{Ident, parse_quote};
 use super::{
     derives::ExtraDerive,
     doc_attrs,
+    ext::ViewExt,
     naming::{CodegenIdentScope, CodegenIdentUsage, CodegenStructFieldName, CodegenTypeName},
     ref_::CodegenRef,
 };
@@ -78,87 +78,19 @@ impl ToTokens for CodegenStruct<'_> {
             .collect_vec();
 
         let mut extra_derives = vec![];
-        // Structs that don't contain any floating-point types
-        // can derive `Eq` and `Hash`.
-        let is_hashable = self.ty.dependencies().all(|view| match view {
-            TypeView::Inline(InlineTypeView::Primitive(_, view))
-            | TypeView::Schema(SchemaTypeView::Primitive(_, view)) => {
-                !matches!(view.ty(), PrimitiveType::F32 | PrimitiveType::F64)
-            }
-            _ => true,
-        });
-        if is_hashable {
+
+        // Derive `Eq` and `Hash` if all transitively referenced types
+        // are hashable.
+        let all_hashable = self.ty.hashable();
+        if all_hashable {
             extra_derives.push(ExtraDerive::Eq);
             extra_derives.push(ExtraDerive::Hash);
         }
-        let is_defaultable = self
-            .ty
-            .traverse(Reach::Dependencies, |kind, view| {
-                match (kind, view) {
-                    (
-                        EdgeKind::Reference,
-                        TypeView::Schema(SchemaTypeView::Container(_, _))
-                        | TypeView::Inline(InlineTypeView::Container(_, _)),
-                    ) => {
-                        // All container types implement `Default`.
-                        Traversal::Ignore
-                    }
-                    (
-                        EdgeKind::Reference | EdgeKind::Inherits,
-                        TypeView::Schema(SchemaTypeView::Struct(_, view))
-                        | TypeView::Inline(InlineTypeView::Struct(_, view)),
-                    ) => {
-                        // Structs may or may not implement `Default`,
-                        // depending on their fields. If this struct
-                        // inherits fields from another struct,
-                        // we need to consider that struct's fields, too.
-                        if view.fields().filter(|f| !f.tag()).all(|f| !f.required()) {
-                            // If all non-tag fields of all reachable structs are optional,
-                            // then this struct can derive `Default`.
-                            Traversal::Ignore
-                        } else {
-                            // Otherwise, skip the struct itself, but visit all its fields
-                            // to determine which ones are defaultable.
-                            Traversal::Skip
-                        }
-                    }
-                    (EdgeKind::Inherits, _) => {
-                        // Inheriting from a non-struct type isn't semantically meaningful
-                        // because the parent doesn't contribute any fields, so we can
-                        // ignore it for the purposes of deriving `Default`.
-                        Traversal::Ignore
-                    }
-                    (EdgeKind::Reference, _) => {
-                        // Any other type that this struct references must be defaultable
-                        // for this struct to derive `Default`.
-                        Traversal::Visit
-                    }
-                }
-            })
-            .all(|ty| {
-                match ty {
-                    // `serde_json::Value` implements `Default`.
-                    TypeView::Inline(InlineTypeView::Any(..))
-                    | TypeView::Schema(SchemaTypeView::Any(..)) => true,
-                    // `Url` doesn't implement `Default`, but other primitives do.
-                    TypeView::Inline(InlineTypeView::Primitive(_, view))
-                    | TypeView::Schema(SchemaTypeView::Primitive(_, view))
-                        if matches!(view.ty(), PrimitiveType::Url) =>
-                    {
-                        false
-                    }
-                    TypeView::Inline(InlineTypeView::Primitive(..))
-                    | TypeView::Schema(SchemaTypeView::Primitive(..)) => true,
-                    // Representable enums derive `Default` via their
-                    // `Other` variants; unrepresentable enums become
-                    // `String` type aliases, which also implement `Default`.
-                    TypeView::Inline(InlineTypeView::Enum(..))
-                    | TypeView::Schema(SchemaTypeView::Enum(..)) => true,
-                    // Other types aren't defaultable.
-                    _ => false,
-                }
-            });
-        if is_defaultable {
+
+        // Derive `Default` if all transitively referenced types
+        // are defaultable.
+        let all_defaultable = self.ty.defaultable();
+        if all_defaultable {
             extra_derives.push(ExtraDerive::Default);
         }
 
