@@ -95,7 +95,7 @@ struct MyView {
 - `IndexMap` where insertion order matters.
 - `FxHash{Map, Set}` instead of `std::collections::Hash{Map, Set}` (HashDoS not a concern).
 - `Box<T>` only to break recursive types; `Vec`/`HashMap` provide their own indirection.
-- `.collect_vec()` (from `itertools`) instead of `.collect::<Vec<_>>()` or `let v: Vec<_> = … .collect()`.
+- `.collect_vec()` (from `itertools`); never `let v: Vec<_> = … .collect()` or `.collect::<Vec<_>>()`.
 
 ### Documentation (`///` and `//!`)
 
@@ -166,6 +166,7 @@ if f.discriminator() { continue; }
 - **YAML fixtures:** Always use `Document::from_yaml(indoc::indoc! { ... })` for OpenAPI documents. Never construct `Document` directly.
 - **Assertions:** Prefer one structural pattern match with `assert_matches!` over multi-step match/`let-else` chains. Only use `let-else` when the bound variable is needed for subsequent method calls. Include actual value in `let-else` panic messages: `panic!("expected X; got `{ty:?}`")`.
 - **Throwaway tests:** When behavior is unclear, write a quick test to prove it rather than theorizing. Delete or convert once done.
+- **Debugging `syn` node mismatches**: When `assert_eq!(actual, expected)` fails, use `println!("{}", actual.to_token_stream())` to compare expectations.
 
 ---
 
