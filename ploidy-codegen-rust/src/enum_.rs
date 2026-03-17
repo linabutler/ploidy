@@ -35,10 +35,10 @@ impl ToTokens for CodegenEnum<'_> {
                 pub type #type_name = ::std::string::String;
             });
         } else {
-            // Otherwise, emit a Rust unit enum.
-            let mut variants = Vec::new();
-            let mut display_arms = Vec::new();
-            let mut from_str_arms = Vec::new();
+            // Otherwise, emit a Rust enum.
+            let mut variants = vec![];
+            let mut display_arms = vec![];
+            let mut from_str_arms = vec![];
 
             for variant in self.ty.variants() {
                 match variant {
@@ -59,29 +59,24 @@ impl ToTokens for CodegenEnum<'_> {
                 parse_quote!(#name)
             };
             let other_name = format_ident!("Other{}", type_name);
-            variants.push(quote! {
-                #[default]
-                #other_name
-            });
-            display_arms.push(quote! { Self::#other_name => "(other)" });
-            from_str_arms.push(quote! { _ => Self::#other_name });
+            variants.push(quote! { #other_name(String) });
+            display_arms.push(quote! { Self::#other_name(s) => s.as_str() });
+            from_str_arms.push(quote! { _ => Self::#other_name(s.to_owned()) });
 
-            let other_serialize_error =
-                format!("can't serialize variant `{type_name}::{other_name}`");
             let expecting = format!("a variant of `{type_name}`");
 
             let doc_attrs = self.ty.description().map(doc_attrs);
 
             tokens.append_all(quote! {
                 #doc_attrs
-                #[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+                #[derive(Clone, Debug, Eq, Hash, PartialEq)]
                 pub enum #type_name {
                     #(#variants),*
                 }
 
-                impl #type_name {
-                    pub fn is_other(&self) -> bool {
-                        matches!(self, Self::#other_name)
+                impl ::std::default::Default for #type_name {
+                    fn default() -> Self {
+                        Self::#other_name(::std::string::String::default())
                     }
                 }
 
@@ -132,10 +127,7 @@ impl ToTokens for CodegenEnum<'_> {
                         &self,
                         serializer: S,
                     ) -> ::std::result::Result<S::Ok, S::Error> {
-                        match self {
-                            Self::#other_name => Err(::ploidy_util::serde::ser::Error::custom(#other_serialize_error)),
-                            v => v.to_string().serialize(serializer),
-                        }
+                        serializer.collect_str(self)
                     }
                 }
             });
@@ -211,17 +203,16 @@ mod tests {
 
         let actual: syn::File = parse_quote!(#codegen);
         let expected: syn::File = parse_quote! {
-            #[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+            #[derive(Clone, Debug, Eq, Hash, PartialEq)]
             pub enum Status {
                 Active,
                 Inactive,
                 Pending,
-                #[default]
-                OtherStatus
+                OtherStatus(String)
             }
-            impl Status {
-                pub fn is_other(&self) -> bool {
-                    matches!(self, Self::OtherStatus)
+            impl ::std::default::Default for Status {
+                fn default() -> Self {
+                    Self::OtherStatus(::std::string::String::default())
                 }
             }
             impl ::std::fmt::Display for Status {
@@ -231,7 +222,7 @@ mod tests {
                             Self::Active => "active",
                             Self::Inactive => "inactive",
                             Self::Pending => "pending",
-                            Self::OtherStatus => "(other)"
+                            Self::OtherStatus(s) => s.as_str()
                         }
                     )
                 }
@@ -244,7 +235,7 @@ mod tests {
                             "active" => Self::Active,
                             "inactive" => Self::Inactive,
                             "pending" => Self::Pending,
-                            _ => Self::OtherStatus
+                            _ => Self::OtherStatus(s.to_owned())
                         }
                     )
                 }
@@ -278,14 +269,7 @@ mod tests {
                     &self,
                     serializer: S,
                 ) -> ::std::result::Result<S::Ok, S::Error> {
-                    match self {
-                        Self::OtherStatus => Err(
-                            ::ploidy_util::serde::ser::Error::custom(
-                                "can't serialize variant `Status::OtherStatus`"
-                            )
-                        ),
-                        v => v.to_string().serialize(serializer),
-                    }
+                    serializer.collect_str(self)
                 }
             }
         };
