@@ -5,6 +5,7 @@ use syn::{Ident, parse_quote};
 
 use super::{
     doc_attrs,
+    ext::EnumViewExt,
     naming::{CodegenIdent, CodegenIdentUsage, CodegenTypeName},
 };
 
@@ -132,25 +133,6 @@ impl ToTokens for CodegenEnum<'_> {
                 }
             });
         }
-    }
-}
-
-/// Rust-specific extensions to [`EnumView`].
-pub(crate) trait EnumViewExt {
-    /// Returns `true` if all variants of this enum can be represented as
-    /// unit variants in Rust. Enums with unrepresentable variants become
-    /// Rust strings instead.
-    fn representable(&self) -> bool;
-}
-
-impl EnumViewExt for EnumView<'_> {
-    fn representable(&self) -> bool {
-        self.variants().iter().all(|variant| match variant {
-            // Only non-empty string variants with at least one identifier
-            // character are representable as Rust enum variants.
-            EnumVariant::String(s) => s.chars().any(unicode_ident::is_xid_continue),
-            _ => false,
-        })
     }
 }
 

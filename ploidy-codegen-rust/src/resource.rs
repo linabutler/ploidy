@@ -1,12 +1,13 @@
 use ploidy_core::{codegen::IntoCode, ir::OperationView};
 use proc_macro2::TokenStream;
-use quote::{ToTokens, TokenStreamExt, quote};
+use quote::{ToTokens, TokenStreamExt, format_ident, quote};
 
 use super::{
     cfg::CfgFeature,
     inlines::CodegenInlines,
-    naming::{CargoFeature, CodegenIdentUsage},
+    naming::{CargoFeature, CodegenIdent, CodegenIdentUsage},
     operation::CodegenOperation,
+    query::CodegenQueryParameters,
 };
 
 /// Generates an `impl Client` block for a feature-gated resource,
@@ -23,6 +24,10 @@ impl<'a> CodegenResource<'a> {
 }
 
 impl ToTokens for CodegenResource<'_> {
+    #[allow(
+        clippy::filter_map_bool_then,
+        reason = "`filter_map` + `then` reads cleaner here"
+    )]
     fn to_tokens(&self, tokens: &mut TokenStream) {
         // Each method gets its own `#[cfg(...)]` attribute.
         let methods = self.ops.iter().map(|view| {
@@ -34,10 +39,42 @@ impl ToTokens for CodegenResource<'_> {
             }
         });
         let inlines = CodegenInlines::Resource(self.ops);
+
+        let params = self
+            .ops
+            .iter()
+            .filter_map(|op| {
+                // Collect query parameter structs for operations
+                // that have at least one query parameter.
+                op.query().next().is_some().then(|| {
+                    let cfg = CfgFeature::for_operation(op);
+                    let query = CodegenQueryParameters::new(op);
+                    let op_ident = CodegenIdent::new(op.id());
+                    let mod_name = format_ident!("{}_query", CodegenIdentUsage::Module(&op_ident));
+                    quote! {
+                        #cfg
+                        mod #mod_name {
+                            #query
+                        }
+                        #cfg
+                        pub use #mod_name::*;
+                    }
+                })
+            })
+            .reduce(|a, b| quote!(#a #b))
+            .map(|params| {
+                quote! {
+                    pub mod parameters {
+                        #params
+                    }
+                }
+            });
+
         tokens.append_all(quote! {
             impl crate::client::Client {
                 #(#methods)*
             }
+            #params
             #inlines
         });
     }
@@ -68,10 +105,11 @@ mod tests {
         parse::Document,
     };
     use pretty_assertions::assert_eq;
-
     use syn::parse_quote;
 
     use crate::{graph::CodegenGraph, naming::CargoFeature};
+
+    // MARK: Feature gating
 
     #[test]
     fn test_operation_method_with_only_unnamed_deps_has_no_cfg() {
@@ -117,35 +155,39 @@ mod tests {
         let feature = CargoFeature::from_name("customer");
         let resource = CodegenResource::new(&feature, &ops);
 
-        // Parse the generated tokens as a file, then
-        // extract the `impl` block containing the methods.
+        // No `#[cfg(...)]` on the method because none of its
+        // dependencies have an `x-resourceId`.
         let actual: syn::File = parse_quote!(#resource);
-        let block = actual
-            .items
-            .iter()
-            .find_map(|item| match item {
-                syn::Item::Impl(block) => Some(block),
-                _ => None,
-            })
-            .unwrap();
-
-        // The method should not have a `#[cfg(...)]` attribute,
-        // since none of its dependencies have an `x-resourceId`.
-        let methods = block
-            .items
-            .iter()
-            .filter_map(|item| match item {
-                syn::ImplItem::Fn(method) => Some(method),
-                _ => None,
-            })
-            .collect_vec();
-        assert_eq!(methods.len(), 1);
-        assert!(
-            !methods[0]
-                .attrs
-                .iter()
-                .any(|attr| attr.path().is_ident("cfg"))
-        );
+        let expected: syn::File = parse_quote! {
+            impl crate::client::Client {
+                pub async fn list_customers(
+                    &self,
+                ) -> Result<::std::vec::Vec<crate::types::Customer>, crate::error::Error> {
+                    let url = {
+                        let mut url = self.base_url.clone();
+                        url
+                            .path_segments_mut()
+                            .map_err(|()| crate::error::Error::UrlCannotBeABase)?
+                            .pop_if_empty()
+                            .push("customers");
+                        url
+                    };
+                    let response = self
+                        .client
+                        .get(url)
+                        .headers(self.headers.clone())
+                        .send()
+                        .await?
+                        .error_for_status()?;
+                    let body = response.bytes().await?;
+                    let deserializer = &mut ::ploidy_util::serde_json::Deserializer::from_slice(&body);
+                    let result = ::ploidy_util::serde_path_to_error::deserialize(deserializer)
+                        .map_err(crate::error::JsonError::from)?;
+                    Ok(result)
+                }
+            }
+        };
+        assert_eq!(actual, expected);
     }
 
     #[test]
@@ -193,32 +235,336 @@ mod tests {
         let feature = CargoFeature::from_name("orders");
         let resource = CodegenResource::new(&feature, &ops);
 
+        // `#[cfg(feature = "customer")]` because `Order` depends on
+        // `Customer`, which has `x-resourceId: customer`.
         let actual: syn::File = parse_quote!(#resource);
-        let block = actual
-            .items
-            .iter()
-            .find_map(|item| match item {
-                syn::Item::Impl(block) => Some(block),
-                _ => None,
-            })
-            .unwrap();
+        let expected: syn::File = parse_quote! {
+            impl crate::client::Client {
+                #[cfg(feature = "customer")]
+                pub async fn list_orders(
+                    &self,
+                ) -> Result<::std::vec::Vec<crate::types::Order>, crate::error::Error> {
+                    let url = {
+                        let mut url = self.base_url.clone();
+                        url
+                            .path_segments_mut()
+                            .map_err(|()| crate::error::Error::UrlCannotBeABase)?
+                            .pop_if_empty()
+                            .push("orders");
+                        url
+                    };
+                    let response = self
+                        .client
+                        .get(url)
+                        .headers(self.headers.clone())
+                        .send()
+                        .await?
+                        .error_for_status()?;
+                    let body = response.bytes().await?;
+                    let deserializer = &mut ::ploidy_util::serde_json::Deserializer::from_slice(&body);
+                    let result = ::ploidy_util::serde_path_to_error::deserialize(deserializer)
+                        .map_err(crate::error::JsonError::from)?;
+                    Ok(result)
+                }
+            }
+        };
+        assert_eq!(actual, expected);
+    }
 
-        // The method should have a `#[cfg(feature = "customer")]` attribute,
-        // since `Order` (no resource) depends on `Customer` (has `x-resourceId`).
-        let methods = block
-            .items
-            .iter()
-            .filter_map(|item| match item {
-                syn::ImplItem::Fn(method) => Some(method),
-                _ => None,
-            })
-            .collect_vec();
-        assert_eq!(methods.len(), 1);
-        let cfg = methods[0]
-            .attrs
-            .iter()
-            .find(|attr| attr.path().is_ident("cfg"));
-        let expected: syn::Attribute = parse_quote!(#[cfg(feature = "customer")]);
-        assert_eq!(cfg, Some(&expected));
+    // MARK: Parameters module
+
+    #[test]
+    fn test_resource_emits_parameters_module() {
+        let doc = Document::from_yaml(indoc::indoc! {"
+            openapi: 3.0.0
+            info:
+              title: Test
+              version: 1.0.0
+            paths:
+              /customers:
+                get:
+                  operationId: listCustomers
+                  x-resource-name: customer
+                  parameters:
+                    - name: limit
+                      in: query
+                      schema:
+                        type: integer
+                        format: int32
+                  responses:
+                    '200':
+                      description: OK
+        "})
+        .unwrap();
+
+        let arena = Arena::new();
+        let spec = Spec::from_doc(&arena, &doc).unwrap();
+        let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
+
+        let ops = graph.operations().collect_vec();
+        let feature = CargoFeature::from_name("customer");
+        let resource = CodegenResource::new(&feature, &ops);
+
+        let actual: syn::File = parse_quote!(#resource);
+        let expected: syn::File = parse_quote! {
+            impl crate::client::Client {
+                pub async fn list_customers(
+                    &self,
+                    query: &parameters::ListCustomersQuery
+                ) -> Result<(), crate::error::Error> {
+                    let url = {
+                        let mut url = self.base_url.clone();
+                        url
+                            .path_segments_mut()
+                            .map_err(|()| crate::error::Error::UrlCannotBeABase)?
+                            .pop_if_empty()
+                            .push("customers");
+                        url
+                    };
+                    let url = {
+                        let mut url = url;
+                        query.append_to(&mut url)?;
+                        url
+                    };
+                    let response = self
+                        .client
+                        .get(url)
+                        .headers(self.headers.clone())
+                        .send()
+                        .await?
+                        .error_for_status()?;
+                    let _ = response;
+                    Ok(())
+                }
+            }
+            pub mod parameters {
+                mod list_customers_query {
+                    #[derive(Debug, Clone, PartialEq, Eq, Hash, Default)]
+                    pub struct ListCustomersQuery {
+                        pub limit: ::std::option::Option<i32>,
+                    }
+                    impl ListCustomersQuery {
+                        /// Serializes and appends query parameters to the URL.
+                        pub fn append_to(
+                            &self,
+                            url: &mut ::ploidy_util::url::Url,
+                        ) -> ::std::result::Result<(), ::ploidy_util::QueryParamError> {
+                            let mut serializer = ::ploidy_util::QuerySerializer::new(url);
+                            serializer
+                                .append("limit", &self.limit, ::ploidy_util::QueryStyle::Form { exploded: true })?;
+                            Ok(())
+                        }
+                    }
+                }
+                pub use list_customers_query::*;
+            }
+        };
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn test_resource_with_multiple_query_ops_shares_parameters_module() {
+        let doc = Document::from_yaml(indoc::indoc! {"
+            openapi: 3.0.0
+            info:
+              title: Test
+              version: 1.0.0
+            paths:
+              /customers:
+                get:
+                  operationId: listCustomers
+                  x-resource-name: customer
+                  parameters:
+                    - name: limit
+                      in: query
+                      schema:
+                        type: integer
+                        format: int32
+                  responses:
+                    '200':
+                      description: OK
+              /customers/search:
+                get:
+                  operationId: searchCustomers
+                  x-resource-name: customer
+                  parameters:
+                    - name: email
+                      in: query
+                      required: true
+                      schema:
+                        type: string
+                  responses:
+                    '200':
+                      description: OK
+        "})
+        .unwrap();
+
+        let arena = Arena::new();
+        let spec = Spec::from_doc(&arena, &doc).unwrap();
+        let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
+
+        let ops = graph.operations().collect_vec();
+        let feature = CargoFeature::from_name("customer");
+        let resource = CodegenResource::new(&feature, &ops);
+
+        let actual: syn::File = parse_quote!(#resource);
+        let expected: syn::File = parse_quote! {
+            impl crate::client::Client {
+                pub async fn list_customers(
+                    &self,
+                    query: &parameters::ListCustomersQuery
+                ) -> Result<(), crate::error::Error> {
+                    let url = {
+                        let mut url = self.base_url.clone();
+                        url
+                            .path_segments_mut()
+                            .map_err(|()| crate::error::Error::UrlCannotBeABase)?
+                            .pop_if_empty()
+                            .push("customers");
+                        url
+                    };
+                    let url = {
+                        let mut url = url;
+                        query.append_to(&mut url)?;
+                        url
+                    };
+                    let response = self
+                        .client
+                        .get(url)
+                        .headers(self.headers.clone())
+                        .send()
+                        .await?
+                        .error_for_status()?;
+                    let _ = response;
+                    Ok(())
+                }
+                pub async fn search_customers(
+                    &self,
+                    query: &parameters::SearchCustomersQuery
+                ) -> Result<(), crate::error::Error> {
+                    let url = {
+                        let mut url = self.base_url.clone();
+                        url
+                            .path_segments_mut()
+                            .map_err(|()| crate::error::Error::UrlCannotBeABase)?
+                            .pop_if_empty()
+                            .push("customers")
+                            .push("search");
+                        url
+                    };
+                    let url = {
+                        let mut url = url;
+                        query.append_to(&mut url)?;
+                        url
+                    };
+                    let response = self
+                        .client
+                        .get(url)
+                        .headers(self.headers.clone())
+                        .send()
+                        .await?
+                        .error_for_status()?;
+                    let _ = response;
+                    Ok(())
+                }
+            }
+            pub mod parameters {
+                mod list_customers_query {
+                    #[derive(Debug, Clone, PartialEq, Eq, Hash, Default)]
+                    pub struct ListCustomersQuery {
+                        pub limit: ::std::option::Option<i32>,
+                    }
+                    impl ListCustomersQuery {
+                        /// Serializes and appends query parameters to the URL.
+                        pub fn append_to(
+                            &self,
+                            url: &mut ::ploidy_util::url::Url,
+                        ) -> ::std::result::Result<(), ::ploidy_util::QueryParamError> {
+                            let mut serializer = ::ploidy_util::QuerySerializer::new(url);
+                            serializer
+                                .append("limit", &self.limit, ::ploidy_util::QueryStyle::Form { exploded: true })?;
+                            Ok(())
+                        }
+                    }
+                }
+                pub use list_customers_query::*;
+                mod search_customers_query {
+                    #[derive(Debug, Clone, PartialEq, Eq, Hash, Default)]
+                    pub struct SearchCustomersQuery {
+                        pub email: ::std::string::String,
+                    }
+                    impl SearchCustomersQuery {
+                        /// Serializes and appends query parameters to the URL.
+                        pub fn append_to(
+                            &self,
+                            url: &mut ::ploidy_util::url::Url,
+                        ) -> ::std::result::Result<(), ::ploidy_util::QueryParamError> {
+                            let mut serializer = ::ploidy_util::QuerySerializer::new(url);
+                            serializer
+                                .append("email", &self.email, ::ploidy_util::QueryStyle::Form { exploded: true })?;
+                            Ok(())
+                        }
+                    }
+                }
+                pub use search_customers_query::*;
+            }
+        };
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn test_resource_omits_parameters_module_when_no_query_params() {
+        let doc = Document::from_yaml(indoc::indoc! {"
+            openapi: 3.0.0
+            info:
+              title: Test
+              version: 1.0.0
+            paths:
+              /customers:
+                get:
+                  operationId: listCustomers
+                  x-resource-name: customer
+                  responses:
+                    '200':
+                      description: OK
+        "})
+        .unwrap();
+
+        let arena = Arena::new();
+        let spec = Spec::from_doc(&arena, &doc).unwrap();
+        let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
+
+        let ops = graph.operations().collect_vec();
+        let feature = CargoFeature::from_name("customer");
+        let resource = CodegenResource::new(&feature, &ops);
+
+        let actual: syn::File = parse_quote!(#resource);
+        let expected: syn::File = parse_quote! {
+            impl crate::client::Client {
+                pub async fn list_customers(
+                    &self,
+                ) -> Result<(), crate::error::Error> {
+                    let url = {
+                        let mut url = self.base_url.clone();
+                        url
+                            .path_segments_mut()
+                            .map_err(|()| crate::error::Error::UrlCannotBeABase)?
+                            .pop_if_empty()
+                            .push("customers");
+                        url
+                    };
+                    let response = self
+                        .client
+                        .get(url)
+                        .headers(self.headers.clone())
+                        .send()
+                        .await?
+                        .error_for_status()?;
+                    let _ = response;
+                    Ok(())
+                }
+            }
+        };
+        assert_eq!(actual, expected);
     }
 }

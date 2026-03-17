@@ -13,7 +13,7 @@ use ploidy_core::{
     },
 };
 use proc_macro2::{Ident, Span, TokenStream};
-use quote::{ToTokens, TokenStreamExt};
+use quote::{IdentFragment, ToTokens, TokenStreamExt};
 use ref_cast::{RefCastCustom, ref_cast_custom};
 
 // Keywords that can't be used as identifiers, even with `r#`.
@@ -315,6 +315,12 @@ impl CodegenIdentUsage<'_> {
             }
         }
         DisplayUsage(self)
+    }
+}
+
+impl IdentFragment for CodegenIdentUsage<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        write!(f, "{}", self.display())
     }
 }
 

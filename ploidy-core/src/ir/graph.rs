@@ -811,17 +811,38 @@ pub struct Traverse<'a> {
 }
 
 impl<'a> Traverse<'a> {
-    pub fn from_roots(
+    /// Starts a breadth-first traversal at a `root` node,
+    /// including `root` in the traversal.
+    pub fn at_root(
         graph: &'a CookedDiGraph<'a>,
-        roots: EnumMap<EdgeKind, FixedBitSet>,
+        root: NodeIndex<usize>,
+        direction: Direction,
+    ) -> Self {
+        let mut discovered = enum_map!(_ => graph.visit_map());
+        discovered[EdgeKind::Reference].grow_and_insert(root.index());
+        Self {
+            graph,
+            stack: VecDeque::from([(EdgeKind::Reference, root)]),
+            discovered,
+            direction,
+        }
+    }
+
+    /// Starts a breadth-first traversal at multiple `roots`,
+    /// including each root in the traversal.
+    pub fn at_roots(
+        graph: &'a CookedDiGraph<'a>,
+        roots: &FixedBitSet,
         direction: Direction,
     ) -> Self {
         let mut stack = VecDeque::new();
         let mut discovered = enum_map!(_ => graph.visit_map());
-        for (kind, indices) in roots {
-            stack.extend(indices.ones().map(|index| (kind, NodeIndex::new(index))));
-            discovered[kind].union_with(&indices);
-        }
+        stack.extend(
+            roots
+                .ones()
+                .map(|index| (EdgeKind::Reference, NodeIndex::new(index))),
+        );
+        discovered[EdgeKind::Reference].union_with(roots);
         Self {
             graph,
             stack,
@@ -830,6 +851,8 @@ impl<'a> Traverse<'a> {
         }
     }
 
+    /// Starts a breadth-first traversal from the immediate neighbors of `root`,
+    /// excluding `root` itself from the traversal.
     pub fn from_neighbors(
         graph: &'a CookedDiGraph<'a>,
         root: NodeIndex<usize>,
