@@ -14,7 +14,6 @@ use syn::{Ident, parse_quote};
 use super::{
     derives::ExtraDerive,
     doc_attrs,
-    enum_::EnumViewExt,
     naming::{CodegenIdentScope, CodegenIdentUsage, CodegenStructFieldName, CodegenTypeName},
     ref_::CodegenRef,
 };
@@ -285,26 +284,7 @@ impl ToTokens for SerdeFieldAttr<'_, '_> {
             }
         }
 
-        if let ref ty @ TypeView::Schema(SchemaTypeView::Enum(_, ref view))
-        | ref ty @ TypeView::Inline(InlineTypeView::Enum(_, ref view)) = self.field.ty()
-            && view.representable()
-        {
-            // Enum fields default to the catch-all `Other` variant,
-            // which returns an error when serialized. Since this
-            // default isn't meaningful, skip serializing them.
-            // This only matches direct enum types; optional fields have
-            // `Container(Optional(Enum))` as their type, so they
-            // fall through to the `AbsentOr::is_absent` branch below.
-            attrs.push(quote! { default });
-            attrs.push({
-                let inner = CodegenRef::new(ty);
-                let path: syn::Path = parse_quote!(#inner::is_other);
-                // `.to_token_stream().to_string()` cuddles each `::` in spaces;
-                // manually stringify the path for cleaner output.
-                let joined = path.segments.iter().map(|s| &s.ident).join("::");
-                quote! { skip_serializing_if = #joined }
-            });
-        } else if !self.field.required() {
+        if !self.field.required() {
             // `CodegenField` always emits `AbsentOr` for optional fields.
             attrs.push(quote! { default });
             attrs.push(
@@ -1779,7 +1759,7 @@ mod tests {
     // MARK: Enum fields
 
     #[test]
-    fn test_struct_required_enum_field_skips_other() {
+    fn test_struct_required_enum_field() {
         let doc = Document::from_yaml(indoc::indoc! {"
             openapi: 3.0.0
             info:
@@ -1824,7 +1804,6 @@ mod tests {
             #[serde(crate = "::ploidy_util::serde")]
             pub struct Pet {
                 pub name: ::std::string::String,
-                #[serde(default, skip_serializing_if = "crate::types::Status::is_other",)]
                 pub status: crate::types::Status,
             }
         };
@@ -1884,7 +1863,7 @@ mod tests {
     }
 
     #[test]
-    fn test_struct_required_inline_enum_field_skips_other() {
+    fn test_struct_required_inline_enum_field() {
         let doc = Document::from_yaml(indoc::indoc! {"
             openapi: 3.0.0
             info:
@@ -1927,7 +1906,6 @@ mod tests {
             #[serde(crate = "::ploidy_util::serde")]
             pub struct Pet {
                 pub name: ::std::string::String,
-                #[serde(default, skip_serializing_if = "crate::types::pet::types::Status::is_other",)]
                 pub status: crate::types::pet::types::Status,
             }
         };
