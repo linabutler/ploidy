@@ -1,6 +1,6 @@
 # Ploidy
 
-**An OpenAPI code generator for polymorphic specs.**
+**A compiler for polymorphic OpenAPI specs.**
 
 [<img src="https://img.shields.io/crates/v/ploidy?style=for-the-badge&logo=rust" alt="crates.io" height="24">](https://crates.io/crates/ploidy)
 [<img src="https://img.shields.io/github/actions/workflow/status/linabutler/ploidy/test.yml?style=for-the-badge&logo=github" alt="Build status" height="24">](https://github.com/linabutler/ploidy/actions?query=branch%3Amain)
@@ -66,7 +66,7 @@ Ploidy's minimum supported Rust version (MSRV) is **Rust 1.89.0**. This only app
 To generate a complete Rust client crate from your OpenAPI spec, run:
 
 ```sh
-ploidy codegen <INPUT-SPEC> <OUTPUT-DIR> rust
+ploidy generate rust <INPUT-SPEC>
 ```
 
 This produces a ready-to-use crate that includes:
@@ -79,9 +79,10 @@ This produces a ready-to-use crate that includes:
 
 | Flag | Description |
 |------|-------------|
-| `-c`, `--check` | Run `cargo check` on the generated code |
-| `--name <NAME>` | Set or override the generated package name. If not passed, and a `Cargo.toml` already exists in the output directory, preserves the existing `package.name`; otherwise, defaults to the name of the output directory |
-| `--version <bump-major, bump-minor, bump-patch>` | If a `Cargo.toml` already exists in the output directory, increments the major, minor, or patch component of `package.version`. If not passed, preserves the existing `package.version`. Ignored if the package doesn't exist yet |
+| `-o`, `--output` | The output directory for the generated crate |
+| `-c`, `--check` | Verify the generated crate compiles |
+| `--name <NAME>` | Set the crate name. If not passed, and a `Cargo.toml` already exists in the output directory, use its `package.name`; otherwise, use the output directory name |
+| `--version <bump-major, bump-minor, bump-patch>` | Increment the major, minor, or patch component of the existing `package.version`. If not passed, use the existing version, or 0.1.0 for new crates |
 
 #### Advanced options
 
