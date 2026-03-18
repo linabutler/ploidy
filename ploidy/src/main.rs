@@ -8,9 +8,10 @@ use ploidy_core::{
     parse::Document,
 };
 
-mod config;
+mod args;
+mod cmd;
 
-use self::config::{CodegenCommand, CodegenCommandLanguage, Command, Main};
+use self::cmd::{Generate, GenerateArgs, Main};
 
 #[cfg(feature = "mimalloc")]
 #[global_allocator]
@@ -18,12 +19,12 @@ static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
 
 fn main() -> Result<()> {
     let Ok(main) = Main::parse().map_err(|err| err.exit());
-    match main.command {
-        Command::Codegen(CodegenCommand {
+    match main {
+        Main::Generate(Generate::Rust(GenerateArgs {
             input,
             output,
-            language: CodegenCommandLanguage::Rust(command),
-        }) => {
+            language,
+        })) => {
             let source = std::fs::read_to_string(&input)
                 .into_diagnostic()
                 .with_context(|| format!("Failed to read `{}`", input.display()))?;
@@ -39,7 +40,7 @@ fn main() -> Result<()> {
             let mut raw = RawGraph::new(&arena, &spec);
             raw.inline_tagged_variants();
 
-            let config = command
+            let config = language
                 .manifest
                 .package
                 .as_ref()
@@ -57,7 +58,7 @@ fn main() -> Result<()> {
             println!("Generating `Cargo.toml`...");
             write_to_disk(
                 &output,
-                CodegenCargoManifest::new(&graph, &command.manifest),
+                CodegenCargoManifest::new(&graph, &language.manifest),
             )?;
 
             println!("Generating `lib.rs`...");
@@ -82,7 +83,7 @@ fn main() -> Result<()> {
 
             println!("Generation complete");
 
-            if command.check {
+            if language.check {
                 println!("Running `cargo check`...");
                 let status = std::process::Command::new("cargo")
                     .arg("check")

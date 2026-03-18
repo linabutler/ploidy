@@ -1,6 +1,6 @@
 [package]
 name = "ploidy"
-description = "A code generator for polymorphic OpenAPI specs"
+description = "A compiler for polymorphic OpenAPI specs"
 readme = "README.md"
 version.workspace = true
 license.workspace = true
@@ -21,6 +21,10 @@ semver = "1"
 
 [features]
 mimalloc = ["dep:mimalloc"]
+
+[dev-dependencies]
+indoc = { workspace = true }
+tempfile = "3"
 
 [package.metadata.binstall]
 pkg-url = "{ repo }/releases/download/v{ version }/{ name }-v{ version }-{ target }{ archive-suffix }"
