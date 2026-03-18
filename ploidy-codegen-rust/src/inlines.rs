@@ -162,7 +162,7 @@ mod tests {
                     #[derive(Debug, Clone, PartialEq, Eq, Hash, Default, ::ploidy_util::serde::Serialize, ::ploidy_util::serde::Deserialize)]
                     #[serde(crate = "::ploidy_util::serde")]
                     pub struct GetItemsFilter {
-                        #[serde(default, skip_serializing_if = "::ploidy_util::absent::AbsentOr::is_absent",)]
+                        #[serde(default, skip_serializing_if = "::ploidy_util::absent::AbsentOr::is_absent")]
                         pub status: ::ploidy_util::absent::AbsentOr<::std::string::String>,
                     }
                 }
@@ -275,7 +275,7 @@ mod tests {
                     #[derive(Debug, Clone, PartialEq, Eq, Hash, Default, ::ploidy_util::serde::Serialize, ::ploidy_util::serde::Deserialize)]
                     #[serde(crate = "::ploidy_util::serde")]
                     pub struct GetItemsApple {
-                        #[serde(default, skip_serializing_if = "::ploidy_util::absent::AbsentOr::is_absent",)]
+                        #[serde(default, skip_serializing_if = "::ploidy_util::absent::AbsentOr::is_absent")]
                         pub value: ::ploidy_util::absent::AbsentOr<::std::string::String>,
                     }
                 }
@@ -284,7 +284,7 @@ mod tests {
                     #[derive(Debug, Clone, PartialEq, Eq, Hash, Default, ::ploidy_util::serde::Serialize, ::ploidy_util::serde::Deserialize)]
                     #[serde(crate = "::ploidy_util::serde")]
                     pub struct GetItemsMango {
-                        #[serde(default, skip_serializing_if = "::ploidy_util::absent::AbsentOr::is_absent",)]
+                        #[serde(default, skip_serializing_if = "::ploidy_util::absent::AbsentOr::is_absent")]
                         pub value: ::ploidy_util::absent::AbsentOr<::std::string::String>,
                     }
                 }
@@ -293,7 +293,7 @@ mod tests {
                     #[derive(Debug, Clone, PartialEq, Eq, Hash, Default, ::ploidy_util::serde::Serialize, ::ploidy_util::serde::Deserialize)]
                     #[serde(crate = "::ploidy_util::serde")]
                     pub struct GetItemsZebra {
-                        #[serde(default, skip_serializing_if = "::ploidy_util::absent::AbsentOr::is_absent",)]
+                        #[serde(default, skip_serializing_if = "::ploidy_util::absent::AbsentOr::is_absent")]
                         pub value: ::ploidy_util::absent::AbsentOr<::std::string::String>,
                     }
                 }
@@ -377,7 +377,7 @@ mod tests {
                     #[derive(Debug, Clone, PartialEq, Eq, Hash, Default, ::ploidy_util::serde::Serialize, ::ploidy_util::serde::Deserialize)]
                     #[serde(crate = "::ploidy_util::serde")]
                     pub struct GetItemsConfig {
-                        #[serde(default, skip_serializing_if = "::ploidy_util::absent::AbsentOr::is_absent",)]
+                        #[serde(default, skip_serializing_if = "::ploidy_util::absent::AbsentOr::is_absent")]
                         pub enabled: ::ploidy_util::absent::AbsentOr<bool>,
                     }
                 }
@@ -428,7 +428,7 @@ mod tests {
                     #[derive(Debug, Clone, PartialEq, Eq, Hash, Default, ::ploidy_util::serde::Serialize, ::ploidy_util::serde::Deserialize)]
                     #[serde(crate = "::ploidy_util::serde")]
                     pub struct GetItemsFiltersItem {
-                        #[serde(default, skip_serializing_if = "::ploidy_util::absent::AbsentOr::is_absent",)]
+                        #[serde(default, skip_serializing_if = "::ploidy_util::absent::AbsentOr::is_absent")]
                         pub field: ::ploidy_util::absent::AbsentOr<::std::string::String>,
                     }
                 }
@@ -479,7 +479,7 @@ mod tests {
                     #[derive(Debug, Clone, PartialEq, Eq, Hash, Default, ::ploidy_util::serde::Serialize, ::ploidy_util::serde::Deserialize)]
                     #[serde(crate = "::ploidy_util::serde")]
                     pub struct GetItemsMetadataValue {
-                        #[serde(default, skip_serializing_if = "::ploidy_util::absent::AbsentOr::is_absent",)]
+                        #[serde(default, skip_serializing_if = "::ploidy_util::absent::AbsentOr::is_absent")]
                         pub value: ::ploidy_util::absent::AbsentOr<::std::string::String>,
                     }
                 }

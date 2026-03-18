@@ -85,15 +85,19 @@ impl<'a> CodegenOperation<'a> {
         }
     }
 
-    /// Generates code to append query parameters to the URL.
+    /// Generates code to serialize query parameters into the URL.
     fn query(&self) -> Option<TokenStream> {
         self.op.query().next().is_some().then(|| {
+            let op_ident = CodegenIdent::new(self.op.id());
+            let query_name = format_ident!("{}Query", CodegenIdentUsage::Type(&op_ident));
             quote! {
-                let url = {
-                    let mut url = url;
-                    query.append_to(&mut url)?;
-                    url
-                };
+                let url = ::ploidy_util::serde::Serialize::serialize(
+                    query,
+                    ::ploidy_util::QuerySerializer::new(
+                        url,
+                        parameters::#query_name::STYLES,
+                    ),
+                )?;
             }
         })
     }
@@ -300,11 +304,13 @@ mod tests {
                         .push(item_id);
                     url
                 };
-                let url = {
-                    let mut url = url;
-                    query.append_to(&mut url)?;
-                    url
-                };
+                let url = ::ploidy_util::serde::Serialize::serialize(
+                    query,
+                    ::ploidy_util::QuerySerializer::new(
+                        url,
+                        parameters::GetItemQuery::STYLES,
+                    ),
+                )?;
                 let response = self
                     .client
                     .get(url)
@@ -364,11 +370,13 @@ mod tests {
                         .push("items");
                     url
                 };
-                let url = {
-                    let mut url = url;
-                    query.append_to(&mut url)?;
-                    url
-                };
+                let url = ::ploidy_util::serde::Serialize::serialize(
+                    query,
+                    ::ploidy_util::QuerySerializer::new(
+                        url,
+                        parameters::GetItemsQuery::STYLES,
+                    ),
+                )?;
                 let response = self
                     .client
                     .get(url)
@@ -435,11 +443,13 @@ mod tests {
                         .push(query2);
                     url
                 };
-                let url = {
-                    let mut url = url;
-                    query.append_to(&mut url)?;
-                    url
-                };
+                let url = ::ploidy_util::serde::Serialize::serialize(
+                    query,
+                    ::ploidy_util::QuerySerializer::new(
+                        url,
+                        parameters::SearchQuery::STYLES,
+                    ),
+                )?;
                 let response = self
                     .client
                     .get(url)
@@ -524,11 +534,13 @@ mod tests {
                         .push(item_id);
                     url
                 };
-                let url = {
-                    let mut url = url;
-                    query.append_to(&mut url)?;
-                    url
-                };
+                let url = ::ploidy_util::serde::Serialize::serialize(
+                    query,
+                    ::ploidy_util::QuerySerializer::new(
+                        url,
+                        parameters::UpdateItemQuery::STYLES,
+                    ),
+                )?;
                 let response = self
                     .client
                     .put(url)

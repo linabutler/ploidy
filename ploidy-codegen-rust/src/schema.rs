@@ -156,30 +156,30 @@ mod tests {
             #[derive(Debug, Clone, PartialEq, Eq, Hash, Default, ::ploidy_util::serde::Serialize, ::ploidy_util::serde::Deserialize)]
             #[serde(crate = "::ploidy_util::serde")]
             pub struct Container {
-                #[serde(default, skip_serializing_if = "::ploidy_util::absent::AbsentOr::is_absent",)]
+                #[serde(default, skip_serializing_if = "::ploidy_util::absent::AbsentOr::is_absent")]
                 pub zebra: ::ploidy_util::absent::AbsentOr<crate::types::container::types::Zebra>,
-                #[serde(default, skip_serializing_if = "::ploidy_util::absent::AbsentOr::is_absent",)]
+                #[serde(default, skip_serializing_if = "::ploidy_util::absent::AbsentOr::is_absent")]
                 pub mango: ::ploidy_util::absent::AbsentOr<crate::types::container::types::Mango>,
-                #[serde(default, skip_serializing_if = "::ploidy_util::absent::AbsentOr::is_absent",)]
+                #[serde(default, skip_serializing_if = "::ploidy_util::absent::AbsentOr::is_absent")]
                 pub apple: ::ploidy_util::absent::AbsentOr<crate::types::container::types::Apple>,
             }
             pub mod types {
                 #[derive(Debug, Clone, PartialEq, Eq, Hash, Default, ::ploidy_util::serde::Serialize, ::ploidy_util::serde::Deserialize)]
                 #[serde(crate = "::ploidy_util::serde")]
                 pub struct Apple {
-                    #[serde(default, skip_serializing_if = "::ploidy_util::absent::AbsentOr::is_absent",)]
+                    #[serde(default, skip_serializing_if = "::ploidy_util::absent::AbsentOr::is_absent")]
                     pub name: ::ploidy_util::absent::AbsentOr<::std::string::String>,
                 }
                 #[derive(Debug, Clone, PartialEq, Eq, Hash, Default, ::ploidy_util::serde::Serialize, ::ploidy_util::serde::Deserialize)]
                 #[serde(crate = "::ploidy_util::serde")]
                 pub struct Mango {
-                    #[serde(default, skip_serializing_if = "::ploidy_util::absent::AbsentOr::is_absent",)]
+                    #[serde(default, skip_serializing_if = "::ploidy_util::absent::AbsentOr::is_absent")]
                     pub name: ::ploidy_util::absent::AbsentOr<::std::string::String>,
                 }
                 #[derive(Debug, Clone, PartialEq, Eq, Hash, Default, ::ploidy_util::serde::Serialize, ::ploidy_util::serde::Deserialize)]
                 #[serde(crate = "::ploidy_util::serde")]
                 pub struct Zebra {
-                    #[serde(default, skip_serializing_if = "::ploidy_util::absent::AbsentOr::is_absent",)]
+                    #[serde(default, skip_serializing_if = "::ploidy_util::absent::AbsentOr::is_absent")]
                     pub name: ::ploidy_util::absent::AbsentOr<::std::string::String>,
                 }
             }
@@ -396,7 +396,7 @@ mod tests {
                 #[derive(Debug, Clone, PartialEq, Eq, Hash, Default, ::ploidy_util::serde::Serialize, ::ploidy_util::serde::Deserialize)]
                 #[serde(crate = "::ploidy_util::serde")]
                 pub struct V1 {
-                    #[serde(default, skip_serializing_if = "::ploidy_util::absent::AbsentOr::is_absent",)]
+                    #[serde(default, skip_serializing_if = "::ploidy_util::absent::AbsentOr::is_absent")]
                     pub value: ::ploidy_util::absent::AbsentOr<::std::string::String>,
                 }
             }

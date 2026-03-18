@@ -1,6 +1,6 @@
 use ploidy_core::ir::{
-    EdgeKind, EnumVariant, EnumView, InlineTypeView, PrimitiveType, Reach, SchemaTypeView,
-    Traversal, TypeView, View,
+    ContainerView, EdgeKind, EnumVariant, EnumView, InlineTypeView, ParameterView, PrimitiveType,
+    QueryParameter, Reach, SchemaTypeView, Traversal, TypeView, View,
 };
 
 /// Rust-specific extensions to [`View`].
@@ -109,5 +109,20 @@ impl EnumViewExt for EnumView<'_> {
             EnumVariant::String(s) => s.chars().any(unicode_ident::is_xid_continue),
             _ => false,
         })
+    }
+}
+
+/// Rust-specific extensions to [`ParameterView`].
+pub(crate) trait ParameterViewExt {
+    /// Returns `true` if the struct field for this parameter
+    /// should be wrapped in an [`Option`]. This is the case when
+    /// the parameter isn't required and its schema type isn't
+    /// already [`Optional`][ContainerView::Optional].
+    fn optional(&self) -> bool;
+}
+
+impl<'view, 'a> ParameterViewExt for ParameterView<'view, 'a, QueryParameter> {
+    fn optional(&self) -> bool {
+        !self.required() && !matches!(self.ty().as_container(), Some(ContainerView::Optional(_)))
     }
 }
