@@ -2317,15 +2317,12 @@ fn test_operation_parameter_style() {
         .unwrap();
     assert_matches!(deep_obj.style(), Some(ParameterStyle::DeepObject));
 
-    // No explicit style; defaults to the exploded `form` style.
+    // No explicit style; `None` defers to the serializer's default.
     let no_style = query_params
         .iter()
         .find(|p| p.name() == "no_style")
         .unwrap();
-    assert_matches!(
-        no_style.style(),
-        Some(ParameterStyle::Form { exploded: true }),
-    );
+    assert_matches!(no_style.style(), None);
 }
 
 #[test]

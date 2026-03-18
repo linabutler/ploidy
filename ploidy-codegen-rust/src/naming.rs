@@ -1,4 +1,9 @@
-use std::{borrow::Cow, cmp::Ordering, fmt::Display, ops::Deref};
+use std::{
+    borrow::{Borrow, Cow},
+    cmp::Ordering,
+    fmt::Display,
+    ops::Deref,
+};
 
 use heck::{AsKebabCase, AsPascalCase, AsSnekCase};
 use itertools::Itertools;
@@ -200,6 +205,12 @@ impl AsRef<CodegenIdentRef> for CodegenIdent {
     }
 }
 
+impl Borrow<CodegenIdentRef> for CodegenIdent {
+    fn borrow(&self) -> &CodegenIdentRef {
+        self
+    }
+}
+
 impl Deref for CodegenIdent {
     type Target = CodegenIdentRef;
 
@@ -216,6 +227,27 @@ pub struct CodegenIdentRef(str);
 impl CodegenIdentRef {
     #[ref_cast_custom]
     fn new(s: &str) -> &Self;
+
+    /// Returns a suitable identifier for a struct field that
+    /// doesn't have an explicit name in the spec.
+    pub fn from_field_name_hint(hint: StructFieldNameHint) -> Cow<'static, Self> {
+        match hint {
+            StructFieldNameHint::Index(index) => {
+                Cow::Owned(CodegenIdent(format!("variant_{index}")))
+            }
+            StructFieldNameHint::AdditionalProperties => {
+                Cow::Borrowed(Self::new("additional_properties"))
+            }
+        }
+    }
+}
+
+impl ToOwned for CodegenIdentRef {
+    type Owned = CodegenIdent;
+
+    fn to_owned(&self) -> Self::Owned {
+        CodegenIdent(self.0.to_owned())
+    }
 }
 
 /// A Cargo feature for conditionally compiling generated code.
@@ -390,24 +422,6 @@ impl ToTokens for CodegenUntaggedVariantName {
             Index(index) => Cow::Owned(format!("V{index}")),
         };
         tokens.append(Ident::new(&s, Span::call_site()));
-    }
-}
-
-#[derive(Clone, Copy, Debug)]
-pub struct CodegenStructFieldName(pub StructFieldNameHint);
-
-impl ToTokens for CodegenStructFieldName {
-    fn to_tokens(&self, tokens: &mut TokenStream) {
-        match self.0 {
-            StructFieldNameHint::Index(index) => {
-                CodegenIdentUsage::Field(&CodegenIdent(format!("variant_{index}")))
-                    .to_tokens(tokens)
-            }
-            StructFieldNameHint::AdditionalProperties => {
-                CodegenIdentUsage::Field(CodegenIdentRef::new("additional_properties"))
-                    .to_tokens(tokens)
-            }
-        }
     }
 }
 
@@ -738,21 +752,25 @@ mod tests {
 
     #[test]
     fn test_struct_field_name_index() {
-        let field_name = CodegenStructFieldName(StructFieldNameHint::Index(0));
-        let actual: syn::Ident = parse_quote!(#field_name);
+        let field_name = CodegenIdentRef::from_field_name_hint(StructFieldNameHint::Index(0));
+        let usage = CodegenIdentUsage::Field(&field_name);
+        let actual: syn::Ident = parse_quote!(#usage);
         let expected: syn::Ident = parse_quote!(variant_0);
         assert_eq!(actual, expected);
 
-        let field_name = CodegenStructFieldName(StructFieldNameHint::Index(5));
-        let actual: syn::Ident = parse_quote!(#field_name);
+        let field_name = CodegenIdentRef::from_field_name_hint(StructFieldNameHint::Index(5));
+        let usage = CodegenIdentUsage::Field(&field_name);
+        let actual: syn::Ident = parse_quote!(#usage);
         let expected: syn::Ident = parse_quote!(variant_5);
         assert_eq!(actual, expected);
     }
 
     #[test]
     fn test_struct_field_name_additional_properties() {
-        let field_name = CodegenStructFieldName(StructFieldNameHint::AdditionalProperties);
-        let actual: syn::Ident = parse_quote!(#field_name);
+        let field_name =
+            CodegenIdentRef::from_field_name_hint(StructFieldNameHint::AdditionalProperties);
+        let usage = CodegenIdentUsage::Field(&field_name);
+        let actual: syn::Ident = parse_quote!(#usage);
         let expected: syn::Ident = parse_quote!(additional_properties);
         assert_eq!(actual, expected);
     }

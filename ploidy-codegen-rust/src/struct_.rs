@@ -1,3 +1,5 @@
+use std::borrow::Cow;
+
 use itertools::Itertools;
 use ploidy_core::{
     codegen::UniqueNames,
@@ -8,13 +10,12 @@ use ploidy_core::{
 };
 use proc_macro2::TokenStream;
 use quote::{ToTokens, TokenStreamExt, quote};
-use syn::{Ident, parse_quote};
 
 use super::{
     derives::ExtraDerive,
     doc_attrs,
     ext::ViewExt,
-    naming::{CodegenIdentScope, CodegenIdentUsage, CodegenStructFieldName, CodegenTypeName},
+    naming::{CodegenIdentRef, CodegenIdentScope, CodegenIdentUsage, CodegenTypeName},
     ref_::CodegenRef,
 };
 
@@ -52,27 +53,20 @@ impl ToTokens for CodegenStruct<'_> {
             .fields()
             .filter(|field| !field.tag())
             .map(|field| {
-                let field_name: Ident = match field.name() {
-                    StructFieldName::Name(n) => {
-                        let name = CodegenIdentUsage::Field(&scope.uniquify(n));
-                        parse_quote!(#name)
-                    }
-                    StructFieldName::Hint(hint) => {
-                        let name = CodegenStructFieldName(hint);
-                        parse_quote!(#name)
-                    }
-                };
-
-                let codegen_field = CodegenField::new(&field);
-                let final_type = codegen_field.to_token_stream();
-
-                let serde_attrs = SerdeFieldAttr::new(&field_name, &field);
                 let doc_attrs = field.description().map(doc_attrs);
+
+                let name = match field.name() {
+                    StructFieldName::Name(n) => Cow::Owned(scope.uniquify(n)),
+                    StructFieldName::Hint(hint) => CodegenIdentRef::from_field_name_hint(hint),
+                };
+                let field_name = CodegenIdentUsage::Field(&name);
+                let serde_attr = SerdeStructFieldAttr::new(field_name, &field);
+                let ty = CodegenField::new(&field);
 
                 quote! {
                     #doc_attrs
-                    #serde_attrs
-                    pub #field_name: #final_type,
+                    #serde_attr
+                    pub #field_name: #ty,
                 }
             })
             .collect_vec();
@@ -188,20 +182,20 @@ impl ToTokens for CodegenField<'_, '_> {
 
 /// Generates a `#[serde(...)]` attribute for a struct field.
 #[derive(Debug)]
-struct SerdeFieldAttr<'view, 'a> {
-    ident: &'a Ident,
+struct SerdeStructFieldAttr<'view, 'a> {
+    field_name: CodegenIdentUsage<'a>,
     field: &'a StructFieldView<'view, 'a>,
 }
 
-impl<'view, 'a> SerdeFieldAttr<'view, 'a> {
-    fn new(ident: &'a Ident, field: &'a StructFieldView<'view, 'a>) -> Self {
-        Self { ident, field }
+impl<'view, 'a> SerdeStructFieldAttr<'view, 'a> {
+    fn new(field_name: CodegenIdentUsage<'a>, field: &'a StructFieldView<'view, 'a>) -> Self {
+        Self { field_name, field }
     }
 }
 
-impl ToTokens for SerdeFieldAttr<'_, '_> {
+impl ToTokens for SerdeStructFieldAttr<'_, '_> {
     fn to_tokens(&self, tokens: &mut TokenStream) {
-        let mut attrs = Vec::new();
+        let mut attrs = vec![];
 
         // Add `flatten` xor `rename` (specifying both on the same field
         // isn't meaningful).
@@ -210,8 +204,7 @@ impl ToTokens for SerdeFieldAttr<'_, '_> {
         } else if let &StructFieldName::Name(name) = &self.field.name() {
             // `rename` if the OpenAPI field name doesn't match
             // the Rust identifier.
-            let f = self.ident.to_string();
-            if f.strip_prefix("r#").unwrap_or(&f) != name {
+            if self.field_name.display().to_string() != name {
                 attrs.push(quote! { rename = #name });
             }
         }
@@ -225,7 +218,7 @@ impl ToTokens for SerdeFieldAttr<'_, '_> {
         }
 
         if !attrs.is_empty() {
-            tokens.append_all(quote! { #[serde(#(#attrs,)*)] });
+            tokens.append_all(quote! { #[serde(#(#attrs),*)] });
         }
     }
 }
@@ -287,7 +280,7 @@ mod tests {
             #[serde(crate = "::ploidy_util::serde")]
             pub struct Pet {
                 pub name: ::std::string::String,
-                #[serde(default, skip_serializing_if = "::ploidy_util::absent::AbsentOr::is_absent",)]
+                #[serde(default, skip_serializing_if = "::ploidy_util::absent::AbsentOr::is_absent")]
                 pub age: ::ploidy_util::absent::AbsentOr<i32>,
             }
         };
@@ -499,7 +492,7 @@ mod tests {
             #[serde(crate = "::ploidy_util::serde")]
             pub struct Record {
                 pub id: ::std::string::String,
-                #[serde(default, skip_serializing_if = "::ploidy_util::absent::AbsentOr::is_absent",)]
+                #[serde(default, skip_serializing_if = "::ploidy_util::absent::AbsentOr::is_absent")]
                 pub deleted_at: ::ploidy_util::absent::AbsentOr<::ploidy_util::chrono::DateTime<::ploidy_util::chrono::Utc>>,
             }
         };
@@ -551,7 +544,7 @@ mod tests {
             #[derive(Debug, Clone, PartialEq, Eq, Hash, Default, ::ploidy_util::serde::Serialize, ::ploidy_util::serde::Deserialize)]
             #[serde(crate = "::ploidy_util::serde")]
             pub struct Record {
-                #[serde(default, skip_serializing_if = "::ploidy_util::absent::AbsentOr::is_absent",)]
+                #[serde(default, skip_serializing_if = "::ploidy_util::absent::AbsentOr::is_absent")]
                 pub nickname: ::ploidy_util::absent::AbsentOr<::std::string::String>,
             }
         };
@@ -602,7 +595,7 @@ mod tests {
             #[serde(crate = "::ploidy_util::serde")]
             pub struct User {
                 pub id: ::std::string::String,
-                #[serde(default, skip_serializing_if = "::ploidy_util::absent::AbsentOr::is_absent",)]
+                #[serde(default, skip_serializing_if = "::ploidy_util::absent::AbsentOr::is_absent")]
                 pub active: ::ploidy_util::absent::AbsentOr<bool>,
             }
         };
@@ -699,9 +692,9 @@ mod tests {
             #[derive(Debug, Clone, PartialEq, Eq, Hash, Default, ::ploidy_util::serde::Serialize, ::ploidy_util::serde::Deserialize)]
             #[serde(crate = "::ploidy_util::serde")]
             pub struct Options {
-                #[serde(default, skip_serializing_if = "::ploidy_util::absent::AbsentOr::is_absent",)]
+                #[serde(default, skip_serializing_if = "::ploidy_util::absent::AbsentOr::is_absent")]
                 pub verbose: ::ploidy_util::absent::AbsentOr<bool>,
-                #[serde(default, skip_serializing_if = "::ploidy_util::absent::AbsentOr::is_absent",)]
+                #[serde(default, skip_serializing_if = "::ploidy_util::absent::AbsentOr::is_absent")]
                 pub count: ::ploidy_util::absent::AbsentOr<i32>,
             }
         };
@@ -750,7 +743,7 @@ mod tests {
             #[derive(Debug, Clone, PartialEq, Eq, Hash, Default, ::ploidy_util::serde::Serialize, ::ploidy_util::serde::Deserialize)]
             #[serde(crate = "::ploidy_util::serde")]
             pub struct Outer {
-                #[serde(default, skip_serializing_if = "::ploidy_util::absent::AbsentOr::is_absent",)]
+                #[serde(default, skip_serializing_if = "::ploidy_util::absent::AbsentOr::is_absent")]
                 pub inner: ::ploidy_util::absent::AbsentOr<crate::types::Inner>,
             }
         };
@@ -866,7 +859,7 @@ mod tests {
             #[derive(Debug, Clone, PartialEq, Eq, Hash, Default, ::ploidy_util::serde::Serialize, ::ploidy_util::serde::Deserialize)]
             #[serde(crate = "::ploidy_util::serde")]
             pub struct Owner {
-                #[serde(default, skip_serializing_if = "::ploidy_util::absent::AbsentOr::is_absent",)]
+                #[serde(default, skip_serializing_if = "::ploidy_util::absent::AbsentOr::is_absent")]
                 pub pet: ::ploidy_util::absent::AbsentOr<crate::types::Pet>,
             }
         };
@@ -915,7 +908,7 @@ mod tests {
             #[derive(Debug, Clone, PartialEq, Eq, Hash, Default, ::ploidy_util::serde::Serialize, ::ploidy_util::serde::Deserialize)]
             #[serde(crate = "::ploidy_util::serde")]
             pub struct Container {
-                #[serde(default, skip_serializing_if = "::ploidy_util::absent::AbsentOr::is_absent",)]
+                #[serde(default, skip_serializing_if = "::ploidy_util::absent::AbsentOr::is_absent")]
                 pub value: ::ploidy_util::absent::AbsentOr<crate::types::StringOrInt>,
             }
         };
@@ -1029,7 +1022,7 @@ mod tests {
             #[derive(Debug, Clone, PartialEq, Eq, Hash, Default, ::ploidy_util::serde::Serialize, ::ploidy_util::serde::Deserialize)]
             #[serde(crate = "::ploidy_util::serde")]
             pub struct Outer {
-                #[serde(default, skip_serializing_if = "::ploidy_util::absent::AbsentOr::is_absent",)]
+                #[serde(default, skip_serializing_if = "::ploidy_util::absent::AbsentOr::is_absent")]
                 pub inner: ::ploidy_util::absent::AbsentOr<crate::types::Inner>,
             }
         };
@@ -1295,7 +1288,7 @@ mod tests {
             #[derive(Debug, Clone, PartialEq, Eq, Hash, Default, ::ploidy_util::serde::Serialize, ::ploidy_util::serde::Deserialize)]
             #[serde(crate = "::ploidy_util::serde")]
             pub struct Corgi {
-                #[serde(default, skip_serializing_if = "::ploidy_util::absent::AbsentOr::is_absent",)]
+                #[serde(default, skip_serializing_if = "::ploidy_util::absent::AbsentOr::is_absent")]
                 pub name: ::ploidy_util::absent::AbsentOr<::std::string::String>,
             }
         };
@@ -1396,7 +1389,7 @@ mod tests {
             #[serde(crate = "::ploidy_util::serde")]
             pub struct Node {
                 pub value: ::std::string::String,
-                #[serde(default, skip_serializing_if = "::ploidy_util::absent::AbsentOr::is_absent",)]
+                #[serde(default, skip_serializing_if = "::ploidy_util::absent::AbsentOr::is_absent")]
                 pub next: ::ploidy_util::absent::AbsentOr<::std::boxed::Box<crate::types::Node>>,
             }
         };
@@ -1501,7 +1494,7 @@ mod tests {
             #[serde(crate = "::ploidy_util::serde")]
             pub struct Node {
                 pub value: ::std::string::String,
-                #[serde(default, skip_serializing_if = "::ploidy_util::absent::AbsentOr::is_absent",)]
+                #[serde(default, skip_serializing_if = "::ploidy_util::absent::AbsentOr::is_absent")]
                 pub children: ::ploidy_util::absent::AbsentOr<::std::vec::Vec<crate::types::Node>>,
             }
         };
@@ -1612,7 +1605,7 @@ mod tests {
             #[serde(crate = "::ploidy_util::serde")]
             pub struct Config {
                 pub name: ::std::string::String,
-                #[serde(flatten,)]
+                #[serde(flatten)]
                 pub additional_properties: ::std::collections::BTreeMap<::std::string::String, ::std::string::String>,
             }
         };
@@ -1787,7 +1780,7 @@ mod tests {
             #[serde(crate = "::ploidy_util::serde")]
             pub struct Pet {
                 pub name: ::std::string::String,
-                #[serde(default, skip_serializing_if = "::ploidy_util::absent::AbsentOr::is_absent",)]
+                #[serde(default, skip_serializing_if = "::ploidy_util::absent::AbsentOr::is_absent")]
                 pub status: ::ploidy_util::absent::AbsentOr<crate::types::Status>,
             }
         };

@@ -321,11 +321,13 @@ mod tests {
                             .push("customers");
                         url
                     };
-                    let url = {
-                        let mut url = url;
-                        query.append_to(&mut url)?;
-                        url
-                    };
+                    let url = ::ploidy_util::serde::Serialize::serialize(
+                        query,
+                        ::ploidy_util::QuerySerializer::new(
+                            url,
+                            parameters::ListCustomersQuery::STYLES,
+                        ),
+                    )?;
                     let response = self
                         .client
                         .get(url)
@@ -339,21 +341,14 @@ mod tests {
             }
             pub mod parameters {
                 mod list_customers_query {
-                    #[derive(Debug, Clone, PartialEq, Eq, Hash, Default)]
+                    #[derive(Debug, Clone, PartialEq, Eq, Hash, Default, ::ploidy_util::serde::Serialize, ::ploidy_util::serde::Deserialize)]
+                    #[serde(crate = "::ploidy_util::serde")]
                     pub struct ListCustomersQuery {
+                        #[serde(default, skip_serializing_if = "Option::is_none")]
                         pub limit: ::std::option::Option<i32>,
                     }
                     impl ListCustomersQuery {
-                        /// Serializes and appends query parameters to the URL.
-                        pub fn append_to(
-                            &self,
-                            url: &mut ::ploidy_util::url::Url,
-                        ) -> ::std::result::Result<(), ::ploidy_util::QueryParamError> {
-                            let mut serializer = ::ploidy_util::QuerySerializer::new(url);
-                            serializer
-                                .append("limit", &self.limit, ::ploidy_util::QueryStyle::Form { exploded: true })?;
-                            Ok(())
-                        }
+                        pub const STYLES: &[(&str, ::ploidy_util::QueryStyle)] = &[];
                     }
                 }
                 pub use list_customers_query::*;
@@ -423,11 +418,13 @@ mod tests {
                             .push("customers");
                         url
                     };
-                    let url = {
-                        let mut url = url;
-                        query.append_to(&mut url)?;
-                        url
-                    };
+                    let url = ::ploidy_util::serde::Serialize::serialize(
+                        query,
+                        ::ploidy_util::QuerySerializer::new(
+                            url,
+                            parameters::ListCustomersQuery::STYLES,
+                        ),
+                    )?;
                     let response = self
                         .client
                         .get(url)
@@ -452,11 +449,13 @@ mod tests {
                             .push("search");
                         url
                     };
-                    let url = {
-                        let mut url = url;
-                        query.append_to(&mut url)?;
-                        url
-                    };
+                    let url = ::ploidy_util::serde::Serialize::serialize(
+                        query,
+                        ::ploidy_util::QuerySerializer::new(
+                            url,
+                            parameters::SearchCustomersQuery::STYLES,
+                        ),
+                    )?;
                     let response = self
                         .client
                         .get(url)
@@ -470,40 +469,25 @@ mod tests {
             }
             pub mod parameters {
                 mod list_customers_query {
-                    #[derive(Debug, Clone, PartialEq, Eq, Hash, Default)]
+                    #[derive(Debug, Clone, PartialEq, Eq, Hash, Default, ::ploidy_util::serde::Serialize, ::ploidy_util::serde::Deserialize)]
+                    #[serde(crate = "::ploidy_util::serde")]
                     pub struct ListCustomersQuery {
+                        #[serde(default, skip_serializing_if = "Option::is_none")]
                         pub limit: ::std::option::Option<i32>,
                     }
                     impl ListCustomersQuery {
-                        /// Serializes and appends query parameters to the URL.
-                        pub fn append_to(
-                            &self,
-                            url: &mut ::ploidy_util::url::Url,
-                        ) -> ::std::result::Result<(), ::ploidy_util::QueryParamError> {
-                            let mut serializer = ::ploidy_util::QuerySerializer::new(url);
-                            serializer
-                                .append("limit", &self.limit, ::ploidy_util::QueryStyle::Form { exploded: true })?;
-                            Ok(())
-                        }
+                        pub const STYLES: &[(&str, ::ploidy_util::QueryStyle)] = &[];
                     }
                 }
                 pub use list_customers_query::*;
                 mod search_customers_query {
-                    #[derive(Debug, Clone, PartialEq, Eq, Hash, Default)]
+                    #[derive(Debug, Clone, PartialEq, Eq, Hash, Default, ::ploidy_util::serde::Serialize, ::ploidy_util::serde::Deserialize)]
+                    #[serde(crate = "::ploidy_util::serde")]
                     pub struct SearchCustomersQuery {
                         pub email: ::std::string::String,
                     }
                     impl SearchCustomersQuery {
-                        /// Serializes and appends query parameters to the URL.
-                        pub fn append_to(
-                            &self,
-                            url: &mut ::ploidy_util::url::Url,
-                        ) -> ::std::result::Result<(), ::ploidy_util::QueryParamError> {
-                            let mut serializer = ::ploidy_util::QuerySerializer::new(url);
-                            serializer
-                                .append("email", &self.email, ::ploidy_util::QueryStyle::Form { exploded: true })?;
-                            Ok(())
-                        }
+                        pub const STYLES: &[(&str, ::ploidy_util::QueryStyle)] = &[];
                     }
                 }
                 pub use search_customers_query::*;

@@ -121,6 +121,7 @@ impl<'a> Spec<'a> {
                         (Some(ParsedParameterStyle::PipeDelimited), Some(false) | None) => {
                             Some(IrParameterStyle::PipeDelimited)
                         }
+                        (None, None) => None,
                         (Some(ParsedParameterStyle::Form) | None, Some(true) | None) => {
                             Some(IrParameterStyle::Form { exploded: true })
                         }

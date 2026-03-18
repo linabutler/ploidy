@@ -8,11 +8,11 @@
 //!
 //! ```
 //! use url::Url;
+//! use serde::Serialize;
 //! use ploidy_util::query::{QuerySerializer, QueryStyle};
 //! # use ploidy_util::query::QueryParamError;
 //!
 //! # fn main() -> Result<(), QueryParamError> {
-//! # use serde::Serialize;
 //! #[derive(Serialize)]
 //! #[serde(rename_all = "lowercase")]
 //! enum Kind {
@@ -22,33 +22,21 @@
 //!     Bunny,
 //! }
 //!
-//! // Serialize parameters with the default style: `form`, exploded.
-//! let mut url = Url::parse("https://api.example.com/pets").unwrap();
-//! let style = QueryStyle::default();
-//! QuerySerializer::new(&mut url)
-//!     .append("kind", &[Kind::Dog, Kind::Cat], style)?
-//!     .append("limit", &10, style)?;
+//! // Serialize a struct's fields as query parameters, using
+//! // the default exploded `form` style for each parameter.
+//! #[derive(Serialize)]
+//! struct PetQuery {
+//!     kind: Vec<Kind>,
+//!     limit: i32,
+//! }
+//!
+//! let url = Url::parse("https://api.example.com/pets").unwrap();
+//! let query = PetQuery { kind: vec![Kind::Dog, Kind::Cat], limit: 10 };
+//! let url = query.serialize(QuerySerializer::new(url, &[]))?;
 //! assert_eq!(url.as_str(), "https://api.example.com/pets?kind=dog&kind=cat&limit=10");
 //!
-//! // ...Or as comma-separated values:
-//! let mut url = Url::parse("https://api.example.com/pets").unwrap();
-//! QuerySerializer::new(&mut url)
-//!     .append("kind", &[Kind::Dog, Kind::Cat], QueryStyle::Form { exploded: false })?;
-//! assert_eq!(url.as_str(), "https://api.example.com/pets?kind=dog,cat");
-//!
-//! // ...Or use `spaceDelimited` values:
-//! let mut url = Url::parse("https://api.example.com/pets").unwrap();
-//! QuerySerializer::new(&mut url)
-//!     .append("kind", &[Kind::Dog, Kind::Cat], QueryStyle::SpaceDelimited)?;
-//! assert_eq!(url.as_str(), "https://api.example.com/pets?kind=dog%20cat");
-//!
-//! // ...Or `pipeDelimited` values:
-//! let mut url = Url::parse("https://api.example.com/pets").unwrap();
-//! QuerySerializer::new(&mut url)
-//!     .append("kind", &[Kind::Dog, Kind::Cat], QueryStyle::PipeDelimited)?;
-//! assert_eq!(url.as_str(), "https://api.example.com/pets?kind=dog%7Ccat");
-//!
-//! // ...Or `deepObject` for nested structures:
+//! // Fields can use different styles. Here, `filter` uses
+//! // `deepObject` while `limit` uses the default `form` style.
 //! #[derive(Serialize)]
 //! struct Filter {
 //!     kind: Vec<Kind>,
@@ -56,22 +44,27 @@
 //!     max_price: u32,
 //! }
 //!
-//! let filter = Filter {
-//!     kind: vec![Kind::Dog, Kind::Cat, Kind::Bunny],
-//!     term: "chow".to_owned(),
-//!     max_price: 30,
-//! };
+//! #[derive(Serialize)]
+//! struct SearchQuery {
+//!     filter: Filter,
+//!     limit: i32,
+//! }
 //!
-//! let mut url = Url::parse("https://api.example.com/search").unwrap();
-//! QuerySerializer::new(&mut url)
-//!     .append("filter", &filter, QueryStyle::DeepObject)?;
-//! assert!(url.query_pairs().eq([
-//!     ("filter[kind][0]".into(), "dog".into()),
-//!     ("filter[kind][1]".into(), "cat".into()),
-//!     ("filter[kind][2]".into(), "bunny".into()),
-//!     ("filter[term]".into(), "chow".into()),
-//!     ("filter[max_price]".into(), "30".into()),
-//! ]));
+//! let url = Url::parse("https://api.example.com/search").unwrap();
+//! let query = SearchQuery {
+//!     filter: Filter {
+//!         kind: vec![Kind::Dog, Kind::Cat, Kind::Bunny],
+//!         term: "chow".to_owned(),
+//!         max_price: 30,
+//!     },
+//!     limit: 10,
+//! };
+//! let url = query.serialize(QuerySerializer::new(url, &[
+//!     ("filter", QueryStyle::DeepObject),
+//! ]))?;
+//! assert!(url.as_str().starts_with(
+//!     "https://api.example.com/search?filter%5Bkind%5D%5B0%5D=dog"
+//! ));
 //! # Ok(())
 //! # }
 //! ```
@@ -82,7 +75,7 @@ use itertools::Itertools;
 use percent_encoding::{AsciiSet, CONTROLS, PercentEncode};
 use serde::{
     Serialize,
-    ser::{Impossible, SerializeMap, SerializeSeq, SerializeStruct, SerializeTuple},
+    ser::{Impossible, SerializeMap, SerializeSeq, SerializeStruct, SerializeTuple, Serializer},
 };
 use url::Url;
 
@@ -111,36 +104,208 @@ impl Default for QueryStyle {
     }
 }
 
-/// A serializer that formats and appends URL query parameters
-/// according to OpenAPI styles.
-pub struct QuerySerializer<'a>(&'a mut Url);
+/// A [`Serializer`] that formats and appends OpenAPI-style
+/// query parameters to a URL.
+pub struct QuerySerializer<'a> {
+    url: Url,
+    styles: &'a [(&'a str, QueryStyle)],
+}
 
 impl<'a> QuerySerializer<'a> {
     /// Creates a new serializer.
-    pub fn new(url: &'a mut Url) -> Self {
-        Self(url)
+    pub fn new(url: Url, styles: &'a [(&'a str, QueryStyle)]) -> Self {
+        Self { url, styles }
+    }
+}
+
+impl<'a> Serializer for QuerySerializer<'a> {
+    type Ok = Url;
+    type Error = QueryParamError;
+
+    type SerializeSeq = Impossible<Self::Ok, Self::Error>;
+    type SerializeTuple = Impossible<Self::Ok, Self::Error>;
+    type SerializeTupleStruct = Impossible<Self::Ok, Self::Error>;
+    type SerializeTupleVariant = Impossible<Self::Ok, Self::Error>;
+    type SerializeMap = Impossible<Self::Ok, Self::Error>;
+    type SerializeStruct = Self;
+    type SerializeStructVariant = Impossible<Self::Ok, Self::Error>;
+
+    fn serialize_struct(
+        self,
+        _: &'static str,
+        _: usize,
+    ) -> Result<Self::SerializeStruct, Self::Error> {
+        Ok(self)
     }
 
-    /// Serializes and appends a query parameter to the URL.
-    pub fn append<T: Serialize>(
+    fn serialize_bool(self, _: bool) -> Result<Self::Ok, Self::Error> {
+        Err(QueryParamError::ExpectedStruct)
+    }
+
+    fn serialize_i8(self, _: i8) -> Result<Self::Ok, Self::Error> {
+        Err(QueryParamError::ExpectedStruct)
+    }
+
+    fn serialize_i16(self, _: i16) -> Result<Self::Ok, Self::Error> {
+        Err(QueryParamError::ExpectedStruct)
+    }
+
+    fn serialize_i32(self, _: i32) -> Result<Self::Ok, Self::Error> {
+        Err(QueryParamError::ExpectedStruct)
+    }
+
+    fn serialize_i64(self, _: i64) -> Result<Self::Ok, Self::Error> {
+        Err(QueryParamError::ExpectedStruct)
+    }
+
+    fn serialize_u8(self, _: u8) -> Result<Self::Ok, Self::Error> {
+        Err(QueryParamError::ExpectedStruct)
+    }
+
+    fn serialize_u16(self, _: u16) -> Result<Self::Ok, Self::Error> {
+        Err(QueryParamError::ExpectedStruct)
+    }
+
+    fn serialize_u32(self, _: u32) -> Result<Self::Ok, Self::Error> {
+        Err(QueryParamError::ExpectedStruct)
+    }
+
+    fn serialize_u64(self, _: u64) -> Result<Self::Ok, Self::Error> {
+        Err(QueryParamError::ExpectedStruct)
+    }
+
+    fn serialize_f32(self, _: f32) -> Result<Self::Ok, Self::Error> {
+        Err(QueryParamError::ExpectedStruct)
+    }
+
+    fn serialize_f64(self, _: f64) -> Result<Self::Ok, Self::Error> {
+        Err(QueryParamError::ExpectedStruct)
+    }
+
+    fn serialize_char(self, _: char) -> Result<Self::Ok, Self::Error> {
+        Err(QueryParamError::ExpectedStruct)
+    }
+
+    fn serialize_str(self, _: &str) -> Result<Self::Ok, Self::Error> {
+        Err(QueryParamError::ExpectedStruct)
+    }
+
+    fn serialize_bytes(self, _: &[u8]) -> Result<Self::Ok, Self::Error> {
+        Err(QueryParamError::ExpectedStruct)
+    }
+
+    fn serialize_none(self) -> Result<Self::Ok, Self::Error> {
+        Err(QueryParamError::ExpectedStruct)
+    }
+
+    fn serialize_some<T: ?Sized + Serialize>(self, _: &T) -> Result<Self::Ok, Self::Error> {
+        Err(QueryParamError::ExpectedStruct)
+    }
+
+    fn serialize_unit(self) -> Result<Self::Ok, Self::Error> {
+        Err(QueryParamError::ExpectedStruct)
+    }
+
+    fn serialize_unit_struct(self, _: &'static str) -> Result<Self::Ok, Self::Error> {
+        Err(QueryParamError::ExpectedStruct)
+    }
+
+    fn serialize_unit_variant(
+        self,
+        _: &'static str,
+        _: u32,
+        _: &'static str,
+    ) -> Result<Self::Ok, Self::Error> {
+        Err(QueryParamError::ExpectedStruct)
+    }
+
+    fn serialize_newtype_struct<T: ?Sized + Serialize>(
+        self,
+        _: &'static str,
+        _: &T,
+    ) -> Result<Self::Ok, Self::Error> {
+        Err(QueryParamError::ExpectedStruct)
+    }
+
+    fn serialize_newtype_variant<T: ?Sized + Serialize>(
+        self,
+        _: &'static str,
+        _: u32,
+        _: &'static str,
+        _: &T,
+    ) -> Result<Self::Ok, Self::Error> {
+        Err(QueryParamError::ExpectedStruct)
+    }
+
+    fn serialize_seq(self, _: Option<usize>) -> Result<Self::SerializeSeq, Self::Error> {
+        Err(QueryParamError::ExpectedStruct)
+    }
+
+    fn serialize_tuple(self, _: usize) -> Result<Self::SerializeTuple, Self::Error> {
+        Err(QueryParamError::ExpectedStruct)
+    }
+
+    fn serialize_tuple_struct(
+        self,
+        _: &'static str,
+        _: usize,
+    ) -> Result<Self::SerializeTupleStruct, Self::Error> {
+        Err(QueryParamError::ExpectedStruct)
+    }
+
+    fn serialize_tuple_variant(
+        self,
+        _: &'static str,
+        _: u32,
+        _: &'static str,
+        _: usize,
+    ) -> Result<Self::SerializeTupleVariant, Self::Error> {
+        Err(QueryParamError::ExpectedStruct)
+    }
+
+    fn serialize_map(self, _: Option<usize>) -> Result<Self::SerializeMap, Self::Error> {
+        Err(QueryParamError::ExpectedStruct)
+    }
+
+    fn serialize_struct_variant(
+        self,
+        _: &'static str,
+        _: u32,
+        _: &'static str,
+        _: usize,
+    ) -> Result<Self::SerializeStructVariant, Self::Error> {
+        Err(QueryParamError::ExpectedStruct)
+    }
+}
+
+impl SerializeStruct for QuerySerializer<'_> {
+    type Ok = Url;
+    type Error = QueryParamError;
+
+    fn serialize_field<T: ?Sized + Serialize>(
         &mut self,
-        name: &str,
+        key: &'static str,
         value: &T,
-        style: QueryStyle,
-    ) -> Result<&mut Self, QueryParamError> {
-        use ParamSerializerState::*;
-        let state = match style {
-            QueryStyle::DeepObject => DeepObject,
-            QueryStyle::Form { exploded: true } => ExplodedForm,
-            QueryStyle::Form { exploded: false } => NonExplodedForm(vec![]),
-            QueryStyle::PipeDelimited => Delimited("|", vec![]),
-            QueryStyle::SpaceDelimited => Delimited(" ", vec![]),
-        };
-        let mut path = KeyPath::new(name);
-        let mut serializer = QueryParamSerializer::new(self.0, &mut path, state);
+    ) -> Result<(), Self::Error> {
+        let style = self
+            .styles
+            .iter()
+            .find(|&&(name, _)| name == key)
+            .map(|&(_, style)| style)
+            .unwrap_or_default();
+        let mut path = KeyPath::new(key);
+        let mut serializer = QueryParamSerializer::new(
+            &mut self.url,
+            &mut path,
+            ParamSerializerState::for_style(style),
+        );
         value.serialize(&mut serializer)?;
         serializer.flush();
-        Ok(self)
+        Ok(())
+    }
+
+    fn end(self) -> Result<Self::Ok, Self::Error> {
+        Ok(self.url)
     }
 }
 
@@ -154,6 +319,19 @@ enum ParamSerializerState {
     NonExplodedForm(Vec<String>),
     /// Exploded `deepObject` style.
     DeepObject,
+}
+
+impl ParamSerializerState {
+    /// Creates the serializer state for a given query style.
+    fn for_style(style: QueryStyle) -> Self {
+        match style {
+            QueryStyle::DeepObject => Self::DeepObject,
+            QueryStyle::Form { exploded: true } => Self::ExplodedForm,
+            QueryStyle::Form { exploded: false } => Self::NonExplodedForm(vec![]),
+            QueryStyle::PipeDelimited => Self::Delimited("|", vec![]),
+            QueryStyle::SpaceDelimited => Self::Delimited(" ", vec![]),
+        }
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -172,8 +350,8 @@ impl<'a> KeyPath<'a> {
         self.1.push(segment.into());
     }
 
-    fn pop(&mut self) -> Cow<'a, str> {
-        self.1.pop().unwrap_or_else(|| self.0.clone())
+    fn pop(&mut self) -> Cow<'_, str> {
+        self.1.pop().unwrap_or_else(|| Cow::Borrowed(&self.0))
     }
 
     fn first(&self) -> &str {
@@ -268,11 +446,11 @@ impl<T: AsRef<str>> Display for PercentEncodeDelimited<'_, T> {
     }
 }
 
-/// A [`Serializer`][serde::Serializer] for a single query parameter.
+/// A [`Serializer`] for a single query parameter.
 #[derive(Debug)]
 struct QueryParamSerializer<'a> {
     /// A mutable reference to the URL being constructed.
-    url: &'a mut url::Url,
+    url: &'a mut Url,
     /// The current key path, starting with the parameter name.
     /// The serializer pushes and pops additional segments for
     /// nested structures.
@@ -282,7 +460,7 @@ struct QueryParamSerializer<'a> {
 
 impl<'a> QueryParamSerializer<'a> {
     /// Creates a new query parameter serializer.
-    fn new(url: &'a mut url::Url, path: &'a mut KeyPath<'a>, state: ParamSerializerState) -> Self {
+    fn new(url: &'a mut Url, path: &'a mut KeyPath<'a>, state: ParamSerializerState) -> Self {
         Self { url, path, state }
     }
 
@@ -339,7 +517,7 @@ impl<'a> QueryParamSerializer<'a> {
                 std::mem::take(buf),
             ),
             Delimited(delimiter, buf) => (
-                // For `spaceDelimited` and `pipeDelimited`, delimeters are encoded.
+                // For `spaceDelimited` and `pipeDelimited`, delimiters are encoded.
                 EncodedOrRaw::encode(delimiter),
                 std::mem::take(buf),
             ),
@@ -364,17 +542,17 @@ impl<'a> QueryParamSerializer<'a> {
     }
 }
 
-impl<'a, 'b> serde::Serializer for &'a mut QueryParamSerializer<'b> {
+impl<'a, 'b> Serializer for &'a mut QueryParamSerializer<'b> {
     type Ok = ();
     type Error = QueryParamError;
 
     type SerializeSeq = QuerySeqSerializer<'a, 'b>;
     type SerializeTuple = QuerySeqSerializer<'a, 'b>;
-    type SerializeTupleStruct = Impossible<(), QueryParamError>;
-    type SerializeTupleVariant = Impossible<(), QueryParamError>;
+    type SerializeTupleStruct = Impossible<Self::Ok, Self::Error>;
+    type SerializeTupleVariant = Impossible<Self::Ok, Self::Error>;
     type SerializeMap = QueryStructSerializer<'a, 'b>;
     type SerializeStruct = QueryStructSerializer<'a, 'b>;
-    type SerializeStructVariant = Impossible<(), QueryParamError>;
+    type SerializeStructVariant = Impossible<Self::Ok, Self::Error>;
 
     fn serialize_bool(self, v: bool) -> Result<Self::Ok, Self::Error> {
         self.append(if v { "true" } else { "false" });
@@ -441,7 +619,7 @@ impl<'a, 'b> serde::Serializer for &'a mut QueryParamSerializer<'b> {
         Ok(())
     }
 
-    fn serialize_bytes(self, _v: &[u8]) -> Result<Self::Ok, Self::Error> {
+    fn serialize_bytes(self, _: &[u8]) -> Result<Self::Ok, Self::Error> {
         Err(UnsupportedTypeError::Bytes)?
     }
 
@@ -632,9 +810,7 @@ impl<'a, 'b> SerializeMap for QueryStructSerializer<'a, 'b> {
     type Error = QueryParamError;
 
     fn serialize_key<T: ?Sized + Serialize>(&mut self, key: &T) -> Result<(), Self::Error> {
-        let mut extractor = KeyExtractor { key: String::new() };
-        key.serialize(&mut extractor)?;
-        self.serializer.path.push(extractor.key);
+        self.serializer.path.push(key.serialize(KeyExtractor)?);
         Ok(())
     }
 
@@ -652,99 +828,96 @@ impl<'a, 'b> SerializeMap for QueryStructSerializer<'a, 'b> {
     }
 
     fn end(self) -> Result<Self::Ok, Self::Error> {
-        SerializeStruct::end(self)
+        self.serializer.flush();
+        Ok(())
     }
 }
 
-/// A helper [`Serializer`][serde::Serializer] for extracting string keys
-/// from maps.
-struct KeyExtractor {
-    key: String,
-}
+/// A helper [`Serializer`] for extracting string keys from maps.
+struct KeyExtractor;
 
-impl serde::Serializer for &mut KeyExtractor {
-    type Ok = ();
+impl Serializer for KeyExtractor {
+    type Ok = String;
     type Error = QueryParamError;
 
-    type SerializeSeq = Impossible<(), QueryParamError>;
-    type SerializeTuple = Impossible<(), QueryParamError>;
-    type SerializeTupleStruct = Impossible<(), QueryParamError>;
-    type SerializeTupleVariant = Impossible<(), QueryParamError>;
-    type SerializeMap = Impossible<(), QueryParamError>;
-    type SerializeStruct = Impossible<(), QueryParamError>;
-    type SerializeStructVariant = Impossible<(), QueryParamError>;
+    type SerializeSeq = Impossible<Self::Ok, Self::Error>;
+    type SerializeTuple = Impossible<Self::Ok, Self::Error>;
+    type SerializeTupleStruct = Impossible<Self::Ok, Self::Error>;
+    type SerializeTupleVariant = Impossible<Self::Ok, Self::Error>;
+    type SerializeMap = Impossible<Self::Ok, Self::Error>;
+    type SerializeStruct = Impossible<Self::Ok, Self::Error>;
+    type SerializeStructVariant = Impossible<Self::Ok, Self::Error>;
+
+    fn serialize_str(self, v: &str) -> Result<Self::Ok, Self::Error> {
+        Ok(v.to_owned())
+    }
 
     fn serialize_bool(self, _: bool) -> Result<Self::Ok, Self::Error> {
-        Err(QueryParamError::MapKeyNotString)
+        Err(QueryParamError::ExpectedStringKey)
     }
 
     fn serialize_i8(self, _: i8) -> Result<Self::Ok, Self::Error> {
-        Err(QueryParamError::MapKeyNotString)
+        Err(QueryParamError::ExpectedStringKey)
     }
 
     fn serialize_i16(self, _: i16) -> Result<Self::Ok, Self::Error> {
-        Err(QueryParamError::MapKeyNotString)
+        Err(QueryParamError::ExpectedStringKey)
     }
 
     fn serialize_i32(self, _: i32) -> Result<Self::Ok, Self::Error> {
-        Err(QueryParamError::MapKeyNotString)
+        Err(QueryParamError::ExpectedStringKey)
     }
 
     fn serialize_i64(self, _: i64) -> Result<Self::Ok, Self::Error> {
-        Err(QueryParamError::MapKeyNotString)
+        Err(QueryParamError::ExpectedStringKey)
     }
 
     fn serialize_u8(self, _: u8) -> Result<Self::Ok, Self::Error> {
-        Err(QueryParamError::MapKeyNotString)
+        Err(QueryParamError::ExpectedStringKey)
     }
 
     fn serialize_u16(self, _: u16) -> Result<Self::Ok, Self::Error> {
-        Err(QueryParamError::MapKeyNotString)
+        Err(QueryParamError::ExpectedStringKey)
     }
 
     fn serialize_u32(self, _: u32) -> Result<Self::Ok, Self::Error> {
-        Err(QueryParamError::MapKeyNotString)
+        Err(QueryParamError::ExpectedStringKey)
     }
 
     fn serialize_u64(self, _: u64) -> Result<Self::Ok, Self::Error> {
-        Err(QueryParamError::MapKeyNotString)
+        Err(QueryParamError::ExpectedStringKey)
     }
 
     fn serialize_f32(self, _: f32) -> Result<Self::Ok, Self::Error> {
-        Err(QueryParamError::MapKeyNotString)
+        Err(QueryParamError::ExpectedStringKey)
     }
 
     fn serialize_f64(self, _: f64) -> Result<Self::Ok, Self::Error> {
-        Err(QueryParamError::MapKeyNotString)
+        Err(QueryParamError::ExpectedStringKey)
     }
 
     fn serialize_char(self, _: char) -> Result<Self::Ok, Self::Error> {
-        Err(QueryParamError::MapKeyNotString)
-    }
-
-    fn serialize_str(self, v: &str) -> Result<Self::Ok, Self::Error> {
-        self.key = v.to_owned();
-        Ok(())
+        Err(QueryParamError::ExpectedStringKey)
     }
 
     fn serialize_bytes(self, _: &[u8]) -> Result<Self::Ok, Self::Error> {
-        Err(QueryParamError::MapKeyNotString)
+        Err(QueryParamError::ExpectedStringKey)
     }
 
     fn serialize_none(self) -> Result<Self::Ok, Self::Error> {
-        Err(QueryParamError::MapKeyNotString)
+        Err(QueryParamError::ExpectedStringKey)
     }
 
     fn serialize_some<T: ?Sized + Serialize>(self, _: &T) -> Result<Self::Ok, Self::Error> {
-        Err(QueryParamError::MapKeyNotString)
+        Err(QueryParamError::ExpectedStringKey)
     }
 
     fn serialize_unit(self) -> Result<Self::Ok, Self::Error> {
-        Err(QueryParamError::MapKeyNotString)
+        Err(QueryParamError::ExpectedStringKey)
     }
 
     fn serialize_unit_struct(self, _: &'static str) -> Result<Self::Ok, Self::Error> {
-        Err(QueryParamError::MapKeyNotString)
+        Err(QueryParamError::ExpectedStringKey)
     }
 
     fn serialize_unit_variant(
@@ -753,7 +926,7 @@ impl serde::Serializer for &mut KeyExtractor {
         _: u32,
         _: &'static str,
     ) -> Result<Self::Ok, Self::Error> {
-        Err(QueryParamError::MapKeyNotString)
+        Err(QueryParamError::ExpectedStringKey)
     }
 
     fn serialize_newtype_struct<T: ?Sized + Serialize>(
@@ -761,7 +934,7 @@ impl serde::Serializer for &mut KeyExtractor {
         _: &'static str,
         _: &T,
     ) -> Result<Self::Ok, Self::Error> {
-        Err(QueryParamError::MapKeyNotString)
+        Err(QueryParamError::ExpectedStringKey)
     }
 
     fn serialize_newtype_variant<T: ?Sized + Serialize>(
@@ -771,15 +944,15 @@ impl serde::Serializer for &mut KeyExtractor {
         _: &'static str,
         _: &T,
     ) -> Result<Self::Ok, Self::Error> {
-        Err(QueryParamError::MapKeyNotString)
+        Err(QueryParamError::ExpectedStringKey)
     }
 
     fn serialize_seq(self, _: Option<usize>) -> Result<Self::SerializeSeq, Self::Error> {
-        Err(QueryParamError::MapKeyNotString)
+        Err(QueryParamError::ExpectedStringKey)
     }
 
     fn serialize_tuple(self, _: usize) -> Result<Self::SerializeTuple, Self::Error> {
-        Err(QueryParamError::MapKeyNotString)
+        Err(QueryParamError::ExpectedStringKey)
     }
 
     fn serialize_tuple_struct(
@@ -787,7 +960,7 @@ impl serde::Serializer for &mut KeyExtractor {
         _: &'static str,
         _: usize,
     ) -> Result<Self::SerializeTupleStruct, Self::Error> {
-        Err(QueryParamError::MapKeyNotString)
+        Err(QueryParamError::ExpectedStringKey)
     }
 
     fn serialize_tuple_variant(
@@ -797,11 +970,11 @@ impl serde::Serializer for &mut KeyExtractor {
         _: &'static str,
         _: usize,
     ) -> Result<Self::SerializeTupleVariant, Self::Error> {
-        Err(QueryParamError::MapKeyNotString)
+        Err(QueryParamError::ExpectedStringKey)
     }
 
     fn serialize_map(self, _: Option<usize>) -> Result<Self::SerializeMap, Self::Error> {
-        Err(QueryParamError::MapKeyNotString)
+        Err(QueryParamError::ExpectedStringKey)
     }
 
     fn serialize_struct(
@@ -809,7 +982,7 @@ impl serde::Serializer for &mut KeyExtractor {
         _: &'static str,
         _: usize,
     ) -> Result<Self::SerializeStruct, Self::Error> {
-        Err(QueryParamError::MapKeyNotString)
+        Err(QueryParamError::ExpectedStringKey)
     }
 
     fn serialize_struct_variant(
@@ -819,7 +992,7 @@ impl serde::Serializer for &mut KeyExtractor {
         _: &'static str,
         _: usize,
     ) -> Result<Self::SerializeStructVariant, Self::Error> {
-        Err(QueryParamError::MapKeyNotString)
+        Err(QueryParamError::ExpectedStringKey)
     }
 }
 
@@ -830,8 +1003,10 @@ pub enum QueryParamError {
     UnsupportedType(#[from] UnsupportedTypeError),
     #[error("style-exploded combination not defined by OpenAPI")]
     UnspecifiedStyleExploded,
-    #[error("map keys must be strings")]
-    MapKeyNotString,
+    #[error("map keys must serialize as strings")]
+    ExpectedStringKey,
+    #[error("query parameters must serialize as a struct")]
+    ExpectedStruct,
     #[error("{0}")]
     Custom(String),
 }
@@ -866,119 +1041,360 @@ mod tests {
     use serde::Serialize;
     use url::Url;
 
+    // MARK: Scalar types
+
     #[test]
     fn test_integer() {
-        let mut url = Url::parse("http://example.com/").unwrap();
-        QuerySerializer::new(&mut url)
-            .append("limit", &42, QueryStyle::default())
+        #[derive(Serialize)]
+        struct Q {
+            limit: i32,
+        }
+
+        let url = Q { limit: 42 }
+            .serialize(QuerySerializer::new(
+                Url::parse("http://example.com/").unwrap(),
+                &[],
+            ))
             .unwrap();
         assert_eq!(url.query(), Some("limit=42"));
     }
 
     #[test]
     fn test_string() {
-        let mut url = Url::parse("http://example.com/").unwrap();
-        QuerySerializer::new(&mut url)
-            .append("name", &"Alice", QueryStyle::default())
+        #[derive(Serialize)]
+        struct Q {
+            name: &'static str,
+        }
+
+        let url = Q { name: "Alice" }
+            .serialize(QuerySerializer::new(
+                Url::parse("http://example.com/").unwrap(),
+                &[],
+            ))
             .unwrap();
         assert_eq!(url.query(), Some("name=Alice"));
     }
 
     #[test]
     fn test_bool() {
-        let mut url = Url::parse("http://example.com/").unwrap();
-        QuerySerializer::new(&mut url)
-            .append("active", &true, QueryStyle::default())
+        #[derive(Serialize)]
+        struct Q {
+            active: bool,
+        }
+
+        let url = Q { active: true }
+            .serialize(QuerySerializer::new(
+                Url::parse("http://example.com/").unwrap(),
+                &[],
+            ))
             .unwrap();
         assert_eq!(url.query(), Some("active=true"));
     }
 
     #[test]
     fn test_option_some() {
-        let mut url = Url::parse("http://example.com/").unwrap();
-        let value = Some(42);
-        QuerySerializer::new(&mut url)
-            .append("limit", &value, QueryStyle::default())
+        #[derive(Serialize)]
+        struct Q {
+            limit: Option<i32>,
+        }
+
+        let url = Q { limit: Some(42) }
+            .serialize(QuerySerializer::new(
+                Url::parse("http://example.com/").unwrap(),
+                &[],
+            ))
             .unwrap();
         assert_eq!(url.query(), Some("limit=42"));
     }
 
     #[test]
     fn test_option_none() {
-        let mut url = Url::parse("http://example.com/").unwrap();
-        let value: Option<i32> = None;
-        QuerySerializer::new(&mut url)
-            .append("limit", &value, QueryStyle::default())
+        #[derive(Serialize)]
+        struct Q {
+            limit: Option<i32>,
+        }
+
+        let url = Q { limit: None }
+            .serialize(QuerySerializer::new(
+                Url::parse("http://example.com/").unwrap(),
+                &[],
+            ))
             .unwrap();
         assert_eq!(url.query(), None);
     }
 
     #[test]
+    fn test_string_with_special_chars() {
+        #[derive(Serialize)]
+        struct Q {
+            name: &'static str,
+        }
+
+        let url = Q {
+            name: "John Doe & Co.",
+        }
+        .serialize(QuerySerializer::new(
+            Url::parse("http://example.com/").unwrap(),
+            &[],
+        ))
+        .unwrap();
+        assert_eq!(url.query(), Some("name=John+Doe+%26+Co."));
+    }
+
+    #[test]
+    fn test_unicode_string() {
+        #[derive(Serialize)]
+        struct Q {
+            name: &'static str,
+        }
+
+        let url = Q { name: "日本語" }
+            .serialize(QuerySerializer::new(
+                Url::parse("http://example.com/").unwrap(),
+                &[],
+            ))
+            .unwrap();
+        assert_eq!(url.query(), Some("name=%E6%97%A5%E6%9C%AC%E8%AA%9E"));
+    }
+
+    #[test]
+    fn test_unit_variant_enum() {
+        #[derive(Serialize)]
+        #[allow(dead_code)]
+        enum Status {
+            Active,
+            Inactive,
+        }
+
+        #[derive(Serialize)]
+        struct Q {
+            status: Status,
+        }
+
+        let url = Q {
+            status: Status::Active,
+        }
+        .serialize(QuerySerializer::new(
+            Url::parse("http://example.com/").unwrap(),
+            &[],
+        ))
+        .unwrap();
+        assert_eq!(url.query(), Some("status=Active"));
+    }
+
+    // MARK: Arrays
+
+    #[test]
     fn test_array_form_exploded() {
-        let mut url = Url::parse("http://example.com/").unwrap();
-        let values = vec![1, 2, 3];
-        QuerySerializer::new(&mut url)
-            .append("ids", &values, QueryStyle::default())
+        #[derive(Serialize)]
+        struct Q {
+            ids: Vec<i32>,
+        }
+
+        let url = Q { ids: vec![1, 2, 3] }
+            .serialize(QuerySerializer::new(
+                Url::parse("http://example.com/").unwrap(),
+                &[],
+            ))
             .unwrap();
         assert_eq!(url.query(), Some("ids=1&ids=2&ids=3"));
     }
 
     #[test]
     fn test_array_form_non_exploded() {
-        let mut url = Url::parse("http://example.com/").unwrap();
-        let values = vec![1, 2, 3];
-        QuerySerializer::new(&mut url)
-            .append("ids", &values, QueryStyle::Form { exploded: false })
+        #[derive(Serialize)]
+        struct Q {
+            ids: Vec<i32>,
+        }
+
+        let url = Q { ids: vec![1, 2, 3] }
+            .serialize(QuerySerializer::new(
+                Url::parse("http://example.com/").unwrap(),
+                &[("ids", QueryStyle::Form { exploded: false })],
+            ))
             .unwrap();
         assert_eq!(url.query(), Some("ids=1,2,3"));
     }
 
     #[test]
     fn test_array_space_delimited() {
-        let mut url = Url::parse("http://example.com/").unwrap();
-        let values = vec![1, 2, 3];
-        QuerySerializer::new(&mut url)
-            .append("ids", &values, QueryStyle::SpaceDelimited)
+        #[derive(Serialize)]
+        struct Q {
+            ids: Vec<i32>,
+        }
+
+        let url = Q { ids: vec![1, 2, 3] }
+            .serialize(QuerySerializer::new(
+                Url::parse("http://example.com/").unwrap(),
+                &[("ids", QueryStyle::SpaceDelimited)],
+            ))
             .unwrap();
         assert_eq!(url.query(), Some("ids=1%202%203"));
     }
 
     #[test]
     fn test_array_pipe_delimited() {
-        let mut url = Url::parse("http://example.com/").unwrap();
-        let values = vec![1, 2, 3];
-        QuerySerializer::new(&mut url)
-            .append("ids", &values, QueryStyle::PipeDelimited)
+        #[derive(Serialize)]
+        struct Q {
+            ids: Vec<i32>,
+        }
+
+        let url = Q { ids: vec![1, 2, 3] }
+            .serialize(QuerySerializer::new(
+                Url::parse("http://example.com/").unwrap(),
+                &[("ids", QueryStyle::PipeDelimited)],
+            ))
             .unwrap();
         assert_eq!(url.query(), Some("ids=1%7C2%7C3"));
     }
 
     #[test]
     fn test_empty_array() {
-        let mut url = Url::parse("http://example.com/").unwrap();
-        let values: Vec<i32> = vec![];
-        QuerySerializer::new(&mut url)
-            .append("ids", &values, QueryStyle::default())
+        #[derive(Serialize)]
+        struct Q {
+            ids: Vec<i32>,
+        }
+
+        let url = Q { ids: vec![] }
+            .serialize(QuerySerializer::new(
+                Url::parse("http://example.com/").unwrap(),
+                &[],
+            ))
             .unwrap();
         assert_eq!(url.query(), None);
     }
 
     #[test]
+    fn test_array_of_strings_with_special_chars() {
+        #[derive(Serialize)]
+        struct Q {
+            tags: Vec<&'static str>,
+        }
+
+        let url = Q {
+            tags: vec!["hello world", "foo&bar"],
+        }
+        .serialize(QuerySerializer::new(
+            Url::parse("http://example.com/").unwrap(),
+            &[("tags", QueryStyle::Form { exploded: false })],
+        ))
+        .unwrap();
+        assert_eq!(url.query(), Some("tags=hello%20world,foo%26bar"));
+    }
+
+    #[test]
+    fn test_deep_object_rejects_top_level_arrays() {
+        #[derive(Serialize)]
+        struct Q {
+            ids: Vec<i32>,
+        }
+
+        let result = Q { ids: vec![1, 2, 3] }.serialize(QuerySerializer::new(
+            Url::parse("http://example.com/").unwrap(),
+            &[("ids", QueryStyle::DeepObject)],
+        ));
+        assert!(matches!(
+            result,
+            Err(QueryParamError::UnspecifiedStyleExploded)
+        ));
+    }
+
+    // MARK: Tuples
+
+    #[test]
+    fn test_tuple_form_exploded() {
+        #[derive(Serialize)]
+        struct Q {
+            coords: (i32, i32, i32),
+        }
+
+        let url = Q {
+            coords: (42, 24, 10),
+        }
+        .serialize(QuerySerializer::new(
+            Url::parse("http://example.com/").unwrap(),
+            &[],
+        ))
+        .unwrap();
+        assert_eq!(url.query(), Some("coords=42&coords=24&coords=10"));
+    }
+
+    #[test]
+    fn test_tuple_form_non_exploded() {
+        #[derive(Serialize)]
+        struct Q {
+            coords: (i32, i32, i32),
+        }
+
+        let url = Q {
+            coords: (42, 24, 10),
+        }
+        .serialize(QuerySerializer::new(
+            Url::parse("http://example.com/").unwrap(),
+            &[("coords", QueryStyle::Form { exploded: false })],
+        ))
+        .unwrap();
+        assert_eq!(url.query(), Some("coords=42,24,10"));
+    }
+
+    #[test]
+    fn test_tuple_space_delimited() {
+        #[derive(Serialize)]
+        struct Q {
+            coords: (i32, i32, i32),
+        }
+
+        let url = Q {
+            coords: (42, 24, 10),
+        }
+        .serialize(QuerySerializer::new(
+            Url::parse("http://example.com/").unwrap(),
+            &[("coords", QueryStyle::SpaceDelimited)],
+        ))
+        .unwrap();
+        assert_eq!(url.query(), Some("coords=42%2024%2010"));
+    }
+
+    #[test]
+    fn test_tuple_pipe_delimited() {
+        #[derive(Serialize)]
+        struct Q {
+            coords: (i32, i32, i32),
+        }
+
+        let url = Q {
+            coords: (42, 24, 10),
+        }
+        .serialize(QuerySerializer::new(
+            Url::parse("http://example.com/").unwrap(),
+            &[("coords", QueryStyle::PipeDelimited)],
+        ))
+        .unwrap();
+        assert_eq!(url.query(), Some("coords=42%7C24%7C10"));
+    }
+
+    // MARK: Objects
+
+    #[test]
     fn test_object_form_exploded() {
         #[derive(Serialize)]
-        struct Person {
+        struct Q {
             first_name: String,
             last_name: String,
         }
 
-        let mut url = Url::parse("http://example.com/").unwrap();
-        let person = Person {
+        let url = Q {
             first_name: "John".to_owned(),
             last_name: "Doe".to_owned(),
-        };
-        QuerySerializer::new(&mut url)
-            .append("person", &person, QueryStyle::default())
-            .unwrap();
+        }
+        .serialize(QuerySerializer::new(
+            Url::parse("http://example.com/").unwrap(),
+            &[
+                ("first_name", QueryStyle::Form { exploded: true }),
+                ("last_name", QueryStyle::Form { exploded: true }),
+            ],
+        ))
+        .unwrap();
         assert_eq!(url.query(), Some("first_name=John&last_name=Doe"));
     }
 
@@ -990,14 +1406,22 @@ mod tests {
             last_name: String,
         }
 
-        let mut url = Url::parse("http://example.com/").unwrap();
-        let person = Person {
-            first_name: "John".to_owned(),
-            last_name: "Doe".to_owned(),
-        };
-        QuerySerializer::new(&mut url)
-            .append("person", &person, QueryStyle::Form { exploded: false })
-            .unwrap();
+        #[derive(Serialize)]
+        struct Q {
+            person: Person,
+        }
+
+        let url = Q {
+            person: Person {
+                first_name: "John".to_owned(),
+                last_name: "Doe".to_owned(),
+            },
+        }
+        .serialize(QuerySerializer::new(
+            Url::parse("http://example.com/").unwrap(),
+            &[("person", QueryStyle::Form { exploded: false })],
+        ))
+        .unwrap();
         assert_eq!(url.query(), Some("person=first_name,John,last_name,Doe"));
     }
 
@@ -1010,14 +1434,22 @@ mod tests {
             location: String,
         }
 
-        let mut url = Url::parse("http://example.com/").unwrap();
-        let filter = Filter {
-            type_field: "cocktail".to_owned(),
-            location: "bar".to_owned(),
-        };
-        QuerySerializer::new(&mut url)
-            .append("filter", &filter, QueryStyle::DeepObject)
-            .unwrap();
+        #[derive(Serialize)]
+        struct Q {
+            filter: Filter,
+        }
+
+        let url = Q {
+            filter: Filter {
+                type_field: "cocktail".to_owned(),
+                location: "bar".to_owned(),
+            },
+        }
+        .serialize(QuerySerializer::new(
+            Url::parse("http://example.com/").unwrap(),
+            &[("filter", QueryStyle::DeepObject)],
+        ))
+        .unwrap();
         assert_eq!(
             url.query(),
             Some("filter%5Btype%5D=cocktail&filter%5Blocation%5D=bar")
@@ -1025,35 +1457,61 @@ mod tests {
     }
 
     #[test]
-    fn test_multiple_params_chained() {
-        let mut url = Url::parse("http://example.com/").unwrap();
-        let tags = vec!["dog", "cat"];
-        let style = QueryStyle::default();
-        QuerySerializer::new(&mut url)
-            .append("limit", &10, style)
-            .unwrap()
-            .append("tags", &tags, style)
-            .unwrap();
-        assert_eq!(url.query(), Some("limit=10&tags=dog&tags=cat"));
+    fn test_space_delimited_object() {
+        #[derive(Serialize)]
+        struct Color {
+            r: u32,
+            g: u32,
+            b: u32,
+        }
+
+        #[derive(Serialize)]
+        struct Q {
+            color: Color,
+        }
+
+        let url = Q {
+            color: Color {
+                r: 100,
+                g: 200,
+                b: 150,
+            },
+        }
+        .serialize(QuerySerializer::new(
+            Url::parse("http://example.com/").unwrap(),
+            &[("color", QueryStyle::SpaceDelimited)],
+        ))
+        .unwrap();
+        assert_eq!(url.query(), Some("color=r%20100%20g%20200%20b%20150"));
     }
 
     #[test]
-    fn test_string_with_special_chars() {
-        let mut url = Url::parse("http://example.com/").unwrap();
-        QuerySerializer::new(&mut url)
-            .append("name", &"John Doe & Co.", QueryStyle::default())
-            .unwrap();
-        assert_eq!(url.query(), Some("name=John+Doe+%26+Co."));
-    }
+    fn test_pipe_delimited_object() {
+        #[derive(Serialize)]
+        struct Color {
+            r: u32,
+            g: u32,
+            b: u32,
+        }
 
-    #[test]
-    fn test_array_of_strings_with_special_chars() {
-        let mut url = Url::parse("http://example.com/").unwrap();
-        let values = vec!["hello world", "foo&bar"];
-        QuerySerializer::new(&mut url)
-            .append("tags", &values, QueryStyle::Form { exploded: false })
-            .unwrap();
-        assert_eq!(url.query(), Some("tags=hello%20world,foo%26bar"));
+        #[derive(Serialize)]
+        struct Q {
+            color: Color,
+        }
+
+        let url = Q {
+            color: Color {
+                r: 100,
+                g: 200,
+                b: 150,
+            },
+        }
+        .serialize(QuerySerializer::new(
+            Url::parse("http://example.com/").unwrap(),
+            &[("color", QueryStyle::PipeDelimited)],
+        ))
+        .unwrap();
+        assert_eq!(url.query(), Some("color=r%7C100%7Cg%7C200%7Cb%7C150"));
     }
 
     #[test]
@@ -1070,17 +1528,25 @@ mod tests {
             address: Address,
         }
 
-        let mut url = Url::parse("http://example.com/").unwrap();
-        let person = Person {
-            name: "Alice".to_owned(),
-            address: Address {
-                city: "Paris".to_owned(),
-                country: "France".to_owned(),
+        #[derive(Serialize)]
+        struct Q {
+            person: Person,
+        }
+
+        let url = Q {
+            person: Person {
+                name: "Alice".to_owned(),
+                address: Address {
+                    city: "Paris".to_owned(),
+                    country: "France".to_owned(),
+                },
             },
-        };
-        QuerySerializer::new(&mut url)
-            .append("person", &person, QueryStyle::DeepObject)
-            .unwrap();
+        }
+        .serialize(QuerySerializer::new(
+            Url::parse("http://example.com/").unwrap(),
+            &[("person", QueryStyle::DeepObject)],
+        ))
+        .unwrap();
         assert_eq!(
             url.query(),
             Some(
@@ -1097,14 +1563,22 @@ mod tests {
             tags: Vec<String>,
         }
 
-        let mut url = Url::parse("http://example.com/").unwrap();
-        let filter = Filter {
-            category: "electronics".to_owned(),
-            tags: vec!["new".to_owned(), "sale".to_owned()],
-        };
-        QuerySerializer::new(&mut url)
-            .append("filter", &filter, QueryStyle::DeepObject)
-            .unwrap();
+        #[derive(Serialize)]
+        struct Q {
+            filter: Filter,
+        }
+
+        let url = Q {
+            filter: Filter {
+                category: "electronics".to_owned(),
+                tags: vec!["new".to_owned(), "sale".to_owned()],
+            },
+        }
+        .serialize(QuerySerializer::new(
+            Url::parse("http://example.com/").unwrap(),
+            &[("filter", QueryStyle::DeepObject)],
+        ))
+        .unwrap();
         assert_eq!(
             url.query(),
             Some(
@@ -1113,146 +1587,101 @@ mod tests {
         );
     }
 
+    // MARK: Struct-level serialization
+
+    #[test]
+    fn test_multiple_params() {
+        #[derive(Serialize)]
+        struct Q {
+            limit: i32,
+            tags: Vec<&'static str>,
+        }
+
+        let url = Q {
+            limit: 10,
+            tags: vec!["dog", "cat"],
+        }
+        .serialize(QuerySerializer::new(
+            Url::parse("http://example.com/").unwrap(),
+            &[
+                ("limit", QueryStyle::Form { exploded: true }),
+                ("tags", QueryStyle::Form { exploded: true }),
+            ],
+        ))
+        .unwrap();
+        assert_eq!(url.query(), Some("limit=10&tags=dog&tags=cat"));
+    }
+
     #[test]
     fn test_serde_skip_if() {
         #[derive(Serialize)]
-        struct Params {
+        struct Q {
             required: i32,
             #[serde(skip_serializing_if = "Option::is_none")]
             optional: Option<String>,
         }
 
-        let mut url = Url::parse("http://example.com/").unwrap();
-        let params = Params {
+        let url = Q {
             required: 42,
             optional: None,
-        };
-        QuerySerializer::new(&mut url)
-            .append("params", &params, QueryStyle::default())
-            .unwrap();
+        }
+        .serialize(QuerySerializer::new(
+            Url::parse("http://example.com/").unwrap(),
+            &[
+                ("required", QueryStyle::Form { exploded: true }),
+                ("optional", QueryStyle::Form { exploded: true }),
+            ],
+        ))
+        .unwrap();
         assert_eq!(url.query(), Some("required=42"));
     }
 
     #[test]
-    fn test_unit_variant_enum() {
+    fn test_mixed_styles() {
         #[derive(Serialize)]
-        #[allow(dead_code)]
-        enum Status {
-            Active,
-            Inactive,
+        struct Filter {
+            #[serde(rename = "type")]
+            type_field: String,
         }
 
-        let mut url = Url::parse("http://example.com/").unwrap();
-        QuerySerializer::new(&mut url)
-            .append("status", &Status::Active, QueryStyle::default())
-            .unwrap();
-        assert_eq!(url.query(), Some("status=Active"));
-    }
-
-    #[test]
-    fn test_unicode_string() {
-        let mut url = Url::parse("http://example.com/").unwrap();
-        QuerySerializer::new(&mut url)
-            .append("name", &"日本語", QueryStyle::default())
-            .unwrap();
-        assert_eq!(url.query(), Some("name=%E6%97%A5%E6%9C%AC%E8%AA%9E"));
-    }
-
-    #[test]
-    fn test_deep_object_rejects_arrays() {
-        let mut url = Url::parse("http://example.com/").unwrap();
-        let values = vec![1, 2, 3];
-        let mut serializer = QuerySerializer::new(&mut url);
-        let result = serializer.append("ids", &values, QueryStyle::DeepObject);
-        assert!(matches!(
-            result,
-            Err(QueryParamError::UnspecifiedStyleExploded)
-        ));
-    }
-
-    #[test]
-    fn test_space_delimited_object() {
         #[derive(Serialize)]
-        struct Color {
-            r: u32,
-            g: u32,
-            b: u32,
+        struct Q {
+            filter: Filter,
+            limit: i32,
         }
 
-        let mut url = Url::parse("http://example.com/").unwrap();
-        let color = Color {
-            r: 100,
-            g: 200,
-            b: 150,
-        };
-        QuerySerializer::new(&mut url)
-            .append("color", &color, QueryStyle::SpaceDelimited)
-            .unwrap();
-
-        // Per OpenAPI spec: `color=R%20100%20G%20200%20B%20150`.
-        assert_eq!(url.query(), Some("color=r%20100%20g%20200%20b%20150"));
+        let url = Q {
+            filter: Filter {
+                type_field: "cocktail".to_owned(),
+            },
+            limit: 10,
+        }
+        .serialize(QuerySerializer::new(
+            Url::parse("http://example.com/").unwrap(),
+            &[
+                ("filter", QueryStyle::DeepObject),
+                ("limit", QueryStyle::Form { exploded: true }),
+            ],
+        ))
+        .unwrap();
+        assert_eq!(url.query(), Some("filter%5Btype%5D=cocktail&limit=10"));
     }
 
     #[test]
-    fn test_pipe_delimited_object() {
+    fn test_unlisted_field_uses_default_style() {
         #[derive(Serialize)]
-        struct Color {
-            r: u32,
-            g: u32,
-            b: u32,
+        struct Q {
+            limit: i32,
         }
 
-        let mut url = Url::parse("http://example.com/").unwrap();
-        let color = Color {
-            r: 100,
-            g: 200,
-            b: 150,
-        };
-        QuerySerializer::new(&mut url)
-            .append("color", &color, QueryStyle::PipeDelimited)
+        // Fields without an explicitly specified style should
+        // fall back to the default style.
+        let url = Q { limit: 42 }
+            .serialize(QuerySerializer::new(
+                Url::parse("http://example.com/").unwrap(),
+                &[],
+            ))
             .unwrap();
-
-        // Per OpenAPI spec: `color=R%7C100%7CG%7C200%7CB%7C150`.
-        assert_eq!(url.query(), Some("color=r%7C100%7Cg%7C200%7Cb%7C150"));
-    }
-
-    #[test]
-    fn test_tuple_form_exploded() {
-        let mut url = Url::parse("http://example.com/").unwrap();
-        let coords = (42, 24, 10);
-        QuerySerializer::new(&mut url)
-            .append("coords", &coords, QueryStyle::default())
-            .unwrap();
-        assert_eq!(url.query(), Some("coords=42&coords=24&coords=10"));
-    }
-
-    #[test]
-    fn test_tuple_form_non_exploded() {
-        let mut url = Url::parse("http://example.com/").unwrap();
-        let coords = (42, 24, 10);
-        QuerySerializer::new(&mut url)
-            .append("coords", &coords, QueryStyle::Form { exploded: false })
-            .unwrap();
-        assert_eq!(url.query(), Some("coords=42,24,10"));
-    }
-
-    #[test]
-    fn test_tuple_space_delimited() {
-        let mut url = Url::parse("http://example.com/").unwrap();
-        let coords = (42, 24, 10);
-        QuerySerializer::new(&mut url)
-            .append("coords", &coords, QueryStyle::SpaceDelimited)
-            .unwrap();
-        assert_eq!(url.query(), Some("coords=42%2024%2010"));
-    }
-
-    #[test]
-    fn test_tuple_pipe_delimited() {
-        let mut url = Url::parse("http://example.com/").unwrap();
-        let coords = (42, 24, 10);
-        QuerySerializer::new(&mut url)
-            .append("coords", &coords, QueryStyle::PipeDelimited)
-            .unwrap();
-        assert_eq!(url.query(), Some("coords=42%7C24%7C10"));
+        assert_eq!(url.query(), Some("limit=42"));
     }
 }

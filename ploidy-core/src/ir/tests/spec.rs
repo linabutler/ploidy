@@ -1440,9 +1440,9 @@ fn test_complex_spec_with_multiple_operations_and_resources() {
 // MARK: Parameter details
 
 #[test]
-fn test_query_parameter_default_style_is_form_exploded() {
+fn test_query_parameter_default_style_is_none() {
     // When a query parameter doesn't specify `style` and `explode`,
-    // the default should be an exploded form.
+    // the style should be `None`.
     let doc = Document::from_yaml(indoc::indoc! {"
         openapi: 3.0.0
         info:
@@ -1469,10 +1469,7 @@ fn test_query_parameter_default_style_is_form_exploded() {
     assert_matches!(
         &*ir.operations,
         [SpecOperation {
-            params: [SpecParameter::Query(SpecParameterInfo {
-                style: Some(ParameterStyle::Form { exploded: true }),
-                ..
-            })],
+            params: [SpecParameter::Query(SpecParameterInfo { style: None, .. })],
             ..
         }],
     );
