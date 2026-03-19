@@ -121,6 +121,28 @@ impl ToTokens for CodegenClientModule<'_> {
                 {
                     self.with_header(::ploidy_util::http::header::USER_AGENT, value)
                 }
+
+                /// Returns a raw [`RequestBuilder`].
+                ///
+                /// The builder sets the base URL and default headers. Use this for
+                /// requests that the typed client methods don't support.
+                ///
+                /// [`RequestBuilder`]: ::ploidy_util::reqwest::RequestBuilder
+                pub fn request(
+                    &self,
+                    method: ::ploidy_util::reqwest::Method,
+                    path: &str,
+                ) -> ::ploidy_util::reqwest::RequestBuilder {
+                    let mut url = self.base_url.clone();
+                    let _ = url
+                        .path_segments_mut()
+                        .map(|mut segments| {
+                            segments.pop_if_empty().extend(path.split('/'));
+                        });
+                    self.client
+                        .request(method, url)
+                        .headers(self.headers.clone())
+                }
             }
 
             #(#mods)*
