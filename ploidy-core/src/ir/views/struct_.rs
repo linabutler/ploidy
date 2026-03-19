@@ -98,7 +98,11 @@ impl<'a> StructView<'a> {
             .filter(move |&index| index != self.index)
             .filter_map(|index| match self.cooked.graph[index] {
                 GraphType::Schema(GraphSchemaType::Struct(_, s))
-                | GraphType::Inline(GraphInlineType::Struct(_, s)) => Some(s),
+                | GraphType::Inline(GraphInlineType::Struct(_, s)) => Some(s.fields),
+                GraphType::Schema(GraphSchemaType::Tagged(_, t))
+                | GraphType::Inline(GraphInlineType::Tagged(_, t)) => Some(t.fields),
+                GraphType::Schema(GraphSchemaType::Untagged(_, u))
+                | GraphType::Inline(GraphInlineType::Untagged(_, u)) => Some(u.fields),
                 _ => None,
             });
 
@@ -109,7 +113,7 @@ impl<'a> StructView<'a> {
         itertools::chain!(
             // Inherited fields first, in declaration order.
             ancestors
-                .flat_map(|ancestor| ancestor.fields)
+                .flatten()
                 .filter(move |field| seen.insert(field.name))
                 .map(|field| StructFieldView {
                     parent: self,

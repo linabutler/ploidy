@@ -111,6 +111,7 @@ where
                     aliases: v.aliases,
                     ty: self.map(v.ty),
                 })),
+            fields: self.fields(raw.fields),
         }
     }
 
@@ -123,7 +124,19 @@ where
                     &UntaggedVariant::Some(hint, ty) => UntaggedVariant::Some(hint, self.map(ty)),
                     UntaggedVariant::Null => UntaggedVariant::Null,
                 })),
+            fields: self.fields(raw.fields),
         }
+    }
+
+    fn fields(&self, raw: &[StructField<'a, T>]) -> &'a [StructField<'a, U>] {
+        self.arena
+            .alloc_slice_exact(raw.iter().map(|f| StructField {
+                name: f.name,
+                ty: self.map(f.ty),
+                required: f.required,
+                description: f.description,
+                flattened: f.flattened,
+            }))
     }
 
     fn container(&self, raw: &Container<'a, T>) -> Container<'a, U> {

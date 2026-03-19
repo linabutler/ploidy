@@ -1308,6 +1308,7 @@ fn test_tagged_description() {
                     aliases: ["dog"],
                     ..
                 }],
+                ..
             },
         )),
     );

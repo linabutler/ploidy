@@ -81,10 +81,11 @@ impl ToTokens for CodegenStruct<'_> {
             extra_derives.push(ExtraDerive::Hash);
         }
 
-        // Derive `Default` if all transitively referenced types
-        // are defaultable.
-        let all_defaultable = self.ty.defaultable();
-        if all_defaultable {
+        // Derive `Default` if all non-tag fields are optional
+        // (they become `AbsentOr<T>`, which is unconditionally `Default`),
+        // or if all transitively referenced types are defaultable.
+        let all_optional = self.ty.fields().filter(|f| !f.tag()).all(|f| !f.required());
+        if all_optional || self.ty.defaultable() {
             extra_derives.push(ExtraDerive::Default);
         }
 
@@ -1173,6 +1174,55 @@ mod tests {
     }
 
     #[test]
+    fn test_struct_derives_default_with_optional_url_field() {
+        // Even though `Url` doesn't implement `Default`, an optional `Url`
+        // field becomes `AbsentOr<Url>`, which is unconditionally `Default`.
+        let doc = Document::from_yaml(indoc::indoc! {"
+            openapi: 3.0.0
+            info:
+              title: Test API
+              version: 1.0.0
+            paths: {}
+            components:
+              schemas:
+                Resource:
+                  type: object
+                  properties:
+                    link:
+                      type: string
+                      format: uri
+                    name:
+                      type: string
+        "})
+        .unwrap();
+
+        let arena = Arena::new();
+        let spec = Spec::from_doc(&arena, &doc).unwrap();
+        let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
+
+        let schema = graph.schemas().find(|s| s.name() == "Resource");
+        let Some(schema @ SchemaTypeView::Struct(_, struct_view)) = &schema else {
+            panic!("expected struct `Resource`; got `{schema:?}`");
+        };
+
+        let name = CodegenTypeName::Schema(schema);
+        let codegen = CodegenStruct::new(name, struct_view);
+
+        let actual: syn::ItemStruct = parse_quote!(#codegen);
+        let expected: syn::ItemStruct = parse_quote! {
+            #[derive(Debug, Clone, PartialEq, Eq, Hash, Default, ::ploidy_util::serde::Serialize, ::ploidy_util::serde::Deserialize)]
+            #[serde(crate = "::ploidy_util::serde")]
+            pub struct Resource {
+                #[serde(default, skip_serializing_if = "::ploidy_util::absent::AbsentOr::is_absent")]
+                pub link: ::ploidy_util::absent::AbsentOr<::ploidy_util::url::Url>,
+                #[serde(default, skip_serializing_if = "::ploidy_util::absent::AbsentOr::is_absent")]
+                pub name: ::ploidy_util::absent::AbsentOr<::std::string::String>,
+            }
+        };
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
     fn test_struct_derives_default_with_required_container_schema_field() {
         // A required field that references a container schema should still allow
         // the struct to derive `Default`, since `Vec<T>` implements `Default`.
@@ -1281,13 +1331,94 @@ mod tests {
 
         let actual: syn::ItemStruct = parse_quote!(#codegen);
         // `Corgi` inherits from the tagged union `Animal` via `allOf`.
-        // Inheriting from a tagged union isn't structurally meaningful;
-        // the union's variants aren't fields. Since `Corgi`'s own field
-        // (`name`) is optional, it should derive `Default`.
+        // `Animal` has `type` as a required common field alongside its
+        // `oneOf` discriminator; `Corgi` inherits it. Both `String` and
+        // `AbsentOr` implement `Default`, so `Default` is still derived.
         let expected: syn::ItemStruct = parse_quote! {
             #[derive(Debug, Clone, PartialEq, Eq, Hash, Default, ::ploidy_util::serde::Serialize, ::ploidy_util::serde::Deserialize)]
             #[serde(crate = "::ploidy_util::serde")]
             pub struct Corgi {
+                pub r#type: ::std::string::String,
+                #[serde(default, skip_serializing_if = "::ploidy_util::absent::AbsentOr::is_absent")]
+                pub name: ::ploidy_util::absent::AbsentOr<::std::string::String>,
+            }
+        };
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn test_struct_excludes_default_when_inheriting_non_defaultable_from_tagged_union() {
+        // `Base` is a tagged union with a non-defaultable `source` field.
+        // `Child` inherits from `Base` and has only optional own fields,
+        // but can't derive `Default` thanks to the inherited `source`.
+        let doc = Document::from_yaml(indoc::indoc! {"
+            openapi: 3.0.0
+            info:
+              title: Test API
+              version: 1.0.0
+            paths: {}
+            components:
+              schemas:
+                TypeA:
+                  type: object
+                  properties:
+                    value:
+                      type: string
+                TypeB:
+                  type: object
+                  properties:
+                    count:
+                      type: integer
+                Base:
+                  oneOf:
+                    - $ref: '#/components/schemas/TypeA'
+                    - $ref: '#/components/schemas/TypeB'
+                  discriminator:
+                    propertyName: kind
+                    mapping:
+                      a: '#/components/schemas/TypeA'
+                      b: '#/components/schemas/TypeB'
+                  properties:
+                    kind:
+                      type: string
+                    source:
+                      type: string
+                      format: uri
+                  required:
+                    - kind
+                    - source
+                Child:
+                  allOf:
+                    - $ref: '#/components/schemas/Base'
+                    - type: object
+                      properties:
+                        name:
+                          type: string
+        "})
+        .unwrap();
+
+        let arena = Arena::new();
+        let spec = Spec::from_doc(&arena, &doc).unwrap();
+        let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
+
+        let schema = graph.schemas().find(|s| s.name() == "Child");
+        let Some(schema @ SchemaTypeView::Struct(_, struct_view)) = &schema else {
+            panic!("expected struct `Child`; got `{schema:?}`");
+        };
+
+        let name = CodegenTypeName::Schema(schema);
+        let codegen = CodegenStruct::new(name, struct_view);
+
+        let actual: syn::ItemStruct = parse_quote!(#codegen);
+        // `Child` inherits non-defaultable `source` from `Base`.
+        // `Url` doesn't implement `Default`, so `Child` can't derive it,
+        // even though `Child`'s own `name` field is optional.
+        let expected: syn::ItemStruct = parse_quote! {
+            #[derive(Debug, Clone, PartialEq, Eq, Hash, ::ploidy_util::serde::Serialize, ::ploidy_util::serde::Deserialize)]
+            #[serde(crate = "::ploidy_util::serde")]
+            pub struct Child {
+                pub kind: ::std::string::String,
+                pub source: ::ploidy_util::url::Url,
                 #[serde(default, skip_serializing_if = "::ploidy_util::absent::AbsentOr::is_absent")]
                 pub name: ::ploidy_util::absent::AbsentOr<::std::string::String>,
             }
