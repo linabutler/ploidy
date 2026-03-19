@@ -4,7 +4,7 @@ use itertools::Itertools;
 
 use crate::{
     arena::Arena,
-    ir::{RawGraph, SchemaTypeView, Spec, StructFieldName, View},
+    ir::{InlineTypeView, RawGraph, SchemaTypeView, Spec, StructFieldName, TypeView, View},
     parse::Document,
     tests::assert_matches,
 };
@@ -1994,4 +1994,260 @@ fn test_circular_all_of_terminates() {
         .find(|f| matches!(f.name(), StructFieldName::Name("a_field")))
         .unwrap();
     assert!(!a_field.tag());
+}
+
+#[test]
+fn test_all_of_parent_with_one_of_and_properties() {
+    // When a parent has `oneOf` (with a `discriminator`) and `properties`,
+    // children inheriting from that parent via `allOf` should still receive
+    // the `oneOf` parent's `properties` as inherited fields.
+    let doc = Document::from_yaml(indoc::indoc! {"
+        openapi: 3.0.0
+        info:
+          title: Test
+          version: 1.0.0
+        components:
+          schemas:
+            Column:
+              type: object
+              properties:
+                name:
+                  type: string
+            Base:
+              oneOf:
+                - $ref: '#/components/schemas/VariantA'
+                - $ref: '#/components/schemas/VariantB'
+              discriminator:
+                propertyName: kind
+                mapping:
+                  a: '#/components/schemas/VariantA'
+                  b: '#/components/schemas/VariantB'
+              properties:
+                schema:
+                  type: array
+                  items:
+                    $ref: '#/components/schemas/Column'
+                kind:
+                  type: string
+            VariantA:
+              allOf:
+                - $ref: '#/components/schemas/Base'
+              properties:
+                a_field:
+                  type: string
+            VariantB:
+              allOf:
+                - $ref: '#/components/schemas/Base'
+              properties:
+                b_field:
+                  type: string
+    "})
+    .unwrap();
+
+    let arena = Arena::new();
+    let spec = Spec::from_doc(&arena, &doc).unwrap();
+    let graph = RawGraph::new(&arena, &spec).cook();
+
+    // `VariantA` inherits from `Base`, which has properties
+    // `schema` and `kind` alongside its discriminator field.
+    let variant_a = graph.schemas().find(|s| s.name() == "VariantA").unwrap();
+    let variant_a_struct = match variant_a {
+        SchemaTypeView::Struct(_, view) => view,
+        other => panic!("expected struct `VariantA`; got {other:?}"),
+    };
+
+    let all_field_names = variant_a_struct
+        .fields()
+        .map(|f| match f.name() {
+            StructFieldName::Name(n) => n,
+            other => panic!("expected named field; got {other:?}"),
+        })
+        .collect_vec();
+
+    // Should include inherited `schema` and `kind` from `Base`,
+    // plus `VariantA`'s own `a_field`.
+    assert_matches!(&*all_field_names, ["schema", "kind", "a_field"]);
+}
+
+#[test]
+fn test_untagged_union_with_properties() {
+    // When a parent has `oneOf` (without a `discriminator`) and `properties`,
+    // the `Untagged` union should retain those properties as `fields`, and
+    // children inheriting from the union via `allOf` should receive its
+    // properties as inherited fields.
+    let doc = Document::from_yaml(indoc::indoc! {"
+        openapi: 3.0.0
+        info:
+          title: Test
+          version: 1.0.0
+        components:
+          schemas:
+            Base:
+              oneOf:
+                - $ref: '#/components/schemas/VariantA'
+                - $ref: '#/components/schemas/VariantB'
+              properties:
+                shared_field:
+                  type: string
+                count:
+                  type: integer
+            VariantA:
+              allOf:
+                - $ref: '#/components/schemas/Base'
+              properties:
+                a_field:
+                  type: string
+            VariantB:
+              allOf:
+                - $ref: '#/components/schemas/Base'
+              properties:
+                b_field:
+                  type: string
+    "})
+    .unwrap();
+
+    let arena = Arena::new();
+    let spec = Spec::from_doc(&arena, &doc).unwrap();
+    let graph = RawGraph::new(&arena, &spec).cook();
+
+    // `Base` has no `discriminator`, so it must be `Untagged`.
+    let base = graph.schemas().find(|s| s.name() == "Base").unwrap();
+    let base_untagged = match base {
+        SchemaTypeView::Untagged(_, view) => view,
+        other => panic!("expected untagged `Base`; got `{other:?}`"),
+    };
+
+    // The untagged union should store its own `properties` directly.
+    let base_field_names = base_untagged
+        .fields()
+        .iter()
+        .map(|f| match f.name {
+            StructFieldName::Name(n) => n,
+            other => panic!("expected named field; got `{other:?}`"),
+        })
+        .collect_vec();
+    assert_matches!(&*base_field_names, ["shared_field", "count"]);
+
+    // `VariantA` inherits from `Base` via `allOf`, so should receive
+    // `Base`'s fields alongside its own `a_field`.
+    let variant_a = graph.schemas().find(|s| s.name() == "VariantA").unwrap();
+    let variant_a_struct = match variant_a {
+        SchemaTypeView::Struct(_, view) => view,
+        other => panic!("expected struct `VariantA`; got `{other:?}`"),
+    };
+
+    let variant_a_field_names = variant_a_struct
+        .fields()
+        .map(|f| match f.name() {
+            StructFieldName::Name(n) => n,
+            other => panic!("expected named field; got `{other:?}`"),
+        })
+        .collect_vec();
+
+    // Inherited fields come first, then the own field.
+    assert_matches!(
+        &*variant_a_field_names,
+        ["shared_field", "count", "a_field"]
+    );
+}
+
+#[test]
+fn test_tagged_union_inlines_include_field_types() {
+    // A tagged union with an own inline enum property should
+    // include that enum in its `inlines()`.
+    let doc = Document::from_yaml(indoc::indoc! {"
+        openapi: 3.0.0
+        info:
+          title: Test
+          version: 1.0.0
+        components:
+          schemas:
+            Dog:
+              type: object
+              properties:
+                kind:
+                  type: string
+            Pet:
+              oneOf:
+                - $ref: '#/components/schemas/Dog'
+              discriminator:
+                propertyName: kind
+                mapping:
+                  dog: '#/components/schemas/Dog'
+              properties:
+                kind:
+                  type: string
+                severity:
+                  type: string
+                  enum: [low, high]
+    "})
+    .unwrap();
+
+    let arena = Arena::new();
+    let spec = Spec::from_doc(&arena, &doc).unwrap();
+    let graph = RawGraph::new(&arena, &spec).cook();
+
+    let pet = graph.schemas().find(|s| s.name() == "Pet").unwrap();
+    let has_inline_enum = pet.inlines().any(|i| matches!(i, InlineTypeView::Enum(..)));
+    assert!(has_inline_enum);
+}
+
+#[test]
+fn test_needs_indirection_through_inlined_tagged_variant() {
+    // When a tagged union has own fields, its variants are inlined.
+    // The inlined variant must retain a reference edge to the original,
+    // so that SCC membership (and thus `needs_indirection()`) is preserved.
+    let doc = Document::from_yaml(indoc::indoc! {"
+        openapi: 3.0.0
+        info:
+          title: Test
+          version: 1.0.0
+        components:
+          schemas:
+            Pet:
+              oneOf:
+                - $ref: '#/components/schemas/Dog'
+              discriminator:
+                propertyName: kind
+              properties:
+                kind:
+                  type: string
+                name:
+                  type: string
+            Dog:
+              type: object
+              properties:
+                parent:
+                  $ref: '#/components/schemas/Pet'
+            Kennel:
+              type: object
+              properties:
+                resident:
+                  $ref: '#/components/schemas/Dog'
+    "})
+    .unwrap();
+
+    let arena = Arena::new();
+    let spec = Spec::from_doc(&arena, &doc).unwrap();
+    let mut raw = RawGraph::new(&arena, &spec);
+    raw.inline_tagged_variants();
+    let graph = raw.cook();
+
+    // The inlined variant `Pet/Dog` should have `parent` marked as
+    // needing indirection, since it points back to `Pet`.
+    let pet = graph.schemas().find(|s| s.name() == "Pet").unwrap();
+    let tagged = match pet {
+        SchemaTypeView::Tagged(_, view) => view,
+        other => panic!("expected tagged `Pet`; got {other:?}"),
+    };
+    let variant = tagged.variants().next().unwrap();
+    let variant_struct = match variant.ty() {
+        TypeView::Inline(InlineTypeView::Struct(_, view)) => view,
+        other => panic!("expected inline struct variant; got {other:?}"),
+    };
+    let parent_field = variant_struct
+        .own_fields()
+        .find(|f| matches!(f.name(), StructFieldName::Name("parent")))
+        .unwrap();
+    assert!(parent_field.needs_indirection());
 }

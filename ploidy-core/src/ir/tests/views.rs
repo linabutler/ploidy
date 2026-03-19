@@ -3361,6 +3361,242 @@ fn test_inlined_when_tagged_unions_disagree_on_tag() {
 }
 
 #[test]
+fn test_inlined_when_tagged_unions_disagree_on_fields() {
+    // When a variant struct appears in multiple tagged unions that
+    // share the same tag but have different common fields, the variant
+    // must be inlined so that each inline copy inherits just its
+    // parent union's fields.
+    let doc = Document::from_yaml(indoc::indoc! {"
+        openapi: 3.0.0
+        info:
+          title: Test
+          version: 1.0.0
+        components:
+          schemas:
+            Dog:
+              type: object
+              properties:
+                kind:
+                  type: string
+                bark:
+                  type: string
+            UnionA:
+              oneOf:
+                - $ref: '#/components/schemas/Dog'
+              discriminator:
+                propertyName: kind
+                mapping:
+                  dog: '#/components/schemas/Dog'
+              properties:
+                kind:
+                  type: string
+                name:
+                  type: string
+            UnionB:
+              oneOf:
+                - $ref: '#/components/schemas/Dog'
+              discriminator:
+                propertyName: kind
+                mapping:
+                  dog: '#/components/schemas/Dog'
+              properties:
+                kind:
+                  type: string
+                habitat:
+                  type: string
+    "})
+    .unwrap();
+
+    let arena = Arena::new();
+    let spec = Spec::from_doc(&arena, &doc).unwrap();
+    let mut raw = RawGraph::new(&arena, &spec);
+    raw.inline_tagged_variants();
+    let graph = raw.cook();
+
+    // The original `Dog` keeps all its own fields.
+    let dog = graph.schemas().find(|s| s.name() == "Dog").unwrap();
+    let SchemaTypeView::Struct(_, dog_struct) = dog else {
+        panic!("expected struct `Dog`; got `{dog:?}`");
+    };
+    let field_names = dog_struct.fields().map(|f| f.name()).collect_vec();
+    assert_matches!(
+        &*field_names,
+        [StructFieldName::Name("kind"), StructFieldName::Name("bark")]
+    );
+
+    // Each inlined `Dog` has an inheritance edge back to its
+    // parent tagged union. `Dog`'s own fields come first, then
+    // the union's own fields; minus duplicates like `kind`.
+    let union_a = graph.schemas().find(|s| s.name() == "UnionA").unwrap();
+    let SchemaTypeView::Tagged(_, union_a_tagged) = union_a else {
+        panic!("expected tagged `UnionA`; got `{union_a:?}`");
+    };
+    let variant = union_a_tagged.variants().next().unwrap();
+    let TypeView::Inline(InlineTypeView::Struct(_, inline_struct)) = variant.ty() else {
+        panic!("expected inline struct variant; got `{:?}`", variant.ty());
+    };
+    let inline_fields = inline_struct.fields().map(|f| f.name()).collect_vec();
+    assert_matches!(
+        &*inline_fields,
+        [
+            // Inherited from `UnionA` (minus `kind` because it's shadowed by own).
+            StructFieldName::Name("name"),
+            // `Dog`'s own fields.
+            StructFieldName::Name("kind"),
+            StructFieldName::Name("bark"),
+        ]
+    );
+
+    let union_b = graph.schemas().find(|s| s.name() == "UnionB").unwrap();
+    let SchemaTypeView::Tagged(_, union_b_tagged) = union_b else {
+        panic!("expected tagged `UnionB`; got `{union_b:?}`");
+    };
+    let variant = union_b_tagged.variants().next().unwrap();
+    let TypeView::Inline(InlineTypeView::Struct(_, inline_struct)) = variant.ty() else {
+        panic!("expected inline struct variant; got `{:?}`", variant.ty());
+    };
+    let inline_fields = inline_struct.fields().map(|f| f.name()).collect_vec();
+    assert_matches!(
+        &*inline_fields,
+        [
+            // Inherited from `UnionB` (minus `kind` because it's shadowed by own).
+            StructFieldName::Name("habitat"),
+            // `Dog`'s own fields.
+            StructFieldName::Name("kind"),
+            StructFieldName::Name("bark"),
+        ]
+    );
+}
+
+#[test]
+fn test_not_inlined_when_variant_already_inherits_union_fields() {
+    // When a variant struct already inherits from the tagged union
+    // via `allOf`, the union's fields are already reachable through
+    // the existing inheritance edge. Inlining would produce a
+    // structurally identical copy, so it should be skipped.
+    let doc = Document::from_yaml(indoc::indoc! {"
+        openapi: 3.0.0
+        info:
+          title: Test
+          version: 1.0.0
+        components:
+          schemas:
+            Dog:
+              allOf:
+                - $ref: '#/components/schemas/Pet'
+              properties:
+                bark:
+                  type: string
+            Pet:
+              oneOf:
+                - $ref: '#/components/schemas/Dog'
+              discriminator:
+                propertyName: kind
+                mapping:
+                  dog: '#/components/schemas/Dog'
+              properties:
+                kind:
+                  type: string
+                name:
+                  type: string
+            Owner:
+              type: object
+              properties:
+                dog:
+                  $ref: '#/components/schemas/Dog'
+    "})
+    .unwrap();
+
+    let arena = Arena::new();
+    let spec = Spec::from_doc(&arena, &doc).unwrap();
+    let mut raw = RawGraph::new(&arena, &spec);
+    raw.inline_tagged_variants();
+    let graph = raw.cook();
+
+    // `Dog` is referenced by `Owner.dog` and inherits from `Pet` via `allOf`,
+    // so the inline would be identical. The variant should remain
+    // a direct reference to `Dog`, not an inline copy.
+    let pet = graph.schemas().find(|s| s.name() == "Pet").unwrap();
+    let tagged = match pet {
+        SchemaTypeView::Tagged(_, view) => view,
+        other => panic!("expected tagged `Pet`; got {other:?}"),
+    };
+    let variant = tagged.variants().next().unwrap();
+    assert_matches!(variant.ty(), TypeView::Schema(SchemaTypeView::Struct(..)));
+
+    // `Dog` should still have the inherited fields from `Pet`.
+    let dog = graph.schemas().find(|s| s.name() == "Dog").unwrap();
+    let SchemaTypeView::Struct(_, dog_struct) = dog else {
+        panic!("expected struct `Dog`; got `{dog:?}`");
+    };
+    let field_names = dog_struct.fields().map(|f| f.name()).collect_vec();
+    assert_matches!(
+        &*field_names,
+        [
+            StructFieldName::Name("kind"),
+            StructFieldName::Name("name"),
+            StructFieldName::Name("bark"),
+        ]
+    );
+}
+
+#[test]
+fn test_inlining_preserves_field_type_edges() {
+    // `Pet` is a tagged union with an inline enum property (`severity`).
+    // `Dog` is both a variant of `Pet` and a property of `Owner`, so it's
+    // inlined. After inlining, `Pet`'s inlines must still include the
+    // `severity` inline enum; only its edge to `Dog` should have been updated.
+    let doc = Document::from_yaml(indoc::indoc! {"
+        openapi: 3.0.0
+        info:
+          title: Test
+          version: 1.0.0
+        paths: {}
+        components:
+          schemas:
+            Dog:
+              type: object
+              properties:
+                kind:
+                  type: string
+                bark:
+                  type: string
+            Pet:
+              oneOf:
+                - $ref: '#/components/schemas/Dog'
+              discriminator:
+                propertyName: kind
+                mapping:
+                  dog: '#/components/schemas/Dog'
+              properties:
+                severity:
+                  type: string
+                  enum:
+                    - low
+                    - high
+            Owner:
+              type: object
+              properties:
+                dog:
+                  $ref: '#/components/schemas/Dog'
+    "})
+    .unwrap();
+
+    let arena = Arena::new();
+    let spec = Spec::from_doc(&arena, &doc).unwrap();
+    let mut raw = RawGraph::new(&arena, &spec);
+    raw.inline_tagged_variants();
+    let graph = raw.cook();
+
+    // `Dog` is inlined because `Owner.dog` gives it a non-tagged incoming edge.
+    // After inlining, `pet.inlines()` must still include the inline enum from
+    // `Pet.severity`.
+    let pet = graph.schemas().find(|s| s.name() == "Pet").unwrap();
+    let has_inline_enum = pet.inlines().any(|i| matches!(i, InlineTypeView::Enum(..)));
+    assert!(has_inline_enum);
+}
+
+#[test]
 fn test_inlined_variant_inline_field_types_not_leaked() {
     // `Dog` is inlined (referenced by `Owner.dog`) and has an
     // inline field type (`details`). After inlining, `Pet`'s

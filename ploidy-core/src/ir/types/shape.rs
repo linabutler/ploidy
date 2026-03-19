@@ -135,6 +135,8 @@ pub struct Tagged<'a, Ty> {
     pub description: Option<&'a str>,
     pub tag: &'a str,
     pub variants: &'a [TaggedVariant<'a, Ty>],
+    // Own fields that the union declares as `properties`.
+    pub fields: &'a [StructField<'a, Ty>],
 }
 
 /// A variant of a tagged union.
@@ -152,6 +154,8 @@ pub struct TaggedVariant<'a, Ty> {
 pub struct Untagged<'a, Ty> {
     pub description: Option<&'a str>,
     pub variants: &'a [UntaggedVariant<Ty>],
+    // Own fields that the union declares as `properties`.
+    pub fields: &'a [StructField<'a, Ty>],
 }
 
 /// A variant of an untagged union.

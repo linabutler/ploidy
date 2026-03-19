@@ -36,29 +36,18 @@ impl<'a, T: View<'a>> ViewExt for T {
                     Traversal::Ignore
                 }
                 (
-                    EdgeKind::Reference | EdgeKind::Inherits,
-                    TypeView::Schema(SchemaTypeView::Struct(_, view))
-                    | TypeView::Inline(InlineTypeView::Struct(_, view)),
+                    EdgeKind::Reference,
+                    TypeView::Schema(SchemaTypeView::Struct(_, _))
+                    | TypeView::Inline(InlineTypeView::Struct(_, _)),
                 ) => {
-                    // Structs may or may not implement `Default`,
-                    // depending on their fields. If this struct
-                    // inherits fields from another struct,
-                    // we need to consider that struct's fields, too.
-                    if view.fields().filter(|f| !f.tag()).all(|f| !f.required()) {
-                        // If all non-tag fields of all reachable structs are optional,
-                        // then this struct can derive `Default`.
-                        Traversal::Ignore
-                    } else {
-                        // Otherwise, skip the struct itself, but visit all its fields
-                        // to determine which ones are defaultable.
-                        Traversal::Skip
-                    }
+                    // Structs may or may not implement `Default`, depending on
+                    // their fields. Skip the struct itself, but explore all
+                    // its fields to determine which ones are defaultable.
+                    Traversal::Skip
                 }
                 (EdgeKind::Inherits, _) => {
-                    // Inheriting from a non-struct type isn't semantically meaningful
-                    // because the parent doesn't contribute any fields, so we can
-                    // ignore it for the purposes of deriving `Default`.
-                    Traversal::Ignore
+                    // Explore parents to check their defaultability.
+                    Traversal::Skip
                 }
                 (EdgeKind::Reference, _) => {
                     // Any other type that this struct references must be defaultable

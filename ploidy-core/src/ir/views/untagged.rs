@@ -30,7 +30,7 @@ use petgraph::graph::NodeIndex;
 use crate::ir::{
     UntaggedVariantNameHint,
     graph::CookedGraph,
-    types::{GraphUntagged, GraphUntaggedVariant},
+    types::{GraphStructField, GraphUntagged, GraphUntaggedVariant},
 };
 
 use super::{ViewNode, ir::TypeView};
@@ -57,6 +57,13 @@ impl<'a> UntaggedView<'a> {
     #[inline]
     pub fn description(&self) -> Option<&'a str> {
         self.ty.description
+    }
+
+    /// Returns the common fields declared alongside `oneOf`,
+    /// shared across all variants.
+    #[inline]
+    pub fn fields(&self) -> &'a [GraphStructField<'a>] {
+        self.ty.fields
     }
 
     /// Returns an iterator over this untagged union's variants.

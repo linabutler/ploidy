@@ -164,7 +164,6 @@ impl<'a> RawGraph<'a> {
             inlines: Vec<VariantInline<'a>>,
         }
         struct VariantInline<'a> {
-            at: usize,
             node: GraphType<'a>,
             variant_index: NodeIndex<usize>,
             parent_indices: &'a [NodeIndex<usize>],
@@ -197,7 +196,7 @@ impl<'a> RawGraph<'a> {
                 };
                 let mut inlines = vec![];
 
-                for (at, variant) in tagged.variants.iter().enumerate() {
+                for variant in tagged.variants {
                     let variant_index = variant.ty;
                     let GraphType::Schema(GraphSchemaType::Struct(variant_info, variant_struct)) =
                         self.graph[variant_index]
@@ -208,8 +207,8 @@ impl<'a> RawGraph<'a> {
                     // A struct variant only needs inlining if it has multiple
                     // distinct uses. Skip if (1) no operation uses the struct,
                     // _and_ (2) every incoming edge is from a tagged union with
-                    // the same tag. If both hold, all uses agree, so the
-                    // struct can be used directly without inlining.
+                    // the same tag and fields. If both hold, all uses agree, so
+                    // the struct can be used directly without inlining.
                     if !used_by_ops.contains(variant_index.index()) {
                         let Some(first) = ({
                             self.graph
@@ -222,49 +221,69 @@ impl<'a> RawGraph<'a> {
                             continue;
                         };
                         // Check that all the variant's inbound edges are from
-                        // tagged unions, and that all their tags match the tag
-                        // of the first union we found.
-                        let all_tags_match = self
+                        // tagged unions, and that all their tags and fields
+                        // match the first union we found.
+                        let all_agree = self
                             .graph
                             .neighbors_directed(variant_index, Direction::Incoming)
                             .all(|neighbor| {
                                 matches!(
                                     self.graph[neighbor],
                                     GraphType::Schema(GraphSchemaType::Tagged(_, t))
-                                        if t.tag == first.tag,
+                                        if t.tag == first.tag && t.fields == first.fields,
                                 )
                             });
-                        if all_tags_match {
+                        if all_agree {
                             continue;
                         }
                     }
 
-                    // Skip inlining the struct variant if it doesn't declare
-                    // the tag as a field. Inlining these struct variants
-                    // would just produce identical inline structs.
-                    let has_tag_field = {
-                        let inherits = EdgeFiltered::from_fn(&self.graph, |edge| {
-                            matches!(edge.weight(), EdgeKind::Inherits)
+                    // Skip inlining when the inline copy would be
+                    // identical to the original. This happens when
+                    // the variant doesn't declare the tag as a field _and_
+                    // either (a) the union has no own fields, or
+                    // (b) the variant already inherits from this union,
+                    // so its fields are already reachable.
+                    let (has_tag_field, already_inherits) = {
+                        let inherits = EdgeFiltered::from_fn(&self.graph, |e| {
+                            matches!(e.weight(), EdgeKind::Inherits)
                         });
                         let mut dfs = DfsPostOrder::new(&inherits, variant_index);
-                        std::iter::from_fn(|| dfs.next(&inherits))
-                            .flat_map(|ancestor| match self.graph[ancestor] {
+                        let mut has_tag_field = false;
+                        let mut already_inherits = false;
+                        while let Some(ancestor) = dfs.next(&inherits)
+                            && !(has_tag_field && already_inherits)
+                        {
+                            already_inherits |= ancestor == index;
+                            has_tag_field |= match self.graph[ancestor] {
                                 GraphType::Schema(GraphSchemaType::Struct(_, s))
-                                | GraphType::Inline(GraphInlineType::Struct(_, s)) => s.fields,
-                                _ => &[],
-                            })
-                            .any(|f| {
-                                // Check own and inherited fields; OpenAPI 3.2
-                                // clarifies that the tag can be inherited.
-                                matches!(f.name, StructFieldName::Name(n) if n == tagged.tag)
-                            })
+                                | GraphType::Inline(GraphInlineType::Struct(_, s)) => {
+                                    // Check own and inherited fields; OpenAPI 3.2
+                                    // clarifies that the tag can be inherited.
+                                    s.fields.iter().any(|f| {
+                                        matches!(
+                                            f.name,
+                                            StructFieldName::Name(n) if n == tagged.tag,
+                                        )
+                                    })
+                                }
+                                _ => false,
+                            };
+                        }
+                        (has_tag_field, already_inherits)
                     };
-                    if !has_tag_field {
+                    if !has_tag_field && (tagged.fields.is_empty() || already_inherits) {
                         continue;
                     }
 
                     // Build our new inline type, with the same attributes
                     // as the schema type, but a distinct inline type path.
+                    // The inline struct is a clone of the original, plus
+                    // an inheritance edge to the tagged union for its fields.
+                    let parents = self.arena.alloc_slice(itertools::chain!(
+                        variant_struct.parents.iter().copied(),
+                        std::iter::once(index),
+                    ));
                     let node = GraphType::Inline(GraphInlineType::Struct(
                         InlineTypePath {
                             root: InlineTypePathRoot::Type(info.name),
@@ -275,15 +294,14 @@ impl<'a> RawGraph<'a> {
                         GraphStruct {
                             description: variant_struct.description,
                             fields: variant_struct.fields,
-                            parents: variant_struct.parents,
+                            parents,
                         },
                     ));
 
                     inlines.push(VariantInline {
-                        at,
                         node,
                         variant_index,
-                        parent_indices: variant_struct.parents,
+                        parent_indices: parents,
                         name: variant.name,
                         aliases: variant.aliases,
                     });
@@ -303,48 +321,63 @@ impl<'a> RawGraph<'a> {
 
         // Apply the plans to the graph.
         for plan in plans {
-            let mut new_variants = plan.tagged.variants.to_vec();
+            let mut new_variants = FxHashMap::default();
 
-            // Add nodes for the inlined types, and connect them to
-            // the original schema variants, so that they'll inherit
-            // the same transitive dependencies and SCC membership.
+            // Add nodes and edges for the inline types.
             for entry in &plan.inlines {
                 let node_index = self.graph.add_node(entry.node);
+
+                // Reference the original variant so that the inline
+                // inherits the original's transitive dependencies and
+                // SCC membership, but not its inline subtree.
                 self.graph
                     .add_edge(node_index, entry.variant_index, EdgeKind::Reference);
+
+                // Add inheritance edges back to the inline's parents.
                 for &parent_index in entry.parent_indices {
                     self.graph
                         .add_edge(node_index, parent_index, EdgeKind::Inherits);
                 }
 
-                new_variants[entry.at] = GraphTaggedVariant {
-                    name: entry.name,
-                    aliases: entry.aliases,
-                    ty: node_index,
-                };
+                new_variants.insert(
+                    entry.variant_index,
+                    GraphTaggedVariant {
+                        name: entry.name,
+                        aliases: entry.aliases,
+                        ty: node_index,
+                    },
+                );
             }
 
-            // Rewrite reference edges from the tagged union
-            // to point to its new variants.
-            let edges_to_remove = self
+            // Retarget reference edges from the tagged union to point to
+            // the new inline variants. We only update edges targeting a
+            // replaced variant; other edges stay.
+            let edges_to_retarget = self
                 .graph
                 .edges_directed(plan.tagged_index, Direction::Outgoing)
-                .filter(|e| matches!(e.weight(), EdgeKind::Reference))
-                .map(|e| e.id())
+                .filter(|e| {
+                    matches!(e.weight(), EdgeKind::Reference)
+                        && new_variants.contains_key(&e.target())
+                })
+                .map(|e| (e.id(), new_variants[&e.target()].ty))
                 .collect_vec();
-            for edge_id in edges_to_remove {
+            for (edge_id, new_target) in edges_to_retarget {
                 self.graph.remove_edge(edge_id);
-            }
-            for variant in &new_variants {
                 self.graph
-                    .add_edge(plan.tagged_index, variant.ty, EdgeKind::Reference);
+                    .add_edge(plan.tagged_index, new_target, EdgeKind::Reference);
             }
 
             // Replace the node for the tagged union itself.
             let modified_tagged = GraphTagged {
                 description: plan.tagged.description,
                 tag: plan.tagged.tag,
-                variants: self.arena.alloc_slice_copy(&new_variants),
+                variants: self.arena.alloc_slice_exact(
+                    plan.tagged
+                        .variants
+                        .iter()
+                        .map(|&v| new_variants.get(&v.ty).copied().unwrap_or(v)),
+                ),
+                fields: plan.tagged.fields,
             };
             self.graph[plan.tagged_index] =
                 GraphType::Schema(GraphSchemaType::Tagged(plan.info, modified_tagged));
@@ -653,24 +686,34 @@ impl<'a> Iterator for SpecTypeVisitor<'a> {
             SpecType::Schema(SpecSchemaType::Untagged(_, ty))
             | SpecType::Inline(SpecInlineType::Untagged(_, ty)) => {
                 self.stack.extend(
-                    ty.variants
-                        .iter()
-                        .filter_map(|variant| match variant {
+                    itertools::chain!(
+                        ty.fields
+                            .iter()
+                            .map(|field| (EdgeKind::Reference, field.ty)),
+                        ty.variants.iter().filter_map(|variant| match variant {
                             SpecUntaggedVariant::Some(_, ty) => {
-                                Some((Some(top), EdgeKind::Reference, *ty))
+                                Some((EdgeKind::Reference, *ty))
                             }
                             _ => None,
-                        })
-                        .rev(),
+                        }),
+                    )
+                    .map(|(kind, ty)| (Some(top), kind, ty))
+                    .rev(),
                 );
             }
             SpecType::Schema(SpecSchemaType::Tagged(_, ty))
             | SpecType::Inline(SpecInlineType::Tagged(_, ty)) => {
                 self.stack.extend(
-                    ty.variants
-                        .iter()
-                        .map(|variant| (Some(top), EdgeKind::Reference, variant.ty))
-                        .rev(),
+                    itertools::chain!(
+                        ty.fields
+                            .iter()
+                            .map(|field| (EdgeKind::Reference, field.ty)),
+                        ty.variants
+                            .iter()
+                            .map(|variant| (EdgeKind::Reference, variant.ty)),
+                    )
+                    .map(|(kind, ty)| (Some(top), kind, ty))
+                    .rev(),
                 );
             }
             SpecType::Schema(SpecSchemaType::Container(_, container))
