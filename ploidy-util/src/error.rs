@@ -13,10 +13,6 @@ pub enum Error {
     #[error("Malformed URL")]
     Url(#[from] url::ParseError),
 
-    /// URL can't be used as a base.
-    #[error("Can't use URL as base URL")]
-    UrlCannotBeABase,
-
     /// Invalid query parameter.
     #[error("Invalid query parameter")]
     QueryParam(#[from] crate::QueryParamError),

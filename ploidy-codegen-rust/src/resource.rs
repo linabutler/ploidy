@@ -165,11 +165,12 @@ mod tests {
                 ) -> Result<::std::vec::Vec<crate::types::Customer>, crate::error::Error> {
                     let url = {
                         let mut url = self.base_url.clone();
-                        url
+                        let _ = url
                             .path_segments_mut()
-                            .map_err(|()| crate::error::Error::UrlCannotBeABase)?
-                            .pop_if_empty()
-                            .push("customers");
+                            .map(|mut segments| {
+                                segments.pop_if_empty()
+                                    .push("customers");
+                            });
                         url
                     };
                     let response = self
@@ -246,11 +247,12 @@ mod tests {
                 ) -> Result<::std::vec::Vec<crate::types::Order>, crate::error::Error> {
                     let url = {
                         let mut url = self.base_url.clone();
-                        url
+                        let _ = url
                             .path_segments_mut()
-                            .map_err(|()| crate::error::Error::UrlCannotBeABase)?
-                            .pop_if_empty()
-                            .push("orders");
+                            .map(|mut segments| {
+                                segments.pop_if_empty()
+                                    .push("orders");
+                            });
                         url
                     };
                     let response = self
@@ -314,11 +316,12 @@ mod tests {
                 ) -> Result<(), crate::error::Error> {
                     let url = {
                         let mut url = self.base_url.clone();
-                        url
+                        let _ = url
                             .path_segments_mut()
-                            .map_err(|()| crate::error::Error::UrlCannotBeABase)?
-                            .pop_if_empty()
-                            .push("customers");
+                            .map(|mut segments| {
+                                segments.pop_if_empty()
+                                    .push("customers");
+                            });
                         url
                     };
                     let url = ::ploidy_util::serde::Serialize::serialize(
@@ -411,11 +414,12 @@ mod tests {
                 ) -> Result<(), crate::error::Error> {
                     let url = {
                         let mut url = self.base_url.clone();
-                        url
+                        let _ = url
                             .path_segments_mut()
-                            .map_err(|()| crate::error::Error::UrlCannotBeABase)?
-                            .pop_if_empty()
-                            .push("customers");
+                            .map(|mut segments| {
+                                segments.pop_if_empty()
+                                    .push("customers");
+                            });
                         url
                     };
                     let url = ::ploidy_util::serde::Serialize::serialize(
@@ -441,12 +445,13 @@ mod tests {
                 ) -> Result<(), crate::error::Error> {
                     let url = {
                         let mut url = self.base_url.clone();
-                        url
+                        let _ = url
                             .path_segments_mut()
-                            .map_err(|()| crate::error::Error::UrlCannotBeABase)?
-                            .pop_if_empty()
-                            .push("customers")
-                            .push("search");
+                            .map(|mut segments| {
+                                segments.pop_if_empty()
+                                    .push("customers")
+                                    .push("search");
+                            });
                         url
                     };
                     let url = ::ploidy_util::serde::Serialize::serialize(
@@ -530,11 +535,12 @@ mod tests {
                 ) -> Result<(), crate::error::Error> {
                     let url = {
                         let mut url = self.base_url.clone();
-                        url
+                        let _ = url
                             .path_segments_mut()
-                            .map_err(|()| crate::error::Error::UrlCannotBeABase)?
-                            .pop_if_empty()
-                            .push("customers");
+                            .map(|mut segments| {
+                                segments.pop_if_empty()
+                                    .push("customers");
+                            });
                         url
                     };
                     let response = self

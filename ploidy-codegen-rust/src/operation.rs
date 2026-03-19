@@ -75,11 +75,12 @@ impl<'a> CodegenOperation<'a> {
         quote! {
             let url = {
                 let mut url = self.base_url.clone();
-                url
+                let _ = url
                     .path_segments_mut()
-                    .map_err(|()| crate::error::Error::UrlCannotBeABase)?
-                    .pop_if_empty()
-                    #(.push(#segments))*;
+                    .map(|mut segments| {
+                        segments.pop_if_empty()
+                            #(.push(#segments))*;
+                    });
                 url
             };
         }
@@ -296,12 +297,13 @@ mod tests {
             ) -> Result<(), crate::error::Error> {
                 let url = {
                     let mut url = self.base_url.clone();
-                    url
+                    let _ = url
                         .path_segments_mut()
-                        .map_err(|()| crate::error::Error::UrlCannotBeABase)?
-                        .pop_if_empty()
-                        .push("items")
-                        .push(item_id);
+                        .map(|mut segments| {
+                            segments.pop_if_empty()
+                                .push("items")
+                                .push(item_id);
+                        });
                     url
                 };
                 let url = ::ploidy_util::serde::Serialize::serialize(
@@ -363,11 +365,12 @@ mod tests {
             ) -> Result<(), crate::error::Error> {
                 let url = {
                     let mut url = self.base_url.clone();
-                    url
+                    let _ = url
                         .path_segments_mut()
-                        .map_err(|()| crate::error::Error::UrlCannotBeABase)?
-                        .pop_if_empty()
-                        .push("items");
+                        .map(|mut segments| {
+                            segments.pop_if_empty()
+                                .push("items");
+                        });
                     url
                 };
                 let url = ::ploidy_util::serde::Serialize::serialize(
@@ -435,12 +438,13 @@ mod tests {
             ) -> Result<(), crate::error::Error> {
                 let url = {
                     let mut url = self.base_url.clone();
-                    url
+                    let _ = url
                         .path_segments_mut()
-                        .map_err(|()| crate::error::Error::UrlCannotBeABase)?
-                        .pop_if_empty()
-                        .push("search")
-                        .push(query2);
+                        .map(|mut segments| {
+                            segments.pop_if_empty()
+                                .push("search")
+                                .push(query2);
+                        });
                     url
                 };
                 let url = ::ploidy_util::serde::Serialize::serialize(
@@ -526,12 +530,13 @@ mod tests {
             ) -> Result<crate::types::Item, crate::error::Error> {
                 let url = {
                     let mut url = self.base_url.clone();
-                    url
+                    let _ = url
                         .path_segments_mut()
-                        .map_err(|()| crate::error::Error::UrlCannotBeABase)?
-                        .pop_if_empty()
-                        .push("items")
-                        .push(item_id);
+                        .map(|mut segments| {
+                            segments.pop_if_empty()
+                                .push("items")
+                                .push(item_id);
+                        });
                     url
                 };
                 let url = ::ploidy_util::serde::Serialize::serialize(
@@ -599,12 +604,13 @@ mod tests {
             ) -> Result<(), crate::error::Error> {
                 let url = {
                     let mut url = self.base_url.clone();
-                    url
+                    let _ = url
                         .path_segments_mut()
-                        .map_err(|()| crate::error::Error::UrlCannotBeABase)?
-                        .pop_if_empty()
-                        .push("items")
-                        .push(item_id);
+                        .map(|mut segments| {
+                            segments.pop_if_empty()
+                                .push("items")
+                                .push(item_id);
+                        });
                     url
                 };
                 let response = self
