@@ -144,7 +144,7 @@ impl ToTokens for CodegenOperation<'_> {
                     params.push(quote! { request: impl Into<#param_type> });
                 }
                 RequestView::Multipart => {
-                    params.push(quote! { form: ::ploidy_util::reqwest::multipart::Form });
+                    params.push(quote! { form: crate::util::reqwest::multipart::Form });
                 }
             }
         }
