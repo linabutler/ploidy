@@ -72,6 +72,16 @@ impl<T> AbsentOr<T> {
         }
     }
 
+    /// Applies `f` to the contained value if [`Present`](Self::Present),
+    /// or returns `default` otherwise.
+    #[inline]
+    pub fn map_or<U>(self, default: U, f: impl FnOnce(T) -> U) -> U {
+        match self {
+            Self::Absent | Self::Null => default,
+            Self::Present(value) => f(value),
+        }
+    }
+
     /// Returns `other` if `self` is [`Present`], or propagates
     /// [`Absent`] and [`Null`].
     ///
