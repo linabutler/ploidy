@@ -66,7 +66,7 @@ Ploidy's minimum supported Rust version (MSRV) is **Rust 1.89.0**. This only app
 To generate a complete Rust client crate from your OpenAPI spec, run:
 
 ```sh
-ploidy generate rust <INPUT-SPEC>
+ploidy generate rust /path/to/spec.yaml
 ```
 
 This produces a ready-to-use crate that includes:
