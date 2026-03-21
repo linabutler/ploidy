@@ -301,6 +301,7 @@ macro_rules! impl_pointee_for {
 impl_pointee_for!(
     i8, u8, i16, u16, i32, u32, i64, u64, i128, u128, isize, usize, f32, f64, bool, String, &'static str,
     #[cfg(feature = "chrono")] chrono::DateTime<chrono::Utc>,
+    #[cfg(feature = "chrono")] chrono::NaiveDate,
     #[cfg(feature = "url")] url::Url,
 );
 

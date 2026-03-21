@@ -62,8 +62,9 @@ impl ToTokens for CodegenUntagged<'_> {
 
         tokens.append_all(quote! {
             #doc_attrs
-            #[derive(Debug, Clone, PartialEq, #(#extra_derives,)* ::ploidy_util::serde::Serialize, ::ploidy_util::serde::Deserialize)]
+            #[derive(Debug, Clone, PartialEq, #(#extra_derives,)* ::ploidy_util::serde::Serialize, ::ploidy_util::serde::Deserialize, ::ploidy_util::pointer::JsonPointee)]
             #[serde(crate = "::ploidy_util::serde", untagged)]
+            #[ploidy(pointer(crate = "::ploidy_util::pointer", untagged))]
             pub enum #type_name_ident {
                 #(#variants),*
             }
@@ -117,8 +118,9 @@ mod tests {
 
         let actual: syn::ItemEnum = parse_quote!(#untagged);
         let expected: syn::ItemEnum = parse_quote! {
-            #[derive(Debug, Clone, PartialEq, Eq, Hash, ::ploidy_util::serde::Serialize, ::ploidy_util::serde::Deserialize)]
+            #[derive(Debug, Clone, PartialEq, Eq, Hash, ::ploidy_util::serde::Serialize, ::ploidy_util::serde::Deserialize, ::ploidy_util::pointer::JsonPointee)]
             #[serde(crate = "::ploidy_util::serde", untagged)]
+            #[ploidy(pointer(crate = "::ploidy_util::pointer", untagged))]
             pub enum StringOrInt {
                 String(::std::string::String),
                 I32(i32)
@@ -157,8 +159,9 @@ mod tests {
 
         let actual: syn::ItemEnum = parse_quote!(#untagged);
         let expected: syn::ItemEnum = parse_quote! {
-            #[derive(Debug, Clone, PartialEq, Eq, Hash, ::ploidy_util::serde::Serialize, ::ploidy_util::serde::Deserialize)]
+            #[derive(Debug, Clone, PartialEq, Eq, Hash, ::ploidy_util::serde::Serialize, ::ploidy_util::serde::Deserialize, ::ploidy_util::pointer::JsonPointee)]
             #[serde(crate = "::ploidy_util::serde", untagged)]
+            #[ploidy(pointer(crate = "::ploidy_util::pointer", untagged))]
             pub enum DateOrUnix {
                 DateTime(::ploidy_util::chrono::DateTime<::ploidy_util::chrono::Utc>),
                 I32(i32)
@@ -208,8 +211,9 @@ mod tests {
 
         let actual: syn::ItemEnum = parse_quote!(#untagged);
         let expected: syn::ItemEnum = parse_quote! {
-            #[derive(Debug, Clone, PartialEq, Eq, Hash, ::ploidy_util::serde::Serialize, ::ploidy_util::serde::Deserialize)]
+            #[derive(Debug, Clone, PartialEq, Eq, Hash, ::ploidy_util::serde::Serialize, ::ploidy_util::serde::Deserialize, ::ploidy_util::pointer::JsonPointee)]
             #[serde(crate = "::ploidy_util::serde", untagged)]
+            #[ploidy(pointer(crate = "::ploidy_util::pointer", untagged))]
             pub enum Animal {
                 V1(crate::types::Dog),
                 V2(crate::types::Cat)
@@ -252,8 +256,9 @@ mod tests {
         let actual: syn::ItemEnum = parse_quote!(#untagged);
         let expected: syn::ItemEnum = parse_quote! {
             #[doc = "A union that can be either a string or an integer."]
-            #[derive(Debug, Clone, PartialEq, Eq, Hash, ::ploidy_util::serde::Serialize, ::ploidy_util::serde::Deserialize)]
+            #[derive(Debug, Clone, PartialEq, Eq, Hash, ::ploidy_util::serde::Serialize, ::ploidy_util::serde::Deserialize, ::ploidy_util::pointer::JsonPointee)]
             #[serde(crate = "::ploidy_util::serde", untagged)]
+            #[ploidy(pointer(crate = "::ploidy_util::pointer", untagged))]
             pub enum StringOrInt {
                 String(::std::string::String),
                 I32(i32)
@@ -294,8 +299,9 @@ mod tests {
 
         let actual: syn::ItemEnum = parse_quote!(#untagged);
         let expected: syn::ItemEnum = parse_quote! {
-            #[derive(Debug, Clone, PartialEq, ::ploidy_util::serde::Serialize, ::ploidy_util::serde::Deserialize)]
+            #[derive(Debug, Clone, PartialEq, ::ploidy_util::serde::Serialize, ::ploidy_util::serde::Deserialize, ::ploidy_util::pointer::JsonPointee)]
             #[serde(crate = "::ploidy_util::serde", untagged)]
+            #[ploidy(pointer(crate = "::ploidy_util::pointer", untagged))]
             pub enum StringOrFloat {
                 String(::std::string::String),
                 F32(f32)
@@ -336,8 +342,9 @@ mod tests {
 
         let actual: syn::ItemEnum = parse_quote!(#untagged);
         let expected: syn::ItemEnum = parse_quote! {
-            #[derive(Debug, Clone, PartialEq, ::ploidy_util::serde::Serialize, ::ploidy_util::serde::Deserialize)]
+            #[derive(Debug, Clone, PartialEq, ::ploidy_util::serde::Serialize, ::ploidy_util::serde::Deserialize, ::ploidy_util::pointer::JsonPointee)]
             #[serde(crate = "::ploidy_util::serde", untagged)]
+            #[ploidy(pointer(crate = "::ploidy_util::pointer", untagged))]
             pub enum StringOrDouble {
                 String(::std::string::String),
                 F64(f64)

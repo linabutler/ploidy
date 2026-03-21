@@ -1,5 +1,6 @@
 use std::{marker::PhantomData, ops::Deref};
 
+use ploidy_pointer::{BadJsonPointer, BadJsonPointerTy, JsonPointee, JsonPointer};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 /// An [`Option`]-like type that distinguishes between
@@ -10,6 +11,21 @@ pub enum AbsentOr<T> {
     Absent,
     Null,
     Present(T),
+}
+
+impl<T: JsonPointee> JsonPointee for AbsentOr<T> {
+    fn resolve(&self, pointer: &JsonPointer) -> Result<&dyn JsonPointee, BadJsonPointer> {
+        match self {
+            Self::Present(value) => value.resolve(pointer),
+            _ => {
+                if pointer.is_empty() {
+                    Ok(self as &dyn JsonPointee)
+                } else {
+                    Err(BadJsonPointerTy::new(pointer).into())
+                }
+            }
+        }
+    }
 }
 
 impl<T> AbsentOr<T> {
