@@ -4,7 +4,7 @@ use ploidy_pointer::{JsonPointee, JsonPointer};
 fn test_rename_field() {
     #[derive(JsonPointee)]
     struct MyStruct {
-        #[ploidy(rename = "customName")]
+        #[ploidy(pointer(rename = "customName"))]
         my_field: String,
     }
 
@@ -25,7 +25,7 @@ fn test_rename_field() {
 #[test]
 fn test_rename_all_snake_case() {
     #[derive(JsonPointee)]
-    #[ploidy(rename_all = "snake_case")]
+    #[ploidy(pointer(rename_all = "snake_case"))]
     struct MyStruct {
         my_field: String,
         another_field: i32,
@@ -47,7 +47,7 @@ fn test_rename_all_snake_case() {
 #[test]
 fn test_rename_all_camel_case() {
     #[derive(JsonPointee)]
-    #[ploidy(rename_all = "camelCase")]
+    #[ploidy(pointer(rename_all = "camelCase"))]
     struct MyStruct {
         my_field: String,
         another_field: i32,
@@ -75,7 +75,7 @@ fn test_rename_all_camel_case() {
 #[test]
 fn test_rename_all_pascal_case() {
     #[derive(JsonPointee)]
-    #[ploidy(rename_all = "PascalCase")]
+    #[ploidy(pointer(rename_all = "PascalCase"))]
     struct MyStruct {
         my_field: String,
         another_field: i32,
@@ -97,7 +97,7 @@ fn test_rename_all_pascal_case() {
 #[test]
 fn test_rename_all_kebab_case() {
     #[derive(JsonPointee)]
-    #[ploidy(rename_all = "kebab-case")]
+    #[ploidy(pointer(rename_all = "kebab-case"))]
     struct MyStruct {
         my_field: String,
         another_field: i32,
@@ -119,9 +119,9 @@ fn test_rename_all_kebab_case() {
 #[test]
 fn test_rename_overrides_rename_all() {
     #[derive(JsonPointee)]
-    #[ploidy(rename_all = "camelCase")]
+    #[ploidy(pointer(rename_all = "camelCase"))]
     struct MyStruct {
-        #[ploidy(rename = "customName")]
+        #[ploidy(pointer(rename = "customName"))]
         my_field: String,
         another_field: i32,
     }
@@ -150,7 +150,7 @@ fn test_rename_overrides_rename_all() {
 #[test]
 fn test_enum_with_rename() {
     #[derive(JsonPointee)]
-    #[ploidy(untagged, rename_all = "camelCase")]
+    #[ploidy(pointer(untagged, rename_all = "camelCase"))]
     enum MyEnum {
         VariantA { my_field: String },
         VariantB { another_field: i32 },
@@ -185,7 +185,7 @@ fn test_flatten_field() {
 
     #[derive(JsonPointee)]
     struct Outer {
-        #[ploidy(flatten)]
+        #[ploidy(pointer(flatten))]
         inner: Inner,
     }
 
@@ -215,9 +215,9 @@ fn test_multiple_flattened_fields() {
 
     #[derive(JsonPointee)]
     struct Outer {
-        #[ploidy(flatten)]
+        #[ploidy(pointer(flatten))]
         inner1: Inner1,
-        #[ploidy(flatten)]
+        #[ploidy(pointer(flatten))]
         inner2: Inner2,
     }
 
@@ -250,7 +250,7 @@ fn test_priority_regular_over_flattened() {
     struct Outer {
         // Regular field with same name.
         my_field: i32,
-        #[ploidy(flatten)]
+        #[ploidy(pointer(flatten))]
         inner: Inner,
     }
 
@@ -276,13 +276,13 @@ fn test_nested_flattening() {
 
     #[derive(JsonPointee)]
     struct Middle {
-        #[ploidy(flatten)]
+        #[ploidy(pointer(flatten))]
         deep: Deep,
     }
 
     #[derive(JsonPointee)]
     struct Outer {
-        #[ploidy(flatten)]
+        #[ploidy(pointer(flatten))]
         middle: Middle,
     }
 
@@ -310,7 +310,7 @@ fn test_flatten_error_not_found() {
     #[derive(JsonPointee)]
     struct Outer {
         regular_field: i32,
-        #[ploidy(flatten)]
+        #[ploidy(pointer(flatten))]
         inner: Inner,
     }
 
@@ -334,11 +334,11 @@ fn test_enum_variant_flatten() {
     }
 
     #[derive(JsonPointee)]
-    #[ploidy(untagged)]
+    #[ploidy(pointer(untagged))]
     enum MyEnum {
         VariantA {
             regular_field: i32,
-            #[ploidy(flatten)]
+            #[ploidy(pointer(flatten))]
             inner: Inner,
         },
     }
@@ -364,16 +364,16 @@ fn test_enum_variant_flatten() {
 #[test]
 fn test_flatten_with_rename_all() {
     #[derive(JsonPointee)]
-    #[ploidy(rename_all = "camelCase")]
+    #[ploidy(pointer(rename_all = "camelCase"))]
     struct Inner {
         inner_field: String,
     }
 
     #[derive(JsonPointee)]
-    #[ploidy(rename_all = "camelCase")]
+    #[ploidy(pointer(rename_all = "camelCase"))]
     struct Outer {
         regular_field: i32,
-        #[ploidy(flatten)]
+        #[ploidy(pointer(flatten))]
         inner: Inner,
     }
 
@@ -409,9 +409,9 @@ fn test_flatten_order_matters() {
 
     #[derive(JsonPointee)]
     struct Outer {
-        #[ploidy(flatten)]
+        #[ploidy(pointer(flatten))]
         inner1: Inner1,
-        #[ploidy(flatten)]
+        #[ploidy(pointer(flatten))]
         inner2: Inner2,
     }
 
@@ -539,7 +539,7 @@ fn test_skip_field() {
     #[derive(JsonPointee)]
     struct MyStruct {
         visible: String,
-        #[ploidy(skip)]
+        #[ploidy(pointer(skip))]
         hidden: String,
     }
 
@@ -568,7 +568,7 @@ fn test_skip_not_in_suggestions() {
     #[derive(JsonPointee)]
     struct MyStruct {
         visible: String,
-        #[ploidy(skip)]
+        #[ploidy(pointer(skip))]
         hidden: String,
     }
 
@@ -597,10 +597,10 @@ fn test_skip_not_in_suggestions() {
 #[test]
 fn test_skip_with_rename_all() {
     #[derive(JsonPointee)]
-    #[ploidy(rename_all = "camelCase")]
+    #[ploidy(pointer(rename_all = "camelCase"))]
     struct MyStruct {
         my_field: String,
-        #[ploidy(skip)]
+        #[ploidy(pointer(skip))]
         hidden_field: String,
     }
 
@@ -627,10 +627,10 @@ fn test_multiple_skip_fields() {
     #[derive(JsonPointee)]
     struct MyStruct {
         visible1: String,
-        #[ploidy(skip)]
+        #[ploidy(pointer(skip))]
         hidden1: String,
         visible2: i32,
-        #[ploidy(skip)]
+        #[ploidy(pointer(skip))]
         hidden2: i32,
     }
 
@@ -665,9 +665,9 @@ fn test_skip_and_flatten_on_different_fields() {
 
     #[derive(JsonPointee)]
     struct Outer {
-        #[ploidy(skip)]
+        #[ploidy(pointer(skip))]
         hidden: String,
-        #[ploidy(flatten)]
+        #[ploidy(pointer(flatten))]
         inner: Inner,
         visible: i32,
     }
@@ -698,11 +698,11 @@ fn test_skip_and_flatten_on_different_fields() {
 #[test]
 fn test_skip_in_enum_variant() {
     #[derive(JsonPointee)]
-    #[ploidy(untagged)]
+    #[ploidy(pointer(untagged))]
     enum MyEnum {
         VariantA {
             visible: String,
-            #[ploidy(skip)]
+            #[ploidy(pointer(skip))]
             hidden: String,
         },
     }
@@ -723,7 +723,7 @@ fn test_skip_in_enum_variant() {
 #[test]
 fn test_skip_in_tuple_struct() {
     #[derive(JsonPointee)]
-    struct MyTuple(String, #[ploidy(skip)] String, i32);
+    struct MyTuple(String, #[ploidy(pointer(skip))] String, i32);
 
     let t = MyTuple("hello".to_owned(), "secret".to_owned(), 42);
 
@@ -746,9 +746,9 @@ fn test_skip_in_tuple_struct() {
 fn test_all_fields_skipped() {
     #[derive(JsonPointee)]
     struct AllHidden {
-        #[ploidy(skip)]
+        #[ploidy(pointer(skip))]
         field1: String,
-        #[ploidy(skip)]
+        #[ploidy(pointer(skip))]
         field2: i32,
     }
 
@@ -772,10 +772,10 @@ fn test_all_fields_skipped() {
 #[test]
 fn test_skip_unit_variant() {
     #[derive(JsonPointee)]
-    #[ploidy(untagged)]
+    #[ploidy(pointer(untagged))]
     enum MyEnum {
         Active,
-        #[ploidy(skip)]
+        #[ploidy(pointer(skip))]
         Inactive,
     }
 
@@ -793,11 +793,11 @@ fn test_skip_unit_variant() {
 #[test]
 fn test_skip_newtype_variant() {
     #[derive(JsonPointee)]
-    #[ploidy(untagged)]
+    #[ploidy(pointer(untagged))]
     #[allow(dead_code)]
     enum MyEnum {
         Value(String),
-        #[ploidy(skip)]
+        #[ploidy(pointer(skip))]
         Ref(String),
     }
 
@@ -816,13 +816,13 @@ fn test_skip_newtype_variant() {
 #[test]
 fn test_skip_struct_variant() {
     #[derive(JsonPointee)]
-    #[ploidy(untagged)]
+    #[ploidy(pointer(untagged))]
     #[allow(dead_code)]
     enum MyEnum {
         Active {
             field: String,
         },
-        #[ploidy(skip)]
+        #[ploidy(pointer(skip))]
         Inactive {
             field: String,
         },
@@ -851,15 +851,15 @@ fn test_skip_struct_variant() {
 #[test]
 fn test_multiple_variants_with_skip() {
     #[derive(JsonPointee)]
-    #[ploidy(untagged)]
+    #[ploidy(pointer(untagged))]
     #[allow(dead_code)]
     enum Status {
         Active {
             count: i32,
         },
-        #[ploidy(skip)]
+        #[ploidy(pointer(skip))]
         Pending,
-        #[ploidy(skip)]
+        #[ploidy(pointer(skip))]
         Deleted {
             reason: String,
         },
@@ -895,7 +895,7 @@ fn test_generic_type_with_bounds() {
     // Test that the derive macro correctly generates `JsonPointee` bounds for
     // generic type parameters. This mirrors the `RefOr<T>` type in Ploidy.
     #[derive(JsonPointee)]
-    #[ploidy(untagged)]
+    #[ploidy(pointer(untagged))]
     enum GenericWrapper<T> {
         Value(T),
         None,
