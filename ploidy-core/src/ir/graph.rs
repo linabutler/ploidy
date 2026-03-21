@@ -112,7 +112,7 @@ impl<'a> RawGraph<'a> {
         let mapper = TypeMapper::new(arena, |ty: &SpecType<'_>| match ty {
             SpecType::Schema(s) => indices[&ResolvedSpecType::Schema(s)],
             SpecType::Inline(i) => indices[&ResolvedSpecType::Inline(i)],
-            SpecType::Ref(r) => schemas[r.name()],
+            SpecType::Ref(r) => schemas[&*r.name()],
         });
         for node in nodes {
             let mapped = match node {

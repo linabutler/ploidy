@@ -1,7 +1,7 @@
-use std::str::FromStr;
+use std::{borrow::Cow, str::FromStr};
 
 use indexmap::IndexMap;
-use ploidy_pointer::{JsonPointee, JsonPointer};
+use ploidy_pointer::{JsonPointee, JsonPointer, JsonPointerBuf};
 use serde::{Deserialize, Deserializer};
 
 use crate::error::SerdeError;
@@ -380,24 +380,23 @@ pub struct Discriminator {
 /// A JSON Pointer reference to a component in the current document.
 #[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, JsonPointee)]
 pub struct ComponentRef {
-    /// The parsed JSON pointer (without the '#' prefix)
     #[ploidy(skip)]
-    pointer: JsonPointer<'static>,
+    pointer: JsonPointerBuf,
 }
 
 impl ComponentRef {
-    /// Returns a reference to the pointer
-    pub fn pointer(&self) -> &JsonPointer<'static> {
+    /// Returns a reference to the pointer.
+    #[inline]
+    pub fn pointer(&self) -> &JsonPointer {
         &self.pointer
     }
 
-    /// Extracts the component name (final segment, unescaped)
-    pub fn name(&self) -> &str {
-        self.pointer
-            .segments()
-            .next_back()
-            .map(|s| s.as_str())
-            .unwrap_or("")
+    /// Returns the component name.
+    #[inline]
+    pub fn name(&self) -> Cow<'_, str> {
+        // `ComponentRef::from_str()` validates that the pointer has
+        // at least one segment, so `unwrap()` is OK.
+        self.pointer.segments().next_back().unwrap().to_str()
     }
 }
 
@@ -412,8 +411,13 @@ impl FromStr for ComponentRef {
         else {
             return Err(BadComponentRef::NotSameDocument);
         };
-        let pointer = JsonPointer::parse_owned(s).map_err(BadComponentRef::Syntax)?;
-        Ok(Self { pointer })
+        let pointer = JsonPointer::parse(s).map_err(BadComponentRef::Syntax)?;
+        if pointer.is_empty() {
+            return Err(BadComponentRef::Empty);
+        }
+        Ok(Self {
+            pointer: pointer.into(),
+        })
     }
 }
 
@@ -454,6 +458,8 @@ pub enum BadComponentRef {
     NotSameDocument,
     #[error("invalid JSON Pointer syntax: {0}")]
     Syntax(#[from] ploidy_pointer::BadJsonPointerSyntax),
+    #[error("reference can't be empty")]
+    Empty,
 }
 
 pub trait FromExtension<'a>: Sized {
@@ -471,39 +477,26 @@ mod tests {
     use super::*;
 
     #[test]
-    fn parse_schema_ref() {
+    fn test_component_ref_name() {
         let r: ComponentRef = "#/components/schemas/Pet".parse().unwrap();
         assert_eq!(r.name(), "Pet");
     }
 
     #[test]
-    fn parse_all_component_types() {
-        for type_name in [
-            "schemas",
-            "responses",
-            "parameters",
-            "examples",
-            "requestBodies",
-            "headers",
-            "securitySchemes",
-            "links",
-            "callbacks",
-        ] {
-            let ref_str = format!("#/components/{}/Test", type_name);
-            let r: ComponentRef = ref_str.parse().unwrap();
-            assert_eq!(r.name(), "Test");
-        }
+    fn test_component_ref_unescapes_name() {
+        let r: ComponentRef = "#/components/schemas/Foo~1Bar".parse().unwrap();
+        assert_eq!(r.name(), "Foo/Bar");
     }
 
     #[test]
-    fn reject_external_ref() {
+    fn test_component_ref_rejects_external_ref() {
         let err = "other.yaml#/components/schemas/Pet".parse::<ComponentRef>();
         assert!(matches!(err, Err(BadComponentRef::NotSameDocument)));
     }
 
     #[test]
-    fn handle_escaping() {
-        let r: ComponentRef = "#/components/schemas/Foo~1Bar".parse().unwrap();
-        assert_eq!(r.name(), "Foo/Bar");
+    fn test_component_ref_rejects_empty() {
+        let err = "#".parse::<ComponentRef>();
+        assert!(matches!(err, Err(BadComponentRef::Empty)));
     }
 }

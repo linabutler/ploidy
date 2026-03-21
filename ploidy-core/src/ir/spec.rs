@@ -82,7 +82,7 @@ impl<'a> Spec<'a> {
                     let param = match param_or_ref {
                         RefOrParameter::Other(p) => p,
                         RefOrParameter::Ref(r) => doc
-                            .resolve(r.path.pointer().clone())
+                            .resolve(r.path.pointer())
                             .ok()
                             .and_then(|p| p.downcast_ref::<Parameter>())?,
                     };
@@ -151,7 +151,7 @@ impl<'a> Spec<'a> {
                         let request = match request_or_ref {
                             RefOrRequestBody::Other(rb) => rb,
                             RefOrRequestBody::Ref(r) => doc
-                                .resolve(r.path.pointer().clone())
+                                .resolve(r.path.pointer())
                                 .ok()
                                 .and_then(|p| p.downcast_ref::<RequestBody>())?,
                         };
@@ -222,7 +222,7 @@ impl<'a> Spec<'a> {
                             let response = match response_or_ref {
                                 RefOrResponse::Other(r) => r,
                                 RefOrResponse::Ref(r) => doc
-                                    .resolve(r.path.pointer().clone())
+                                    .resolve(r.path.pointer())
                                     .ok()
                                     .and_then(|p| p.downcast_ref::<Response>())?,
                             };
@@ -302,7 +302,7 @@ impl<'a> Spec<'a> {
             match ty {
                 SpecType::Schema(ty) => return ResolvedSpecType::Schema(ty),
                 SpecType::Inline(ty) => return ResolvedSpecType::Inline(ty),
-                SpecType::Ref(r) => ty = &self.schemas[r.name()],
+                SpecType::Ref(r) => ty = &self.schemas[&*r.name()],
             }
         }
     }

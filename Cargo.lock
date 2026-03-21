@@ -1156,8 +1156,8 @@ version = "0.10.0"
 dependencies = [
  "chrono",
  "indexmap",
- "itertools",
  "ploidy-pointer-derive",
+ "ref-cast",
  "serde_json",
  "strsim",
  "thiserror 2.0.18",

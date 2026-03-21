@@ -306,7 +306,7 @@ fn derive_for(input: &DeriveInput) -> syn::Result<TokenStream> {
     Ok(quote! {
         #[automatically_derived]
         impl #impl_generics ::ploidy_pointer::JsonPointee for #name #ty_generics #where_clause {
-            fn resolve(&self, #pointer: ::ploidy_pointer::JsonPointer<'_>)
+            fn resolve(&self, #pointer: &::ploidy_pointer::JsonPointer)
                 -> ::std::result::Result<&dyn ::ploidy_pointer::JsonPointee, ::ploidy_pointer::BadJsonPointer> {
                 #body
             }
@@ -435,7 +435,7 @@ fn derive_for_enum(
                                     let Some(#key) = #pointer.head() else {
                                         return Ok(self as &dyn ::ploidy_pointer::JsonPointee);
                                     };
-                                    if #key.as_str() == #tag_field {
+                                    if #key == #tag_field {
                                         return Ok(&#effective_name as &dyn ::ploidy_pointer::JsonPointee);
                                     }
                                     <_ as ::ploidy_pointer::JsonPointee>::resolve(inner, #pointer)
@@ -459,7 +459,7 @@ fn derive_for_enum(
                                     let Some(#key) = #pointer.head() else {
                                         return Ok(self as &dyn ::ploidy_pointer::JsonPointee);
                                     };
-                                    if #key.as_str() != #effective_name {
+                                    if #key != #effective_name {
                                         return Err(#key_err)?;
                                     }
                                     <_ as ::ploidy_pointer::JsonPointee>::resolve(inner, #pointer.tail())
@@ -486,7 +486,7 @@ fn derive_for_enum(
                                     let Some(#key) = #pointer.head() else {
                                         return Ok(self as &dyn ::ploidy_pointer::JsonPointee);
                                     };
-                                    match #key.as_str() {
+                                    match &*#key.to_str() {
                                         #tag_field => Ok(&#effective_name as &dyn ::ploidy_pointer::JsonPointee),
                                         #content_field => <_ as ::ploidy_pointer::JsonPointee>::resolve(inner, #pointer.tail()),
                                         _ => Err(#key_err)?,
@@ -810,7 +810,7 @@ impl ToTokens for NamedPointeeBody<'_> {
                         <_ as ::ploidy_pointer::JsonPointee>
                             ::resolve(
                                 #binding,
-                                #pointer.clone()
+                                #pointer
                             )
                             .or_else(|_| #rest)
                     }
@@ -826,10 +826,10 @@ impl ToTokens for NamedPointeeBody<'_> {
                     let Some(#key) = #pointer.head() else {
                         return Ok(self as &dyn ::ploidy_pointer::JsonPointee);
                     };
-                    if #key.as_str() == #tag_field {
+                    if #key == #tag_field {
                         return Ok(&#variant_name as &dyn ::ploidy_pointer::JsonPointee);
                     }
-                    match #key.as_str() {
+                    match &*#key.to_str() {
                         #(#arms,)*
                         _ => #wildcard,
                     }
@@ -849,14 +849,14 @@ impl ToTokens for NamedPointeeBody<'_> {
                     let Some(#key) = #pointer.head() else {
                         return Ok(self as &dyn ::ploidy_pointer::JsonPointee);
                     };
-                    if #key.as_str() != #variant_name {
+                    if #key != #variant_name {
                         return Err(#ty_err)?;
                     }
                     let #pointer = #pointer.tail();
                     let Some(#key) = #pointer.head() else {
                         return Ok(self as &dyn ::ploidy_pointer::JsonPointee);
                     };
-                    match #key.as_str() {
+                    match &*#key.to_str() {
                         #(#arms,)*
                         _ => #wildcard,
                     }
@@ -885,7 +885,7 @@ impl ToTokens for NamedPointeeBody<'_> {
                     let Some(#key) = #pointer.head() else {
                         return Ok(self as &dyn ::ploidy_pointer::JsonPointee);
                     };
-                    match #key.as_str() {
+                    match &*#key.to_str() {
                         #tag_field => {
                             return Ok(&#variant_name as &dyn ::ploidy_pointer::JsonPointee);
                         }
@@ -894,7 +894,7 @@ impl ToTokens for NamedPointeeBody<'_> {
                             let Some(#key) = #pointer.head() else {
                                 return Ok(self as &dyn ::ploidy_pointer::JsonPointee);
                             };
-                            match #key.as_str() {
+                            match &*#key.to_str() {
                                 #(#arms,)*
                                 _ => #wildcard,
                             }
@@ -912,7 +912,7 @@ impl ToTokens for NamedPointeeBody<'_> {
                     let Some(#key) = #pointer.head() else {
                         return Ok(self as &dyn ::ploidy_pointer::JsonPointee);
                     };
-                    match #key.as_str() {
+                    match &*#key.to_str() {
                         #(#arms,)*
                         _ => #wildcard,
                     }
@@ -986,7 +986,7 @@ impl ToTokens for TuplePointeeBody<'_> {
                     let Some(#key) = #pointer.head() else {
                         return Ok(self as &dyn ::ploidy_pointer::JsonPointee);
                     };
-                    if #key.as_str() == #tag_field {
+                    if #key == #tag_field {
                         return Ok(&#variant_name as &dyn ::ploidy_pointer::JsonPointee);
                     }
                     #tail
@@ -1006,7 +1006,7 @@ impl ToTokens for TuplePointeeBody<'_> {
                     let Some(#key) = #pointer.head() else {
                         return Ok(self as &dyn ::ploidy_pointer::JsonPointee);
                     };
-                    if #key.as_str() != #variant_name {
+                    if #key != #variant_name {
                         return Err(#ty_err)?;
                     }
                     let #pointer = #pointer.tail();
@@ -1039,7 +1039,7 @@ impl ToTokens for TuplePointeeBody<'_> {
                     let Some(#key) = #pointer.head() else {
                         return Ok(self as &dyn ::ploidy_pointer::JsonPointee);
                     };
-                    match #key.as_str() {
+                    match &*#key.to_str() {
                         #tag_field => {
                             return Ok(&#variant_name as &dyn ::ploidy_pointer::JsonPointee);
                         }
@@ -1105,7 +1105,7 @@ impl ToTokens for UnitPointeeBody<'_> {
                     let Some(#key) = #pointer.head() else {
                         return Ok(self as &dyn ::ploidy_pointer::JsonPointee);
                     };
-                    if #key.as_str() == #tag_field {
+                    if #key == #tag_field {
                         return Ok(&#variant_name as &dyn ::ploidy_pointer::JsonPointee);
                     }
                     Err(#key_err)?
@@ -1129,7 +1129,7 @@ impl ToTokens for UnitPointeeBody<'_> {
                     let Some(#key) = #pointer.head() else {
                         return Ok(self as &dyn ::ploidy_pointer::JsonPointee);
                     };
-                    if #key.as_str() != #variant_name {
+                    if #key != #variant_name {
                         return Err(#key_err)?;
                     }
                     if !#pointer.tail().is_empty() {
@@ -1155,7 +1155,7 @@ impl ToTokens for UnitPointeeBody<'_> {
                     let Some(#key) = #pointer.head() else {
                         return Ok(self as &dyn ::ploidy_pointer::JsonPointee);
                     };
-                    match #key.as_str() {
+                    match &*#key.to_str() {
                         #tag_field => {
                             return Ok(&#variant_name as &dyn ::ploidy_pointer::JsonPointee);
                         }
@@ -1381,7 +1381,7 @@ impl ToTokens for SkippedVariantBody<'_> {
                         let Some(#key) = #pointer.head() else {
                             return Ok(self as &dyn ::ploidy_pointer::JsonPointee);
                         };
-                        if #key.as_str() == #tag_field {
+                        if #key == #tag_field {
                             return Ok(&#effective_name as &dyn ::ploidy_pointer::JsonPointee);
                         }
                         Err(#ty_err)?
@@ -1418,7 +1418,7 @@ impl ToTokens for SkippedVariantBody<'_> {
                         let Some(#key) = #pointer.head() else {
                             return Ok(self as &dyn ::ploidy_pointer::JsonPointee);
                         };
-                        match #key.as_str() {
+                        match &*#key.to_str() {
                             #tag_field => {
                                 return Ok(&#effective_name as &dyn ::ploidy_pointer::JsonPointee);
                             }
