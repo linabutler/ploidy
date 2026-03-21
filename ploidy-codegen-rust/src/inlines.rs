@@ -159,8 +159,9 @@ mod tests {
         let expected: syn::File = parse_quote! {
             pub mod types {
                 mod get_items_filter {
-                    #[derive(Debug, Clone, PartialEq, Eq, Hash, Default, ::ploidy_util::serde::Serialize, ::ploidy_util::serde::Deserialize)]
+                    #[derive(Debug, Clone, PartialEq, Eq, Hash, Default, ::ploidy_util::serde::Serialize, ::ploidy_util::serde::Deserialize, ::ploidy_util::pointer::JsonPointee)]
                     #[serde(crate = "::ploidy_util::serde")]
+                    #[ploidy(pointer(crate = "::ploidy_util::pointer"))]
                     pub struct GetItemsFilter {
                         #[serde(default, skip_serializing_if = "::ploidy_util::absent::AbsentOr::is_absent")]
                         pub status: ::ploidy_util::absent::AbsentOr<::std::string::String>,
@@ -272,8 +273,9 @@ mod tests {
         let expected: syn::File = parse_quote! {
             pub mod types {
                 mod get_items_apple {
-                    #[derive(Debug, Clone, PartialEq, Eq, Hash, Default, ::ploidy_util::serde::Serialize, ::ploidy_util::serde::Deserialize)]
+                    #[derive(Debug, Clone, PartialEq, Eq, Hash, Default, ::ploidy_util::serde::Serialize, ::ploidy_util::serde::Deserialize, ::ploidy_util::pointer::JsonPointee)]
                     #[serde(crate = "::ploidy_util::serde")]
+                    #[ploidy(pointer(crate = "::ploidy_util::pointer"))]
                     pub struct GetItemsApple {
                         #[serde(default, skip_serializing_if = "::ploidy_util::absent::AbsentOr::is_absent")]
                         pub value: ::ploidy_util::absent::AbsentOr<::std::string::String>,
@@ -281,8 +283,9 @@ mod tests {
                 }
                 pub use get_items_apple::*;
                 mod get_items_mango {
-                    #[derive(Debug, Clone, PartialEq, Eq, Hash, Default, ::ploidy_util::serde::Serialize, ::ploidy_util::serde::Deserialize)]
+                    #[derive(Debug, Clone, PartialEq, Eq, Hash, Default, ::ploidy_util::serde::Serialize, ::ploidy_util::serde::Deserialize, ::ploidy_util::pointer::JsonPointee)]
                     #[serde(crate = "::ploidy_util::serde")]
+                    #[ploidy(pointer(crate = "::ploidy_util::pointer"))]
                     pub struct GetItemsMango {
                         #[serde(default, skip_serializing_if = "::ploidy_util::absent::AbsentOr::is_absent")]
                         pub value: ::ploidy_util::absent::AbsentOr<::std::string::String>,
@@ -290,8 +293,9 @@ mod tests {
                 }
                 pub use get_items_mango::*;
                 mod get_items_zebra {
-                    #[derive(Debug, Clone, PartialEq, Eq, Hash, Default, ::ploidy_util::serde::Serialize, ::ploidy_util::serde::Deserialize)]
+                    #[derive(Debug, Clone, PartialEq, Eq, Hash, Default, ::ploidy_util::serde::Serialize, ::ploidy_util::serde::Deserialize, ::ploidy_util::pointer::JsonPointee)]
                     #[serde(crate = "::ploidy_util::serde")]
+                    #[ploidy(pointer(crate = "::ploidy_util::pointer"))]
                     pub struct GetItemsZebra {
                         #[serde(default, skip_serializing_if = "::ploidy_util::absent::AbsentOr::is_absent")]
                         pub value: ::ploidy_util::absent::AbsentOr<::std::string::String>,
@@ -374,8 +378,9 @@ mod tests {
         let expected: syn::File = parse_quote! {
             pub mod types {
                 mod get_items_config {
-                    #[derive(Debug, Clone, PartialEq, Eq, Hash, Default, ::ploidy_util::serde::Serialize, ::ploidy_util::serde::Deserialize)]
+                    #[derive(Debug, Clone, PartialEq, Eq, Hash, Default, ::ploidy_util::serde::Serialize, ::ploidy_util::serde::Deserialize, ::ploidy_util::pointer::JsonPointee)]
                     #[serde(crate = "::ploidy_util::serde")]
+                    #[ploidy(pointer(crate = "::ploidy_util::pointer"))]
                     pub struct GetItemsConfig {
                         #[serde(default, skip_serializing_if = "::ploidy_util::absent::AbsentOr::is_absent")]
                         pub enabled: ::ploidy_util::absent::AbsentOr<bool>,
@@ -425,8 +430,9 @@ mod tests {
         let expected: syn::File = parse_quote! {
             pub mod types {
                 mod get_items_filters_item {
-                    #[derive(Debug, Clone, PartialEq, Eq, Hash, Default, ::ploidy_util::serde::Serialize, ::ploidy_util::serde::Deserialize)]
+                    #[derive(Debug, Clone, PartialEq, Eq, Hash, Default, ::ploidy_util::serde::Serialize, ::ploidy_util::serde::Deserialize, ::ploidy_util::pointer::JsonPointee)]
                     #[serde(crate = "::ploidy_util::serde")]
+                    #[ploidy(pointer(crate = "::ploidy_util::pointer"))]
                     pub struct GetItemsFiltersItem {
                         #[serde(default, skip_serializing_if = "::ploidy_util::absent::AbsentOr::is_absent")]
                         pub field: ::ploidy_util::absent::AbsentOr<::std::string::String>,
@@ -476,8 +482,9 @@ mod tests {
         let expected: syn::File = parse_quote! {
             pub mod types {
                 mod get_items_metadata_value {
-                    #[derive(Debug, Clone, PartialEq, Eq, Hash, Default, ::ploidy_util::serde::Serialize, ::ploidy_util::serde::Deserialize)]
+                    #[derive(Debug, Clone, PartialEq, Eq, Hash, Default, ::ploidy_util::serde::Serialize, ::ploidy_util::serde::Deserialize, ::ploidy_util::pointer::JsonPointee)]
                     #[serde(crate = "::ploidy_util::serde")]
+                    #[ploidy(pointer(crate = "::ploidy_util::pointer"))]
                     pub struct GetItemsMetadataValue {
                         #[serde(default, skip_serializing_if = "::ploidy_util::absent::AbsentOr::is_absent")]
                         pub value: ::ploidy_util::absent::AbsentOr<::std::string::String>,

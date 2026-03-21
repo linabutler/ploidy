@@ -1,4 +1,5 @@
 use base64::Engine;
+use ploidy_pointer::{BadJsonPointer, BadJsonPointerTy, JsonPointee, JsonPointer};
 use serde::{Deserialize, Deserializer, Serialize, Serializer, de};
 
 /// A wrapper around a [`Vec<u8>`] that serializes and deserializes
@@ -10,6 +11,16 @@ impl Base64 {
     #[inline]
     pub fn into_vec(self) -> Vec<u8> {
         self.0
+    }
+}
+
+impl JsonPointee for Base64 {
+    fn resolve(&self, pointer: &JsonPointer) -> Result<&dyn JsonPointee, BadJsonPointer> {
+        if pointer.is_empty() {
+            Ok(self as &dyn JsonPointee)
+        } else {
+            Err(BadJsonPointerTy::new(pointer).into())
+        }
     }
 }
 

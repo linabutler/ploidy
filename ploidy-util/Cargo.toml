@@ -15,6 +15,7 @@ chrono = { version = "0.4", features = ["serde"] }
 http = "1"
 itertools = "0.14"
 percent-encoding = "2.3"
+ploidy-pointer = { workspace = true, features = ["chrono", "derive", "serde_json", "url"] }
 reqwest = { version = "0.13", default-features = false, features = [
     "form",
     "http2",
