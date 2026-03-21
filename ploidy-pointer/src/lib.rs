@@ -1,106 +1,172 @@
 use std::{
     any::Any,
-    borrow::Cow,
+    borrow::{Borrow, Cow},
     collections::{BTreeMap, HashMap},
     fmt::{Debug, Display},
     hash::BuildHasher,
+    iter::FusedIterator,
     ops::{Deref, Range},
     rc::Rc,
+    str::Split,
     sync::Arc,
 };
 
-use itertools::Itertools;
+use ref_cast::{RefCastCustom, ref_cast_custom};
 
 #[cfg(feature = "derive")]
 pub use ploidy_pointer_derive::JsonPointee;
 
-/// A parsed JSON Pointer.
-#[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
-pub struct JsonPointer<'a>(Cow<'a, [JsonPointerSegment<'a>]>);
+/// A JSON Pointer.
+#[derive(Debug, Eq, Hash, Ord, PartialEq, PartialOrd, RefCastCustom)]
+#[repr(transparent)]
+pub struct JsonPointer(str);
 
-impl JsonPointer<'static> {
-    /// Constructs a pointer from an RFC 6901 string,
-    /// with segments that own their contents.
-    pub fn parse_owned(s: &str) -> Result<Self, BadJsonPointerSyntax> {
-        if s.is_empty() {
-            return Ok(Self::empty());
+impl JsonPointer {
+    #[ref_cast_custom]
+    fn new(raw: &str) -> &Self;
+
+    /// Parses a pointer from an RFC 6901 string.
+    ///
+    /// The empty string is the valid root pointer.
+    /// All other strings must start with `/`.
+    #[inline]
+    pub fn parse(s: &str) -> Result<&Self, BadJsonPointerSyntax> {
+        if s.is_empty() || s.starts_with('/') {
+            Ok(Self::new(s))
+        } else {
+            Err(BadJsonPointerSyntax::MissingLeadingSlash)
         }
-        let Some(s) = s.strip_prefix('/') else {
-            return Err(BadJsonPointerSyntax::MissingLeadingSlash);
-        };
-        let segments = s
-            .split('/')
-            .map(str::to_owned)
-            .map(JsonPointerSegment::from_str)
-            .collect_vec();
-        Ok(Self(segments.into()))
-    }
-}
-
-impl<'a> JsonPointer<'a> {
-    /// Constructs an empty pointer that resolves to the current value.
-    pub fn empty() -> Self {
-        Self(Cow::Borrowed(&[]))
     }
 
-    /// Constructs a pointer from an RFC 6901 string,
-    /// with segments that borrow from the string.
-    pub fn parse(s: &'a str) -> Result<Self, BadJsonPointerSyntax> {
-        if s.is_empty() {
-            return Ok(Self::empty());
-        }
-        let Some(s) = s.strip_prefix('/') else {
-            return Err(BadJsonPointerSyntax::MissingLeadingSlash);
-        };
-        let segments = s.split('/').map(JsonPointerSegment::from_str).collect_vec();
-        Ok(Self(segments.into()))
+    /// Returns the empty root pointer.
+    #[inline]
+    pub fn empty() -> &'static Self {
+        JsonPointer::new("")
     }
 
-    /// Returns `true` if this is an empty pointer.
+    /// Returns `true` if this is the empty root pointer.
+    #[inline]
     pub fn is_empty(&self) -> bool {
         self.0.is_empty()
     }
 
-    /// Returns the first segment of this pointer, or `None`
-    /// if this is an empty pointer.
-    pub fn head(&self) -> Option<&JsonPointerSegment<'a>> {
-        self.0.first()
+    /// Returns the first segment, or `None` for the root pointer.
+    #[inline]
+    pub fn head(&self) -> Option<&JsonPointerSegment> {
+        let rest = self.0.strip_prefix('/')?;
+        let raw = rest.find('/').map(|index| &rest[..index]).unwrap_or(rest);
+        Some(JsonPointerSegment::new(raw))
     }
 
-    /// Returns a new pointer without the first segment of this pointer.
-    /// If this pointer has only one segment, or is an empty pointer,
-    /// returns an empty pointer.
-    pub fn tail(&self) -> JsonPointer<'_> {
+    /// Returns the pointer without its first segment.
+    ///
+    /// For the root pointer, returns the root pointer.
+    #[inline]
+    pub fn tail(&self) -> &JsonPointer {
         self.0
-            .get(1..)
-            .map(|tail| JsonPointer(tail.into()))
-            .unwrap_or_else(JsonPointer::empty)
+            .strip_prefix('/')
+            .and_then(|rest| rest.find('/').map(|index| &rest[index..]))
+            .map(JsonPointer::new)
+            .unwrap_or_else(|| JsonPointer::empty())
     }
 
-    /// Returns a borrowing iterator over this pointer's segments.
+    /// Returns a borrowing iterator over the segments.
+    #[inline]
     pub fn segments(&self) -> JsonPointerSegments<'_> {
-        JsonPointerSegments(self.0.iter())
-    }
-
-    /// Returns a consuming iterator over this pointer's segments.
-    pub fn into_segments(self) -> IntoJsonPointerSegments<'a> {
-        IntoJsonPointerSegments(self.0.into_owned().into_iter())
+        JsonPointerSegments(self.0.strip_prefix('/').map(|raw| raw.split('/')))
     }
 }
 
-impl Display for JsonPointer<'_> {
+impl Display for JsonPointer {
+    #[inline]
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match &*self.0 {
-            [] => Ok(()),
-            segments => write!(f, "/{}", segments.iter().format("/")),
+        f.write_str(&self.0)
+    }
+}
+
+impl<'a> From<&'a JsonPointer> for Cow<'a, JsonPointer> {
+    #[inline]
+    fn from(value: &'a JsonPointer) -> Self {
+        Cow::Borrowed(value)
+    }
+}
+
+impl ToOwned for JsonPointer {
+    type Owned = JsonPointerBuf;
+
+    #[inline]
+    fn to_owned(&self) -> Self::Owned {
+        JsonPointerBuf(self.0.to_owned())
+    }
+}
+
+/// An owned JSON Pointer.
+#[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub struct JsonPointerBuf(String);
+
+impl JsonPointerBuf {
+    /// Parses an owned pointer from an RFC 6901 string.
+    ///
+    /// The empty string is the valid root pointer.
+    /// All other strings must start with `/`.
+    #[inline]
+    pub fn parse(s: String) -> Result<Self, BadJsonPointerSyntax> {
+        if s.is_empty() || s.starts_with('/') {
+            Ok(Self(s))
+        } else {
+            Err(BadJsonPointerSyntax::MissingLeadingSlash)
         }
+    }
+}
+
+impl AsRef<JsonPointer> for JsonPointerBuf {
+    #[inline]
+    fn as_ref(&self) -> &JsonPointer {
+        self
+    }
+}
+
+impl Borrow<JsonPointer> for JsonPointerBuf {
+    #[inline]
+    fn borrow(&self) -> &JsonPointer {
+        self
+    }
+}
+
+impl Deref for JsonPointerBuf {
+    type Target = JsonPointer;
+
+    #[inline]
+    fn deref(&self) -> &Self::Target {
+        JsonPointer::new(&self.0)
+    }
+}
+
+impl Display for JsonPointerBuf {
+    #[inline]
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        <JsonPointer as Display>::fmt(self, f)
+    }
+}
+
+impl From<JsonPointerBuf> for Cow<'_, JsonPointer> {
+    #[inline]
+    fn from(value: JsonPointerBuf) -> Self {
+        Cow::Owned(value)
+    }
+}
+
+impl From<&JsonPointer> for JsonPointerBuf {
+    #[inline]
+    fn from(value: &JsonPointer) -> Self {
+        value.to_owned()
     }
 }
 
 /// A value that a [`JsonPointer`] points to.
 pub trait JsonPointee: Any {
     /// Resolves a [`JsonPointer`] against this value.
-    fn resolve(&self, pointer: JsonPointer<'_>) -> Result<&dyn JsonPointee, BadJsonPointer>;
+    fn resolve(&self, pointer: &JsonPointer) -> Result<&dyn JsonPointee, BadJsonPointer>;
 }
 
 impl dyn JsonPointee {
@@ -118,131 +184,89 @@ impl dyn JsonPointee {
     }
 }
 
-/// A borrowing iterator over the segments of a [`JsonPointer`].
-#[derive(Clone, Debug)]
-pub struct JsonPointerSegments<'a>(std::slice::Iter<'a, JsonPointerSegment<'a>>);
-
-impl<'a> Iterator for JsonPointerSegments<'a> {
-    type Item = &'a JsonPointerSegment<'a>;
-
-    #[inline]
-    fn next(&mut self) -> Option<Self::Item> {
-        self.0.next()
-    }
-
-    #[inline]
-    fn size_hint(&self) -> (usize, Option<usize>) {
-        self.0.size_hint()
-    }
-
-    #[inline]
-    fn count(self) -> usize {
-        self.0.count()
-    }
-
-    #[inline]
-    fn last(mut self) -> Option<Self::Item> {
-        self.next_back()
-    }
-}
-
-impl ExactSizeIterator for JsonPointerSegments<'_> {}
-
-impl DoubleEndedIterator for JsonPointerSegments<'_> {
-    #[inline]
-    fn next_back(&mut self) -> Option<Self::Item> {
-        self.0.next_back()
-    }
-}
-
-/// A consuming iterator over the segments of a [`JsonPointer`].
-#[derive(Debug)]
-pub struct IntoJsonPointerSegments<'a>(std::vec::IntoIter<JsonPointerSegment<'a>>);
-
-impl<'a> Iterator for IntoJsonPointerSegments<'a> {
-    type Item = JsonPointerSegment<'a>;
-
-    #[inline]
-    fn next(&mut self) -> Option<Self::Item> {
-        self.0.next()
-    }
-
-    #[inline]
-    fn size_hint(&self) -> (usize, Option<usize>) {
-        self.0.size_hint()
-    }
-
-    #[inline]
-    fn count(self) -> usize {
-        self.0.count()
-    }
-
-    #[inline]
-    fn last(mut self) -> Option<Self::Item> {
-        self.next_back()
-    }
-}
-
-impl ExactSizeIterator for IntoJsonPointerSegments<'_> {}
-
-impl DoubleEndedIterator for IntoJsonPointerSegments<'_> {
-    #[inline]
-    fn next_back(&mut self) -> Option<Self::Item> {
-        self.0.next_back()
-    }
-}
-
 /// A single segment of a [`JsonPointer`].
-#[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
-pub struct JsonPointerSegment<'a>(Cow<'a, str>);
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Hash, RefCastCustom)]
+#[repr(transparent)]
+pub struct JsonPointerSegment(str);
 
-impl<'a> JsonPointerSegment<'a> {
+impl JsonPointerSegment {
+    #[ref_cast_custom]
+    fn new(raw: &str) -> &Self;
+
+    /// Returns the value of this segment as a string.
     #[inline]
-    fn from_str(s: impl Into<Cow<'a, str>>) -> Self {
-        let s = s.into();
-        if s.contains('~') {
-            Self(s.replace("~1", "/").replace("~0", "~").into())
+    pub fn to_str(&self) -> Cow<'_, str> {
+        if self.0.contains('~') {
+            self.0.replace("~1", "/").replace("~0", "~").into()
         } else {
-            Self(s)
+            Cow::Borrowed(&self.0)
         }
-    }
-
-    /// Returns the string value of this segment.
-    #[inline]
-    pub fn as_str(&self) -> &str {
-        self
     }
 
     /// Returns the value of this segment as an array index,
     /// or `None` if this segment can't be used as an index.
     #[inline]
     pub fn to_index(&self) -> Option<usize> {
-        match self.as_bytes() {
+        match self.0.as_bytes() {
             [b'0'] => Some(0),
-            [b'1'..=b'9', rest @ ..] if rest.iter().all(|b: &u8| b.is_ascii_digit()) => {
+            [b'1'..=b'9', rest @ ..] if rest.iter().all(u8::is_ascii_digit) => {
                 // `usize::from_str` allows a leading `+`, and
                 // ignores leading zeros; RFC 6901 forbids both.
-                self.parse().ok()
+                self.0.parse().ok()
             }
             _ => None,
         }
     }
 }
 
-impl Deref for JsonPointerSegment<'_> {
-    type Target = str;
+impl PartialEq<str> for JsonPointerSegment {
+    #[inline]
+    fn eq(&self, other: &str) -> bool {
+        self.to_str() == other
+    }
+}
+
+impl PartialEq<JsonPointerSegment> for str {
+    #[inline]
+    fn eq(&self, other: &JsonPointerSegment) -> bool {
+        other == self
+    }
+}
+
+impl Display for JsonPointerSegment {
+    #[inline]
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.to_str())
+    }
+}
+
+/// A borrowing iterator over the segments of a [`JsonPointer`].
+#[derive(Clone, Debug)]
+pub struct JsonPointerSegments<'a>(Option<Split<'a, char>>);
+
+impl<'a> Iterator for JsonPointerSegments<'a> {
+    type Item = &'a JsonPointerSegment;
 
     #[inline]
-    fn deref(&self) -> &Self::Target {
-        &self.0
+    fn next(&mut self) -> Option<Self::Item> {
+        self.0
+            .as_mut()
+            .and_then(|iter| iter.next())
+            .map(JsonPointerSegment::new)
     }
 }
 
-impl Display for JsonPointerSegment<'_> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.replace("~", "~0").replace("/", "~1"))
+impl<'a> DoubleEndedIterator for JsonPointerSegments<'a> {
+    #[inline]
+    fn next_back(&mut self) -> Option<Self::Item> {
+        self.0
+            .as_mut()
+            .and_then(|iter| iter.next_back())
+            .map(JsonPointerSegment::new)
     }
 }
+
+impl FusedIterator for JsonPointerSegments<'_> {}
 
 macro_rules! impl_pointee_for {
     () => {};
@@ -253,18 +277,18 @@ macro_rules! impl_pointee_for {
     };
     ($ty:ty $(, $($rest:tt)*)?) => {
         impl JsonPointee for $ty {
-            fn resolve(&self, pointer: JsonPointer<'_>) -> Result<&dyn JsonPointee, BadJsonPointer> {
+            fn resolve(&self, pointer: &JsonPointer) -> Result<&dyn JsonPointee, BadJsonPointer> {
                 if pointer.is_empty() {
                     Ok(self)
                 } else {
                     Err({
                         #[cfg(feature = "did-you-mean")]
                         let err = BadJsonPointerTy::with_ty(
-                            &pointer,
+                            pointer,
                             JsonPointeeTy::Named(stringify!($ty)),
                         );
                         #[cfg(not(feature = "did-you-mean"))]
-                        let err = BadJsonPointerTy::new(&pointer);
+                        let err = BadJsonPointerTy::new(pointer);
                         err
                     })?
                 }
@@ -281,7 +305,7 @@ impl_pointee_for!(
 );
 
 impl<T: JsonPointee> JsonPointee for Option<T> {
-    fn resolve(&self, pointer: JsonPointer<'_>) -> Result<&dyn JsonPointee, BadJsonPointer> {
+    fn resolve(&self, pointer: &JsonPointer) -> Result<&dyn JsonPointee, BadJsonPointer> {
         if let Some(value) = self {
             value.resolve(pointer)
         } else {
@@ -300,25 +324,25 @@ impl<T: JsonPointee> JsonPointee for Option<T> {
 }
 
 impl<T: JsonPointee> JsonPointee for Box<T> {
-    fn resolve(&self, pointer: JsonPointer<'_>) -> Result<&dyn JsonPointee, BadJsonPointer> {
+    fn resolve(&self, pointer: &JsonPointer) -> Result<&dyn JsonPointee, BadJsonPointer> {
         (**self).resolve(pointer)
     }
 }
 
 impl<T: JsonPointee> JsonPointee for Arc<T> {
-    fn resolve(&self, pointer: JsonPointer<'_>) -> Result<&dyn JsonPointee, BadJsonPointer> {
+    fn resolve(&self, pointer: &JsonPointer) -> Result<&dyn JsonPointee, BadJsonPointer> {
         (**self).resolve(pointer)
     }
 }
 
 impl<T: JsonPointee> JsonPointee for Rc<T> {
-    fn resolve(&self, pointer: JsonPointer<'_>) -> Result<&dyn JsonPointee, BadJsonPointer> {
+    fn resolve(&self, pointer: &JsonPointer) -> Result<&dyn JsonPointee, BadJsonPointer> {
         (**self).resolve(pointer)
     }
 }
 
 impl<T: JsonPointee> JsonPointee for Vec<T> {
-    fn resolve(&self, pointer: JsonPointer<'_>) -> Result<&dyn JsonPointee, BadJsonPointer> {
+    fn resolve(&self, pointer: &JsonPointer) -> Result<&dyn JsonPointee, BadJsonPointer> {
         let Some(key) = pointer.head() else {
             return Ok(self);
         };
@@ -331,10 +355,9 @@ impl<T: JsonPointee> JsonPointee for Vec<T> {
         } else {
             Err({
                 #[cfg(feature = "did-you-mean")]
-                let err =
-                    BadJsonPointerTy::with_ty(&pointer, JsonPointeeTy::Named(stringify!($ty)));
+                let err = BadJsonPointerTy::with_ty(pointer, JsonPointeeTy::name_of(self));
                 #[cfg(not(feature = "did-you-mean"))]
-                let err = BadJsonPointerTy::new(&pointer);
+                let err = BadJsonPointerTy::new(pointer);
                 err
             })?
         }
@@ -346,11 +369,11 @@ where
     T: JsonPointee,
     H: BuildHasher + 'static,
 {
-    fn resolve(&self, pointer: JsonPointer<'_>) -> Result<&dyn JsonPointee, BadJsonPointer> {
+    fn resolve(&self, pointer: &JsonPointer) -> Result<&dyn JsonPointee, BadJsonPointer> {
         let Some(key) = pointer.head() else {
             return Ok(self);
         };
-        if let Some(value) = self.get(key.as_str()) {
+        if let Some(value) = self.get(&*key.to_str()) {
             value.resolve(pointer.tail())
         } else {
             Err({
@@ -369,11 +392,11 @@ where
 }
 
 impl<T: JsonPointee> JsonPointee for BTreeMap<String, T> {
-    fn resolve(&self, pointer: JsonPointer<'_>) -> Result<&dyn JsonPointee, BadJsonPointer> {
+    fn resolve(&self, pointer: &JsonPointer) -> Result<&dyn JsonPointee, BadJsonPointer> {
         let Some(key) = pointer.head() else {
             return Ok(self);
         };
-        if let Some(value) = self.get(key.as_str()) {
+        if let Some(value) = self.get(&*key.to_str()) {
             value.resolve(pointer.tail())
         } else {
             Err({
@@ -397,11 +420,11 @@ where
     T: JsonPointee,
     H: BuildHasher + 'static,
 {
-    fn resolve(&self, pointer: JsonPointer<'_>) -> Result<&dyn JsonPointee, BadJsonPointer> {
+    fn resolve(&self, pointer: &JsonPointer) -> Result<&dyn JsonPointee, BadJsonPointer> {
         let Some(key) = pointer.head() else {
             return Ok(self);
         };
-        if let Some(value) = self.get(key.as_str()) {
+        if let Some(value) = self.get(&*key.to_str()) {
             value.resolve(pointer.tail())
         } else {
             Err({
@@ -421,13 +444,13 @@ where
 
 #[cfg(feature = "serde_json")]
 impl JsonPointee for serde_json::Value {
-    fn resolve(&self, pointer: JsonPointer<'_>) -> Result<&dyn JsonPointee, BadJsonPointer> {
+    fn resolve(&self, pointer: &JsonPointer) -> Result<&dyn JsonPointee, BadJsonPointer> {
         let Some(key) = pointer.head() else {
             return Ok(self);
         };
         match self {
             serde_json::Value::Object(map) => {
-                if let Some(value) = map.get(key.as_str()) {
+                if let Some(value) = map.get(&*key.to_str()) {
                     value.resolve(pointer.tail())
                 } else {
                     Err({
@@ -447,10 +470,9 @@ impl JsonPointee for serde_json::Value {
                 let Some(index) = key.to_index() else {
                     return Err({
                         #[cfg(feature = "did-you-mean")]
-                        let err =
-                            BadJsonPointerTy::with_ty(&pointer, JsonPointeeTy::name_of(array));
+                        let err = BadJsonPointerTy::with_ty(pointer, JsonPointeeTy::name_of(array));
                         #[cfg(not(feature = "did-you-mean"))]
-                        let err = BadJsonPointerTy::new(&pointer);
+                        let err = BadJsonPointerTy::new(pointer);
                         err
                     })?;
                 };
@@ -469,9 +491,9 @@ impl JsonPointee for serde_json::Value {
             })?,
             _ => Err({
                 #[cfg(feature = "did-you-mean")]
-                let err = BadJsonPointerTy::with_ty(&pointer, JsonPointeeTy::name_of(self));
+                let err = BadJsonPointerTy::with_ty(pointer, JsonPointeeTy::name_of(self));
                 #[cfg(not(feature = "did-you-mean"))]
-                let err = BadJsonPointerTy::new(&pointer);
+                let err = BadJsonPointerTy::new(pointer);
                 err
             })?,
         }
@@ -507,18 +529,18 @@ pub struct BadJsonPointerKey {
 
 impl BadJsonPointerKey {
     #[cold]
-    pub fn new(key: &JsonPointerSegment<'_>) -> Self {
+    pub fn new(key: &JsonPointerSegment) -> Self {
         Self {
-            key: key.to_string(),
+            key: key.to_str().into_owned(),
             context: None,
         }
     }
 
     #[cfg(feature = "did-you-mean")]
     #[cold]
-    pub fn with_ty(key: &JsonPointerSegment<'_>, ty: JsonPointeeTy) -> Self {
+    pub fn with_ty(key: &JsonPointerSegment, ty: JsonPointeeTy) -> Self {
         Self {
-            key: key.to_string(),
+            key: key.to_str().into_owned(),
             context: Some(BadJsonPointerKeyContext {
                 ty,
                 suggestion: None,
@@ -529,13 +551,14 @@ impl BadJsonPointerKey {
     #[cfg(feature = "did-you-mean")]
     #[cold]
     pub fn with_suggestions<'a>(
-        key: &'a JsonPointerSegment<'_>,
+        key: &JsonPointerSegment,
         ty: JsonPointeeTy,
         suggestions: impl IntoIterator<Item = &'a str>,
     ) -> Self {
+        let key = key.to_str();
         let suggestion = suggestions
             .into_iter()
-            .map(|suggestion| (suggestion, strsim::jaro_winkler(key.as_str(), suggestion)))
+            .map(|suggestion| (suggestion, strsim::jaro_winkler(&key, suggestion)))
             .max_by(|&(_, a), &(_, b)| {
                 // `strsim::jaro_winkler` returns the Jaro-Winkler _similarity_,
                 // not distance; so higher values mean the strings are closer.
@@ -543,7 +566,7 @@ impl BadJsonPointerKey {
             })
             .map(|(suggestion, _)| suggestion.to_owned());
         Self {
-            key: key.to_string(),
+            key: key.into_owned(),
             context: Some(BadJsonPointerKeyContext { ty, suggestion }),
         }
     }
@@ -586,7 +609,7 @@ pub struct BadJsonPointerTy {
 }
 
 impl BadJsonPointerTy {
-    pub fn new(pointer: &JsonPointer<'_>) -> Self {
+    pub fn new(pointer: &JsonPointer) -> Self {
         Self {
             pointer: pointer.to_string(),
             ty: None,
@@ -595,7 +618,7 @@ impl BadJsonPointerTy {
 
     #[cfg(feature = "did-you-mean")]
     #[cold]
-    pub fn with_ty(pointer: &JsonPointer<'_>, ty: JsonPointeeTy) -> Self {
+    pub fn with_ty(pointer: &JsonPointer, ty: JsonPointeeTy) -> Self {
         Self {
             pointer: pointer.to_string(),
             ty: Some(ty),
@@ -698,32 +721,99 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_parse_pointer() {
+    fn test_segments() {
         let pointer = JsonPointer::parse("/foo/bar/0").unwrap();
-        let mut segments = pointer.into_segments();
-        assert_eq!(segments.len(), 3);
-        assert_eq!(segments.next(), Some(JsonPointerSegment::from_str("foo")));
-        assert_eq!(segments.next(), Some(JsonPointerSegment::from_str("bar")));
+        let mut segments = pointer.segments();
+        assert_eq!(segments.next().unwrap(), "foo");
+        assert_eq!(segments.next().unwrap(), "bar");
         // `"0"` is parsed as a string segment, but implementations for `Vec`
         // and tuple structs will parse it as an index.
-        assert_eq!(segments.next(), Some(JsonPointerSegment::from_str("0")));
+        assert_eq!(segments.next().unwrap(), "0");
         assert_eq!(segments.next(), None);
     }
 
     #[test]
-    fn test_parse_pointer_escaping() {
+    fn test_escaped_segments() {
         let pointer = JsonPointer::parse("/foo~1bar/baz~0qux").unwrap();
-        let mut segments = pointer.into_segments();
-        assert_eq!(segments.len(), 2);
-        assert_eq!(
-            segments.next(),
-            Some(JsonPointerSegment::from_str("foo~1bar"))
-        );
-        assert_eq!(
-            segments.next(),
-            Some(JsonPointerSegment::from_str("baz~0qux"))
-        );
+        let mut segments = pointer.segments();
+        // `~1` unescapes to `/`, `~0` unescapes to `~`.
+        assert_eq!(segments.next().unwrap(), "foo/bar");
+        assert_eq!(segments.next().unwrap(), "baz~qux");
         assert_eq!(segments.next(), None);
+    }
+
+    #[test]
+    fn test_segment_display() {
+        let pointer = JsonPointer::parse("/foo~1bar").unwrap();
+        let segment = pointer.head().unwrap();
+        assert_eq!(segment.to_string(), "foo/bar");
+    }
+
+    #[test]
+    fn test_pointer_display() {
+        let input = "/foo/bar~1baz/0";
+        let pointer = JsonPointer::parse(input).unwrap();
+        assert_eq!(pointer.to_string(), input);
+    }
+
+    #[test]
+    fn test_pointer_buf() {
+        let pointer: Cow<'_, JsonPointer> = JsonPointer::parse("/foo/bar~0baz").unwrap().into();
+        let owned = pointer.into_owned();
+        let mut segments = owned.segments();
+        assert_eq!(segments.next().unwrap(), "foo");
+        assert_eq!(segments.next().unwrap(), "bar~baz");
+        assert_eq!(owned.to_string(), "/foo/bar~0baz");
+    }
+
+    #[test]
+    fn test_head_tail_single_segment() {
+        let pointer = JsonPointer::parse("/foo").unwrap();
+        assert_eq!(pointer.head().unwrap(), "foo");
+        assert!(pointer.tail().is_empty());
+    }
+
+    #[test]
+    fn test_tail_root_idempotent() {
+        let root = JsonPointer::empty();
+        assert!(root.tail().is_empty());
+        assert!(root.tail().tail().is_empty());
+    }
+
+    #[test]
+    fn test_trailing_slash_produces_empty_segment() {
+        let pointer = JsonPointer::parse("/foo/").unwrap();
+        let mut segments = pointer.segments();
+        assert_eq!(segments.next().unwrap(), "foo");
+        assert_eq!(segments.next().unwrap(), "");
+        assert_eq!(segments.next(), None);
+
+        // `head()` returns the first segment; `tail()` preserves the
+        // trailing slash as a pointer with one empty segment.
+        assert_eq!(pointer.head().unwrap(), "foo");
+        let tail = pointer.tail();
+        assert_eq!(tail.head().unwrap(), "");
+        assert!(tail.tail().is_empty());
+    }
+
+    #[test]
+    fn test_consecutive_slashes() {
+        let pointer = JsonPointer::parse("//").unwrap();
+        let mut segments = pointer.segments();
+        assert_eq!(segments.next().unwrap(), "");
+        assert_eq!(segments.next().unwrap(), "");
+        assert_eq!(segments.next(), None);
+
+        assert_eq!(pointer.head().unwrap(), "");
+        let tail = pointer.tail();
+        assert_eq!(tail.head().unwrap(), "");
+        assert!(tail.tail().is_empty());
+    }
+
+    #[test]
+    fn test_parse_missing_leading_slash() {
+        assert!(JsonPointer::parse("foo").is_err());
+        assert!(JsonPointerBuf::parse("foo".to_owned()).is_err());
     }
 
     #[test]
@@ -765,26 +855,5 @@ mod tests {
         let data = 42;
         let pointer = JsonPointer::parse("/foo").unwrap();
         assert!(data.resolve(pointer).is_err());
-    }
-
-    #[test]
-    fn test_segments() {
-        let pointer = JsonPointer::parse("/foo/bar/baz").unwrap();
-
-        // Can iterate multiple times with borrowing iterator.
-        let segments: Vec<_> = pointer.segments().map(|s| s.as_str()).collect();
-        assert_eq!(segments, vec!["foo", "bar", "baz"]);
-
-        // Pointer is still usable after borrowing iteration.
-        let segments_again: Vec<_> = pointer.segments().map(|s| s.as_str()).collect();
-        assert_eq!(segments_again, vec!["foo", "bar", "baz"]);
-
-        // Verify iterator traits.
-        assert_eq!(pointer.segments().len(), 3);
-        assert_eq!(pointer.segments().last().map(|s| s.as_str()), Some("baz"));
-        assert_eq!(
-            pointer.segments().next_back().map(|s| s.as_str()),
-            Some("baz")
-        );
     }
 }

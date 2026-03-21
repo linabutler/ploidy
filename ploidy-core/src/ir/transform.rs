@@ -99,15 +99,16 @@ impl<'context, 'a> IrTransformer<'context, 'a> {
             for schema in one_of {
                 match schema {
                     RefOrSchema::Ref(r) => {
+                        let name: &_ = self.arena().alloc_str(&r.path.name());
                         let aliases =
                             match inverted.get(&r.path).map(|s| s.as_slice()).unwrap_or(&[]) {
                                 // When a discriminator value doesn't have
                                 // an explicit `mapping`, use the schema name.
-                                [] => &[&*self.arena().alloc_str(r.path.name())],
+                                [] => &[name],
                                 aliases => aliases,
                             };
                         variants.push(SpecTaggedVariant {
-                            name: r.path.name(),
+                            name,
                             ty: self.arena().alloc(SpecType::Ref(&r.path)),
                             aliases: self.arena().alloc_slice_copy(aliases),
                         });
@@ -260,12 +261,12 @@ impl<'context, 'a> IrTransformer<'context, 'a> {
                         // For references, use the referenced type's name
                         // as the field name. For example, a pointer like
                         // `#/components/schemas/Address` becomes `address`.
-                        let name = StructFieldName::Name(r.path.name());
+                        let name = StructFieldName::Name(self.arena().alloc_str(&r.path.name()));
                         let ty: &_ = self.arena().alloc(SpecType::Ref(&r.path));
                         let desc = self
                             .context
                             .doc
-                            .resolve(r.path.pointer().clone())
+                            .resolve(r.path.pointer())
                             .ok()
                             .and_then(|p| p.downcast_ref::<Schema>())
                             .and_then(|s| s.description.as_deref());
@@ -665,7 +666,7 @@ impl<'context, 'a> IrTransformer<'context, 'a> {
                     RefOrSchema::Ref(r) => self
                         .context
                         .doc
-                        .resolve(r.path.pointer().clone())
+                        .resolve(r.path.pointer())
                         .ok()
                         .and_then(|p| p.downcast_ref::<Schema>())
                         .and_then(|schema| schema.description.as_deref()),
@@ -673,7 +674,7 @@ impl<'context, 'a> IrTransformer<'context, 'a> {
                 let nullable = match field_schema {
                     RefOrSchema::Other(schema) if schema.nullable => true,
                     RefOrSchema::Ref(r) => {
-                        if let Ok(resolved) = self.context.doc.resolve(r.path.pointer().clone())
+                        if let Ok(resolved) = self.context.doc.resolve(r.path.pointer())
                             && let Some(schema) = resolved.downcast_ref::<Schema>()
                             && schema.nullable
                         {
