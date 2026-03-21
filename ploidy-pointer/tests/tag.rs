@@ -3,7 +3,7 @@ use ploidy_pointer::{JsonPointee, JsonPointer};
 #[test]
 fn test_basic_tag_named_variants() {
     #[derive(JsonPointee)]
-    #[ploidy(tag = "type")]
+    #[ploidy(pointer(tag = "type"))]
     enum Response {
         Success { data: String },
         Error { code: i32 },
@@ -36,7 +36,7 @@ fn test_basic_tag_named_variants() {
 #[test]
 fn test_tag_with_rename_all() {
     #[derive(JsonPointee)]
-    #[ploidy(tag = "type", rename_all = "camelCase")]
+    #[ploidy(pointer(tag = "type", rename_all = "camelCase"))]
     enum Response {
         SuccessResponse {
             data: String,
@@ -60,11 +60,11 @@ fn test_tag_with_rename_all() {
 #[test]
 fn test_tag_with_variant_rename() {
     #[derive(JsonPointee)]
-    #[ploidy(tag = "kind")]
+    #[ploidy(pointer(tag = "kind"))]
     enum Message {
-        #[ploidy(rename = "success")]
+        #[ploidy(pointer(rename = "success"))]
         Success { text: String },
-        #[ploidy(rename = "error")]
+        #[ploidy(pointer(rename = "error"))]
         Error { message: String },
     }
 
@@ -88,7 +88,7 @@ fn test_tag_with_variant_rename() {
 #[test]
 fn test_tag_with_unit_variants() {
     #[derive(JsonPointee)]
-    #[ploidy(tag = "status")]
+    #[ploidy(pointer(tag = "status"))]
     enum Status {
         Pending,
         #[allow(dead_code)]
@@ -116,7 +116,7 @@ fn test_tag_with_unit_variants() {
 #[test]
 fn test_tag_with_newtype_variants() {
     #[derive(JsonPointee)]
-    #[ploidy(tag = "type")]
+    #[ploidy(pointer(tag = "type"))]
     enum Wrapper {
         String(String),
         #[allow(dead_code)]
@@ -140,7 +140,7 @@ fn test_tag_with_newtype_variants() {
 #[test]
 fn test_tag_with_tuple_variants() {
     #[derive(JsonPointee)]
-    #[ploidy(tag = "type")]
+    #[ploidy(pointer(tag = "type"))]
     enum Data {
         Pair(String, i32),
         #[allow(dead_code)]
@@ -167,7 +167,7 @@ fn test_tag_with_tuple_variants() {
 #[test]
 fn test_backward_compatibility_without_tag() {
     #[derive(JsonPointee)]
-    #[ploidy(untagged)]
+    #[ploidy(pointer(untagged))]
     enum Response {
         Success {
             data: String,
@@ -195,11 +195,11 @@ fn test_backward_compatibility_without_tag() {
 #[test]
 fn test_tag_with_skipped_variants() {
     #[derive(JsonPointee)]
-    #[ploidy(tag = "type")]
+    #[ploidy(pointer(tag = "type"))]
     enum Response {
         #[allow(dead_code)]
         Success { data: String },
-        #[ploidy(skip)]
+        #[ploidy(pointer(skip))]
         #[allow(dead_code)]
         Internal { secret: String },
     }
@@ -225,7 +225,7 @@ fn test_tag_with_skipped_variants() {
 #[test]
 fn test_tag_error_suggestions() {
     #[derive(JsonPointee)]
-    #[ploidy(tag = "type")]
+    #[ploidy(pointer(tag = "type"))]
     enum Response {
         Success { data: String },
     }
@@ -242,7 +242,7 @@ fn test_tag_error_suggestions() {
 #[test]
 fn test_tag_with_mixed_variant_types() {
     #[derive(JsonPointee)]
-    #[ploidy(tag = "kind")]
+    #[ploidy(pointer(tag = "kind"))]
     enum Mixed {
         Unit,
         Newtype(String),
@@ -284,9 +284,9 @@ fn test_tag_with_mixed_variant_types() {
 #[test]
 fn test_tag_priority_explicit_rename_over_rename_all() {
     #[derive(JsonPointee)]
-    #[ploidy(tag = "type", rename_all = "SCREAMING_SNAKE_CASE")]
+    #[ploidy(pointer(tag = "type", rename_all = "SCREAMING_SNAKE_CASE"))]
     enum Response {
-        #[ploidy(rename = "custom_success")]
+        #[ploidy(pointer(rename = "custom_success"))]
         Success {
             data: String,
         },
@@ -314,7 +314,7 @@ fn test_tag_priority_explicit_rename_over_rename_all() {
 #[test]
 fn test_newtype_variant_empty_pointer_returns_enum() {
     #[derive(JsonPointee)]
-    #[ploidy(tag = "type")]
+    #[ploidy(pointer(tag = "type"))]
     enum Container {
         Value(String),
     }
@@ -330,7 +330,7 @@ fn test_newtype_variant_empty_pointer_returns_enum() {
 #[test]
 fn test_untagged_newtype_transparent() {
     #[derive(JsonPointee)]
-    #[ploidy(untagged)]
+    #[ploidy(pointer(untagged))]
     enum Container {
         Value(String),
     }
@@ -458,7 +458,7 @@ fn test_external_tag_newtype_variants() {
 #[test]
 fn test_external_tag_with_rename_all() {
     #[derive(JsonPointee)]
-    #[ploidy(rename_all = "snake_case")]
+    #[ploidy(pointer(rename_all = "snake_case"))]
     enum Response {
         SuccessResponse {
             data: String,
@@ -483,10 +483,10 @@ fn test_external_tag_with_rename_all() {
 fn test_external_tag_with_variant_rename() {
     #[derive(JsonPointee)]
     enum Message {
-        #[ploidy(rename = "ok")]
+        #[ploidy(pointer(rename = "ok"))]
         Success { text: String },
         #[allow(dead_code)]
-        #[ploidy(rename = "err")]
+        #[ploidy(pointer(rename = "err"))]
         Error { message: String },
     }
 
@@ -535,7 +535,7 @@ fn test_external_tag_mixed_variants() {
 #[test]
 fn test_adjacent_tag_named_variants() {
     #[derive(JsonPointee)]
-    #[ploidy(tag = "type", content = "value")]
+    #[ploidy(pointer(tag = "type", content = "value"))]
     enum Response {
         Success { data: String },
         Error { code: i32 },
@@ -568,7 +568,7 @@ fn test_adjacent_tag_named_variants() {
 #[test]
 fn test_adjacent_tag_tuple_variants() {
     #[derive(JsonPointee)]
-    #[ploidy(tag = "t", content = "c")]
+    #[ploidy(pointer(tag = "t", content = "c"))]
     enum Value {
         #[allow(dead_code)]
         Single(String),
@@ -595,7 +595,7 @@ fn test_adjacent_tag_tuple_variants() {
 #[test]
 fn test_adjacent_tag_unit_variants() {
     #[derive(JsonPointee)]
-    #[ploidy(tag = "type", content = "data")]
+    #[ploidy(pointer(tag = "type", content = "data"))]
     enum Status {
         Pending,
         #[allow(dead_code)]
@@ -619,7 +619,7 @@ fn test_adjacent_tag_unit_variants() {
 #[test]
 fn test_adjacent_tag_newtype_variants() {
     #[derive(JsonPointee)]
-    #[ploidy(tag = "kind", content = "payload")]
+    #[ploidy(pointer(tag = "kind", content = "payload"))]
     enum Wrapper {
         Text(String),
         #[allow(dead_code)]
@@ -642,7 +642,7 @@ fn test_adjacent_tag_newtype_variants() {
 #[test]
 fn test_adjacent_tag_with_rename_all() {
     #[derive(JsonPointee)]
-    #[ploidy(tag = "type", content = "value", rename_all = "SCREAMING_SNAKE_CASE")]
+    #[ploidy(pointer(tag = "type", content = "value", rename_all = "SCREAMING_SNAKE_CASE"))]
     enum Response {
         SuccessResponse {
             data: String,
@@ -666,12 +666,12 @@ fn test_adjacent_tag_with_rename_all() {
 #[test]
 fn test_adjacent_tag_with_variant_rename() {
     #[derive(JsonPointee)]
-    #[ploidy(tag = "kind", content = "data")]
+    #[ploidy(pointer(tag = "kind", content = "data"))]
     enum Message {
-        #[ploidy(rename = "success")]
+        #[ploidy(pointer(rename = "success"))]
         Success { text: String },
         #[allow(dead_code)]
-        #[ploidy(rename = "error")]
+        #[ploidy(pointer(rename = "error"))]
         Error { message: String },
     }
 
@@ -688,7 +688,7 @@ fn test_adjacent_tag_with_variant_rename() {
 #[test]
 fn test_adjacent_tag_mixed_variants() {
     #[derive(JsonPointee)]
-    #[ploidy(tag = "type", content = "value")]
+    #[ploidy(pointer(tag = "type", content = "value"))]
     enum Mixed {
         Unit,
         Named { value: String },
@@ -764,7 +764,7 @@ fn test_external_tag_wrong_variant_error() {
 #[test]
 fn test_adjacent_tag_wrong_field_error() {
     #[derive(JsonPointee)]
-    #[ploidy(tag = "type", content = "value")]
+    #[ploidy(pointer(tag = "type", content = "value"))]
     enum Response {
         Success { data: String },
     }
@@ -789,7 +789,7 @@ fn test_external_tag_skipped_variant() {
         #[allow(dead_code)]
         Success { data: String },
         #[allow(dead_code)]
-        #[ploidy(skip)]
+        #[ploidy(pointer(skip))]
         Internal { debug: String },
     }
 
@@ -808,12 +808,12 @@ fn test_external_tag_skipped_variant() {
 #[test]
 fn test_adjacent_tag_skipped_variant() {
     #[derive(JsonPointee)]
-    #[ploidy(tag = "type", content = "value")]
+    #[ploidy(pointer(tag = "type", content = "value"))]
     enum Response {
         #[allow(dead_code)]
         Success { data: String },
         #[allow(dead_code)]
-        #[ploidy(skip)]
+        #[ploidy(pointer(skip))]
         Internal { debug: String },
     }
 

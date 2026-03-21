@@ -8,12 +8,12 @@
 //!
 //! Container-level attributes apply to structs and enums:
 //!
-//! * `#[ploidy(tag = "field")]` - Use the internally tagged enum representation,
+//! * `#[ploidy(pointer(tag = "field"))]` - Use the internally tagged enum representation,
 //!   with the given field name for the tag. Supported on enums only.
-//! * `#[ploidy(tag = "t", content = "c")]` - Use the adjacently tagged enum representation,
+//! * `#[ploidy(pointer(tag = "t", content = "c"))]` - Use the adjacently tagged enum representation,
 //!   with the given field names for the tag and contents. Supported on enums only.
-//! * `#[ploidy(untagged)]` - Use the untagged enum representation. Supported on enums only.
-//! * `#[ploidy(rename_all = "case")]` - Rename all struct fields or enum variants
+//! * `#[ploidy(pointer(untagged))]` - Use the untagged enum representation. Supported on enums only.
+//! * `#[ploidy(pointer(rename_all = "case"))]` - Rename all struct fields or enum variants
 //!   according to the given case. The supported cases are `lowercase`, `UPPERCASE`,
 //!   `PascalCase`, `camelCase`, `snake_case`, `SCREAMING_SNAKE_CASE`, `kebab-case`, and
 //!   `SCREAMING-KEBAB-CASE`.
@@ -22,20 +22,20 @@
 //!
 //! Variant-level attributes apply to enum variants:
 //!
-//! * `#[ploidy(rename = "name")]` - Access this variant using the given name,
+//! * `#[ploidy(pointer(rename = "name"))]` - Access this variant using the given name,
 //!   instead of its Rust name.
-//! * `#[ploidy(skip)]` - Make this variant inaccessible, except for the tag field
+//! * `#[ploidy(pointer(skip))]` - Make this variant inaccessible, except for the tag field
 //!   if using the internally or adjacently tagged enum representation.
 //!
 //! # Field Attributes
 //!
 //! Field-level attributes apply to struct and enum variant fields:
 //!
-//! * `#[ploidy(rename = "name")]` - Access this variant using the given name,
+//! * `#[ploidy(pointer(rename = "name"))]` - Access this variant using the given name,
 //!   instead of its Rust name.
-//! * `#[ploidy(flatten)]` - Remove one layer of structure between the container
+//! * `#[ploidy(pointer(flatten))]` - Remove one layer of structure between the container
 //!   and field. Supported on named fields only.
-//! * `#[ploidy(skip)]` - Exclude the field from pointer access.
+//! * `#[ploidy(pointer(skip))]` - Exclude the field from pointer access.
 //!
 //! # Examples
 //!
@@ -47,7 +47,7 @@
 //! #[derive(JsonPointee)]
 //! struct User {
 //!     name: String,
-//!     #[ploidy(flatten)]
+//!     #[ploidy(pointer(flatten))]
 //!     contact: ContactInfo,
 //! }
 //!
@@ -86,10 +86,10 @@
 //! # use ploidy_pointer::{BadJsonPointer, JsonPointee, JsonPointer};
 //! # fn main() -> Result<(), Box<dyn std::error::Error>> {
 //! #[derive(JsonPointee)]
-//! #[ploidy(rename_all = "snake_case")]
+//! #[ploidy(pointer(rename_all = "snake_case"))]
 //! enum ApiResponse {
 //!     SuccessResponse { data: String },
-//!     #[ploidy(rename = "error")]
+//!     #[ploidy(pointer(rename = "error"))]
 //!     ErrorResponse { message: String },
 //! }
 //!
@@ -150,7 +150,7 @@
 //! # use ploidy_pointer::{BadJsonPointer, JsonPointee, JsonPointer};
 //! # fn main() -> Result<(), Box<dyn std::error::Error>> {
 //! #[derive(JsonPointee)]
-//! #[ploidy(tag = "type")]
+//! #[ploidy(pointer(tag = "type"))]
 //! enum Message {
 //!     Text { content: String },
 //!     Image { url: String },
@@ -180,7 +180,7 @@
 //! # use ploidy_pointer::{BadJsonPointer, JsonPointee, JsonPointer};
 //! # fn main() -> Result<(), Box<dyn std::error::Error>> {
 //! #[derive(JsonPointee)]
-//! #[ploidy(tag = "type", content = "value")]
+//! #[ploidy(pointer(tag = "type", content = "value"))]
 //! enum Message {
 //!     Text { content: String },
 //!     Image { url: String },
@@ -210,7 +210,7 @@
 //! # use ploidy_pointer::{BadJsonPointer, JsonPointee, JsonPointer};
 //! # fn main() -> Result<(), Box<dyn std::error::Error>> {
 //! #[derive(JsonPointee)]
-//! #[ploidy(untagged)]
+//! #[ploidy(pointer(untagged))]
 //! enum Message {
 //!     Text { content: String },
 //!     Image { url: String },
@@ -1467,23 +1467,32 @@ impl ContainerAttr {
         }
         let mut attrs = vec![];
         attr.parse_nested_meta(|meta| {
-            if meta.path.is_ident("rename_all") {
-                let value = meta.value()?;
-                let s: syn::LitStr = value.parse()?;
-                let Some(rename) = RenameAll::from_str(&s.value()) else {
-                    return Err(meta.error(DeriveError::BadRenameAll));
-                };
-                attrs.push(Self::RenameAll(rename));
-            } else if meta.path.is_ident("tag") {
-                let value = meta.value()?;
-                let s: syn::LitStr = value.parse()?;
-                attrs.push(Self::Tag(s.value()));
-            } else if meta.path.is_ident("content") {
-                let value = meta.value()?;
-                let s: syn::LitStr = value.parse()?;
-                attrs.push(Self::Content(s.value()));
-            } else if meta.path.is_ident("untagged") {
-                attrs.push(Self::Untagged);
+            if meta.path.is_ident("pointer") {
+                meta.parse_nested_meta(|meta| {
+                    if meta.path.is_ident("rename_all") {
+                        let value = meta.value()?;
+                        let s: syn::LitStr = value.parse()?;
+                        let Some(rename) = RenameAll::from_str(&s.value()) else {
+                            return Err(meta.error(DeriveError::BadRenameAll));
+                        };
+                        attrs.push(Self::RenameAll(rename));
+                    } else if meta.path.is_ident("tag") {
+                        let value = meta.value()?;
+                        let s: syn::LitStr = value.parse()?;
+                        attrs.push(Self::Tag(s.value()));
+                    } else if meta.path.is_ident("content") {
+                        let value = meta.value()?;
+                        let s: syn::LitStr = value.parse()?;
+                        attrs.push(Self::Content(s.value()));
+                    } else if meta.path.is_ident("untagged") {
+                        attrs.push(Self::Untagged);
+                    } else {
+                        return Err(meta.error(DeriveError::UnrecognizedPointer));
+                    }
+                    Ok(())
+                })?;
+            } else {
+                return Err(meta.error(DeriveError::UnrecognizedPloidy));
             }
             Ok(())
         })?;
@@ -1505,14 +1514,23 @@ impl FieldAttr {
         }
         let mut attrs = vec![];
         attr.parse_nested_meta(|meta| {
-            if meta.path.is_ident("rename") {
-                let value = meta.value()?;
-                let s: syn::LitStr = value.parse()?;
-                attrs.push(Self::Rename(s.value()));
-            } else if meta.path.is_ident("flatten") {
-                attrs.push(Self::Flatten);
-            } else if meta.path.is_ident("skip") {
-                attrs.push(Self::Skip);
+            if meta.path.is_ident("pointer") {
+                meta.parse_nested_meta(|meta| {
+                    if meta.path.is_ident("rename") {
+                        let value = meta.value()?;
+                        let s: syn::LitStr = value.parse()?;
+                        attrs.push(Self::Rename(s.value()));
+                    } else if meta.path.is_ident("flatten") {
+                        attrs.push(Self::Flatten);
+                    } else if meta.path.is_ident("skip") {
+                        attrs.push(Self::Skip);
+                    } else {
+                        return Err(meta.error(DeriveError::UnrecognizedPointer));
+                    }
+                    Ok(())
+                })?;
+            } else {
+                return Err(meta.error(DeriveError::UnrecognizedPloidy));
             }
             Ok(())
         })?;
@@ -1533,12 +1551,21 @@ impl VariantAttr {
         }
         let mut attrs = vec![];
         attr.parse_nested_meta(|meta| {
-            if meta.path.is_ident("skip") {
-                attrs.push(Self::Skip);
-            } else if meta.path.is_ident("rename") {
-                let value = meta.value()?;
-                let s: syn::LitStr = value.parse()?;
-                attrs.push(Self::Rename(s.value()));
+            if meta.path.is_ident("pointer") {
+                meta.parse_nested_meta(|meta| {
+                    if meta.path.is_ident("skip") {
+                        attrs.push(Self::Skip);
+                    } else if meta.path.is_ident("rename") {
+                        let value = meta.value()?;
+                        let s: syn::LitStr = value.parse()?;
+                        attrs.push(Self::Rename(s.value()));
+                    } else {
+                        return Err(meta.error(DeriveError::UnrecognizedPointer));
+                    }
+                    Ok(())
+                })?;
+            } else {
+                return Err(meta.error(DeriveError::UnrecognizedPloidy));
             }
             Ok(())
         })?;
@@ -1636,4 +1663,8 @@ enum DeriveError {
     ConflictingTagAttributes,
     #[error("`rename_all` must be one of: {}", RenameAll::all().iter().join(","))]
     BadRenameAll,
+    #[error("unrecognized `#[ploidy(...)]` attribute")]
+    UnrecognizedPloidy,
+    #[error("unrecognized `#[ploidy(pointer(...))]` attribute")]
+    UnrecognizedPointer,
 }
