@@ -153,8 +153,9 @@ mod tests {
         // but the inline types in `mod types` should be sorted alphabetically
         // (`Apple`, `Mango`, `Zebra`).
         let expected: syn::File = parse_quote! {
-            #[derive(Debug, Clone, PartialEq, Eq, Hash, Default, ::ploidy_util::serde::Serialize, ::ploidy_util::serde::Deserialize)]
+            #[derive(Debug, Clone, PartialEq, Eq, Hash, Default, ::ploidy_util::serde::Serialize, ::ploidy_util::serde::Deserialize, ::ploidy_util::pointer::JsonPointee)]
             #[serde(crate = "::ploidy_util::serde")]
+            #[ploidy(pointer(crate = "::ploidy_util::pointer"))]
             pub struct Container {
                 #[serde(default, skip_serializing_if = "::ploidy_util::absent::AbsentOr::is_absent")]
                 pub zebra: ::ploidy_util::absent::AbsentOr<crate::types::container::types::Zebra>,
@@ -164,20 +165,23 @@ mod tests {
                 pub apple: ::ploidy_util::absent::AbsentOr<crate::types::container::types::Apple>,
             }
             pub mod types {
-                #[derive(Debug, Clone, PartialEq, Eq, Hash, Default, ::ploidy_util::serde::Serialize, ::ploidy_util::serde::Deserialize)]
+                #[derive(Debug, Clone, PartialEq, Eq, Hash, Default, ::ploidy_util::serde::Serialize, ::ploidy_util::serde::Deserialize, ::ploidy_util::pointer::JsonPointee)]
                 #[serde(crate = "::ploidy_util::serde")]
+                #[ploidy(pointer(crate = "::ploidy_util::pointer"))]
                 pub struct Apple {
                     #[serde(default, skip_serializing_if = "::ploidy_util::absent::AbsentOr::is_absent")]
                     pub name: ::ploidy_util::absent::AbsentOr<::std::string::String>,
                 }
-                #[derive(Debug, Clone, PartialEq, Eq, Hash, Default, ::ploidy_util::serde::Serialize, ::ploidy_util::serde::Deserialize)]
+                #[derive(Debug, Clone, PartialEq, Eq, Hash, Default, ::ploidy_util::serde::Serialize, ::ploidy_util::serde::Deserialize, ::ploidy_util::pointer::JsonPointee)]
                 #[serde(crate = "::ploidy_util::serde")]
+                #[ploidy(pointer(crate = "::ploidy_util::pointer"))]
                 pub struct Mango {
                     #[serde(default, skip_serializing_if = "::ploidy_util::absent::AbsentOr::is_absent")]
                     pub name: ::ploidy_util::absent::AbsentOr<::std::string::String>,
                 }
-                #[derive(Debug, Clone, PartialEq, Eq, Hash, Default, ::ploidy_util::serde::Serialize, ::ploidy_util::serde::Deserialize)]
+                #[derive(Debug, Clone, PartialEq, Eq, Hash, Default, ::ploidy_util::serde::Serialize, ::ploidy_util::serde::Deserialize, ::ploidy_util::pointer::JsonPointee)]
                 #[serde(crate = "::ploidy_util::serde")]
+                #[ploidy(pointer(crate = "::ploidy_util::pointer"))]
                 pub struct Zebra {
                     #[serde(default, skip_serializing_if = "::ploidy_util::absent::AbsentOr::is_absent")]
                     pub name: ::ploidy_util::absent::AbsentOr<::std::string::String>,
@@ -229,8 +233,9 @@ mod tests {
         let expected: syn::File = parse_quote! {
             pub type InvalidParameters = ::std::vec::Vec<crate::types::invalid_parameters::types::Item>;
             pub mod types {
-                #[derive(Debug, Clone, PartialEq, Eq, Hash, Default, ::ploidy_util::serde::Serialize, ::ploidy_util::serde::Deserialize)]
+                #[derive(Debug, Clone, PartialEq, Eq, Hash, Default, ::ploidy_util::serde::Serialize, ::ploidy_util::serde::Deserialize, ::ploidy_util::pointer::JsonPointee)]
                 #[serde(crate = "::ploidy_util::serde")]
+                #[ploidy(pointer(crate = "::ploidy_util::pointer"))]
                 pub struct Item {
                     pub name: ::std::string::String,
                     pub reason: ::std::string::String,
@@ -393,8 +398,9 @@ mod tests {
         let expected: syn::File = parse_quote! {
             pub type NullableOneOf = ::std::option::Option<crate::types::nullable_one_of::types::V1>;
             pub mod types {
-                #[derive(Debug, Clone, PartialEq, Eq, Hash, Default, ::ploidy_util::serde::Serialize, ::ploidy_util::serde::Deserialize)]
+                #[derive(Debug, Clone, PartialEq, Eq, Hash, Default, ::ploidy_util::serde::Serialize, ::ploidy_util::serde::Deserialize, ::ploidy_util::pointer::JsonPointee)]
                 #[serde(crate = "::ploidy_util::serde")]
+                #[ploidy(pointer(crate = "::ploidy_util::pointer"))]
                 pub struct V1 {
                     #[serde(default, skip_serializing_if = "::ploidy_util::absent::AbsentOr::is_absent")]
                     pub value: ::ploidy_util::absent::AbsentOr<::std::string::String>,

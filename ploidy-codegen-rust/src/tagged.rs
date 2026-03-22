@@ -72,9 +72,16 @@ impl ToTokens for CodegenTagged<'_> {
                     }
                 };
 
+                // Use the primary name for JSON pointer traversal;
+                // secondary aliases are only used for deserialization.
+                let pointer_attr = variant.aliases().first().map(|&primary| {
+                    quote! { #[ploidy(pointer(rename = #primary))] }
+                });
+
                 let rust_type_name = CodegenRef::new(&view);
                 let v = quote! {
                     #serde_attr
+                    #pointer_attr
                     #variant_name(#rust_type_name),
                 };
 
@@ -100,8 +107,9 @@ impl ToTokens for CodegenTagged<'_> {
         let type_name = &self.name;
         let main = quote! {
             #doc_attrs
-            #[derive(Debug, Clone, PartialEq, #(#extra_derives,)* ::ploidy_util::serde::Serialize, ::ploidy_util::serde::Deserialize)]
+            #[derive(Debug, Clone, PartialEq, #(#extra_derives,)* ::ploidy_util::serde::Serialize, ::ploidy_util::serde::Deserialize, ::ploidy_util::pointer::JsonPointee)]
             #[serde(crate = "::ploidy_util::serde", tag = #discriminator_field_literal)]
+            #[ploidy(pointer(crate = "::ploidy_util::pointer", tag = #discriminator_field_literal))]
             pub enum #type_name {
                 #(#vs)*
             }
@@ -172,12 +180,15 @@ mod tests {
 
         let actual: syn::File = parse_quote!(#codegen);
         let expected: syn::File = parse_quote! {
-            #[derive(Debug, Clone, PartialEq, Eq, Hash, ::ploidy_util::serde::Serialize, ::ploidy_util::serde::Deserialize)]
+            #[derive(Debug, Clone, PartialEq, Eq, Hash, ::ploidy_util::serde::Serialize, ::ploidy_util::serde::Deserialize, ::ploidy_util::pointer::JsonPointee)]
             #[serde(crate = "::ploidy_util::serde", tag = "petType")]
+            #[ploidy(pointer(crate = "::ploidy_util::pointer", tag = "petType"))]
             pub enum Pet {
                 #[serde(rename = "dog")]
+                #[ploidy(pointer(rename = "dog"))]
                 Dog(crate::types::Dog),
                 #[serde(rename = "cat")]
+                #[ploidy(pointer(rename = "cat"))]
                 Cat(crate::types::Cat),
             }
             impl ::std::convert::From<crate::types::Dog> for Pet {
@@ -239,12 +250,15 @@ mod tests {
 
         let actual: syn::File = parse_quote!(#codegen);
         let expected: syn::File = parse_quote! {
-            #[derive(Debug, Clone, PartialEq, Eq, Hash, ::ploidy_util::serde::Serialize, ::ploidy_util::serde::Deserialize)]
+            #[derive(Debug, Clone, PartialEq, Eq, Hash, ::ploidy_util::serde::Serialize, ::ploidy_util::serde::Deserialize, ::ploidy_util::pointer::JsonPointee)]
             #[serde(crate = "::ploidy_util::serde", tag = "type")]
+            #[ploidy(pointer(crate = "::ploidy_util::pointer", tag = "type"))]
             pub enum Pet {
                 #[serde(rename = "canine")]
+                #[ploidy(pointer(rename = "canine"))]
                 Dog(crate::types::Dog),
                 #[serde(rename = "feline")]
+                #[ploidy(pointer(rename = "feline"))]
                 Cat(crate::types::Cat),
             }
             impl ::std::convert::From<crate::types::Dog> for Pet {
@@ -301,10 +315,12 @@ mod tests {
 
         let actual: syn::File = parse_quote!(#codegen);
         let expected: syn::File = parse_quote! {
-            #[derive(Debug, Clone, PartialEq, Eq, Hash, ::ploidy_util::serde::Serialize, ::ploidy_util::serde::Deserialize)]
+            #[derive(Debug, Clone, PartialEq, Eq, Hash, ::ploidy_util::serde::Serialize, ::ploidy_util::serde::Deserialize, ::ploidy_util::pointer::JsonPointee)]
             #[serde(crate = "::ploidy_util::serde", tag = "type")]
+            #[ploidy(pointer(crate = "::ploidy_util::pointer", tag = "type"))]
             pub enum Pet {
                 #[serde(rename = "dog", alias = "canine", alias = "puppy",)]
+                #[ploidy(pointer(rename = "dog"))]
                 Dog(crate::types::Dog),
             }
             impl ::std::convert::From<crate::types::Dog> for Pet {
@@ -363,12 +379,15 @@ mod tests {
         let actual: syn::File = parse_quote!(#codegen);
         let expected: syn::File = parse_quote! {
             #[doc = "Represents different types of pets"]
-            #[derive(Debug, Clone, PartialEq, Eq, Hash, ::ploidy_util::serde::Serialize, ::ploidy_util::serde::Deserialize)]
+            #[derive(Debug, Clone, PartialEq, Eq, Hash, ::ploidy_util::serde::Serialize, ::ploidy_util::serde::Deserialize, ::ploidy_util::pointer::JsonPointee)]
             #[serde(crate = "::ploidy_util::serde", tag = "type")]
+            #[ploidy(pointer(crate = "::ploidy_util::pointer", tag = "type"))]
             pub enum Pet {
                 #[serde(rename = "dog")]
+                #[ploidy(pointer(rename = "dog"))]
                 Dog(crate::types::Dog),
                 #[serde(rename = "cat")]
+                #[ploidy(pointer(rename = "cat"))]
                 Cat(crate::types::Cat),
             }
             impl ::std::convert::From<crate::types::Dog> for Pet {
@@ -427,12 +446,15 @@ mod tests {
 
         let actual: syn::File = parse_quote!(#codegen);
         let expected: syn::File = parse_quote! {
-            #[derive(Debug, Clone, PartialEq, Eq, Hash, ::ploidy_util::serde::Serialize, ::ploidy_util::serde::Deserialize)]
+            #[derive(Debug, Clone, PartialEq, Eq, Hash, ::ploidy_util::serde::Serialize, ::ploidy_util::serde::Deserialize, ::ploidy_util::pointer::JsonPointee)]
             #[serde(crate = "::ploidy_util::serde", tag = "petType")]
+            #[ploidy(pointer(crate = "::ploidy_util::pointer", tag = "petType"))]
             pub enum Pet {
                 #[serde(rename = "Dog")]
+                #[ploidy(pointer(rename = "Dog"))]
                 Dog(crate::types::Dog),
                 #[serde(rename = "Cat")]
+                #[ploidy(pointer(rename = "Cat"))]
                 Cat(crate::types::Cat),
             }
             impl ::std::convert::From<crate::types::Dog> for Pet {
@@ -504,10 +526,12 @@ mod tests {
 
         let actual: syn::File = parse_quote!(#codegen);
         let expected: syn::File = parse_quote! {
-            #[derive(Debug, Clone, PartialEq, Eq, Hash, ::ploidy_util::serde::Serialize, ::ploidy_util::serde::Deserialize)]
+            #[derive(Debug, Clone, PartialEq, Eq, Hash, ::ploidy_util::serde::Serialize, ::ploidy_util::serde::Deserialize, ::ploidy_util::pointer::JsonPointee)]
             #[serde(crate = "::ploidy_util::serde", tag = "kind")]
+            #[ploidy(pointer(crate = "::ploidy_util::pointer", tag = "kind"))]
             pub enum Pet {
                 #[serde(rename = "dog")]
+                #[ploidy(pointer(rename = "dog"))]
                 Dog(crate::types::pet::types::Dog),
             }
             impl ::std::convert::From<crate::types::pet::types::Dog> for Pet {
@@ -559,10 +583,12 @@ mod tests {
 
         let actual: syn::File = parse_quote!(#codegen);
         let expected: syn::File = parse_quote! {
-            #[derive(Debug, Clone, PartialEq, Eq, Hash, ::ploidy_util::serde::Serialize, ::ploidy_util::serde::Deserialize)]
+            #[derive(Debug, Clone, PartialEq, Eq, Hash, ::ploidy_util::serde::Serialize, ::ploidy_util::serde::Deserialize, ::ploidy_util::pointer::JsonPointee)]
             #[serde(crate = "::ploidy_util::serde", tag = "kind")]
+            #[ploidy(pointer(crate = "::ploidy_util::pointer", tag = "kind"))]
             pub enum Pet {
                 #[serde(rename = "dog")]
+                #[ploidy(pointer(rename = "dog"))]
                 Dog(crate::types::Dog),
             }
             impl ::std::convert::From<crate::types::Dog> for Pet {
@@ -634,12 +660,15 @@ mod tests {
         // `Dog` is inlined, so `Pet::Dog` holds the inline type.
         // `Cat` isn't inlined, so `Pet::Cat` holds the schema type.
         let expected: syn::File = parse_quote! {
-            #[derive(Debug, Clone, PartialEq, Eq, Hash, ::ploidy_util::serde::Serialize, ::ploidy_util::serde::Deserialize)]
+            #[derive(Debug, Clone, PartialEq, Eq, Hash, ::ploidy_util::serde::Serialize, ::ploidy_util::serde::Deserialize, ::ploidy_util::pointer::JsonPointee)]
             #[serde(crate = "::ploidy_util::serde", tag = "kind")]
+            #[ploidy(pointer(crate = "::ploidy_util::pointer", tag = "kind"))]
             pub enum Pet {
                 #[serde(rename = "dog")]
+                #[ploidy(pointer(rename = "dog"))]
                 Dog(crate::types::pet::types::Dog),
                 #[serde(rename = "cat")]
+                #[ploidy(pointer(rename = "cat"))]
                 Cat(crate::types::Cat),
             }
             impl ::std::convert::From<crate::types::pet::types::Dog> for Pet {

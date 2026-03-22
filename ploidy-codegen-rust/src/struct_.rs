@@ -60,12 +60,12 @@ impl ToTokens for CodegenStruct<'_> {
                     StructFieldName::Hint(hint) => CodegenIdentRef::from_field_name_hint(hint),
                 };
                 let field_name = CodegenIdentUsage::Field(&name);
-                let serde_attr = SerdeStructFieldAttr::new(field_name, &field);
+                let field_attrs = StructFieldAttrs::new(field_name, &field);
                 let ty = CodegenField::new(&field);
 
                 quote! {
                     #doc_attrs
-                    #serde_attr
+                    #field_attrs
                     pub #field_name: #ty,
                 }
             })
@@ -94,8 +94,9 @@ impl ToTokens for CodegenStruct<'_> {
 
         tokens.append_all(quote! {
             #doc_attrs
-            #[derive(Debug, Clone, PartialEq, #(#extra_derives,)* ::ploidy_util::serde::Serialize, ::ploidy_util::serde::Deserialize)]
+            #[derive(Debug, Clone, PartialEq, #(#extra_derives,)* ::ploidy_util::serde::Serialize, ::ploidy_util::serde::Deserialize, ::ploidy_util::pointer::JsonPointee)]
             #[serde(crate = "::ploidy_util::serde")]
+            #[ploidy(pointer(crate = "::ploidy_util::pointer"))]
             pub struct #type_name {
                 #(#fields)*
             }
@@ -181,46 +182,72 @@ impl ToTokens for CodegenField<'_, '_> {
     }
 }
 
-/// Generates a `#[serde(...)]` attribute for a struct field.
+/// Generates `#[serde(...)]` and `#[ploidy(pointer(...))]` attributes
+/// for a struct field.
 #[derive(Debug)]
-struct SerdeStructFieldAttr<'view, 'a> {
+struct StructFieldAttrs<'view, 'a> {
     field_name: CodegenIdentUsage<'a>,
     field: &'a StructFieldView<'view, 'a>,
 }
 
-impl<'view, 'a> SerdeStructFieldAttr<'view, 'a> {
+impl<'view, 'a> StructFieldAttrs<'view, 'a> {
     fn new(field_name: CodegenIdentUsage<'a>, field: &'a StructFieldView<'view, 'a>) -> Self {
         Self { field_name, field }
     }
 }
 
-impl ToTokens for SerdeStructFieldAttr<'_, '_> {
+impl ToTokens for StructFieldAttrs<'_, '_> {
     fn to_tokens(&self, tokens: &mut TokenStream) {
-        let mut attrs = vec![];
+        let serde = {
+            let mut meta = vec![];
 
-        // Add `flatten` xor `rename` (specifying both on the same field
-        // isn't meaningful).
-        if self.field.flattened() {
-            attrs.push(quote! { flatten });
-        } else if let &StructFieldName::Name(name) = &self.field.name() {
-            // `rename` if the OpenAPI field name doesn't match
-            // the Rust identifier.
-            if self.field_name.display().to_string() != name {
-                attrs.push(quote! { rename = #name });
+            // Add `flatten` xor `rename` (specifying both on the same field
+            // isn't meaningful).
+            if self.field.flattened() {
+                meta.push(quote! { flatten });
+            } else if let &StructFieldName::Name(name) = &self.field.name() {
+                // `rename` if the OpenAPI field name doesn't match
+                // the Rust identifier.
+                if self.field_name.display().to_string() != name {
+                    meta.push(quote! { rename = #name });
+                }
             }
-        }
 
-        if !self.field.required() {
-            // `CodegenField` always emits `AbsentOr` for optional fields.
-            attrs.push(quote! { default });
-            attrs.push(
-                quote! { skip_serializing_if = "::ploidy_util::absent::AbsentOr::is_absent" },
-            );
-        }
+            if !self.field.required() {
+                // `CodegenField` always emits `AbsentOr` for optional fields.
+                meta.push(quote! { default });
+                meta.push(
+                    quote! { skip_serializing_if = "::ploidy_util::absent::AbsentOr::is_absent" },
+                );
+            }
 
-        if !attrs.is_empty() {
-            tokens.append_all(quote! { #[serde(#(#attrs),*)] });
-        }
+            if meta.is_empty() {
+                quote! {}
+            } else {
+                quote! { #[serde(#(#meta),*)] }
+            }
+        };
+
+        let pointer = {
+            let mut meta = vec![];
+
+            if self.field.flattened() {
+                meta.push(quote! { flatten });
+            } else if let &StructFieldName::Name(name) = &self.field.name()
+                && self.field_name.display().to_string() != name
+            {
+                meta.push(quote! { rename = #name });
+            }
+
+            if meta.is_empty() {
+                quote! {}
+            } else {
+                quote! { #[ploidy(pointer(#(#meta),*))] }
+            }
+        };
+
+        tokens.append_all(serde);
+        tokens.append_all(pointer);
     }
 }
 
@@ -277,8 +304,9 @@ mod tests {
         // `name` is a required string field, which implements `Default`,
         // so the struct can derive `Default`.
         let expected: syn::ItemStruct = parse_quote! {
-            #[derive(Debug, Clone, PartialEq, Eq, Hash, Default, ::ploidy_util::serde::Serialize, ::ploidy_util::serde::Deserialize)]
+            #[derive(Debug, Clone, PartialEq, Eq, Hash, Default, ::ploidy_util::serde::Serialize, ::ploidy_util::serde::Deserialize, ::ploidy_util::pointer::JsonPointee)]
             #[serde(crate = "::ploidy_util::serde")]
+            #[ploidy(pointer(crate = "::ploidy_util::pointer"))]
             pub struct Pet {
                 pub name: ::std::string::String,
                 #[serde(default, skip_serializing_if = "::ploidy_util::absent::AbsentOr::is_absent")]
@@ -336,8 +364,9 @@ mod tests {
         // `name` is a required string field, which implements `Default`,
         // so the struct can derive `Default`. The tag field is excluded.
         let expected: syn::ItemStruct = parse_quote! {
-            #[derive(Debug, Clone, PartialEq, Eq, Hash, Default, ::ploidy_util::serde::Serialize, ::ploidy_util::serde::Deserialize)]
+            #[derive(Debug, Clone, PartialEq, Eq, Hash, Default, ::ploidy_util::serde::Serialize, ::ploidy_util::serde::Deserialize, ::ploidy_util::pointer::JsonPointee)]
             #[serde(crate = "::ploidy_util::serde")]
+            #[ploidy(pointer(crate = "::ploidy_util::pointer"))]
             pub struct Animal {
                 pub name: ::std::string::String,
             }
@@ -387,8 +416,9 @@ mod tests {
         // and without `#[serde(...)]` attributes. Since both `String` and
         // `Option<T>` implement `Default`, the struct can derive `Default`.
         let expected: syn::ItemStruct = parse_quote! {
-            #[derive(Debug, Clone, PartialEq, Eq, Hash, Default, ::ploidy_util::serde::Serialize, ::ploidy_util::serde::Deserialize)]
+            #[derive(Debug, Clone, PartialEq, Eq, Hash, Default, ::ploidy_util::serde::Serialize, ::ploidy_util::serde::Deserialize, ::ploidy_util::pointer::JsonPointee)]
             #[serde(crate = "::ploidy_util::serde")]
+            #[ploidy(pointer(crate = "::ploidy_util::pointer"))]
             pub struct Record {
                 pub id: ::std::string::String,
                 pub deleted_at: ::std::option::Option<::ploidy_util::chrono::DateTime<::ploidy_util::chrono::Utc>>,
@@ -439,8 +469,9 @@ mod tests {
         // Since both `String` and `Option<T>` implement `Default`, the struct can
         // derive `Default`.
         let expected: syn::ItemStruct = parse_quote! {
-            #[derive(Debug, Clone, PartialEq, Eq, Hash, Default, ::ploidy_util::serde::Serialize, ::ploidy_util::serde::Deserialize)]
+            #[derive(Debug, Clone, PartialEq, Eq, Hash, Default, ::ploidy_util::serde::Serialize, ::ploidy_util::serde::Deserialize, ::ploidy_util::pointer::JsonPointee)]
             #[serde(crate = "::ploidy_util::serde")]
+            #[ploidy(pointer(crate = "::ploidy_util::pointer"))]
             pub struct Record {
                 pub id: ::std::string::String,
                 pub deleted_at: ::std::option::Option<::ploidy_util::chrono::DateTime<::ploidy_util::chrono::Utc>>,
@@ -489,8 +520,9 @@ mod tests {
         // Optional nullable field uses `AbsentOr<T>` with `#[serde(...)]` attributes.
         // Since `String` implements `Default`, the struct can derive `Default`.
         let expected: syn::ItemStruct = parse_quote! {
-            #[derive(Debug, Clone, PartialEq, Eq, Hash, Default, ::ploidy_util::serde::Serialize, ::ploidy_util::serde::Deserialize)]
+            #[derive(Debug, Clone, PartialEq, Eq, Hash, Default, ::ploidy_util::serde::Serialize, ::ploidy_util::serde::Deserialize, ::ploidy_util::pointer::JsonPointee)]
             #[serde(crate = "::ploidy_util::serde")]
+            #[ploidy(pointer(crate = "::ploidy_util::pointer"))]
             pub struct Record {
                 pub id: ::std::string::String,
                 #[serde(default, skip_serializing_if = "::ploidy_util::absent::AbsentOr::is_absent")]
@@ -542,8 +574,9 @@ mod tests {
         // The field should be `AbsentOr<String>`, not `AbsentOr<NullableString>`
         // (which would be `AbsentOr<Option<String>>`).
         let expected: syn::ItemStruct = parse_quote! {
-            #[derive(Debug, Clone, PartialEq, Eq, Hash, Default, ::ploidy_util::serde::Serialize, ::ploidy_util::serde::Deserialize)]
+            #[derive(Debug, Clone, PartialEq, Eq, Hash, Default, ::ploidy_util::serde::Serialize, ::ploidy_util::serde::Deserialize, ::ploidy_util::pointer::JsonPointee)]
             #[serde(crate = "::ploidy_util::serde")]
+            #[ploidy(pointer(crate = "::ploidy_util::pointer"))]
             pub struct Record {
                 #[serde(default, skip_serializing_if = "::ploidy_util::absent::AbsentOr::is_absent")]
                 pub nickname: ::ploidy_util::absent::AbsentOr<::std::string::String>,
@@ -592,8 +625,9 @@ mod tests {
         // `id` is a required string field, which implements `Default`,
         // so the struct can derive `Default`.
         let expected: syn::ItemStruct = parse_quote! {
-            #[derive(Debug, Clone, PartialEq, Eq, Hash, Default, ::ploidy_util::serde::Serialize, ::ploidy_util::serde::Deserialize)]
+            #[derive(Debug, Clone, PartialEq, Eq, Hash, Default, ::ploidy_util::serde::Serialize, ::ploidy_util::serde::Deserialize, ::ploidy_util::pointer::JsonPointee)]
             #[serde(crate = "::ploidy_util::serde")]
+            #[ploidy(pointer(crate = "::ploidy_util::pointer"))]
             pub struct User {
                 pub id: ::std::string::String,
                 #[serde(default, skip_serializing_if = "::ploidy_util::absent::AbsentOr::is_absent")]
@@ -643,8 +677,9 @@ mod tests {
         // `value` and `unit` are required primitive fields. `f64` prevents `Eq`
         // and `Hash`, but both implement `Default`, so the struct can derive it.
         let expected: syn::ItemStruct = parse_quote! {
-            #[derive(Debug, Clone, PartialEq, Default, ::ploidy_util::serde::Serialize, ::ploidy_util::serde::Deserialize)]
+            #[derive(Debug, Clone, PartialEq, Default, ::ploidy_util::serde::Serialize, ::ploidy_util::serde::Deserialize, ::ploidy_util::pointer::JsonPointee)]
             #[serde(crate = "::ploidy_util::serde")]
+            #[ploidy(pointer(crate = "::ploidy_util::pointer"))]
             pub struct Measurement {
                 pub value: f64,
                 pub unit: ::std::string::String,
@@ -690,8 +725,9 @@ mod tests {
 
         let actual: syn::ItemStruct = parse_quote!(#codegen);
         let expected: syn::ItemStruct = parse_quote! {
-            #[derive(Debug, Clone, PartialEq, Eq, Hash, Default, ::ploidy_util::serde::Serialize, ::ploidy_util::serde::Deserialize)]
+            #[derive(Debug, Clone, PartialEq, Eq, Hash, Default, ::ploidy_util::serde::Serialize, ::ploidy_util::serde::Deserialize, ::ploidy_util::pointer::JsonPointee)]
             #[serde(crate = "::ploidy_util::serde")]
+            #[ploidy(pointer(crate = "::ploidy_util::pointer"))]
             pub struct Options {
                 #[serde(default, skip_serializing_if = "::ploidy_util::absent::AbsentOr::is_absent")]
                 pub verbose: ::ploidy_util::absent::AbsentOr<bool>,
@@ -741,8 +777,9 @@ mod tests {
         // Both `Outer` and `Inner` have all optional fields,
         // so `Default` should be derived for both.
         let expected: syn::ItemStruct = parse_quote! {
-            #[derive(Debug, Clone, PartialEq, Eq, Hash, Default, ::ploidy_util::serde::Serialize, ::ploidy_util::serde::Deserialize)]
+            #[derive(Debug, Clone, PartialEq, Eq, Hash, Default, ::ploidy_util::serde::Serialize, ::ploidy_util::serde::Deserialize, ::ploidy_util::pointer::JsonPointee)]
             #[serde(crate = "::ploidy_util::serde")]
+            #[ploidy(pointer(crate = "::ploidy_util::pointer"))]
             pub struct Outer {
                 #[serde(default, skip_serializing_if = "::ploidy_util::absent::AbsentOr::is_absent")]
                 pub inner: ::ploidy_util::absent::AbsentOr<crate::types::Inner>,
@@ -795,8 +832,9 @@ mod tests {
         // but `id` is a string which implements `Default`. Since all reachable
         // required fields are defaultable, `Outer` can derive `Default`.
         let expected: syn::ItemStruct = parse_quote! {
-            #[derive(Debug, Clone, PartialEq, Eq, Hash, Default, ::ploidy_util::serde::Serialize, ::ploidy_util::serde::Deserialize)]
+            #[derive(Debug, Clone, PartialEq, Eq, Hash, Default, ::ploidy_util::serde::Serialize, ::ploidy_util::serde::Deserialize, ::ploidy_util::pointer::JsonPointee)]
             #[serde(crate = "::ploidy_util::serde")]
+            #[ploidy(pointer(crate = "::ploidy_util::pointer"))]
             pub struct Outer {
                 pub inner: crate::types::Inner,
             }
@@ -857,8 +895,9 @@ mod tests {
         // `Pet` is a tagged union, but `Owner.pet` is optional (`AbsentOr<Pet>`),
         // which always implements `Default`.
         let expected: syn::ItemStruct = parse_quote! {
-            #[derive(Debug, Clone, PartialEq, Eq, Hash, Default, ::ploidy_util::serde::Serialize, ::ploidy_util::serde::Deserialize)]
+            #[derive(Debug, Clone, PartialEq, Eq, Hash, Default, ::ploidy_util::serde::Serialize, ::ploidy_util::serde::Deserialize, ::ploidy_util::pointer::JsonPointee)]
             #[serde(crate = "::ploidy_util::serde")]
+            #[ploidy(pointer(crate = "::ploidy_util::pointer"))]
             pub struct Owner {
                 #[serde(default, skip_serializing_if = "::ploidy_util::absent::AbsentOr::is_absent")]
                 pub pet: ::ploidy_util::absent::AbsentOr<crate::types::Pet>,
@@ -906,8 +945,9 @@ mod tests {
         // `StringOrInt` is an untagged union, but `Container.value` is optional
         // (`AbsentOr<StringOrInt>`), which always implements `Default`.
         let expected: syn::ItemStruct = parse_quote! {
-            #[derive(Debug, Clone, PartialEq, Eq, Hash, Default, ::ploidy_util::serde::Serialize, ::ploidy_util::serde::Deserialize)]
+            #[derive(Debug, Clone, PartialEq, Eq, Hash, Default, ::ploidy_util::serde::Serialize, ::ploidy_util::serde::Deserialize, ::ploidy_util::pointer::JsonPointee)]
             #[serde(crate = "::ploidy_util::serde")]
+            #[ploidy(pointer(crate = "::ploidy_util::pointer"))]
             pub struct Container {
                 #[serde(default, skip_serializing_if = "::ploidy_util::absent::AbsentOr::is_absent")]
                 pub value: ::ploidy_util::absent::AbsentOr<crate::types::StringOrInt>,
@@ -970,8 +1010,9 @@ mod tests {
         let actual: syn::ItemStruct = parse_quote!(#codegen);
         // `Pet` is a required field, so `Owner` can't derive `Default`.
         let expected: syn::ItemStruct = parse_quote! {
-            #[derive(Debug, Clone, PartialEq, Eq, Hash, ::ploidy_util::serde::Serialize, ::ploidy_util::serde::Deserialize)]
+            #[derive(Debug, Clone, PartialEq, Eq, Hash, ::ploidy_util::serde::Serialize, ::ploidy_util::serde::Deserialize, ::ploidy_util::pointer::JsonPointee)]
             #[serde(crate = "::ploidy_util::serde")]
+            #[ploidy(pointer(crate = "::ploidy_util::pointer"))]
             pub struct Owner {
                 pub pet: crate::types::Pet,
             }
@@ -1020,8 +1061,9 @@ mod tests {
         // `Outer.inner` is optional, so `Outer` can derive `Default` even though
         // `Inner` has a required field.
         let expected: syn::ItemStruct = parse_quote! {
-            #[derive(Debug, Clone, PartialEq, Eq, Hash, Default, ::ploidy_util::serde::Serialize, ::ploidy_util::serde::Deserialize)]
+            #[derive(Debug, Clone, PartialEq, Eq, Hash, Default, ::ploidy_util::serde::Serialize, ::ploidy_util::serde::Deserialize, ::ploidy_util::pointer::JsonPointee)]
             #[serde(crate = "::ploidy_util::serde")]
+            #[ploidy(pointer(crate = "::ploidy_util::pointer"))]
             pub struct Outer {
                 #[serde(default, skip_serializing_if = "::ploidy_util::absent::AbsentOr::is_absent")]
                 pub inner: ::ploidy_util::absent::AbsentOr<crate::types::Inner>,
@@ -1065,8 +1107,9 @@ mod tests {
         // `data` is a required `Any` field. Since `serde_json::Value` implements
         // `Default`, the struct can derive `Default`.
         let expected: syn::ItemStruct = parse_quote! {
-            #[derive(Debug, Clone, PartialEq, Eq, Hash, Default, ::ploidy_util::serde::Serialize, ::ploidy_util::serde::Deserialize)]
+            #[derive(Debug, Clone, PartialEq, Eq, Hash, Default, ::ploidy_util::serde::Serialize, ::ploidy_util::serde::Deserialize, ::ploidy_util::pointer::JsonPointee)]
             #[serde(crate = "::ploidy_util::serde")]
+            #[ploidy(pointer(crate = "::ploidy_util::pointer"))]
             pub struct Container {
                 pub data: ::ploidy_util::serde_json::Value,
             }
@@ -1117,8 +1160,9 @@ mod tests {
         // Primitives like `String`, `i32`, and `bool` implement `Default`,
         // so the struct can derive `Default`.
         let expected: syn::ItemStruct = parse_quote! {
-            #[derive(Debug, Clone, PartialEq, Eq, Hash, Default, ::ploidy_util::serde::Serialize, ::ploidy_util::serde::Deserialize)]
+            #[derive(Debug, Clone, PartialEq, Eq, Hash, Default, ::ploidy_util::serde::Serialize, ::ploidy_util::serde::Deserialize, ::ploidy_util::pointer::JsonPointee)]
             #[serde(crate = "::ploidy_util::serde")]
+            #[ploidy(pointer(crate = "::ploidy_util::pointer"))]
             pub struct Defaults {
                 pub text: ::std::string::String,
                 pub count: i32,
@@ -1164,8 +1208,9 @@ mod tests {
         let actual: syn::ItemStruct = parse_quote!(#codegen);
         // `Url` doesn't implement `Default`, so the struct can't derive it.
         let expected: syn::ItemStruct = parse_quote! {
-            #[derive(Debug, Clone, PartialEq, Eq, Hash, ::ploidy_util::serde::Serialize, ::ploidy_util::serde::Deserialize)]
+            #[derive(Debug, Clone, PartialEq, Eq, Hash, ::ploidy_util::serde::Serialize, ::ploidy_util::serde::Deserialize, ::ploidy_util::pointer::JsonPointee)]
             #[serde(crate = "::ploidy_util::serde")]
+            #[ploidy(pointer(crate = "::ploidy_util::pointer"))]
             pub struct Resource {
                 pub link: ::ploidy_util::url::Url,
             }
@@ -1210,8 +1255,9 @@ mod tests {
 
         let actual: syn::ItemStruct = parse_quote!(#codegen);
         let expected: syn::ItemStruct = parse_quote! {
-            #[derive(Debug, Clone, PartialEq, Eq, Hash, Default, ::ploidy_util::serde::Serialize, ::ploidy_util::serde::Deserialize)]
+            #[derive(Debug, Clone, PartialEq, Eq, Hash, Default, ::ploidy_util::serde::Serialize, ::ploidy_util::serde::Deserialize, ::ploidy_util::pointer::JsonPointee)]
             #[serde(crate = "::ploidy_util::serde")]
+            #[ploidy(pointer(crate = "::ploidy_util::pointer"))]
             pub struct Resource {
                 #[serde(default, skip_serializing_if = "::ploidy_util::absent::AbsentOr::is_absent")]
                 pub link: ::ploidy_util::absent::AbsentOr<::ploidy_util::url::Url>,
@@ -1264,8 +1310,9 @@ mod tests {
         // `Tags` is a type alias for `Vec<String>`, which implements `Default`,
         // so the struct can derive `Default`.
         let expected: syn::ItemStruct = parse_quote! {
-            #[derive(Debug, Clone, PartialEq, Eq, Hash, Default, ::ploidy_util::serde::Serialize, ::ploidy_util::serde::Deserialize)]
+            #[derive(Debug, Clone, PartialEq, Eq, Hash, Default, ::ploidy_util::serde::Serialize, ::ploidy_util::serde::Deserialize, ::ploidy_util::pointer::JsonPointee)]
             #[serde(crate = "::ploidy_util::serde")]
+            #[ploidy(pointer(crate = "::ploidy_util::pointer"))]
             pub struct Container {
                 pub tags: crate::types::Tags,
             }
@@ -1335,8 +1382,9 @@ mod tests {
         // `oneOf` discriminator; `Corgi` inherits it. Both `String` and
         // `AbsentOr` implement `Default`, so `Default` is still derived.
         let expected: syn::ItemStruct = parse_quote! {
-            #[derive(Debug, Clone, PartialEq, Eq, Hash, Default, ::ploidy_util::serde::Serialize, ::ploidy_util::serde::Deserialize)]
+            #[derive(Debug, Clone, PartialEq, Eq, Hash, Default, ::ploidy_util::serde::Serialize, ::ploidy_util::serde::Deserialize, ::ploidy_util::pointer::JsonPointee)]
             #[serde(crate = "::ploidy_util::serde")]
+            #[ploidy(pointer(crate = "::ploidy_util::pointer"))]
             pub struct Corgi {
                 pub r#type: ::std::string::String,
                 #[serde(default, skip_serializing_if = "::ploidy_util::absent::AbsentOr::is_absent")]
@@ -1414,8 +1462,9 @@ mod tests {
         // `Url` doesn't implement `Default`, so `Child` can't derive it,
         // even though `Child`'s own `name` field is optional.
         let expected: syn::ItemStruct = parse_quote! {
-            #[derive(Debug, Clone, PartialEq, Eq, Hash, ::ploidy_util::serde::Serialize, ::ploidy_util::serde::Deserialize)]
+            #[derive(Debug, Clone, PartialEq, Eq, Hash, ::ploidy_util::serde::Serialize, ::ploidy_util::serde::Deserialize, ::ploidy_util::pointer::JsonPointee)]
             #[serde(crate = "::ploidy_util::serde")]
+            #[ploidy(pointer(crate = "::ploidy_util::pointer"))]
             pub struct Child {
                 pub kind: ::std::string::String,
                 pub source: ::ploidy_util::url::Url,
@@ -1467,8 +1516,9 @@ mod tests {
         // `next` is required and recursive, so it should be boxed. `value` is a
         // string which implements `Default`, so the struct can derive `Default`.
         let expected: syn::ItemStruct = parse_quote! {
-            #[derive(Debug, Clone, PartialEq, Eq, Hash, Default, ::ploidy_util::serde::Serialize, ::ploidy_util::serde::Deserialize)]
+            #[derive(Debug, Clone, PartialEq, Eq, Hash, Default, ::ploidy_util::serde::Serialize, ::ploidy_util::serde::Deserialize, ::ploidy_util::pointer::JsonPointee)]
             #[serde(crate = "::ploidy_util::serde")]
+            #[ploidy(pointer(crate = "::ploidy_util::pointer"))]
             pub struct Node {
                 pub value: ::std::string::String,
                 pub next: ::std::boxed::Box<crate::types::Node>,
@@ -1516,8 +1566,9 @@ mod tests {
         // giving `AbsentOr<Box<Node>>`, not `Box<AbsentOr<Node>>`. `value` is a
         // string which implements `Default`, so the struct can derive `Default`.
         let expected: syn::ItemStruct = parse_quote! {
-            #[derive(Debug, Clone, PartialEq, Eq, Hash, Default, ::ploidy_util::serde::Serialize, ::ploidy_util::serde::Deserialize)]
+            #[derive(Debug, Clone, PartialEq, Eq, Hash, Default, ::ploidy_util::serde::Serialize, ::ploidy_util::serde::Deserialize, ::ploidy_util::pointer::JsonPointee)]
             #[serde(crate = "::ploidy_util::serde")]
+            #[ploidy(pointer(crate = "::ploidy_util::pointer"))]
             pub struct Node {
                 pub value: ::std::string::String,
                 #[serde(default, skip_serializing_if = "::ploidy_util::absent::AbsentOr::is_absent")]
@@ -1569,8 +1620,9 @@ mod tests {
         // provide their own indirection, so no boxing is needed. `value` is a
         // string which implements `Default`, so the struct can derive `Default`.
         let expected: syn::ItemStruct = parse_quote! {
-            #[derive(Debug, Clone, PartialEq, Eq, Hash, Default, ::ploidy_util::serde::Serialize, ::ploidy_util::serde::Deserialize)]
+            #[derive(Debug, Clone, PartialEq, Eq, Hash, Default, ::ploidy_util::serde::Serialize, ::ploidy_util::serde::Deserialize, ::ploidy_util::pointer::JsonPointee)]
             #[serde(crate = "::ploidy_util::serde")]
+            #[ploidy(pointer(crate = "::ploidy_util::pointer"))]
             pub struct Node {
                 pub value: ::std::string::String,
                 pub children: ::std::vec::Vec<crate::types::Node>,
@@ -1621,8 +1673,9 @@ mod tests {
         // being optional (`AbsentOr`). `value` is a string which implements
         // `Default`, so the struct can derive `Default`.
         let expected: syn::ItemStruct = parse_quote! {
-            #[derive(Debug, Clone, PartialEq, Eq, Hash, Default, ::ploidy_util::serde::Serialize, ::ploidy_util::serde::Deserialize)]
+            #[derive(Debug, Clone, PartialEq, Eq, Hash, Default, ::ploidy_util::serde::Serialize, ::ploidy_util::serde::Deserialize, ::ploidy_util::pointer::JsonPointee)]
             #[serde(crate = "::ploidy_util::serde")]
+            #[ploidy(pointer(crate = "::ploidy_util::pointer"))]
             pub struct Node {
                 pub value: ::std::string::String,
                 #[serde(default, skip_serializing_if = "::ploidy_util::absent::AbsentOr::is_absent")]
@@ -1683,8 +1736,9 @@ mod tests {
         // Inherited fields from inline `allOf` parents should appear first
         // in declaration order, followed by the struct's own fields.
         let expected: syn::ItemStruct = parse_quote! {
-            #[derive(Debug, Clone, PartialEq, Eq, Hash, Default, ::ploidy_util::serde::Serialize, ::ploidy_util::serde::Deserialize)]
+            #[derive(Debug, Clone, PartialEq, Eq, Hash, Default, ::ploidy_util::serde::Serialize, ::ploidy_util::serde::Deserialize, ::ploidy_util::pointer::JsonPointee)]
             #[serde(crate = "::ploidy_util::serde")]
+            #[ploidy(pointer(crate = "::ploidy_util::pointer"))]
             pub struct Person {
                 pub name: ::std::string::String,
                 pub age: i32,
@@ -1732,11 +1786,13 @@ mod tests {
 
         let actual: syn::ItemStruct = parse_quote!(#codegen);
         let expected: syn::ItemStruct = parse_quote! {
-            #[derive(Debug, Clone, PartialEq, Eq, Hash, Default, ::ploidy_util::serde::Serialize, ::ploidy_util::serde::Deserialize)]
+            #[derive(Debug, Clone, PartialEq, Eq, Hash, Default, ::ploidy_util::serde::Serialize, ::ploidy_util::serde::Deserialize, ::ploidy_util::pointer::JsonPointee)]
             #[serde(crate = "::ploidy_util::serde")]
+            #[ploidy(pointer(crate = "::ploidy_util::pointer"))]
             pub struct Config {
                 pub name: ::std::string::String,
                 #[serde(flatten)]
+                #[ploidy(pointer(flatten))]
                 pub additional_properties: ::std::collections::BTreeMap<::std::string::String, ::std::string::String>,
             }
         };
@@ -1802,8 +1858,9 @@ mod tests {
         // tagged union no longer references `Dog` directly, so `kind`
         // is not treated as a tag.
         let expected: syn::ItemStruct = parse_quote! {
-            #[derive(Debug, Clone, PartialEq, Eq, Hash, Default, ::ploidy_util::serde::Serialize, ::ploidy_util::serde::Deserialize)]
+            #[derive(Debug, Clone, PartialEq, Eq, Hash, Default, ::ploidy_util::serde::Serialize, ::ploidy_util::serde::Deserialize, ::ploidy_util::pointer::JsonPointee)]
             #[serde(crate = "::ploidy_util::serde")]
+            #[ploidy(pointer(crate = "::ploidy_util::pointer"))]
             pub struct Dog {
                 pub kind: ::std::string::String,
                 pub bark: ::std::string::String,
@@ -1856,8 +1913,9 @@ mod tests {
 
         let actual: syn::ItemStruct = parse_quote!(#codegen);
         let expected: syn::ItemStruct = parse_quote! {
-            #[derive(Debug, Clone, PartialEq, Eq, Hash, Default, ::ploidy_util::serde::Serialize, ::ploidy_util::serde::Deserialize)]
+            #[derive(Debug, Clone, PartialEq, Eq, Hash, Default, ::ploidy_util::serde::Serialize, ::ploidy_util::serde::Deserialize, ::ploidy_util::pointer::JsonPointee)]
             #[serde(crate = "::ploidy_util::serde")]
+            #[ploidy(pointer(crate = "::ploidy_util::pointer"))]
             pub struct Pet {
                 pub name: ::std::string::String,
                 pub status: crate::types::Status,
@@ -1907,8 +1965,9 @@ mod tests {
 
         let actual: syn::ItemStruct = parse_quote!(#codegen);
         let expected: syn::ItemStruct = parse_quote! {
-            #[derive(Debug, Clone, PartialEq, Eq, Hash, Default, ::ploidy_util::serde::Serialize, ::ploidy_util::serde::Deserialize)]
+            #[derive(Debug, Clone, PartialEq, Eq, Hash, Default, ::ploidy_util::serde::Serialize, ::ploidy_util::serde::Deserialize, ::ploidy_util::pointer::JsonPointee)]
             #[serde(crate = "::ploidy_util::serde")]
+            #[ploidy(pointer(crate = "::ploidy_util::pointer"))]
             pub struct Pet {
                 pub name: ::std::string::String,
                 #[serde(default, skip_serializing_if = "::ploidy_util::absent::AbsentOr::is_absent")]
@@ -1958,8 +2017,9 @@ mod tests {
 
         let actual: syn::ItemStruct = parse_quote!(#codegen);
         let expected: syn::ItemStruct = parse_quote! {
-            #[derive(Debug, Clone, PartialEq, Eq, Hash, Default, ::ploidy_util::serde::Serialize, ::ploidy_util::serde::Deserialize)]
+            #[derive(Debug, Clone, PartialEq, Eq, Hash, Default, ::ploidy_util::serde::Serialize, ::ploidy_util::serde::Deserialize, ::ploidy_util::pointer::JsonPointee)]
             #[serde(crate = "::ploidy_util::serde")]
+            #[ploidy(pointer(crate = "::ploidy_util::pointer"))]
             pub struct Pet {
                 pub name: ::std::string::String,
                 pub status: crate::types::pet::types::Status,
@@ -2014,8 +2074,9 @@ mod tests {
         // `Container::Optional`, not `Enum`.
         let actual: syn::ItemStruct = parse_quote!(#codegen);
         let expected: syn::ItemStruct = parse_quote! {
-            #[derive(Debug, Clone, PartialEq, Eq, Hash, Default, ::ploidy_util::serde::Serialize, ::ploidy_util::serde::Deserialize)]
+            #[derive(Debug, Clone, PartialEq, Eq, Hash, Default, ::ploidy_util::serde::Serialize, ::ploidy_util::serde::Deserialize, ::ploidy_util::pointer::JsonPointee)]
             #[serde(crate = "::ploidy_util::serde")]
+            #[ploidy(pointer(crate = "::ploidy_util::pointer"))]
             pub struct Pet {
                 pub name: ::std::string::String,
                 pub status: ::std::option::Option<crate::types::Status>,
@@ -2069,8 +2130,9 @@ mod tests {
         // so no `skip_serializing_if` is added.
         let actual: syn::ItemStruct = parse_quote!(#codegen);
         let expected: syn::ItemStruct = parse_quote! {
-            #[derive(Debug, Clone, PartialEq, Eq, Hash, Default, ::ploidy_util::serde::Serialize, ::ploidy_util::serde::Deserialize)]
+            #[derive(Debug, Clone, PartialEq, Eq, Hash, Default, ::ploidy_util::serde::Serialize, ::ploidy_util::serde::Deserialize, ::ploidy_util::pointer::JsonPointee)]
             #[serde(crate = "::ploidy_util::serde")]
+            #[ploidy(pointer(crate = "::ploidy_util::pointer"))]
             pub struct Pet {
                 pub name: ::std::string::String,
                 pub priority: crate::types::Priority,

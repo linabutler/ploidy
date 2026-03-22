@@ -70,7 +70,8 @@ impl ToTokens for CodegenEnum<'_> {
 
             tokens.append_all(quote! {
                 #doc_attrs
-                #[derive(Clone, Debug, Eq, Hash, PartialEq)]
+                #[derive(Clone, Debug, Eq, Hash, PartialEq, ::ploidy_util::pointer::JsonPointee)]
+                #[ploidy(pointer(crate = "::ploidy_util::pointer"))]
                 pub enum #type_name {
                     #(#variants),*
                 }
@@ -185,7 +186,8 @@ mod tests {
 
         let actual: syn::File = parse_quote!(#codegen);
         let expected: syn::File = parse_quote! {
-            #[derive(Clone, Debug, Eq, Hash, PartialEq)]
+            #[derive(Clone, Debug, Eq, Hash, PartialEq, ::ploidy_util::pointer::JsonPointee)]
+            #[ploidy(pointer(crate = "::ploidy_util::pointer"))]
             pub enum Status {
                 Active,
                 Inactive,

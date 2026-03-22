@@ -8,34 +8,36 @@
 //!
 //! Container-level attributes apply to structs and enums:
 //!
-//! * `#[ploidy(tag = "field")]` - Use the internally tagged enum representation,
+//! * `#[ploidy(pointer(tag = "field"))]` - Use the internally tagged enum representation,
 //!   with the given field name for the tag. Supported on enums only.
-//! * `#[ploidy(tag = "t", content = "c")]` - Use the adjacently tagged enum representation,
+//! * `#[ploidy(pointer(tag = "t", content = "c"))]` - Use the adjacently tagged enum representation,
 //!   with the given field names for the tag and contents. Supported on enums only.
-//! * `#[ploidy(untagged)]` - Use the untagged enum representation. Supported on enums only.
-//! * `#[ploidy(rename_all = "case")]` - Rename all struct fields or enum variants
+//! * `#[ploidy(pointer(untagged))]` - Use the untagged enum representation. Supported on enums only.
+//! * `#[ploidy(pointer(rename_all = "case"))]` - Rename all struct fields or enum variants
 //!   according to the given case. The supported cases are `lowercase`, `UPPERCASE`,
 //!   `PascalCase`, `camelCase`, `snake_case`, `SCREAMING_SNAKE_CASE`, `kebab-case`, and
 //!   `SCREAMING-KEBAB-CASE`.
+//! * `#[ploidy(pointer(crate = "path::to::ploidy_pointer"))]` - Override the path to the
+//!   `ploidy_pointer` crate. Defaults to `::ploidy_pointer`.
 //!
 //! # Variant Attributes
 //!
 //! Variant-level attributes apply to enum variants:
 //!
-//! * `#[ploidy(rename = "name")]` - Access this variant using the given name,
+//! * `#[ploidy(pointer(rename = "name"))]` - Access this variant using the given name,
 //!   instead of its Rust name.
-//! * `#[ploidy(skip)]` - Make this variant inaccessible, except for the tag field
+//! * `#[ploidy(pointer(skip))]` - Make this variant inaccessible, except for the tag field
 //!   if using the internally or adjacently tagged enum representation.
 //!
 //! # Field Attributes
 //!
 //! Field-level attributes apply to struct and enum variant fields:
 //!
-//! * `#[ploidy(rename = "name")]` - Access this variant using the given name,
+//! * `#[ploidy(pointer(rename = "name"))]` - Access this variant using the given name,
 //!   instead of its Rust name.
-//! * `#[ploidy(flatten)]` - Remove one layer of structure between the container
+//! * `#[ploidy(pointer(flatten))]` - Remove one layer of structure between the container
 //!   and field. Supported on named fields only.
-//! * `#[ploidy(skip)]` - Exclude the field from pointer access.
+//! * `#[ploidy(pointer(skip))]` - Exclude the field from pointer access.
 //!
 //! # Examples
 //!
@@ -47,7 +49,7 @@
 //! #[derive(JsonPointee)]
 //! struct User {
 //!     name: String,
-//!     #[ploidy(flatten)]
+//!     #[ploidy(pointer(flatten))]
 //!     contact: ContactInfo,
 //! }
 //!
@@ -86,10 +88,10 @@
 //! # use ploidy_pointer::{BadJsonPointer, JsonPointee, JsonPointer};
 //! # fn main() -> Result<(), Box<dyn std::error::Error>> {
 //! #[derive(JsonPointee)]
-//! #[ploidy(rename_all = "snake_case")]
+//! #[ploidy(pointer(rename_all = "snake_case"))]
 //! enum ApiResponse {
 //!     SuccessResponse { data: String },
-//!     #[ploidy(rename = "error")]
+//!     #[ploidy(pointer(rename = "error"))]
 //!     ErrorResponse { message: String },
 //! }
 //!
@@ -150,7 +152,7 @@
 //! # use ploidy_pointer::{BadJsonPointer, JsonPointee, JsonPointer};
 //! # fn main() -> Result<(), Box<dyn std::error::Error>> {
 //! #[derive(JsonPointee)]
-//! #[ploidy(tag = "type")]
+//! #[ploidy(pointer(tag = "type"))]
 //! enum Message {
 //!     Text { content: String },
 //!     Image { url: String },
@@ -180,7 +182,7 @@
 //! # use ploidy_pointer::{BadJsonPointer, JsonPointee, JsonPointer};
 //! # fn main() -> Result<(), Box<dyn std::error::Error>> {
 //! #[derive(JsonPointee)]
-//! #[ploidy(tag = "type", content = "value")]
+//! #[ploidy(pointer(tag = "type", content = "value"))]
 //! enum Message {
 //!     Text { content: String },
 //!     Image { url: String },
@@ -210,7 +212,7 @@
 //! # use ploidy_pointer::{BadJsonPointer, JsonPointee, JsonPointer};
 //! # fn main() -> Result<(), Box<dyn std::error::Error>> {
 //! #[derive(JsonPointee)]
-//! #[ploidy(untagged)]
+//! #[ploidy(pointer(untagged))]
 //! enum Message {
 //!     Text { content: String },
 //!     Image { url: String },
@@ -229,7 +231,7 @@
 //!
 //! [serde]: https://serde.rs
 
-use std::fmt::Display;
+use std::{borrow::Cow, fmt::Display};
 
 use heck::{
     ToKebabCase, ToLowerCamelCase, ToPascalCase, ToShoutyKebabCase, ToShoutySnakeCase, ToSnakeCase,
@@ -261,8 +263,15 @@ fn derive_for(input: &DeriveInput) -> syn::Result<TokenStream> {
         .map(ContainerAttr::parse_all)
         .flatten_ok()
         .try_collect()?;
-    let container =
-        ContainerInfo::new(name, &attrs).map_err(|err| syn::Error::new_spanned(input, err))?;
+    let root = attrs
+        .iter()
+        .find_map(|attr| match attr {
+            ContainerAttr::Crate(path) => Some(Cow::Borrowed(path)),
+            _ => None,
+        })
+        .unwrap_or_else(|| Cow::Owned(syn::parse_quote!(::ploidy_pointer)));
+    let container = ContainerInfo::new(name, &root, &attrs)
+        .map_err(|err| syn::Error::new_spanned(input, err))?;
 
     // Hygienic parameter for the generated `resolve` method.
     let pointer = Ident::new("pointer", Span::mixed_site());
@@ -289,7 +298,7 @@ fn derive_for(input: &DeriveInput) -> syn::Result<TokenStream> {
             .filter_map(|param| match param {
                 GenericParam::Type(param) => {
                     let ident = &param.ident;
-                    Some(quote! { #ident: ::ploidy_pointer::JsonPointee })
+                    Some(quote! { #ident: #root::JsonPointee })
                 }
                 _ => None,
             })
@@ -305,9 +314,12 @@ fn derive_for(input: &DeriveInput) -> syn::Result<TokenStream> {
 
     Ok(quote! {
         #[automatically_derived]
-        impl #impl_generics ::ploidy_pointer::JsonPointee for #name #ty_generics #where_clause {
-            fn resolve(&self, #pointer: &::ploidy_pointer::JsonPointer)
-                -> ::std::result::Result<&dyn ::ploidy_pointer::JsonPointee, ::ploidy_pointer::BadJsonPointer> {
+        impl #impl_generics #root::JsonPointee for #name #ty_generics #where_clause {
+            #[inline]
+            fn as_any(&self) -> &dyn ::std::any::Any { self }
+
+            fn resolve(&self, #pointer: &#root::JsonPointer)
+                -> ::std::result::Result<&dyn #root::JsonPointee, #root::BadJsonPointer> {
                 #body
             }
         }
@@ -338,8 +350,9 @@ fn derive_for_struct(
         }
         Fields::Unnamed(fields) if fields.unnamed.len() == 1 => {
             // For newtype structs, resolve the pointer against the inner value.
+            let root = container.root;
             quote! {
-                <_ as ::ploidy_pointer::JsonPointee>::resolve(&self.0, #pointer)
+                <_ as #root::JsonPointee>::resolve(&self.0, #pointer)
             }
         }
         Fields::Unnamed(fields) => {
@@ -381,6 +394,7 @@ fn derive_for_enum(
         .iter()
         .map(|variant| {
             let name = &variant.ident;
+            let root = container.root;
             let attrs: Vec<_> = variant
                 .attrs
                 .iter()
@@ -433,12 +447,12 @@ fn derive_for_enum(
                             quote! {
                                 Self::#name(inner) => {
                                     let Some(#key) = #pointer.head() else {
-                                        return Ok(self as &dyn ::ploidy_pointer::JsonPointee);
+                                        return Ok(self as &dyn #root::JsonPointee);
                                     };
                                     if #key == #tag_field {
-                                        return Ok(&#effective_name as &dyn ::ploidy_pointer::JsonPointee);
+                                        return Ok(&#effective_name as &dyn #root::JsonPointee);
                                     }
-                                    <_ as ::ploidy_pointer::JsonPointee>::resolve(inner, #pointer)
+                                    <_ as #root::JsonPointee>::resolve(inner, #pointer)
                                 }
                             }
                         }
@@ -450,19 +464,19 @@ fn derive_for_enum(
                             let effective_name = info.effective_name();
                             let pointee_ty = TuplePointeeTy::Variant(info, tag);
                             let key_err = if cfg!(feature = "did-you-mean") {
-                                quote!(::ploidy_pointer::BadJsonPointerKey::with_ty(#key, #pointee_ty))
+                                quote!(#root::BadJsonPointerKey::with_ty(#key, #pointee_ty))
                             } else {
-                                quote!(::ploidy_pointer::BadJsonPointerKey::new(#key))
+                                quote!(#root::BadJsonPointerKey::new(#key))
                             };
                             quote! {
                                 Self::#name(inner) => {
                                     let Some(#key) = #pointer.head() else {
-                                        return Ok(self as &dyn ::ploidy_pointer::JsonPointee);
+                                        return Ok(self as &dyn #root::JsonPointee);
                                     };
                                     if #key != #effective_name {
                                         return Err(#key_err)?;
                                     }
-                                    <_ as ::ploidy_pointer::JsonPointee>::resolve(inner, #pointer.tail())
+                                    <_ as #root::JsonPointee>::resolve(inner, #pointer.tail())
                                 }
                             }
                         }
@@ -473,22 +487,22 @@ fn derive_for_enum(
                             let effective_name = info.effective_name();
                             let pointee_ty = TuplePointeeTy::Variant(info, tag);
                             let key_err = if cfg!(feature = "did-you-mean") {
-                                quote!(::ploidy_pointer::BadJsonPointerKey::with_suggestions(
+                                quote!(#root::BadJsonPointerKey::with_suggestions(
                                     #key,
                                     #pointee_ty,
                                     [#tag_field, #content_field],
                                 ))
                             } else {
-                                quote!(::ploidy_pointer::BadJsonPointerKey::new(#key))
+                                quote!(#root::BadJsonPointerKey::new(#key))
                             };
                             quote! {
                                 Self::#name(inner) => {
                                     let Some(#key) = #pointer.head() else {
-                                        return Ok(self as &dyn ::ploidy_pointer::JsonPointee);
+                                        return Ok(self as &dyn #root::JsonPointee);
                                     };
                                     match &*#key.to_str() {
-                                        #tag_field => Ok(&#effective_name as &dyn ::ploidy_pointer::JsonPointee),
-                                        #content_field => <_ as ::ploidy_pointer::JsonPointee>::resolve(inner, #pointer.tail()),
+                                        #tag_field => Ok(&#effective_name as &dyn #root::JsonPointee),
+                                        #content_field => <_ as #root::JsonPointee>::resolve(inner, #pointer.tail()),
                                         _ => Err(#key_err)?,
                                     }
                                 }
@@ -499,7 +513,7 @@ fn derive_for_enum(
                             // against the inner value.
                             quote! {
                                 Self::#name(inner) => {
-                                    <_ as ::ploidy_pointer::JsonPointee>::resolve(
+                                    <_ as #root::JsonPointee>::resolve(
                                         inner,
                                         #pointer,
                                     )
@@ -553,15 +567,20 @@ fn derive_for_enum(
     })
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy)]
 struct ContainerInfo<'a> {
     name: &'a Ident,
+    root: &'a syn::Path,
     rename_all: Option<RenameAll>,
     tag: Option<VariantTag<'a>>,
 }
 
 impl<'a> ContainerInfo<'a> {
-    fn new(name: &'a Ident, attrs: &'a [ContainerAttr]) -> Result<Self, DeriveError> {
+    fn new(
+        name: &'a Ident,
+        root: &'a syn::Path,
+        attrs: &'a [ContainerAttr],
+    ) -> Result<Self, DeriveError> {
         let rename_all = attrs.iter().find_map(|attr| match attr {
             &ContainerAttr::RenameAll(rename_all) => Some(rename_all),
             _ => None,
@@ -606,6 +625,7 @@ impl<'a> ContainerInfo<'a> {
 
         Ok(Self {
             name,
+            root,
             rename_all,
             tag,
         })
@@ -698,7 +718,7 @@ impl TupleFieldInfo {
     }
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy)]
 struct VariantInfo<'a> {
     container: ContainerInfo<'a>,
     name: &'a Ident,
@@ -736,7 +756,7 @@ impl<'a> VariantInfo<'a> {
     }
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy)]
 struct NamedPointeeBody<'a> {
     ty: NamedPointeeTy<'a>,
     pointer: &'a Ident,
@@ -755,6 +775,7 @@ impl<'a> NamedPointeeBody<'a> {
 
 impl ToTokens for NamedPointeeBody<'_> {
     fn to_tokens(&self, tokens: &mut TokenStream) {
+        let root = self.ty.container().root;
         let pointer = self.pointer;
         let key = Ident::new("key", Span::mixed_site());
         let pointee_ty = self.ty;
@@ -768,7 +789,7 @@ impl ToTokens for NamedPointeeBody<'_> {
                 let field_key = &f.key;
                 let binding = f.binding;
                 quote! {
-                    #field_key => <_ as ::ploidy_pointer::JsonPointee>::resolve(
+                    #field_key => <_ as #root::JsonPointee>::resolve(
                         #binding,
                         #pointer.tail(),
                     )
@@ -793,13 +814,13 @@ impl ToTokens for NamedPointeeBody<'_> {
             // For flattened fields, we build an `.or_else()` chain bottom-up
             // using a right fold.
             let rest = if cfg!(feature = "did-you-mean") {
-                quote!(Err(::ploidy_pointer::BadJsonPointerKey::with_suggestions(
+                quote!(Err(#root::BadJsonPointerKey::with_suggestions(
                     #key,
                     #pointee_ty,
                     [#(#suggestions),*],
                 ))?)
             } else {
-                quote!(Err(::ploidy_pointer::BadJsonPointerKey::new(#key))?)
+                quote!(Err(#root::BadJsonPointerKey::new(#key))?)
             };
             self.fields
                 .iter()
@@ -807,7 +828,7 @@ impl ToTokens for NamedPointeeBody<'_> {
                 .rfold(rest, |rest, f| {
                     let binding = f.binding;
                     quote! {
-                        <_ as ::ploidy_pointer::JsonPointee>
+                        <_ as #root::JsonPointee>
                             ::resolve(
                                 #binding,
                                 #pointer
@@ -824,10 +845,10 @@ impl ToTokens for NamedPointeeBody<'_> {
                 let variant_name = info.effective_name();
                 quote! {
                     let Some(#key) = #pointer.head() else {
-                        return Ok(self as &dyn ::ploidy_pointer::JsonPointee);
+                        return Ok(self as &dyn #root::JsonPointee);
                     };
                     if #key == #tag_field {
-                        return Ok(&#variant_name as &dyn ::ploidy_pointer::JsonPointee);
+                        return Ok(&#variant_name as &dyn #root::JsonPointee);
                     }
                     match &*#key.to_str() {
                         #(#arms,)*
@@ -841,20 +862,20 @@ impl ToTokens for NamedPointeeBody<'_> {
                 // against the named fields.
                 let variant_name = info.effective_name();
                 let ty_err = if cfg!(feature = "did-you-mean") {
-                    quote!(::ploidy_pointer::BadJsonPointerTy::with_ty(&#pointer, #pointee_ty))
+                    quote!(#root::BadJsonPointerTy::with_ty(&#pointer, #pointee_ty))
                 } else {
-                    quote!(::ploidy_pointer::BadJsonPointerTy::new(&#pointer))
+                    quote!(#root::BadJsonPointerTy::new(&#pointer))
                 };
                 quote! {
                     let Some(#key) = #pointer.head() else {
-                        return Ok(self as &dyn ::ploidy_pointer::JsonPointee);
+                        return Ok(self as &dyn #root::JsonPointee);
                     };
                     if #key != #variant_name {
                         return Err(#ty_err)?;
                     }
                     let #pointer = #pointer.tail();
                     let Some(#key) = #pointer.head() else {
-                        return Ok(self as &dyn ::ploidy_pointer::JsonPointee);
+                        return Ok(self as &dyn #root::JsonPointee);
                     };
                     match &*#key.to_str() {
                         #(#arms,)*
@@ -873,26 +894,26 @@ impl ToTokens for NamedPointeeBody<'_> {
                 // must match either the tag or content field.
                 let variant_name = info.effective_name();
                 let key_err = if cfg!(feature = "did-you-mean") {
-                    quote!(::ploidy_pointer::BadJsonPointerKey::with_suggestions(
+                    quote!(#root::BadJsonPointerKey::with_suggestions(
                         #key,
                         #pointee_ty,
                         [#tag_field, #content_field],
                     ))
                 } else {
-                    quote!(::ploidy_pointer::BadJsonPointerKey::new(#key))
+                    quote!(#root::BadJsonPointerKey::new(#key))
                 };
                 quote! {
                     let Some(#key) = #pointer.head() else {
-                        return Ok(self as &dyn ::ploidy_pointer::JsonPointee);
+                        return Ok(self as &dyn #root::JsonPointee);
                     };
                     match &*#key.to_str() {
                         #tag_field => {
-                            return Ok(&#variant_name as &dyn ::ploidy_pointer::JsonPointee);
+                            return Ok(&#variant_name as &dyn #root::JsonPointee);
                         }
                         #content_field => {
                             let #pointer = #pointer.tail();
                             let Some(#key) = #pointer.head() else {
-                                return Ok(self as &dyn ::ploidy_pointer::JsonPointee);
+                                return Ok(self as &dyn #root::JsonPointee);
                             };
                             match &*#key.to_str() {
                                 #(#arms,)*
@@ -910,7 +931,7 @@ impl ToTokens for NamedPointeeBody<'_> {
                 // access the fields directly.
                 quote! {
                     let Some(#key) = #pointer.head() else {
-                        return Ok(self as &dyn ::ploidy_pointer::JsonPointee);
+                        return Ok(self as &dyn #root::JsonPointee);
                     };
                     match &*#key.to_str() {
                         #(#arms,)*
@@ -924,7 +945,7 @@ impl ToTokens for NamedPointeeBody<'_> {
     }
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy)]
 struct TuplePointeeBody<'a> {
     ty: TuplePointeeTy<'a>,
     pointer: &'a Ident,
@@ -943,6 +964,7 @@ impl<'a> TuplePointeeBody<'a> {
 
 impl ToTokens for TuplePointeeBody<'_> {
     fn to_tokens(&self, tokens: &mut TokenStream) {
+        let root = self.ty.container().root;
         let pointer = self.pointer;
         let idx = Ident::new("idx", Span::mixed_site());
         let key = Ident::new("key", Span::mixed_site());
@@ -952,7 +974,7 @@ impl ToTokens for TuplePointeeBody<'_> {
             let index = f.index;
             let binding = &f.binding;
             quote! {
-                #index => <_ as ::ploidy_pointer::JsonPointee>::resolve(
+                #index => <_ as #root::JsonPointee>::resolve(
                     #binding,
                     #pointer.tail(),
                 )
@@ -963,9 +985,9 @@ impl ToTokens for TuplePointeeBody<'_> {
         let ty = self.ty;
         let len = self.fields.len();
         let ty_err = if cfg!(feature = "did-you-mean") {
-            quote!(::ploidy_pointer::BadJsonPointerTy::with_ty(&#pointer, #ty))
+            quote!(#root::BadJsonPointerTy::with_ty(&#pointer, #ty))
         } else {
-            quote!(::ploidy_pointer::BadJsonPointerTy::new(&#pointer))
+            quote!(#root::BadJsonPointerTy::new(&#pointer))
         };
         let tail = quote! {
             let Some(#idx) = #key.to_index() else {
@@ -973,7 +995,7 @@ impl ToTokens for TuplePointeeBody<'_> {
             };
             match #idx {
                 #(#arms,)*
-                _ => Err(::ploidy_pointer::BadJsonPointer::Index(#idx, 0..#len))
+                _ => Err(#root::BadJsonPointer::Index(#idx, 0..#len))
             }
         };
 
@@ -984,10 +1006,10 @@ impl ToTokens for TuplePointeeBody<'_> {
                 let variant_name = info.effective_name();
                 quote! {
                     let Some(#key) = #pointer.head() else {
-                        return Ok(self as &dyn ::ploidy_pointer::JsonPointee);
+                        return Ok(self as &dyn #root::JsonPointee);
                     };
                     if #key == #tag_field {
-                        return Ok(&#variant_name as &dyn ::ploidy_pointer::JsonPointee);
+                        return Ok(&#variant_name as &dyn #root::JsonPointee);
                     }
                     #tail
                 }
@@ -998,20 +1020,20 @@ impl ToTokens for TuplePointeeBody<'_> {
                 // against the tuple indices.
                 let variant_name = info.effective_name();
                 let ty_err = if cfg!(feature = "did-you-mean") {
-                    quote!(::ploidy_pointer::BadJsonPointerTy::with_ty(&#pointer, #ty))
+                    quote!(#root::BadJsonPointerTy::with_ty(&#pointer, #ty))
                 } else {
-                    quote!(::ploidy_pointer::BadJsonPointerTy::new(&#pointer))
+                    quote!(#root::BadJsonPointerTy::new(&#pointer))
                 };
                 quote! {
                     let Some(#key) = #pointer.head() else {
-                        return Ok(self as &dyn ::ploidy_pointer::JsonPointee);
+                        return Ok(self as &dyn #root::JsonPointee);
                     };
                     if #key != #variant_name {
                         return Err(#ty_err)?;
                     }
                     let #pointer = #pointer.tail();
                     let Some(#key) = #pointer.head() else {
-                        return Ok(self as &dyn ::ploidy_pointer::JsonPointee);
+                        return Ok(self as &dyn #root::JsonPointee);
                     };
                     #tail
                 }
@@ -1027,26 +1049,26 @@ impl ToTokens for TuplePointeeBody<'_> {
                 // must match either the tag or content field.
                 let variant_name = info.effective_name();
                 let key_err = if cfg!(feature = "did-you-mean") {
-                    quote!(::ploidy_pointer::BadJsonPointerKey::with_suggestions(
+                    quote!(#root::BadJsonPointerKey::with_suggestions(
                         #key,
                         #ty,
                         [#tag_field, #content_field],
                     ))
                 } else {
-                    quote!(::ploidy_pointer::BadJsonPointerKey::new(#key))
+                    quote!(#root::BadJsonPointerKey::new(#key))
                 };
                 quote! {
                     let Some(#key) = #pointer.head() else {
-                        return Ok(self as &dyn ::ploidy_pointer::JsonPointee);
+                        return Ok(self as &dyn #root::JsonPointee);
                     };
                     match &*#key.to_str() {
                         #tag_field => {
-                            return Ok(&#variant_name as &dyn ::ploidy_pointer::JsonPointee);
+                            return Ok(&#variant_name as &dyn #root::JsonPointee);
                         }
                         #content_field => {
                             let #pointer = #pointer.tail();
                             let Some(#key) = #pointer.head() else {
-                                return Ok(self as &dyn ::ploidy_pointer::JsonPointee);
+                                return Ok(self as &dyn #root::JsonPointee);
                             };
                             #tail
                         }
@@ -1061,7 +1083,7 @@ impl ToTokens for TuplePointeeBody<'_> {
                 // access the tuple indices directly.
                 quote! {
                     let Some(#key) = #pointer.head() else {
-                        return Ok(self as &dyn ::ploidy_pointer::JsonPointee);
+                        return Ok(self as &dyn #root::JsonPointee);
                     };
                     #tail
                 }
@@ -1072,7 +1094,7 @@ impl ToTokens for TuplePointeeBody<'_> {
     }
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy)]
 struct UnitPointeeBody<'a> {
     ty: UnitPointeeTy<'a>,
     pointer: &'a Ident,
@@ -1086,6 +1108,7 @@ impl<'a> UnitPointeeBody<'a> {
 
 impl ToTokens for UnitPointeeBody<'_> {
     fn to_tokens(&self, tokens: &mut TokenStream) {
+        let root = self.ty.container().root;
         let pointer = self.pointer;
         let body = match self.ty {
             ty @ UnitPointeeTy::Variant(info, VariantTag::Internal(tag_field)) => {
@@ -1093,20 +1116,20 @@ impl ToTokens for UnitPointeeBody<'_> {
                 let key = Ident::new("key", Span::mixed_site());
                 let variant_name = info.effective_name();
                 let key_err = if cfg!(feature = "did-you-mean") {
-                    quote!(::ploidy_pointer::BadJsonPointerKey::with_suggestions(
+                    quote!(#root::BadJsonPointerKey::with_suggestions(
                         #key,
                         #ty,
                         [#tag_field],
                     ))
                 } else {
-                    quote!(::ploidy_pointer::BadJsonPointerKey::new(#key))
+                    quote!(#root::BadJsonPointerKey::new(#key))
                 };
                 quote! {
                     let Some(#key) = #pointer.head() else {
-                        return Ok(self as &dyn ::ploidy_pointer::JsonPointee);
+                        return Ok(self as &dyn #root::JsonPointee);
                     };
                     if #key == #tag_field {
-                        return Ok(&#variant_name as &dyn ::ploidy_pointer::JsonPointee);
+                        return Ok(&#variant_name as &dyn #root::JsonPointee);
                     }
                     Err(#key_err)?
                 }
@@ -1116,18 +1139,18 @@ impl ToTokens for UnitPointeeBody<'_> {
                 let key = Ident::new("key", Span::mixed_site());
                 let variant_name = info.effective_name();
                 let key_err = if cfg!(feature = "did-you-mean") {
-                    quote!(::ploidy_pointer::BadJsonPointerKey::with_ty(#key, #ty))
+                    quote!(#root::BadJsonPointerKey::with_ty(#key, #ty))
                 } else {
-                    quote!(::ploidy_pointer::BadJsonPointerKey::new(#key))
+                    quote!(#root::BadJsonPointerKey::new(#key))
                 };
                 let ty_err = if cfg!(feature = "did-you-mean") {
-                    quote!(::ploidy_pointer::BadJsonPointerTy::with_ty(&#pointer.tail(), #ty))
+                    quote!(#root::BadJsonPointerTy::with_ty(&#pointer.tail(), #ty))
                 } else {
-                    quote!(::ploidy_pointer::BadJsonPointerTy::new(&#pointer.tail()))
+                    quote!(#root::BadJsonPointerTy::new(&#pointer.tail()))
                 };
                 quote! {
                     let Some(#key) = #pointer.head() else {
-                        return Ok(self as &dyn ::ploidy_pointer::JsonPointee);
+                        return Ok(self as &dyn #root::JsonPointee);
                     };
                     if #key != #variant_name {
                         return Err(#key_err)?;
@@ -1135,7 +1158,7 @@ impl ToTokens for UnitPointeeBody<'_> {
                     if !#pointer.tail().is_empty() {
                         return Err(#ty_err)?;
                     }
-                    Ok(self as &dyn ::ploidy_pointer::JsonPointee)
+                    Ok(self as &dyn #root::JsonPointee)
                 }
             }
             ty @ UnitPointeeTy::Variant(info, VariantTag::Adjacent { tag: tag_field, .. }) => {
@@ -1143,21 +1166,21 @@ impl ToTokens for UnitPointeeBody<'_> {
                 let key = Ident::new("key", Span::mixed_site());
                 let variant_name = info.effective_name();
                 let key_err = if cfg!(feature = "did-you-mean") {
-                    quote!(::ploidy_pointer::BadJsonPointerKey::with_suggestions(
+                    quote!(#root::BadJsonPointerKey::with_suggestions(
                         #key,
                         #ty,
                         [#tag_field],
                     ))
                 } else {
-                    quote!(::ploidy_pointer::BadJsonPointerKey::new(#key))
+                    quote!(#root::BadJsonPointerKey::new(#key))
                 };
                 quote! {
                     let Some(#key) = #pointer.head() else {
-                        return Ok(self as &dyn ::ploidy_pointer::JsonPointee);
+                        return Ok(self as &dyn #root::JsonPointee);
                     };
                     match &*#key.to_str() {
                         #tag_field => {
-                            return Ok(&#variant_name as &dyn ::ploidy_pointer::JsonPointee);
+                            return Ok(&#variant_name as &dyn #root::JsonPointee);
                         }
                         _ => {
                             return Err(#key_err)?;
@@ -1168,13 +1191,13 @@ impl ToTokens for UnitPointeeBody<'_> {
             ty @ (UnitPointeeTy::Struct(_) | UnitPointeeTy::Variant(_, VariantTag::Untagged)) => {
                 // For unit structs and untagged unit variants, deny all fields.
                 let ty_err = if cfg!(feature = "did-you-mean") {
-                    quote!(::ploidy_pointer::BadJsonPointerTy::with_ty(&#pointer, #ty))
+                    quote!(#root::BadJsonPointerTy::with_ty(&#pointer, #ty))
                 } else {
-                    quote!(::ploidy_pointer::BadJsonPointerTy::new(&#pointer))
+                    quote!(#root::BadJsonPointerTy::new(&#pointer))
                 };
                 quote! {
                     if #pointer.is_empty() {
-                        Ok(self as &dyn ::ploidy_pointer::JsonPointee)
+                        Ok(self as &dyn #root::JsonPointee)
                     } else {
                         Err(#ty_err)?
                     }
@@ -1185,19 +1208,29 @@ impl ToTokens for UnitPointeeBody<'_> {
     }
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy)]
 enum NamedPointeeTy<'a> {
     Struct(ContainerInfo<'a>),
     Variant(VariantInfo<'a>, VariantTag<'a>),
 }
 
+impl<'a> NamedPointeeTy<'a> {
+    fn container(self) -> ContainerInfo<'a> {
+        match self {
+            Self::Struct(info) => info,
+            Self::Variant(info, _) => info.container,
+        }
+    }
+}
+
 impl ToTokens for NamedPointeeTy<'_> {
     fn to_tokens(&self, tokens: &mut TokenStream) {
+        let root = self.container().root;
         tokens.append_all(match self {
             Self::Struct(info) => {
                 let ty = info.name;
                 quote! {
-                    ::ploidy_pointer::JsonPointeeTy::struct_named(
+                    #root::JsonPointeeTy::struct_named(
                         stringify!(#ty)
                     )
                 }
@@ -1206,7 +1239,7 @@ impl ToTokens for NamedPointeeTy<'_> {
                 let ty = info.container.name;
                 let variant = info.name;
                 quote! {
-                    ::ploidy_pointer::JsonPointeeTy::struct_variant_named(
+                    #root::JsonPointeeTy::struct_variant_named(
                         stringify!(#ty),
                         stringify!(#variant),
                     )
@@ -1216,19 +1249,29 @@ impl ToTokens for NamedPointeeTy<'_> {
     }
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy)]
 enum TuplePointeeTy<'a> {
     Struct(ContainerInfo<'a>),
     Variant(VariantInfo<'a>, VariantTag<'a>),
 }
 
+impl<'a> TuplePointeeTy<'a> {
+    fn container(self) -> ContainerInfo<'a> {
+        match self {
+            Self::Struct(info) => info,
+            Self::Variant(info, _) => info.container,
+        }
+    }
+}
+
 impl ToTokens for TuplePointeeTy<'_> {
     fn to_tokens(&self, tokens: &mut TokenStream) {
+        let root = self.container().root;
         tokens.append_all(match self {
             Self::Struct(info) => {
                 let ty = info.name;
                 quote! {
-                    ::ploidy_pointer::JsonPointeeTy::tuple_struct_named(
+                    #root::JsonPointeeTy::tuple_struct_named(
                         stringify!(#ty)
                     )
                 }
@@ -1237,7 +1280,7 @@ impl ToTokens for TuplePointeeTy<'_> {
                 let ty = info.container.name;
                 let variant = info.name;
                 quote! {
-                    ::ploidy_pointer::JsonPointeeTy::tuple_variant_named(
+                    #root::JsonPointeeTy::tuple_variant_named(
                         stringify!(#ty),
                         stringify!(#variant),
                     )
@@ -1247,19 +1290,29 @@ impl ToTokens for TuplePointeeTy<'_> {
     }
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy)]
 enum UnitPointeeTy<'a> {
     Struct(ContainerInfo<'a>),
     Variant(VariantInfo<'a>, VariantTag<'a>),
 }
 
+impl<'a> UnitPointeeTy<'a> {
+    fn container(self) -> ContainerInfo<'a> {
+        match self {
+            Self::Struct(info) => info,
+            Self::Variant(info, _) => info.container,
+        }
+    }
+}
+
 impl ToTokens for UnitPointeeTy<'_> {
     fn to_tokens(&self, tokens: &mut TokenStream) {
+        let root = self.container().root;
         tokens.append_all(match self {
             Self::Struct(info) => {
                 let ty = info.name;
                 quote! {
-                    ::ploidy_pointer::JsonPointeeTy::unit_struct_named(
+                    #root::JsonPointeeTy::unit_struct_named(
                         stringify!(#ty)
                     )
                 }
@@ -1268,7 +1321,7 @@ impl ToTokens for UnitPointeeTy<'_> {
                 let ty = info.container.name;
                 let variant = info.name;
                 quote! {
-                    ::ploidy_pointer::JsonPointeeTy::unit_variant_named(
+                    #root::JsonPointeeTy::unit_variant_named(
                         stringify!(#ty),
                         stringify!(#variant),
                     )
@@ -1278,7 +1331,7 @@ impl ToTokens for UnitPointeeTy<'_> {
     }
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy)]
 enum VariantTy<'a> {
     Named(VariantInfo<'a>, VariantTag<'a>),
     Tuple(VariantInfo<'a>, VariantTag<'a>),
@@ -1299,12 +1352,13 @@ impl<'a> VariantTy<'a> {
 
 impl ToTokens for VariantTy<'_> {
     fn to_tokens(&self, tokens: &mut TokenStream) {
+        let root = self.info().container.root;
         tokens.append_all(match self {
             Self::Named(info, _) => {
                 let ty = info.container.name;
                 let variant = info.name;
                 quote! {
-                    ::ploidy_pointer::JsonPointeeTy::struct_variant_named(
+                    #root::JsonPointeeTy::struct_variant_named(
                         stringify!(#ty),
                         stringify!(#variant),
                     )
@@ -1314,7 +1368,7 @@ impl ToTokens for VariantTy<'_> {
                 let ty = info.container.name;
                 let variant = info.name;
                 quote! {
-                    ::ploidy_pointer::JsonPointeeTy::tuple_variant_named(
+                    #root::JsonPointeeTy::tuple_variant_named(
                         stringify!(#ty),
                         stringify!(#variant),
                     )
@@ -1324,7 +1378,7 @@ impl ToTokens for VariantTy<'_> {
                 let ty = info.container.name;
                 let variant = info.name;
                 quote! {
-                    ::ploidy_pointer::JsonPointeeTy::unit_variant_named(
+                    #root::JsonPointeeTy::unit_variant_named(
                         stringify!(#ty),
                         stringify!(#variant),
                     )
@@ -1334,7 +1388,7 @@ impl ToTokens for VariantTy<'_> {
     }
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy)]
 struct SkippedVariantBody<'a> {
     ty: VariantTy<'a>,
     pointer: &'a Ident,
@@ -1348,6 +1402,7 @@ impl<'a> SkippedVariantBody<'a> {
 
 impl ToTokens for SkippedVariantBody<'_> {
     fn to_tokens(&self, tokens: &mut TokenStream) {
+        let root = self.ty.info().container.root;
         let pointer = self.pointer;
         let ty = self.ty;
 
@@ -1372,17 +1427,17 @@ impl ToTokens for SkippedVariantBody<'_> {
                 let key = Ident::new("key", Span::mixed_site());
                 let effective_name = ty.info().effective_name();
                 let ty_err = if cfg!(feature = "did-you-mean") {
-                    quote!(::ploidy_pointer::BadJsonPointerTy::with_ty(&#pointer, #ty))
+                    quote!(#root::BadJsonPointerTy::with_ty(&#pointer, #ty))
                 } else {
-                    quote!(::ploidy_pointer::BadJsonPointerTy::new(&#pointer))
+                    quote!(#root::BadJsonPointerTy::new(&#pointer))
                 };
                 tokens.append_all(quote! {
                     #pattern => {
                         let Some(#key) = #pointer.head() else {
-                            return Ok(self as &dyn ::ploidy_pointer::JsonPointee);
+                            return Ok(self as &dyn #root::JsonPointee);
                         };
                         if #key == #tag_field {
-                            return Ok(&#effective_name as &dyn ::ploidy_pointer::JsonPointee);
+                            return Ok(&#effective_name as &dyn #root::JsonPointee);
                         }
                         Err(#ty_err)?
                     }
@@ -1391,9 +1446,9 @@ impl ToTokens for SkippedVariantBody<'_> {
             VariantTag::External => {
                 // Externally tagged skipped variants are completely inaccessible.
                 let ty_err = if cfg!(feature = "did-you-mean") {
-                    quote!(::ploidy_pointer::BadJsonPointerTy::with_ty(&#pointer, #ty))
+                    quote!(#root::BadJsonPointerTy::with_ty(&#pointer, #ty))
                 } else {
-                    quote!(::ploidy_pointer::BadJsonPointerTy::new(&#pointer))
+                    quote!(#root::BadJsonPointerTy::new(&#pointer))
                 };
                 tokens.append_all(quote! {
                     #pattern => Err(#ty_err)?
@@ -1405,22 +1460,22 @@ impl ToTokens for SkippedVariantBody<'_> {
                 let key = Ident::new("key", Span::mixed_site());
                 let effective_name = ty.info().effective_name();
                 let key_err = if cfg!(feature = "did-you-mean") {
-                    quote!(::ploidy_pointer::BadJsonPointerKey::with_suggestions(
+                    quote!(#root::BadJsonPointerKey::with_suggestions(
                         #key,
                         #ty,
                         [#tag_field],
                     ))
                 } else {
-                    quote!(::ploidy_pointer::BadJsonPointerKey::new(#key))
+                    quote!(#root::BadJsonPointerKey::new(#key))
                 };
                 tokens.append_all(quote! {
                     #pattern => {
                         let Some(#key) = #pointer.head() else {
-                            return Ok(self as &dyn ::ploidy_pointer::JsonPointee);
+                            return Ok(self as &dyn #root::JsonPointee);
                         };
                         match &*#key.to_str() {
                             #tag_field => {
-                                return Ok(&#effective_name as &dyn ::ploidy_pointer::JsonPointee);
+                                return Ok(&#effective_name as &dyn #root::JsonPointee);
                             }
                             _ => {
                                 return Err(#key_err)?;
@@ -1432,9 +1487,9 @@ impl ToTokens for SkippedVariantBody<'_> {
             VariantTag::Untagged => {
                 // Untagged skipped variants are completely inaccessible.
                 let ty_err = if cfg!(feature = "did-you-mean") {
-                    quote!(::ploidy_pointer::BadJsonPointerTy::with_ty(&#pointer, #ty))
+                    quote!(#root::BadJsonPointerTy::with_ty(&#pointer, #ty))
                 } else {
-                    quote!(::ploidy_pointer::BadJsonPointerTy::new(&#pointer))
+                    quote!(#root::BadJsonPointerTy::new(&#pointer))
                 };
                 tokens.append_all(quote! {
                     #pattern => Err(#ty_err)?
@@ -1452,8 +1507,9 @@ enum VariantTag<'a> {
     Untagged,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 enum ContainerAttr {
+    Crate(syn::Path),
     RenameAll(RenameAll),
     Tag(String),
     Content(String),
@@ -1467,23 +1523,36 @@ impl ContainerAttr {
         }
         let mut attrs = vec![];
         attr.parse_nested_meta(|meta| {
-            if meta.path.is_ident("rename_all") {
-                let value = meta.value()?;
-                let s: syn::LitStr = value.parse()?;
-                let Some(rename) = RenameAll::from_str(&s.value()) else {
-                    return Err(meta.error(DeriveError::BadRenameAll));
-                };
-                attrs.push(Self::RenameAll(rename));
-            } else if meta.path.is_ident("tag") {
-                let value = meta.value()?;
-                let s: syn::LitStr = value.parse()?;
-                attrs.push(Self::Tag(s.value()));
-            } else if meta.path.is_ident("content") {
-                let value = meta.value()?;
-                let s: syn::LitStr = value.parse()?;
-                attrs.push(Self::Content(s.value()));
-            } else if meta.path.is_ident("untagged") {
-                attrs.push(Self::Untagged);
+            if meta.path.is_ident("pointer") {
+                meta.parse_nested_meta(|meta| {
+                    if meta.path.is_ident("crate") {
+                        let value = meta.value()?;
+                        let s: syn::LitStr = value.parse()?;
+                        attrs.push(Self::Crate(s.parse()?));
+                    } else if meta.path.is_ident("rename_all") {
+                        let value = meta.value()?;
+                        let s: syn::LitStr = value.parse()?;
+                        let Some(rename) = RenameAll::from_str(&s.value()) else {
+                            return Err(meta.error(DeriveError::BadRenameAll));
+                        };
+                        attrs.push(Self::RenameAll(rename));
+                    } else if meta.path.is_ident("tag") {
+                        let value = meta.value()?;
+                        let s: syn::LitStr = value.parse()?;
+                        attrs.push(Self::Tag(s.value()));
+                    } else if meta.path.is_ident("content") {
+                        let value = meta.value()?;
+                        let s: syn::LitStr = value.parse()?;
+                        attrs.push(Self::Content(s.value()));
+                    } else if meta.path.is_ident("untagged") {
+                        attrs.push(Self::Untagged);
+                    } else {
+                        return Err(meta.error(DeriveError::UnrecognizedPointer));
+                    }
+                    Ok(())
+                })?;
+            } else {
+                return Err(meta.error(DeriveError::UnrecognizedPloidy));
             }
             Ok(())
         })?;
@@ -1505,14 +1574,23 @@ impl FieldAttr {
         }
         let mut attrs = vec![];
         attr.parse_nested_meta(|meta| {
-            if meta.path.is_ident("rename") {
-                let value = meta.value()?;
-                let s: syn::LitStr = value.parse()?;
-                attrs.push(Self::Rename(s.value()));
-            } else if meta.path.is_ident("flatten") {
-                attrs.push(Self::Flatten);
-            } else if meta.path.is_ident("skip") {
-                attrs.push(Self::Skip);
+            if meta.path.is_ident("pointer") {
+                meta.parse_nested_meta(|meta| {
+                    if meta.path.is_ident("rename") {
+                        let value = meta.value()?;
+                        let s: syn::LitStr = value.parse()?;
+                        attrs.push(Self::Rename(s.value()));
+                    } else if meta.path.is_ident("flatten") {
+                        attrs.push(Self::Flatten);
+                    } else if meta.path.is_ident("skip") {
+                        attrs.push(Self::Skip);
+                    } else {
+                        return Err(meta.error(DeriveError::UnrecognizedPointer));
+                    }
+                    Ok(())
+                })?;
+            } else {
+                return Err(meta.error(DeriveError::UnrecognizedPloidy));
             }
             Ok(())
         })?;
@@ -1533,12 +1611,21 @@ impl VariantAttr {
         }
         let mut attrs = vec![];
         attr.parse_nested_meta(|meta| {
-            if meta.path.is_ident("skip") {
-                attrs.push(Self::Skip);
-            } else if meta.path.is_ident("rename") {
-                let value = meta.value()?;
-                let s: syn::LitStr = value.parse()?;
-                attrs.push(Self::Rename(s.value()));
+            if meta.path.is_ident("pointer") {
+                meta.parse_nested_meta(|meta| {
+                    if meta.path.is_ident("skip") {
+                        attrs.push(Self::Skip);
+                    } else if meta.path.is_ident("rename") {
+                        let value = meta.value()?;
+                        let s: syn::LitStr = value.parse()?;
+                        attrs.push(Self::Rename(s.value()));
+                    } else {
+                        return Err(meta.error(DeriveError::UnrecognizedPointer));
+                    }
+                    Ok(())
+                })?;
+            } else {
+                return Err(meta.error(DeriveError::UnrecognizedPloidy));
             }
             Ok(())
         })?;
@@ -1636,4 +1723,8 @@ enum DeriveError {
     ConflictingTagAttributes,
     #[error("`rename_all` must be one of: {}", RenameAll::all().iter().join(","))]
     BadRenameAll,
+    #[error("unrecognized `#[ploidy(...)]` attribute")]
+    UnrecognizedPloidy,
+    #[error("unrecognized `#[ploidy(pointer(...))]` attribute")]
+    UnrecognizedPointer,
 }
