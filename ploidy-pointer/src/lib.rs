@@ -187,6 +187,26 @@ impl dyn JsonPointee {
     }
 }
 
+/// Convenience methods for [`JsonPointee`] types.
+pub trait JsonPointeeExt: JsonPointee {
+    /// Parses a JSON pointer string, resolves it against this value,
+    /// and downcasts the result to `T`.
+    #[inline]
+    fn pointer<T: JsonPointee>(&self, path: &str) -> Result<&T, JsonPointerError> {
+        let pointer = JsonPointer::parse(path)?;
+        let resolved = self.resolve(pointer)?;
+        resolved
+            .downcast_ref()
+            .ok_or_else(|| JsonPointerError::Type {
+                pointer: pointer.to_owned(),
+                expected: std::any::type_name::<T>(),
+                actual: std::any::type_name_of_val(resolved),
+            })
+    }
+}
+
+impl<P: JsonPointee + ?Sized> JsonPointeeExt for P {}
+
 /// A single segment of a [`JsonPointer`].
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Hash, RefCastCustom)]
 #[repr(transparent)]
@@ -552,6 +572,21 @@ impl JsonPointee for serde_json::Value {
     }
 }
 
+/// An error that occurs during traversal.
+#[derive(Debug, thiserror::Error)]
+pub enum JsonPointerError {
+    #[error(transparent)]
+    Syntax(#[from] BadJsonPointerSyntax),
+    #[error(transparent)]
+    Resolve(#[from] BadJsonPointer),
+    #[error("expected `{pointer}` to be {expected}; got {actual}")]
+    Type {
+        pointer: JsonPointerBuf,
+        expected: &'static str,
+        actual: &'static str,
+    },
+}
+
 /// An error that occurs during parsing.
 #[derive(Debug, thiserror::Error)]
 pub enum BadJsonPointerSyntax {
@@ -907,5 +942,52 @@ mod tests {
         let data = 42;
         let pointer = JsonPointer::parse("/foo").unwrap();
         assert!(data.resolve(pointer).is_err());
+    }
+
+    #[test]
+    fn test_pointer_vec_element() {
+        let data = vec![10, 20, 30];
+        let result: &i32 = data.pointer("/1").unwrap();
+        assert_eq!(result, &20);
+    }
+
+    #[test]
+    fn test_pointer_hashmap_value() {
+        let mut data = HashMap::new();
+        data.insert("foo".to_owned(), 42);
+        let result: &i32 = data.pointer("/foo").unwrap();
+        assert_eq!(result, &42);
+    }
+
+    #[test]
+    fn test_pointer_root() {
+        let data = 42;
+        let result: &i32 = data.pointer("").unwrap();
+        assert_eq!(result, &42);
+    }
+
+    #[test]
+    fn test_pointer_syntax_error() {
+        let data = 42;
+        assert!(matches!(
+            data.pointer::<i32>("no-slash"),
+            Err(JsonPointerError::Syntax(_))
+        ));
+    }
+
+    #[test]
+    fn test_pointer_resolve_error() {
+        let data = 42;
+        assert!(matches!(
+            data.pointer::<i32>("/foo"),
+            Err(JsonPointerError::Resolve(_))
+        ));
+    }
+
+    #[test]
+    fn test_pointer_cast_error() {
+        let data = vec![42];
+        let err = data.pointer::<String>("/0").unwrap_err();
+        assert!(matches!(err, JsonPointerError::Type { .. }));
     }
 }
