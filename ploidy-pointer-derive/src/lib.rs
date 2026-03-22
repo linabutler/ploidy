@@ -315,6 +315,9 @@ fn derive_for(input: &DeriveInput) -> syn::Result<TokenStream> {
     Ok(quote! {
         #[automatically_derived]
         impl #impl_generics #root::JsonPointee for #name #ty_generics #where_clause {
+            #[inline]
+            fn as_any(&self) -> &dyn ::std::any::Any { self }
+
             fn resolve(&self, #pointer: &#root::JsonPointer)
                 -> ::std::result::Result<&dyn #root::JsonPointee, #root::BadJsonPointer> {
                 #body

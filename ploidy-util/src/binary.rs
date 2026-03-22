@@ -1,3 +1,5 @@
+use std::any::Any;
+
 use base64::Engine;
 use ploidy_pointer::{BadJsonPointer, BadJsonPointerTy, JsonPointee, JsonPointer};
 use serde::{Deserialize, Deserializer, Serialize, Serializer, de};
@@ -15,6 +17,11 @@ impl Base64 {
 }
 
 impl JsonPointee for Base64 {
+    #[inline]
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+
     fn resolve(&self, pointer: &JsonPointer) -> Result<&dyn JsonPointee, BadJsonPointer> {
         if pointer.is_empty() {
             Ok(self as &dyn JsonPointee)

@@ -165,6 +165,9 @@ impl From<&JsonPointer> for JsonPointerBuf {
 
 /// A value that a [`JsonPointer`] points to.
 pub trait JsonPointee: Any {
+    /// Returns this value as a `&dyn Any` for downcasting.
+    fn as_any(&self) -> &dyn Any;
+
     /// Resolves a [`JsonPointer`] against this value.
     fn resolve(&self, pointer: &JsonPointer) -> Result<&dyn JsonPointee, BadJsonPointer>;
 }
@@ -174,13 +177,13 @@ impl dyn JsonPointee {
     /// or `None` if it isn't.
     #[inline]
     pub fn downcast_ref<T: JsonPointee>(&self) -> Option<&T> {
-        (self as &dyn Any).downcast_ref::<T>()
+        self.as_any().downcast_ref::<T>()
     }
 
     /// Returns `true` if the pointed-to value is of type `T`.
     #[inline]
     pub fn is<T: JsonPointee>(&self) -> bool {
-        (self as &dyn Any).is::<T>()
+        self.as_any().is::<T>()
     }
 }
 
@@ -277,6 +280,9 @@ macro_rules! impl_pointee_for {
     };
     ($ty:ty $(, $($rest:tt)*)?) => {
         impl JsonPointee for $ty {
+            #[inline]
+            fn as_any(&self) -> &dyn Any { self }
+
             fn resolve(&self, pointer: &JsonPointer) -> Result<&dyn JsonPointee, BadJsonPointer> {
                 if pointer.is_empty() {
                     Ok(self)
@@ -306,6 +312,11 @@ impl_pointee_for!(
 );
 
 impl<T: JsonPointee> JsonPointee for Option<T> {
+    #[inline]
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+
     fn resolve(&self, pointer: &JsonPointer) -> Result<&dyn JsonPointee, BadJsonPointer> {
         if let Some(value) = self {
             value.resolve(pointer)
@@ -325,24 +336,44 @@ impl<T: JsonPointee> JsonPointee for Option<T> {
 }
 
 impl<T: JsonPointee> JsonPointee for Box<T> {
+    #[inline]
+    fn as_any(&self) -> &dyn Any {
+        &**self
+    }
+
     fn resolve(&self, pointer: &JsonPointer) -> Result<&dyn JsonPointee, BadJsonPointer> {
         (**self).resolve(pointer)
     }
 }
 
 impl<T: JsonPointee> JsonPointee for Arc<T> {
+    #[inline]
+    fn as_any(&self) -> &dyn Any {
+        &**self
+    }
+
     fn resolve(&self, pointer: &JsonPointer) -> Result<&dyn JsonPointee, BadJsonPointer> {
         (**self).resolve(pointer)
     }
 }
 
 impl<T: JsonPointee> JsonPointee for Rc<T> {
+    #[inline]
+    fn as_any(&self) -> &dyn Any {
+        &**self
+    }
+
     fn resolve(&self, pointer: &JsonPointer) -> Result<&dyn JsonPointee, BadJsonPointer> {
         (**self).resolve(pointer)
     }
 }
 
 impl<T: JsonPointee> JsonPointee for Vec<T> {
+    #[inline]
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+
     fn resolve(&self, pointer: &JsonPointer) -> Result<&dyn JsonPointee, BadJsonPointer> {
         let Some(key) = pointer.head() else {
             return Ok(self);
@@ -370,6 +401,11 @@ where
     T: JsonPointee,
     H: BuildHasher + 'static,
 {
+    #[inline]
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+
     fn resolve(&self, pointer: &JsonPointer) -> Result<&dyn JsonPointee, BadJsonPointer> {
         let Some(key) = pointer.head() else {
             return Ok(self);
@@ -393,6 +429,11 @@ where
 }
 
 impl<T: JsonPointee> JsonPointee for BTreeMap<String, T> {
+    #[inline]
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+
     fn resolve(&self, pointer: &JsonPointer) -> Result<&dyn JsonPointee, BadJsonPointer> {
         let Some(key) = pointer.head() else {
             return Ok(self);
@@ -421,6 +462,11 @@ where
     T: JsonPointee,
     H: BuildHasher + 'static,
 {
+    #[inline]
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+
     fn resolve(&self, pointer: &JsonPointer) -> Result<&dyn JsonPointee, BadJsonPointer> {
         let Some(key) = pointer.head() else {
             return Ok(self);
@@ -445,6 +491,11 @@ where
 
 #[cfg(feature = "serde_json")]
 impl JsonPointee for serde_json::Value {
+    #[inline]
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+
     fn resolve(&self, pointer: &JsonPointer) -> Result<&dyn JsonPointee, BadJsonPointer> {
         let Some(key) = pointer.head() else {
             return Ok(self);

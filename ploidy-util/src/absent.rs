@@ -1,4 +1,4 @@
-use std::{marker::PhantomData, ops::Deref};
+use std::{any::Any, marker::PhantomData, ops::Deref};
 
 use ploidy_pointer::{BadJsonPointer, BadJsonPointerTy, JsonPointee, JsonPointer};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
@@ -14,6 +14,11 @@ pub enum AbsentOr<T> {
 }
 
 impl<T: JsonPointee> JsonPointee for AbsentOr<T> {
+    #[inline]
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+
     fn resolve(&self, pointer: &JsonPointer) -> Result<&dyn JsonPointee, BadJsonPointer> {
         match self {
             Self::Present(value) => value.resolve(pointer),
