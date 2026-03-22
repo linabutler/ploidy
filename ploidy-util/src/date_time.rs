@@ -1,3 +1,5 @@
+use std::any::Any;
+
 use chrono::{DateTime, Utc};
 use ploidy_pointer::{BadJsonPointer, BadJsonPointerTy, JsonPointee, JsonPointer};
 use serde::{Deserialize, Deserializer, Serialize, Serializer, de};
@@ -219,6 +221,9 @@ pub enum TryFromTimestampError {
 macro_rules! impl_pointee_for {
     ($($ty:ty),*) => {$(
         impl JsonPointee for $ty {
+            #[inline]
+            fn as_any(&self) -> &dyn Any { self }
+
             fn resolve(&self, pointer: &JsonPointer) -> Result<&dyn JsonPointee, BadJsonPointer> {
                 if pointer.is_empty() {
                     Ok(self as &dyn JsonPointee)

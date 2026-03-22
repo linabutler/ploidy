@@ -1,3 +1,5 @@
+use std::{rc::Rc, sync::Arc};
+
 use ploidy_pointer::{JsonPointee, JsonPointer};
 
 #[test]
@@ -991,4 +993,73 @@ fn test_multiple_generic_parameters_with_bounds() {
     let pointer = JsonPointer::parse("/second/right_value").unwrap();
     let result = pair.resolve(pointer).unwrap();
     assert_eq!(result.downcast_ref::<i32>(), Some(&100));
+}
+
+#[test]
+fn test_downcast_box() {
+    #[derive(JsonPointee)]
+    struct Inner {
+        value: String,
+    }
+
+    let boxed = Box::new(Inner {
+        value: "hello".to_owned(),
+    });
+    let pointee: &dyn JsonPointee = &boxed;
+
+    // `downcast_ref` should see `Inner`, not `Box<Inner>`.
+    assert!(pointee.downcast_ref::<Inner>().is_some());
+    assert!(pointee.downcast_ref::<Box<Inner>>().is_none());
+}
+
+#[test]
+fn test_downcast_arc() {
+    #[derive(JsonPointee)]
+    struct Inner {
+        value: String,
+    }
+
+    let arced = Arc::new(Inner {
+        value: "hello".to_owned(),
+    });
+    let pointee: &dyn JsonPointee = &arced;
+
+    // `downcast_ref` should see `Inner`, not `Arc<Inner>`.
+    assert!(pointee.downcast_ref::<Inner>().is_some());
+    assert!(pointee.downcast_ref::<Arc<Inner>>().is_none());
+}
+
+#[test]
+fn test_downcast_rc() {
+    #[derive(JsonPointee)]
+    struct Inner {
+        value: String,
+    }
+
+    let rced = Rc::new(Inner {
+        value: "hello".to_owned(),
+    });
+    let pointee: &dyn JsonPointee = &rced;
+
+    // `downcast_ref` should see `Inner`, not `Rc<Inner>`.
+    assert!(pointee.downcast_ref::<Inner>().is_some());
+    assert!(pointee.downcast_ref::<Rc<Inner>>().is_none());
+}
+
+#[test]
+fn test_box_resolve_is_transparent() {
+    #[derive(JsonPointee)]
+    struct Inner {
+        value: String,
+    }
+
+    let boxed: Box<Inner> = Box::new(Inner {
+        value: "hello".to_owned(),
+    });
+
+    // Resolving through a `Box` should reach the inner struct's fields.
+    let result = boxed
+        .resolve(JsonPointer::parse("/value").unwrap())
+        .unwrap();
+    assert_eq!(result.downcast_ref::<String>(), Some(&"hello".to_owned()));
 }
