@@ -3,12 +3,11 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use cargo_toml::{Manifest, Package};
 use clap::{
     CommandFactory, FromArgMatches,
     error::{Error as ClapError, ErrorKind as ClapErrorKind, Result as ClapResult},
 };
-use ploidy_codegen_rust::CargoMetadata;
+use ploidy_codegen_rust::{CargoManifest, CargoManifestDiff, CargoManifestError};
 use semver::Version;
 
 use super::args::{RawGenerate, RawGenerateRustArgs, RawMain, VersionBump};
@@ -83,16 +82,16 @@ pub struct GenerateArgs<T> {
 
 #[derive(Debug)]
 pub struct GenerateRustArgs {
-    pub manifest: Manifest<CargoMetadata>,
+    pub manifest: CargoManifest,
     pub check: bool,
 }
 
 impl GenerateRustArgs {
     pub fn try_new(output: &Path, args: RawGenerateRustArgs) -> ClapResult<Self> {
         let path = output.join("Cargo.toml");
-        match Manifest::<CargoMetadata>::from_path_with_metadata(&path) {
-            Ok(mut manifest) => {
-                let package = manifest.package.as_mut().ok_or_else(|| {
+        match CargoManifest::from_disk(&path) {
+            Ok(manifest) => {
+                let package = manifest.package().ok_or_else(|| {
                     ClapError::raw(
                         ClapErrorKind::ValueValidation,
                         format!(
@@ -102,28 +101,34 @@ impl GenerateRustArgs {
                         ),
                     )
                 })?;
-                // Update the generated package name and version,
-                // if specified on the command line.
-                package.name = args.name.unwrap_or_else(|| package.name().to_owned());
-                if let Some(bump) = args.version {
-                    let base = package.version().parse().map_err(|err| {
-                        ClapError::raw(
-                            ClapErrorKind::ValueValidation,
-                            format!(
-                                "manifest `{}` contains invalid package version `{}`: {err}",
-                                path.display(),
-                                package.version()
-                            ),
-                        )
-                    })?;
-                    package.version.set(bump_version(&base, bump).to_string());
-                }
+                let name = package.name();
+                let version = package.version().map_err(|err| {
+                    ClapError::raw(
+                        ClapErrorKind::ValueValidation,
+                        format!(
+                            "manifest `{}` contains invalid package version: {err}",
+                            path.display(),
+                        ),
+                    )
+                })?;
+
+                let diff = CargoManifestDiff {
+                    name: Some(args.name.unwrap_or_else(|| name.to_owned())),
+                    version: Some(
+                        args.version
+                            .map(|bump| bump_version(&version, bump))
+                            .unwrap_or(version),
+                    ),
+                    ..Default::default()
+                };
+                let manifest = manifest.apply(diff);
+
                 Ok(Self {
                     manifest,
                     check: args.check,
                 })
             }
-            Err(cargo_toml::Error::Io(err)) if err.kind() == IoErrorKind::NotFound => {
+            Err(CargoManifestError::Io(err)) if err.kind() == IoErrorKind::NotFound => {
                 let name = args
                     .name
                     .or_else(|| {
@@ -143,10 +148,7 @@ impl GenerateRustArgs {
                     .version
                     .map(|bump| bump_version(&DEFAULT_VERSION, bump))
                     .unwrap_or(DEFAULT_VERSION);
-                let manifest = Manifest {
-                    package: Some(Package::new(name, version.to_string())),
-                    ..Default::default()
-                };
+                let manifest = CargoManifest::new(&name, version);
                 Ok(Self {
                     manifest,
                     check: args.check,
@@ -217,10 +219,10 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let args = RawGenerateRustArgs::default();
         let result = GenerateRustArgs::try_new(dir.path(), args).unwrap();
-        let package = result.manifest.package.as_ref().unwrap();
+        let package = result.manifest.package().unwrap();
         // Infers name from the temp directory name.
         assert!(!package.name().is_empty());
-        assert_eq!(package.version(), DEFAULT_VERSION.to_string());
+        assert_eq!(package.version().unwrap(), DEFAULT_VERSION);
     }
 
     #[test]
@@ -232,8 +234,8 @@ mod tests {
             ..Default::default()
         };
         let result = GenerateRustArgs::try_new(dir.path(), args).unwrap();
-        let package = result.manifest.package.as_ref().unwrap();
-        assert_eq!(package.version(), "1.0.0");
+        let package = result.manifest.package().unwrap();
+        assert_eq!(package.version().unwrap(), Version::new(1, 0, 0));
     }
 
     #[test]
@@ -244,7 +246,7 @@ mod tests {
             ..Default::default()
         };
         let result = GenerateRustArgs::try_new(dir.path(), args).unwrap();
-        let package = result.manifest.package.as_ref().unwrap();
+        let package = result.manifest.package().unwrap();
         assert_eq!(package.name(), "my-crate");
     }
 
@@ -263,9 +265,9 @@ mod tests {
         .unwrap();
         let args = RawGenerateRustArgs::default();
         let result = GenerateRustArgs::try_new(dir.path(), args).unwrap();
-        let package = result.manifest.package.as_ref().unwrap();
+        let package = result.manifest.package().unwrap();
         assert_eq!(package.name(), "existing-pkg");
-        assert_eq!(package.version(), "2.0.0");
+        assert_eq!(package.version().unwrap(), Version::new(2, 0, 0));
     }
 
     #[test]
@@ -286,7 +288,7 @@ mod tests {
             ..Default::default()
         };
         let result = GenerateRustArgs::try_new(dir.path(), args).unwrap();
-        let package = result.manifest.package.as_ref().unwrap();
+        let package = result.manifest.package().unwrap();
         assert_eq!(package.name(), "new-name");
     }
 
@@ -308,8 +310,8 @@ mod tests {
             ..Default::default()
         };
         let result = GenerateRustArgs::try_new(dir.path(), args).unwrap();
-        let package = result.manifest.package.as_ref().unwrap();
-        assert_eq!(package.version(), "1.3.0");
+        let package = result.manifest.package().unwrap();
+        assert_eq!(package.version().unwrap(), Version::new(1, 3, 0));
     }
 
     #[test]

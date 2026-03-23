@@ -13,14 +13,9 @@
 //!
 //! # Feature-gated blanket implementations
 //!
-//! Two blanket implementations of [`Code`] are available behind
-//! feature flags:
-//!
 //! - **`proc-macro2`**: `(T, TokenStream)` where `T: AsRef<str>`
 //!   formats the token stream with [prettyplease] and writes it
 //!   to the path given by `T`.
-//! - **`cargo_toml`**: `(&str, Manifest<T>)` serializes a Cargo
-//!   manifest to TOML and writes it to the given path.
 //!
 //! [prettyplease]: https://docs.rs/prettyplease/latest/prettyplease/
 
@@ -65,19 +60,6 @@ impl<T: AsRef<str>> Code for (T, proc_macro2::TokenStream) {
             Ok(file) => Ok(prettyplease::unparse(&file)),
             Err(err) => Err(err.context(format!("Failed to format `{}`", self.0.as_ref()))),
         }
-    }
-}
-
-#[cfg(feature = "cargo_toml")]
-impl<T: serde::Serialize> Code for (&'static str, cargo_toml::Manifest<T>) {
-    fn path(&self) -> &str {
-        self.0
-    }
-
-    fn into_string(self) -> miette::Result<String> {
-        toml::to_string_pretty(&self.1)
-            .into_diagnostic()
-            .with_context(|| format!("Failed to serialize `{}`", self.0))
     }
 }
 
