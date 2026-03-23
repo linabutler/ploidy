@@ -12,7 +12,6 @@ rust-version.workspace = true
 [dependencies]
 atomic_refcell = "0.1"
 bumpalo = { version = "3", features = ["collections"] }
-cargo_toml = { version = "0.22", optional = true }
 either = { workspace = true }
 enum-map = "2"
 fixedbitset = "0.5"
@@ -33,7 +32,6 @@ ref-cast = { workspace = true }
 rustc-hash = "2"
 syn = { version = "2", default-features = false, optional = true }
 thiserror = "2"
-toml = { version = "1", default-features = false, optional = true }
 unicase = "2"
 winnow = "0.7"
 
@@ -42,7 +40,6 @@ indoc = "2"
 
 [features]
 default = []
-cargo_toml = ["dep:cargo_toml", "toml/display", "toml/serde"]
 proc-macro2 = [
     "dep:prettyplease",
     "dep:proc-macro2",

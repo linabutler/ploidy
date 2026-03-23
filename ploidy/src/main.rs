@@ -42,12 +42,13 @@ fn main() -> Result<()> {
 
             let config = language
                 .manifest
-                .package
-                .as_ref()
-                .and_then(|p| p.metadata.as_ref()?.ploidy.as_ref());
+                .package()
+                .map(|p| p.config())
+                .transpose()?
+                .flatten();
             let graph = {
                 let graph = raw.cook();
-                match config {
+                match config.as_ref() {
                     Some(config) => CodegenGraph::with_config(graph, config),
                     None => CodegenGraph::new(graph),
                 }
