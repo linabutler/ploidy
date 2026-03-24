@@ -344,19 +344,15 @@ impl<T: JsonPointee> JsonPointee for Option<T> {
     }
 
     fn resolve(&self, pointer: &JsonPointer) -> Result<&dyn JsonPointee, JsonPointerResolveError> {
-        if let Some(value) = self {
-            value.resolve(pointer)
-        } else {
-            let Some(key) = pointer.head() else {
-                return Ok(&None::<T>);
-            };
-            Err({
+        match self {
+            Some(value) => value.resolve(pointer),
+            None => Err({
                 #[cfg(feature = "did-you-mean")]
-                let err = JsonPointerKeyError::with_ty(key, JsonPointeeType::name_of(self));
+                let err = JsonPointerTypeError::with_ty(pointer, JsonPointeeType::name_of(self));
                 #[cfg(not(feature = "did-you-mean"))]
-                let err = JsonPointerKeyError::new(key);
+                let err = JsonPointerTypeError::new(pointer);
                 err
-            })?
+            })?,
         }
     }
 }
@@ -364,12 +360,7 @@ impl<T: JsonPointee> JsonPointee for Option<T> {
 impl<T: JsonPointee> JsonPointee for Box<T> {
     #[inline]
     fn as_any(&self) -> &dyn Any {
-        &**self
-    }
-
-    #[inline]
-    fn name(&self) -> &'static str {
-        (**self).name()
+        self
     }
 
     fn resolve(&self, pointer: &JsonPointer) -> Result<&dyn JsonPointee, JsonPointerResolveError> {
@@ -380,12 +371,7 @@ impl<T: JsonPointee> JsonPointee for Box<T> {
 impl<T: JsonPointee> JsonPointee for Arc<T> {
     #[inline]
     fn as_any(&self) -> &dyn Any {
-        &**self
-    }
-
-    #[inline]
-    fn name(&self) -> &'static str {
-        (**self).name()
+        self
     }
 
     fn resolve(&self, pointer: &JsonPointer) -> Result<&dyn JsonPointee, JsonPointerResolveError> {
@@ -396,12 +382,7 @@ impl<T: JsonPointee> JsonPointee for Arc<T> {
 impl<T: JsonPointee> JsonPointee for Rc<T> {
     #[inline]
     fn as_any(&self) -> &dyn Any {
-        &**self
-    }
-
-    #[inline]
-    fn name(&self) -> &'static str {
-        (**self).name()
+        self
     }
 
     fn resolve(&self, pointer: &JsonPointer) -> Result<&dyn JsonPointee, JsonPointerResolveError> {

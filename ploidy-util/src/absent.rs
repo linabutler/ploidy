@@ -1,6 +1,8 @@
 use std::{any::Any, marker::PhantomData, ops::Deref};
 
-use ploidy_pointer::{JsonPointee, JsonPointer, JsonPointerResolveError, JsonPointerTypeError};
+use ploidy_pointer::{
+    JsonPointee, JsonPointeeType, JsonPointer, JsonPointerResolveError, JsonPointerTypeError,
+};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 /// An [`Option`]-like type that distinguishes between
@@ -22,13 +24,13 @@ impl<T: JsonPointee> JsonPointee for AbsentOr<T> {
     fn resolve(&self, pointer: &JsonPointer) -> Result<&dyn JsonPointee, JsonPointerResolveError> {
         match self {
             Self::Present(value) => value.resolve(pointer),
-            _ => {
-                if pointer.is_empty() {
-                    Ok(self as &dyn JsonPointee)
-                } else {
-                    Err(JsonPointerTypeError::new(pointer).into())
-                }
-            }
+            _ => Err({
+                #[cfg(feature = "did-you-mean")]
+                let err = JsonPointerTypeError::with_ty(pointer, JsonPointeeType::name_of(self));
+                #[cfg(not(feature = "did-you-mean"))]
+                let err = JsonPointerTypeError::new(pointer);
+                err
+            })?,
         }
     }
 }
@@ -293,4 +295,82 @@ pub enum FieldAbsentError {
     Absent(&'static str),
     #[error("field `{0}` is `null`")]
     Null(&'static str),
+}
+
+#[cfg(test)]
+mod tests {
+    use ploidy_pointer::{JsonPointee, JsonPointeeExt};
+
+    use super::*;
+
+    #[derive(JsonPointee)]
+    #[ploidy(pointer(untagged))]
+    enum Response {
+        One(ResponseOne),
+        Two(ResponseTwo),
+    }
+
+    #[derive(JsonPointee)]
+    struct ResponseOne {
+        data: AbsentOr<String>,
+        error: AbsentOr<ResponseError>,
+    }
+
+    #[derive(JsonPointee)]
+    struct ResponseTwo {
+        data: AbsentOr<i32>,
+        error: AbsentOr<ResponseError>,
+    }
+
+    #[derive(JsonPointee)]
+    struct ResponseError {
+        message: String,
+    }
+
+    #[test]
+    fn test_absent_or_present_pointer_succeeds() {
+        let response = Response::One(ResponseOne {
+            error: AbsentOr::Present(ResponseError {
+                message: "oops".to_owned(),
+            }),
+            data: AbsentOr::Null,
+        });
+
+        // `error` is present, so the pointer should resolve.
+        let err = response.pointer::<ResponseError>("/error").unwrap();
+        assert_eq!(err.message, "oops");
+
+        // The `AbsentOr` wrapper itself is transparent;
+        // there's no way to access it via the pointer.
+        assert!(
+            response
+                .pointer::<AbsentOr<ResponseError>>("/error")
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn test_absent_or_null_errors() {
+        let response = Response::Two(ResponseTwo {
+            data: AbsentOr::Present(2),
+            error: AbsentOr::Null,
+        });
+
+        // The `AbsentOr` wrapper is transparent, and `Null` has no value,
+        // so resolving the pointer always errors.
+        let result = response.pointer::<ResponseError>("/error");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_absent_or_absent_errors() {
+        let response = Response::Two(ResponseTwo {
+            data: AbsentOr::Present(2),
+            error: AbsentOr::Absent,
+        });
+
+        // `AbsentOr::Absent` behaves the same as `Null`.
+        let result = response.pointer::<ResponseError>("/error");
+        assert!(result.is_err());
+    }
 }
