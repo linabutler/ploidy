@@ -15,19 +15,7 @@ use toml_edit::{Array, DocumentMut, InlineTable, Table, TableLike, value};
 
 use super::{config::CodegenConfig, graph::CodegenGraph, naming::CargoFeature};
 
-const PLOIDY_VERSION: Version = {
-    const fn parse(value: &'static str) -> u64 {
-        match u64::from_str_radix(value, 10) {
-            Ok(v) => v,
-            Err(_) => unreachable!(),
-        }
-    }
-    Version::new(
-        parse(env!("CARGO_PKG_VERSION_MAJOR")),
-        parse(env!("CARGO_PKG_VERSION_MINOR")),
-        parse(env!("CARGO_PKG_VERSION_PATCH")),
-    )
-};
+const PLOIDY_VERSION: &str = env!("CARGO_PKG_VERSION");
 
 #[derive(Clone, Debug)]
 pub struct CodegenCargoManifest<'a> {
@@ -121,7 +109,10 @@ impl<'a> CodegenCargoManifest<'a> {
             edition: Some(RustEdition::E2024),
             dependencies: Some(BTreeMap::from_iter([
                 // `ploidy-util` is our only runtime dependency.
-                ("ploidy-util".to_owned(), Dependency::Simple(PLOIDY_VERSION)),
+                (
+                    "ploidy-util".to_owned(),
+                    Dependency::Simple(PLOIDY_VERSION.parse().unwrap()),
+                ),
             ])),
             features: Some(features),
             ..Default::default()
