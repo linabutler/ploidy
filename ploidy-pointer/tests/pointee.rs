@@ -1005,9 +1005,9 @@ fn test_downcast_box() {
     let boxed = Box::new(Inner {
         value: "hello".to_owned(),
     });
-    let pointee: &dyn JsonPointee = &boxed;
+    let pointee = boxed.resolve(JsonPointer::empty()).unwrap();
 
-    // `downcast_ref` should see `Inner`, not `Box<Inner>`.
+    // `resolve` should return `Inner`, not `Box<Inner>`.
     assert!(pointee.downcast_ref::<Inner>().is_some());
     assert!(pointee.downcast_ref::<Box<Inner>>().is_none());
 }
@@ -1022,9 +1022,9 @@ fn test_downcast_arc() {
     let arced = Arc::new(Inner {
         value: "hello".to_owned(),
     });
-    let pointee: &dyn JsonPointee = &arced;
+    let pointee = arced.resolve(JsonPointer::empty()).unwrap();
 
-    // `downcast_ref` should see `Inner`, not `Arc<Inner>`.
+    // `resolve` should return `Inner`, not `Arc<Inner>`.
     assert!(pointee.downcast_ref::<Inner>().is_some());
     assert!(pointee.downcast_ref::<Arc<Inner>>().is_none());
 }
@@ -1039,9 +1039,9 @@ fn test_downcast_rc() {
     let rced = Rc::new(Inner {
         value: "hello".to_owned(),
     });
-    let pointee: &dyn JsonPointee = &rced;
+    let pointee = rced.resolve(JsonPointer::empty()).unwrap();
 
-    // `downcast_ref` should see `Inner`, not `Rc<Inner>`.
+    // `resolve` should return `Inner`, not `Rc<Inner>`.
     assert!(pointee.downcast_ref::<Inner>().is_some());
     assert!(pointee.downcast_ref::<Rc<Inner>>().is_none());
 }
@@ -1056,10 +1056,29 @@ fn test_box_resolve_is_transparent() {
     let boxed: Box<Inner> = Box::new(Inner {
         value: "hello".to_owned(),
     });
-
-    // Resolving through a `Box` should reach the inner struct's fields.
     let result = boxed
         .resolve(JsonPointer::parse("/value").unwrap())
         .unwrap();
+
+    // Resolving through a `Box` should reach the inner struct's fields.
     assert_eq!(result.downcast_ref::<String>(), Some(&"hello".to_owned()));
+}
+
+#[test]
+fn test_option_resolve_is_transparent() {
+    #[derive(Debug, Eq, JsonPointee, PartialEq)]
+    struct Inner {
+        value: String,
+    }
+
+    let some = Some(Inner {
+        value: "hello".to_owned(),
+    });
+    let inner = some.resolve(JsonPointer::empty()).unwrap();
+    assert_eq!(inner.downcast_ref::<Inner>(), some.as_ref());
+    let value = some.resolve(JsonPointer::parse("/value").unwrap()).unwrap();
+    assert_eq!(value.downcast_ref::<String>(), Some(&"hello".to_owned()));
+
+    let none = None::<Inner>;
+    assert!(none.resolve(JsonPointer::empty()).is_err());
 }
