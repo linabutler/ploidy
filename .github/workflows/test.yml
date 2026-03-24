@@ -20,6 +20,17 @@ jobs:
   test:
     name: Build and test
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        features:
+          - all
+          - none
+    env:
+      CARGO_FLAGS: >-
+        --workspace
+        ${{ matrix.features == 'all' && '--all-features' || '' }}
+        ${{ matrix.features == 'none' && '--no-default-features' || '' }}
     steps:
       - uses: actions/checkout@v6
         with:
@@ -62,16 +73,17 @@ jobs:
         id: restore-sccache
         with:
           path: ${{ env.SCCACHE_DIR }}
-          key: sccache-${{ hashFiles('rust-toolchain.toml') }}-${{ hashFiles('**/Cargo.lock') }}
+          key: sccache-${{ hashFiles('rust-toolchain.toml') }}-${{ matrix.features }}-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: |
+            sccache-${{ hashFiles('rust-toolchain.toml') }}-${{ matrix.features }}-
             sccache-${{ hashFiles('rust-toolchain.toml') }}-
 
-      - name: Build all targets
+      - name: Build all tests
         shell: bash
         env:
           RUSTC_WRAPPER: sccache
         run: |
-          cargo build --workspace --all-targets
+          cargo test $CARGO_FLAGS --no-run
 
       - name: Cache Cargo packages and metadata
         uses: actions/cache/save@v5
@@ -96,22 +108,37 @@ jobs:
           RUSTC_WRAPPER: sccache
           SCCACHE_LOCAL_RW_MODE: READ_ONLY
         run: |
-          cargo test --workspace --no-fail-fast --all-features
+          cargo test $CARGO_FLAGS --no-fail-fast
 
-  test-msrv:
-    name: Test on minimum supported Rust version
+  msrv:
+    name: Build and test on minimum supported Rust version
     needs: [test]
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
+        rust:
+          - "1.85.0"
+          - "1.89.0"
+        features:
+          - all
+          - none
         include:
-          - name: workspace
-            rust: "1.89.0"
-            packages: --workspace
-          - name: ploidy-util
-            rust: "1.85.0"
-            packages: -p ploidy-util
+          - rust: "1.85.0"
+            packages:
+              - ploidy-pointer
+              - ploidy-pointer-derive
+              - ploidy-util
+          - rust: "1.89.0"
+            packages:
+              - ploidy
+              - ploidy-codegen-rust
+              - ploidy-core
+    env:
+      CARGO_FLAGS: >-
+        ${{ format('--package {0}', join(matrix.packages, ' --package ')) }}
+        ${{ matrix.features == 'all' && '--all-features' || '' }}
+        ${{ matrix.features == 'none' && '--no-default-features' || '' }}
     steps:
       - uses: actions/checkout@v6
         with:
@@ -138,22 +165,32 @@ jobs:
 
       - uses: mozilla-actions/sccache-action@7d986dd989559c6ecdb630a3fd2557667be217ad # v0.0.9
 
+      - name: Prepare build cache key
+        shell: bash
+        env:
+          MATRIX_PACKAGES: ${{ toJSON(matrix.packages) }}
+        run: |
+          echo "$MATRIX_PACKAGES" > "$GITHUB_WORKSPACE/build-cache-key"
+
       - name: Restore build cache
         uses: actions/cache/restore@v5
         id: restore-sccache
         with:
           path: ${{ env.SCCACHE_DIR }}
-          key: sccache-${{ matrix.rust }}-${{ hashFiles('**/Cargo.lock') }}
+          # In `hashFiles`, paths starting with `/` refer to the workspace root,
+          # not the filesystem root.
+          key: sccache-${{ matrix.rust }}-${{ matrix.features }}-${{ hashFiles('**/Cargo.lock', '/build-cache-key') }}
           restore-keys: |
+            sccache-${{ matrix.rust }}-${{ matrix.features }}-
             sccache-${{ matrix.rust }}-
 
-      - name: Run tests
+      - name: Build all tests
         shell: bash
         env:
           RUSTUP_TOOLCHAIN: ${{ matrix.rust }}
           RUSTC_WRAPPER: sccache
         run: |
-          cargo test ${{ matrix.packages }} --no-fail-fast --all-features
+          cargo test $CARGO_FLAGS --no-run
 
       - name: Cache build products
         uses: actions/cache/save@v5
@@ -161,3 +198,12 @@ jobs:
         with:
           path: ${{ env.SCCACHE_DIR }}
           key: ${{ steps.restore-sccache.outputs.cache-primary-key }}
+
+      - name: Run tests
+        shell: bash
+        env:
+          RUSTUP_TOOLCHAIN: ${{ matrix.rust }}
+          RUSTC_WRAPPER: sccache
+          SCCACHE_LOCAL_RW_MODE: READ_ONLY
+        run: |
+          cargo test $CARGO_FLAGS --no-fail-fast
