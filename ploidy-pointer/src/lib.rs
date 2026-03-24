@@ -30,11 +30,11 @@ impl JsonPointer {
     /// The empty string is the valid root pointer.
     /// All other strings must start with `/`.
     #[inline]
-    pub fn parse(s: &str) -> Result<&Self, BadJsonPointerSyntax> {
+    pub fn parse(s: &str) -> Result<&Self, JsonPointerSyntaxError> {
         if s.is_empty() || s.starts_with('/') {
             Ok(Self::new(s))
         } else {
-            Err(BadJsonPointerSyntax::MissingLeadingSlash)
+            Err(JsonPointerSyntaxError)
         }
     }
 
@@ -110,11 +110,11 @@ impl JsonPointerBuf {
     /// The empty string is the valid root pointer.
     /// All other strings must start with `/`.
     #[inline]
-    pub fn parse(s: String) -> Result<Self, BadJsonPointerSyntax> {
+    pub fn parse(s: String) -> Result<Self, JsonPointerSyntaxError> {
         if s.is_empty() || s.starts_with('/') {
             Ok(Self(s))
         } else {
-            Err(BadJsonPointerSyntax::MissingLeadingSlash)
+            Err(JsonPointerSyntaxError)
         }
     }
 }
@@ -165,11 +165,17 @@ impl From<&JsonPointer> for JsonPointerBuf {
 
 /// A value that a [`JsonPointer`] points to.
 pub trait JsonPointee: Any {
+    /// Resolves a [`JsonPointer`] against this value.
+    fn resolve(&self, pointer: &JsonPointer) -> Result<&dyn JsonPointee, JsonPointerResolveError>;
+
     /// Returns this value as a `&dyn Any` for downcasting.
     fn as_any(&self) -> &dyn Any;
 
-    /// Resolves a [`JsonPointer`] against this value.
-    fn resolve(&self, pointer: &JsonPointer) -> Result<&dyn JsonPointee, BadJsonPointer>;
+    /// Returns the concrete type name of this value.
+    #[inline]
+    fn name(&self) -> &'static str {
+        std::any::type_name::<Self>()
+    }
 }
 
 impl dyn JsonPointee {
@@ -200,7 +206,7 @@ pub trait JsonPointeeExt: JsonPointee {
             .ok_or_else(|| JsonPointerError::Type {
                 pointer: pointer.to_owned(),
                 expected: std::any::type_name::<T>(),
-                actual: std::any::type_name_of_val(resolved),
+                actual: resolved.name(),
             })
     }
 }
@@ -303,18 +309,18 @@ macro_rules! impl_pointee_for {
             #[inline]
             fn as_any(&self) -> &dyn Any { self }
 
-            fn resolve(&self, pointer: &JsonPointer) -> Result<&dyn JsonPointee, BadJsonPointer> {
+            fn resolve(&self, pointer: &JsonPointer) -> Result<&dyn JsonPointee, JsonPointerResolveError> {
                 if pointer.is_empty() {
                     Ok(self)
                 } else {
                     Err({
                         #[cfg(feature = "did-you-mean")]
-                        let err = BadJsonPointerTy::with_ty(
+                        let err = JsonPointerTypeError::with_ty(
                             pointer,
-                            JsonPointeeTy::Named(stringify!($ty)),
+                            JsonPointeeType::Named(stringify!($ty)),
                         );
                         #[cfg(not(feature = "did-you-mean"))]
-                        let err = BadJsonPointerTy::new(pointer);
+                        let err = JsonPointerTypeError::new(pointer);
                         err
                     })?
                 }
@@ -337,7 +343,7 @@ impl<T: JsonPointee> JsonPointee for Option<T> {
         self
     }
 
-    fn resolve(&self, pointer: &JsonPointer) -> Result<&dyn JsonPointee, BadJsonPointer> {
+    fn resolve(&self, pointer: &JsonPointer) -> Result<&dyn JsonPointee, JsonPointerResolveError> {
         if let Some(value) = self {
             value.resolve(pointer)
         } else {
@@ -346,9 +352,9 @@ impl<T: JsonPointee> JsonPointee for Option<T> {
             };
             Err({
                 #[cfg(feature = "did-you-mean")]
-                let err = BadJsonPointerKey::with_ty(key, JsonPointeeTy::name_of(self));
+                let err = JsonPointerKeyError::with_ty(key, JsonPointeeType::name_of(self));
                 #[cfg(not(feature = "did-you-mean"))]
-                let err = BadJsonPointerKey::new(key);
+                let err = JsonPointerKeyError::new(key);
                 err
             })?
         }
@@ -361,7 +367,12 @@ impl<T: JsonPointee> JsonPointee for Box<T> {
         &**self
     }
 
-    fn resolve(&self, pointer: &JsonPointer) -> Result<&dyn JsonPointee, BadJsonPointer> {
+    #[inline]
+    fn name(&self) -> &'static str {
+        (**self).name()
+    }
+
+    fn resolve(&self, pointer: &JsonPointer) -> Result<&dyn JsonPointee, JsonPointerResolveError> {
         (**self).resolve(pointer)
     }
 }
@@ -372,7 +383,12 @@ impl<T: JsonPointee> JsonPointee for Arc<T> {
         &**self
     }
 
-    fn resolve(&self, pointer: &JsonPointer) -> Result<&dyn JsonPointee, BadJsonPointer> {
+    #[inline]
+    fn name(&self) -> &'static str {
+        (**self).name()
+    }
+
+    fn resolve(&self, pointer: &JsonPointer) -> Result<&dyn JsonPointee, JsonPointerResolveError> {
         (**self).resolve(pointer)
     }
 }
@@ -383,7 +399,12 @@ impl<T: JsonPointee> JsonPointee for Rc<T> {
         &**self
     }
 
-    fn resolve(&self, pointer: &JsonPointer) -> Result<&dyn JsonPointee, BadJsonPointer> {
+    #[inline]
+    fn name(&self) -> &'static str {
+        (**self).name()
+    }
+
+    fn resolve(&self, pointer: &JsonPointer) -> Result<&dyn JsonPointee, JsonPointerResolveError> {
         (**self).resolve(pointer)
     }
 }
@@ -394,7 +415,7 @@ impl<T: JsonPointee> JsonPointee for Vec<T> {
         self
     }
 
-    fn resolve(&self, pointer: &JsonPointer) -> Result<&dyn JsonPointee, BadJsonPointer> {
+    fn resolve(&self, pointer: &JsonPointer) -> Result<&dyn JsonPointee, JsonPointerResolveError> {
         let Some(key) = pointer.head() else {
             return Ok(self);
         };
@@ -402,14 +423,14 @@ impl<T: JsonPointee> JsonPointee for Vec<T> {
             if let Some(item) = self.get(index) {
                 item.resolve(pointer.tail())
             } else {
-                Err(BadJsonPointer::Index(index, 0..self.len()))
+                Err(JsonPointerResolveError::Index(index, 0..self.len()))
             }
         } else {
             Err({
                 #[cfg(feature = "did-you-mean")]
-                let err = BadJsonPointerTy::with_ty(pointer, JsonPointeeTy::name_of(self));
+                let err = JsonPointerTypeError::with_ty(pointer, JsonPointeeType::name_of(self));
                 #[cfg(not(feature = "did-you-mean"))]
-                let err = BadJsonPointerTy::new(pointer);
+                let err = JsonPointerTypeError::new(pointer);
                 err
             })?
         }
@@ -426,7 +447,7 @@ where
         self
     }
 
-    fn resolve(&self, pointer: &JsonPointer) -> Result<&dyn JsonPointee, BadJsonPointer> {
+    fn resolve(&self, pointer: &JsonPointer) -> Result<&dyn JsonPointee, JsonPointerResolveError> {
         let Some(key) = pointer.head() else {
             return Ok(self);
         };
@@ -435,13 +456,13 @@ where
         } else {
             Err({
                 #[cfg(feature = "did-you-mean")]
-                let err = BadJsonPointerKey::with_suggestions(
+                let err = JsonPointerKeyError::with_suggestions(
                     key,
-                    JsonPointeeTy::name_of(self),
+                    JsonPointeeType::name_of(self),
                     self.keys().map(|key| key.as_str()),
                 );
                 #[cfg(not(feature = "did-you-mean"))]
-                let err = BadJsonPointerKey::new(key);
+                let err = JsonPointerKeyError::new(key);
                 err
             })?
         }
@@ -454,7 +475,7 @@ impl<T: JsonPointee> JsonPointee for BTreeMap<String, T> {
         self
     }
 
-    fn resolve(&self, pointer: &JsonPointer) -> Result<&dyn JsonPointee, BadJsonPointer> {
+    fn resolve(&self, pointer: &JsonPointer) -> Result<&dyn JsonPointee, JsonPointerResolveError> {
         let Some(key) = pointer.head() else {
             return Ok(self);
         };
@@ -463,13 +484,13 @@ impl<T: JsonPointee> JsonPointee for BTreeMap<String, T> {
         } else {
             Err({
                 #[cfg(feature = "did-you-mean")]
-                let err = BadJsonPointerKey::with_suggestions(
+                let err = JsonPointerKeyError::with_suggestions(
                     key,
-                    JsonPointeeTy::name_of(self),
+                    JsonPointeeType::name_of(self),
                     self.keys().map(|key| key.as_str()),
                 );
                 #[cfg(not(feature = "did-you-mean"))]
-                let err = BadJsonPointerKey::new(key);
+                let err = JsonPointerKeyError::new(key);
                 err
             })?
         }
@@ -487,7 +508,7 @@ where
         self
     }
 
-    fn resolve(&self, pointer: &JsonPointer) -> Result<&dyn JsonPointee, BadJsonPointer> {
+    fn resolve(&self, pointer: &JsonPointer) -> Result<&dyn JsonPointee, JsonPointerResolveError> {
         let Some(key) = pointer.head() else {
             return Ok(self);
         };
@@ -496,13 +517,13 @@ where
         } else {
             Err({
                 #[cfg(feature = "did-you-mean")]
-                let err = BadJsonPointerKey::with_suggestions(
+                let err = JsonPointerKeyError::with_suggestions(
                     key,
-                    JsonPointeeTy::name_of(self),
+                    JsonPointeeType::name_of(self),
                     self.keys().map(|key| key.as_str()),
                 );
                 #[cfg(not(feature = "did-you-mean"))]
-                let err = BadJsonPointerKey::new(key);
+                let err = JsonPointerKeyError::new(key);
                 err
             })?
         }
@@ -516,7 +537,7 @@ impl JsonPointee for serde_json::Value {
         self
     }
 
-    fn resolve(&self, pointer: &JsonPointer) -> Result<&dyn JsonPointee, BadJsonPointer> {
+    fn resolve(&self, pointer: &JsonPointer) -> Result<&dyn JsonPointee, JsonPointerResolveError> {
         let Some(key) = pointer.head() else {
             return Ok(self);
         };
@@ -527,13 +548,13 @@ impl JsonPointee for serde_json::Value {
                 } else {
                     Err({
                         #[cfg(feature = "did-you-mean")]
-                        let err = BadJsonPointerKey::with_suggestions(
+                        let err = JsonPointerKeyError::with_suggestions(
                             key,
-                            JsonPointeeTy::name_of(map),
+                            JsonPointeeType::name_of(map),
                             map.keys().map(|key| key.as_str()),
                         );
                         #[cfg(not(feature = "did-you-mean"))]
-                        let err = BadJsonPointerKey::new(key);
+                        let err = JsonPointerKeyError::new(key);
                         err
                     })?
                 }
@@ -542,43 +563,44 @@ impl JsonPointee for serde_json::Value {
                 let Some(index) = key.to_index() else {
                     return Err({
                         #[cfg(feature = "did-you-mean")]
-                        let err = BadJsonPointerTy::with_ty(pointer, JsonPointeeTy::name_of(array));
+                        let err =
+                            JsonPointerTypeError::with_ty(pointer, JsonPointeeType::name_of(array));
                         #[cfg(not(feature = "did-you-mean"))]
-                        let err = BadJsonPointerTy::new(pointer);
+                        let err = JsonPointerTypeError::new(pointer);
                         err
                     })?;
                 };
                 if let Some(item) = array.get(index) {
                     item.resolve(pointer.tail())
                 } else {
-                    Err(BadJsonPointer::Index(index, 0..array.len()))
+                    Err(JsonPointerResolveError::Index(index, 0..array.len()))
                 }
             }
             serde_json::Value::Null => Err({
                 #[cfg(feature = "did-you-mean")]
-                let err = BadJsonPointerKey::with_ty(key, JsonPointeeTy::name_of(self));
+                let err = JsonPointerKeyError::with_ty(key, JsonPointeeType::name_of(self));
                 #[cfg(not(feature = "did-you-mean"))]
-                let err = BadJsonPointerKey::new(key);
+                let err = JsonPointerKeyError::new(key);
                 err
             })?,
             _ => Err({
                 #[cfg(feature = "did-you-mean")]
-                let err = BadJsonPointerTy::with_ty(pointer, JsonPointeeTy::name_of(self));
+                let err = JsonPointerTypeError::with_ty(pointer, JsonPointeeType::name_of(self));
                 #[cfg(not(feature = "did-you-mean"))]
-                let err = BadJsonPointerTy::new(pointer);
+                let err = JsonPointerTypeError::new(pointer);
                 err
             })?,
         }
     }
 }
 
-/// An error that occurs during traversal.
+/// An error that occurs during pointer resolution.
 #[derive(Debug, thiserror::Error)]
 pub enum JsonPointerError {
     #[error(transparent)]
-    Syntax(#[from] BadJsonPointerSyntax),
+    Syntax(#[from] JsonPointerSyntaxError),
     #[error(transparent)]
-    Resolve(#[from] BadJsonPointer),
+    Resolve(#[from] JsonPointerResolveError),
     #[error("expected `{pointer}` to be {expected}; got {actual}")]
     Type {
         pointer: JsonPointerBuf,
@@ -589,32 +611,30 @@ pub enum JsonPointerError {
 
 /// An error that occurs during parsing.
 #[derive(Debug, thiserror::Error)]
-pub enum BadJsonPointerSyntax {
-    #[error("JSON Pointer must start with `/`")]
-    MissingLeadingSlash,
-}
+#[error("JSON Pointer must start with `/`")]
+pub struct JsonPointerSyntaxError;
 
 /// An error that occurs during traversal.
 #[derive(Debug, thiserror::Error)]
-pub enum BadJsonPointer {
+pub enum JsonPointerResolveError {
     #[error(transparent)]
-    Key(#[from] BadJsonPointerKey),
+    Key(#[from] JsonPointerKeyError),
     #[error("index {} out of range {}..{}", .0, .1.start, .1.end)]
     Index(usize, Range<usize>),
     #[error(transparent)]
-    Ty(#[from] BadJsonPointerTy),
+    Ty(#[from] JsonPointerTypeError),
 }
 
 /// An error that occurs when a pointed-to value doesn't have a key
 /// that the pointer references, with an optional suggestion
 /// for the correct key.
 #[derive(Debug)]
-pub struct BadJsonPointerKey {
+pub struct JsonPointerKeyError {
     pub key: String,
-    pub context: Option<BadJsonPointerKeyContext>,
+    pub context: Option<JsonPointerKeyErrorContext>,
 }
 
-impl BadJsonPointerKey {
+impl JsonPointerKeyError {
     #[cold]
     pub fn new(key: &JsonPointerSegment) -> Self {
         Self {
@@ -625,10 +645,10 @@ impl BadJsonPointerKey {
 
     #[cfg(feature = "did-you-mean")]
     #[cold]
-    pub fn with_ty(key: &JsonPointerSegment, ty: JsonPointeeTy) -> Self {
+    pub fn with_ty(key: &JsonPointerSegment, ty: JsonPointeeType) -> Self {
         Self {
             key: key.to_str().into_owned(),
-            context: Some(BadJsonPointerKeyContext {
+            context: Some(JsonPointerKeyErrorContext {
                 ty,
                 suggestion: None,
             }),
@@ -639,7 +659,7 @@ impl BadJsonPointerKey {
     #[cold]
     pub fn with_suggestions<'a>(
         key: &JsonPointerSegment,
-        ty: JsonPointeeTy,
+        ty: JsonPointeeType,
         suggestions: impl IntoIterator<Item = &'a str>,
     ) -> Self {
         let key = key.to_str();
@@ -654,17 +674,17 @@ impl BadJsonPointerKey {
             .map(|(suggestion, _)| suggestion.to_owned());
         Self {
             key: key.into_owned(),
-            context: Some(BadJsonPointerKeyContext { ty, suggestion }),
+            context: Some(JsonPointerKeyErrorContext { ty, suggestion }),
         }
     }
 }
 
-impl std::error::Error for BadJsonPointerKey {}
+impl std::error::Error for JsonPointerKeyError {}
 
-impl Display for BadJsonPointerKey {
+impl Display for JsonPointerKeyError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match &self.context {
-            Some(BadJsonPointerKeyContext {
+            Some(JsonPointerKeyErrorContext {
                 ty,
                 suggestion: Some(suggestion),
             }) => write!(
@@ -672,7 +692,7 @@ impl Display for BadJsonPointerKey {
                 "unknown key {:?} for value of {ty}; did you mean {suggestion:?}?",
                 self.key
             ),
-            Some(BadJsonPointerKeyContext {
+            Some(JsonPointerKeyErrorContext {
                 ty,
                 suggestion: None,
             }) => write!(f, "unknown key {:?} for value of {ty}", self.key),
@@ -682,20 +702,20 @@ impl Display for BadJsonPointerKey {
 }
 
 #[derive(Debug)]
-pub struct BadJsonPointerKeyContext {
-    pub ty: JsonPointeeTy,
+pub struct JsonPointerKeyErrorContext {
+    pub ty: JsonPointeeType,
     pub suggestion: Option<String>,
 }
 
 /// An error that occurs when a pointer can't be resolved
 /// against a value of the given type.
 #[derive(Debug)]
-pub struct BadJsonPointerTy {
+pub struct JsonPointerTypeError {
     pub pointer: String,
-    pub ty: Option<JsonPointeeTy>,
+    pub ty: Option<JsonPointeeType>,
 }
 
-impl BadJsonPointerTy {
+impl JsonPointerTypeError {
     pub fn new(pointer: &JsonPointer) -> Self {
         Self {
             pointer: pointer.to_string(),
@@ -705,7 +725,7 @@ impl BadJsonPointerTy {
 
     #[cfg(feature = "did-you-mean")]
     #[cold]
-    pub fn with_ty(pointer: &JsonPointer, ty: JsonPointeeTy) -> Self {
+    pub fn with_ty(pointer: &JsonPointer, ty: JsonPointeeType) -> Self {
         Self {
             pointer: pointer.to_string(),
             ty: Some(ty),
@@ -713,9 +733,9 @@ impl BadJsonPointerTy {
     }
 }
 
-impl std::error::Error for BadJsonPointerTy {}
+impl std::error::Error for JsonPointerTypeError {}
 
-impl Display for BadJsonPointerTy {
+impl Display for JsonPointerTypeError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self.ty {
             Some(ty) => write!(f, "can't resolve {:?} against value of {ty}", self.pointer),
@@ -726,13 +746,13 @@ impl Display for BadJsonPointerTy {
 
 /// The name of a pointed-to type, for reporting traversal errors.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum JsonPointeeTy {
+pub enum JsonPointeeType {
     Struct(JsonPointeeStructTy),
     Variant(&'static str, JsonPointeeStructTy),
     Named(&'static str),
 }
 
-impl JsonPointeeTy {
+impl JsonPointeeType {
     #[inline]
     pub fn struct_named(ty: &'static str) -> Self {
         Self::Struct(JsonPointeeStructTy::Named(ty))
@@ -774,7 +794,7 @@ impl JsonPointeeTy {
     }
 }
 
-impl Display for JsonPointeeTy {
+impl Display for JsonPointeeType {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Struct(JsonPointeeStructTy::Named(ty)) => write!(f, "struct `{ty}`"),

@@ -457,7 +457,7 @@ pub enum BadComponentRef {
     #[error("references must start with `#`; external references aren't supported")]
     NotSameDocument,
     #[error("invalid JSON Pointer syntax: {0}")]
-    Syntax(#[from] ploidy_pointer::BadJsonPointerSyntax),
+    Syntax(#[from] ploidy_pointer::JsonPointerSyntaxError),
     #[error("reference can't be empty")]
     Empty,
 }
