@@ -44,7 +44,7 @@
 //! ## Struct flattening
 //!
 //! ```ignore
-//! # use ploidy_pointer::{BadJsonPointer, JsonPointee, JsonPointer};
+//! # use ploidy_pointer::{JsonPointerError, JsonPointee, JsonPointer};
 //! # fn main() -> Result<(), Box<dyn std::error::Error>> {
 //! #[derive(JsonPointee)]
 //! struct User {
@@ -85,7 +85,7 @@
 //! ## Renaming fields
 //!
 //! ```ignore
-//! # use ploidy_pointer::{BadJsonPointer, JsonPointee, JsonPointer};
+//! # use ploidy_pointer::{JsonPointerError, JsonPointee, JsonPointer};
 //! # fn main() -> Result<(), Box<dyn std::error::Error>> {
 //! #[derive(JsonPointee)]
 //! #[ploidy(pointer(rename_all = "snake_case"))]
@@ -124,7 +124,7 @@
 //! This is the default enum representation. The variant's tag wraps the contents.
 //!
 //! ```ignore
-//! # use ploidy_pointer::{BadJsonPointer, JsonPointee, JsonPointer};
+//! # use ploidy_pointer::{JsonPointerError, JsonPointee, JsonPointer};
 //! # fn main() -> Result<(), Box<dyn std::error::Error>> {
 //! #[derive(JsonPointee)]
 //! enum Message {
@@ -149,7 +149,7 @@
 //! is next to the variant's fields.
 //!
 //! ```ignore
-//! # use ploidy_pointer::{BadJsonPointer, JsonPointee, JsonPointer};
+//! # use ploidy_pointer::{JsonPointerError, JsonPointee, JsonPointer};
 //! # fn main() -> Result<(), Box<dyn std::error::Error>> {
 //! #[derive(JsonPointee)]
 //! #[ploidy(pointer(tag = "type"))]
@@ -179,7 +179,7 @@
 //! to each other, as two fields in the same object.
 //!
 //! ```ignore
-//! # use ploidy_pointer::{BadJsonPointer, JsonPointee, JsonPointer};
+//! # use ploidy_pointer::{JsonPointerError, JsonPointee, JsonPointer};
 //! # fn main() -> Result<(), Box<dyn std::error::Error>> {
 //! #[derive(JsonPointee)]
 //! #[ploidy(pointer(tag = "type", content = "value"))]
@@ -209,7 +209,7 @@
 //! and pointers are resolved against the variant's contents.
 //!
 //! ```ignore
-//! # use ploidy_pointer::{BadJsonPointer, JsonPointee, JsonPointer};
+//! # use ploidy_pointer::{JsonPointerError, JsonPointee, JsonPointer};
 //! # fn main() -> Result<(), Box<dyn std::error::Error>> {
 //! #[derive(JsonPointee)]
 //! #[ploidy(pointer(untagged))]
@@ -319,7 +319,7 @@ fn derive_for(input: &DeriveInput) -> syn::Result<TokenStream> {
             fn as_any(&self) -> &dyn ::std::any::Any { self }
 
             fn resolve(&self, #pointer: &#root::JsonPointer)
-                -> ::std::result::Result<&dyn #root::JsonPointee, #root::BadJsonPointer> {
+                -> ::std::result::Result<&dyn #root::JsonPointee, #root::JsonPointerResolveError> {
                 #body
             }
         }
@@ -464,9 +464,9 @@ fn derive_for_enum(
                             let effective_name = info.effective_name();
                             let pointee_ty = TuplePointeeTy::Variant(info, tag);
                             let key_err = if cfg!(feature = "did-you-mean") {
-                                quote!(#root::BadJsonPointerKey::with_ty(#key, #pointee_ty))
+                                quote!(#root::JsonPointerKeyError::with_ty(#key, #pointee_ty))
                             } else {
-                                quote!(#root::BadJsonPointerKey::new(#key))
+                                quote!(#root::JsonPointerKeyError::new(#key))
                             };
                             quote! {
                                 Self::#name(inner) => {
@@ -487,13 +487,13 @@ fn derive_for_enum(
                             let effective_name = info.effective_name();
                             let pointee_ty = TuplePointeeTy::Variant(info, tag);
                             let key_err = if cfg!(feature = "did-you-mean") {
-                                quote!(#root::BadJsonPointerKey::with_suggestions(
+                                quote!(#root::JsonPointerKeyError::with_suggestions(
                                     #key,
                                     #pointee_ty,
                                     [#tag_field, #content_field],
                                 ))
                             } else {
-                                quote!(#root::BadJsonPointerKey::new(#key))
+                                quote!(#root::JsonPointerKeyError::new(#key))
                             };
                             quote! {
                                 Self::#name(inner) => {
@@ -814,13 +814,13 @@ impl ToTokens for NamedPointeeBody<'_> {
             // For flattened fields, we build an `.or_else()` chain bottom-up
             // using a right fold.
             let rest = if cfg!(feature = "did-you-mean") {
-                quote!(Err(#root::BadJsonPointerKey::with_suggestions(
+                quote!(Err(#root::JsonPointerKeyError::with_suggestions(
                     #key,
                     #pointee_ty,
                     [#(#suggestions),*],
                 ))?)
             } else {
-                quote!(Err(#root::BadJsonPointerKey::new(#key))?)
+                quote!(Err(#root::JsonPointerKeyError::new(#key))?)
             };
             self.fields
                 .iter()
@@ -862,9 +862,9 @@ impl ToTokens for NamedPointeeBody<'_> {
                 // against the named fields.
                 let variant_name = info.effective_name();
                 let ty_err = if cfg!(feature = "did-you-mean") {
-                    quote!(#root::BadJsonPointerTy::with_ty(&#pointer, #pointee_ty))
+                    quote!(#root::JsonPointerTypeError::with_ty(&#pointer, #pointee_ty))
                 } else {
-                    quote!(#root::BadJsonPointerTy::new(&#pointer))
+                    quote!(#root::JsonPointerTypeError::new(&#pointer))
                 };
                 quote! {
                     let Some(#key) = #pointer.head() else {
@@ -894,13 +894,13 @@ impl ToTokens for NamedPointeeBody<'_> {
                 // must match either the tag or content field.
                 let variant_name = info.effective_name();
                 let key_err = if cfg!(feature = "did-you-mean") {
-                    quote!(#root::BadJsonPointerKey::with_suggestions(
+                    quote!(#root::JsonPointerKeyError::with_suggestions(
                         #key,
                         #pointee_ty,
                         [#tag_field, #content_field],
                     ))
                 } else {
-                    quote!(#root::BadJsonPointerKey::new(#key))
+                    quote!(#root::JsonPointerKeyError::new(#key))
                 };
                 quote! {
                     let Some(#key) = #pointer.head() else {
@@ -985,9 +985,9 @@ impl ToTokens for TuplePointeeBody<'_> {
         let ty = self.ty;
         let len = self.fields.len();
         let ty_err = if cfg!(feature = "did-you-mean") {
-            quote!(#root::BadJsonPointerTy::with_ty(&#pointer, #ty))
+            quote!(#root::JsonPointerTypeError::with_ty(&#pointer, #ty))
         } else {
-            quote!(#root::BadJsonPointerTy::new(&#pointer))
+            quote!(#root::JsonPointerTypeError::new(&#pointer))
         };
         let tail = quote! {
             let Some(#idx) = #key.to_index() else {
@@ -995,7 +995,7 @@ impl ToTokens for TuplePointeeBody<'_> {
             };
             match #idx {
                 #(#arms,)*
-                _ => Err(#root::BadJsonPointer::Index(#idx, 0..#len))
+                _ => Err(#root::JsonPointerResolveError::Index(#idx, 0..#len))
             }
         };
 
@@ -1020,9 +1020,9 @@ impl ToTokens for TuplePointeeBody<'_> {
                 // against the tuple indices.
                 let variant_name = info.effective_name();
                 let ty_err = if cfg!(feature = "did-you-mean") {
-                    quote!(#root::BadJsonPointerTy::with_ty(&#pointer, #ty))
+                    quote!(#root::JsonPointerTypeError::with_ty(&#pointer, #ty))
                 } else {
-                    quote!(#root::BadJsonPointerTy::new(&#pointer))
+                    quote!(#root::JsonPointerTypeError::new(&#pointer))
                 };
                 quote! {
                     let Some(#key) = #pointer.head() else {
@@ -1049,13 +1049,13 @@ impl ToTokens for TuplePointeeBody<'_> {
                 // must match either the tag or content field.
                 let variant_name = info.effective_name();
                 let key_err = if cfg!(feature = "did-you-mean") {
-                    quote!(#root::BadJsonPointerKey::with_suggestions(
+                    quote!(#root::JsonPointerKeyError::with_suggestions(
                         #key,
                         #ty,
                         [#tag_field, #content_field],
                     ))
                 } else {
-                    quote!(#root::BadJsonPointerKey::new(#key))
+                    quote!(#root::JsonPointerKeyError::new(#key))
                 };
                 quote! {
                     let Some(#key) = #pointer.head() else {
@@ -1116,13 +1116,13 @@ impl ToTokens for UnitPointeeBody<'_> {
                 let key = Ident::new("key", Span::mixed_site());
                 let variant_name = info.effective_name();
                 let key_err = if cfg!(feature = "did-you-mean") {
-                    quote!(#root::BadJsonPointerKey::with_suggestions(
+                    quote!(#root::JsonPointerKeyError::with_suggestions(
                         #key,
                         #ty,
                         [#tag_field],
                     ))
                 } else {
-                    quote!(#root::BadJsonPointerKey::new(#key))
+                    quote!(#root::JsonPointerKeyError::new(#key))
                 };
                 quote! {
                     let Some(#key) = #pointer.head() else {
@@ -1139,14 +1139,14 @@ impl ToTokens for UnitPointeeBody<'_> {
                 let key = Ident::new("key", Span::mixed_site());
                 let variant_name = info.effective_name();
                 let key_err = if cfg!(feature = "did-you-mean") {
-                    quote!(#root::BadJsonPointerKey::with_ty(#key, #ty))
+                    quote!(#root::JsonPointerKeyError::with_ty(#key, #ty))
                 } else {
-                    quote!(#root::BadJsonPointerKey::new(#key))
+                    quote!(#root::JsonPointerKeyError::new(#key))
                 };
                 let ty_err = if cfg!(feature = "did-you-mean") {
-                    quote!(#root::BadJsonPointerTy::with_ty(&#pointer.tail(), #ty))
+                    quote!(#root::JsonPointerTypeError::with_ty(&#pointer.tail(), #ty))
                 } else {
-                    quote!(#root::BadJsonPointerTy::new(&#pointer.tail()))
+                    quote!(#root::JsonPointerTypeError::new(&#pointer.tail()))
                 };
                 quote! {
                     let Some(#key) = #pointer.head() else {
@@ -1166,13 +1166,13 @@ impl ToTokens for UnitPointeeBody<'_> {
                 let key = Ident::new("key", Span::mixed_site());
                 let variant_name = info.effective_name();
                 let key_err = if cfg!(feature = "did-you-mean") {
-                    quote!(#root::BadJsonPointerKey::with_suggestions(
+                    quote!(#root::JsonPointerKeyError::with_suggestions(
                         #key,
                         #ty,
                         [#tag_field],
                     ))
                 } else {
-                    quote!(#root::BadJsonPointerKey::new(#key))
+                    quote!(#root::JsonPointerKeyError::new(#key))
                 };
                 quote! {
                     let Some(#key) = #pointer.head() else {
@@ -1191,9 +1191,9 @@ impl ToTokens for UnitPointeeBody<'_> {
             ty @ (UnitPointeeTy::Struct(_) | UnitPointeeTy::Variant(_, VariantTag::Untagged)) => {
                 // For unit structs and untagged unit variants, deny all fields.
                 let ty_err = if cfg!(feature = "did-you-mean") {
-                    quote!(#root::BadJsonPointerTy::with_ty(&#pointer, #ty))
+                    quote!(#root::JsonPointerTypeError::with_ty(&#pointer, #ty))
                 } else {
-                    quote!(#root::BadJsonPointerTy::new(&#pointer))
+                    quote!(#root::JsonPointerTypeError::new(&#pointer))
                 };
                 quote! {
                     if #pointer.is_empty() {
@@ -1230,7 +1230,7 @@ impl ToTokens for NamedPointeeTy<'_> {
             Self::Struct(info) => {
                 let ty = info.name;
                 quote! {
-                    #root::JsonPointeeTy::struct_named(
+                    #root::JsonPointeeType::struct_named(
                         stringify!(#ty)
                     )
                 }
@@ -1239,7 +1239,7 @@ impl ToTokens for NamedPointeeTy<'_> {
                 let ty = info.container.name;
                 let variant = info.name;
                 quote! {
-                    #root::JsonPointeeTy::struct_variant_named(
+                    #root::JsonPointeeType::struct_variant_named(
                         stringify!(#ty),
                         stringify!(#variant),
                     )
@@ -1271,7 +1271,7 @@ impl ToTokens for TuplePointeeTy<'_> {
             Self::Struct(info) => {
                 let ty = info.name;
                 quote! {
-                    #root::JsonPointeeTy::tuple_struct_named(
+                    #root::JsonPointeeType::tuple_struct_named(
                         stringify!(#ty)
                     )
                 }
@@ -1280,7 +1280,7 @@ impl ToTokens for TuplePointeeTy<'_> {
                 let ty = info.container.name;
                 let variant = info.name;
                 quote! {
-                    #root::JsonPointeeTy::tuple_variant_named(
+                    #root::JsonPointeeType::tuple_variant_named(
                         stringify!(#ty),
                         stringify!(#variant),
                     )
@@ -1312,7 +1312,7 @@ impl ToTokens for UnitPointeeTy<'_> {
             Self::Struct(info) => {
                 let ty = info.name;
                 quote! {
-                    #root::JsonPointeeTy::unit_struct_named(
+                    #root::JsonPointeeType::unit_struct_named(
                         stringify!(#ty)
                     )
                 }
@@ -1321,7 +1321,7 @@ impl ToTokens for UnitPointeeTy<'_> {
                 let ty = info.container.name;
                 let variant = info.name;
                 quote! {
-                    #root::JsonPointeeTy::unit_variant_named(
+                    #root::JsonPointeeType::unit_variant_named(
                         stringify!(#ty),
                         stringify!(#variant),
                     )
@@ -1358,7 +1358,7 @@ impl ToTokens for VariantTy<'_> {
                 let ty = info.container.name;
                 let variant = info.name;
                 quote! {
-                    #root::JsonPointeeTy::struct_variant_named(
+                    #root::JsonPointeeType::struct_variant_named(
                         stringify!(#ty),
                         stringify!(#variant),
                     )
@@ -1368,7 +1368,7 @@ impl ToTokens for VariantTy<'_> {
                 let ty = info.container.name;
                 let variant = info.name;
                 quote! {
-                    #root::JsonPointeeTy::tuple_variant_named(
+                    #root::JsonPointeeType::tuple_variant_named(
                         stringify!(#ty),
                         stringify!(#variant),
                     )
@@ -1378,7 +1378,7 @@ impl ToTokens for VariantTy<'_> {
                 let ty = info.container.name;
                 let variant = info.name;
                 quote! {
-                    #root::JsonPointeeTy::unit_variant_named(
+                    #root::JsonPointeeType::unit_variant_named(
                         stringify!(#ty),
                         stringify!(#variant),
                     )
@@ -1427,9 +1427,9 @@ impl ToTokens for SkippedVariantBody<'_> {
                 let key = Ident::new("key", Span::mixed_site());
                 let effective_name = ty.info().effective_name();
                 let ty_err = if cfg!(feature = "did-you-mean") {
-                    quote!(#root::BadJsonPointerTy::with_ty(&#pointer, #ty))
+                    quote!(#root::JsonPointerTypeError::with_ty(&#pointer, #ty))
                 } else {
-                    quote!(#root::BadJsonPointerTy::new(&#pointer))
+                    quote!(#root::JsonPointerTypeError::new(&#pointer))
                 };
                 tokens.append_all(quote! {
                     #pattern => {
@@ -1446,9 +1446,9 @@ impl ToTokens for SkippedVariantBody<'_> {
             VariantTag::External => {
                 // Externally tagged skipped variants are completely inaccessible.
                 let ty_err = if cfg!(feature = "did-you-mean") {
-                    quote!(#root::BadJsonPointerTy::with_ty(&#pointer, #ty))
+                    quote!(#root::JsonPointerTypeError::with_ty(&#pointer, #ty))
                 } else {
-                    quote!(#root::BadJsonPointerTy::new(&#pointer))
+                    quote!(#root::JsonPointerTypeError::new(&#pointer))
                 };
                 tokens.append_all(quote! {
                     #pattern => Err(#ty_err)?
@@ -1460,13 +1460,13 @@ impl ToTokens for SkippedVariantBody<'_> {
                 let key = Ident::new("key", Span::mixed_site());
                 let effective_name = ty.info().effective_name();
                 let key_err = if cfg!(feature = "did-you-mean") {
-                    quote!(#root::BadJsonPointerKey::with_suggestions(
+                    quote!(#root::JsonPointerKeyError::with_suggestions(
                         #key,
                         #ty,
                         [#tag_field],
                     ))
                 } else {
-                    quote!(#root::BadJsonPointerKey::new(#key))
+                    quote!(#root::JsonPointerKeyError::new(#key))
                 };
                 tokens.append_all(quote! {
                     #pattern => {
@@ -1487,9 +1487,9 @@ impl ToTokens for SkippedVariantBody<'_> {
             VariantTag::Untagged => {
                 // Untagged skipped variants are completely inaccessible.
                 let ty_err = if cfg!(feature = "did-you-mean") {
-                    quote!(#root::BadJsonPointerTy::with_ty(&#pointer, #ty))
+                    quote!(#root::JsonPointerTypeError::with_ty(&#pointer, #ty))
                 } else {
-                    quote!(#root::BadJsonPointerTy::new(&#pointer))
+                    quote!(#root::JsonPointerTypeError::new(&#pointer))
                 };
                 tokens.append_all(quote! {
                     #pattern => Err(#ty_err)?

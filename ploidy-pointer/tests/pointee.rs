@@ -582,7 +582,7 @@ fn test_skip_not_in_suggestions() {
     // Try accessing a nonexistent field.
     let pointer = JsonPointer::parse("/nonexistent").unwrap();
     match s.resolve(pointer) {
-        Err(ploidy_pointer::BadJsonPointer::Key(key_err)) => {
+        Err(ploidy_pointer::JsonPointerResolveError::Key(key_err)) => {
             // Suggestion should be `"visible"`, not `"hidden"`.
             assert_eq!(
                 key_err
@@ -592,7 +592,7 @@ fn test_skip_not_in_suggestions() {
                 Some("visible")
             );
         }
-        _ => panic!("expected `BadJsonPointer::Key` error"),
+        _ => panic!("expected `JsonPointerError::Key` error"),
     }
 }
 

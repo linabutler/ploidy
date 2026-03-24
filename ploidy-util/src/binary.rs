@@ -1,7 +1,7 @@
 use std::any::Any;
 
 use base64::Engine;
-use ploidy_pointer::{BadJsonPointer, BadJsonPointerTy, JsonPointee, JsonPointer};
+use ploidy_pointer::{JsonPointee, JsonPointer, JsonPointerResolveError, JsonPointerTypeError};
 use serde::{Deserialize, Deserializer, Serialize, Serializer, de};
 
 /// A wrapper around a [`Vec<u8>`] that serializes and deserializes
@@ -22,11 +22,11 @@ impl JsonPointee for Base64 {
         self
     }
 
-    fn resolve(&self, pointer: &JsonPointer) -> Result<&dyn JsonPointee, BadJsonPointer> {
+    fn resolve(&self, pointer: &JsonPointer) -> Result<&dyn JsonPointee, JsonPointerResolveError> {
         if pointer.is_empty() {
             Ok(self as &dyn JsonPointee)
         } else {
-            Err(BadJsonPointerTy::new(pointer).into())
+            Err(JsonPointerTypeError::new(pointer).into())
         }
     }
 }
