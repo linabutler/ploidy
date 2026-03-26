@@ -14,7 +14,7 @@ use std::{
 use ref_cast::{RefCastCustom, ref_cast_custom};
 
 #[cfg(feature = "derive")]
-pub use ploidy_pointer_derive::JsonPointee;
+pub use ploidy_pointer_derive::{JsonPointee, JsonPointerTarget};
 
 /// A JSON Pointer.
 #[derive(Debug, Eq, Hash, Ord, PartialEq, PartialOrd, RefCastCustom)]
@@ -74,6 +74,18 @@ impl JsonPointer {
     #[inline]
     pub fn segments(&self) -> JsonPointerSegments<'_> {
         JsonPointerSegments(self.0.strip_prefix('/').map(|raw| raw.split('/')))
+    }
+
+    /// Follows this pointer through `root` and extracts the result as `T`.
+    #[inline]
+    pub fn follow<'a, T: JsonPointerTarget<'a>>(
+        &self,
+        root: &'a (impl JsonPointee + ?Sized),
+    ) -> Result<T, JsonPointerError> {
+        T::from_pointee(root.resolve(self)?).map_err(|err| JsonPointerError::Type {
+            pointer: self.to_owned(),
+            source: err,
+        })
     }
 }
 
@@ -166,10 +178,7 @@ impl From<&JsonPointer> for JsonPointerBuf {
 /// A value that a [`JsonPointer`] points to.
 pub trait JsonPointee: Any {
     /// Resolves a [`JsonPointer`] against this value.
-    fn resolve(&self, pointer: &JsonPointer) -> Result<&dyn JsonPointee, JsonPointerResolveError>;
-
-    /// Returns this value as a `&dyn Any` for downcasting.
-    fn as_any(&self) -> &dyn Any;
+    fn resolve(&self, pointer: &JsonPointer) -> Result<&dyn JsonPointee, JsonPointeeError>;
 
     /// Returns the concrete type name of this value.
     #[inline]
@@ -178,36 +187,19 @@ pub trait JsonPointee: Any {
     }
 }
 
-impl dyn JsonPointee {
-    /// Returns a reference to the pointed-to value if it's of type `T`,
-    /// or `None` if it isn't.
-    #[inline]
-    pub fn downcast_ref<T: JsonPointee>(&self) -> Option<&T> {
-        self.as_any().downcast_ref::<T>()
-    }
-
-    /// Returns `true` if the pointed-to value is of type `T`.
-    #[inline]
-    pub fn is<T: JsonPointee>(&self) -> bool {
-        self.as_any().is::<T>()
-    }
+/// Extracts a typed value from a [`JsonPointee`].
+pub trait JsonPointerTarget<'a>: Sized {
+    /// Tries to extract `Self` from a resolved pointee.
+    fn from_pointee(pointee: &'a dyn JsonPointee) -> Result<Self, JsonPointerTargetError>;
 }
 
 /// Convenience methods for [`JsonPointee`] types.
 pub trait JsonPointeeExt: JsonPointee {
     /// Parses a JSON pointer string, resolves it against this value,
-    /// and downcasts the result to `T`.
+    /// and extracts the result as `T`.
     #[inline]
-    fn pointer<T: JsonPointee>(&self, path: &str) -> Result<&T, JsonPointerError> {
-        let pointer = JsonPointer::parse(path)?;
-        let resolved = self.resolve(pointer)?;
-        resolved
-            .downcast_ref()
-            .ok_or_else(|| JsonPointerError::Type {
-                pointer: pointer.to_owned(),
-                expected: std::any::type_name::<T>(),
-                actual: resolved.name(),
-            })
+    fn pointer<'a, T: JsonPointerTarget<'a>>(&'a self, path: &str) -> Result<T, JsonPointerError> {
+        JsonPointer::parse(path)?.follow(self)
     }
 }
 
@@ -306,10 +298,7 @@ macro_rules! impl_pointee_for {
     };
     ($ty:ty $(, $($rest:tt)*)?) => {
         impl JsonPointee for $ty {
-            #[inline]
-            fn as_any(&self) -> &dyn Any { self }
-
-            fn resolve(&self, pointer: &JsonPointer) -> Result<&dyn JsonPointee, JsonPointerResolveError> {
+            fn resolve(&self, pointer: &JsonPointer) -> Result<&dyn JsonPointee, JsonPointeeError> {
                 if pointer.is_empty() {
                     Ok(self)
                 } else {
@@ -337,13 +326,139 @@ impl_pointee_for!(
     #[cfg(feature = "url")] url::Url,
 );
 
-impl<T: JsonPointee> JsonPointee for Option<T> {
-    #[inline]
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
+macro_rules! impl_copied_pointer_target_for {
+    () => {};
+    (#[$($attrs:tt)+] $ty:ty $(, $($rest:tt)*)?) => {
+        #[$($attrs)*]
+        impl_copied_pointer_target_for!($ty);
+        $(impl_copied_pointer_target_for!($($rest)*);)?
+    };
+    ($ty:ty $(, $($rest:tt)*)?) => {
+        impl<'a> JsonPointerTarget<'a> for $ty {
+            #[inline]
+            fn from_pointee(pointee: &'a dyn JsonPointee) -> Result<Self, JsonPointerTargetError> {
+                let any: &dyn Any = pointee;
+                any.downcast_ref::<$ty>().copied().ok_or_else(|| JsonPointerTargetError {
+                    expected: ::std::any::type_name::<$ty>(),
+                    actual: pointee.name(),
+                })
+            }
+        }
+        $(impl_copied_pointer_target_for!($($rest)*);)?
+    };
+}
 
-    fn resolve(&self, pointer: &JsonPointer) -> Result<&dyn JsonPointee, JsonPointerResolveError> {
+impl_copied_pointer_target_for!(
+    i8, u8, i16, u16, i32, u32, i64, u64, i128, u128, isize, usize, f32, f64, bool,
+    #[cfg(feature = "chrono")] chrono::DateTime<chrono::Utc>,
+    #[cfg(feature = "chrono")] chrono::NaiveDate,
+);
+
+impl<'a> JsonPointerTarget<'a> for &'a str {
+    #[inline]
+    fn from_pointee(pointee: &'a dyn JsonPointee) -> Result<Self, JsonPointerTargetError> {
+        let any: &dyn Any = pointee;
+        if let Some(s) = any.downcast_ref::<String>() {
+            Ok(s.as_str())
+        } else if let Some(&s) = any.downcast_ref::<&str>() {
+            Ok(s)
+        } else {
+            Err(JsonPointerTargetError {
+                expected: "str",
+                actual: pointee.name(),
+            })
+        }
+    }
+}
+
+impl<'a, T: JsonPointee> JsonPointerTarget<'a> for &'a [T] {
+    #[inline]
+    fn from_pointee(pointee: &'a dyn JsonPointee) -> Result<Self, JsonPointerTargetError> {
+        let any: &dyn Any = pointee;
+        if let Some(v) = any.downcast_ref::<Vec<T>>() {
+            Ok(v.as_slice())
+        } else if let Some(v) = any.downcast_ref::<&[T]>() {
+            Ok(v)
+        } else {
+            Err(JsonPointerTargetError {
+                expected: ::std::any::type_name::<[T]>(),
+                actual: pointee.name(),
+            })
+        }
+    }
+}
+
+#[cfg(feature = "url")]
+impl<'a> JsonPointerTarget<'a> for &'a url::Url {
+    #[inline]
+    fn from_pointee(pointee: &'a dyn JsonPointee) -> Result<Self, JsonPointerTargetError> {
+        let any: &dyn Any = pointee;
+        any.downcast_ref::<url::Url>()
+            .ok_or_else(|| JsonPointerTargetError {
+                expected: ::std::any::type_name::<url::Url>(),
+                actual: pointee.name(),
+            })
+    }
+}
+
+impl<'a, T: JsonPointee, H: BuildHasher + 'static> JsonPointerTarget<'a>
+    for &'a HashMap<String, T, H>
+{
+    #[inline]
+    fn from_pointee(pointee: &'a dyn JsonPointee) -> Result<Self, JsonPointerTargetError> {
+        let any: &dyn Any = pointee;
+        any.downcast_ref::<HashMap<String, T, H>>()
+            .ok_or_else(|| JsonPointerTargetError {
+                expected: ::std::any::type_name::<HashMap<String, T, H>>(),
+                actual: pointee.name(),
+            })
+    }
+}
+
+impl<'a, T: JsonPointee> JsonPointerTarget<'a> for &'a BTreeMap<String, T> {
+    #[inline]
+    fn from_pointee(pointee: &'a dyn JsonPointee) -> Result<Self, JsonPointerTargetError> {
+        let any: &dyn Any = pointee;
+        any.downcast_ref::<BTreeMap<String, T>>()
+            .ok_or_else(|| JsonPointerTargetError {
+                expected: ::std::any::type_name::<BTreeMap<String, T>>(),
+                actual: pointee.name(),
+            })
+    }
+}
+
+#[cfg(feature = "indexmap")]
+impl<'a, T: JsonPointee, H: BuildHasher + 'static> JsonPointerTarget<'a>
+    for &'a indexmap::IndexMap<String, T, H>
+{
+    #[inline]
+    fn from_pointee(pointee: &'a dyn JsonPointee) -> Result<Self, JsonPointerTargetError> {
+        let any: &dyn Any = pointee;
+        any.downcast_ref::<indexmap::IndexMap<String, T, H>>()
+            .ok_or_else(|| JsonPointerTargetError {
+                expected: ::std::any::type_name::<indexmap::IndexMap<String, T, H>>(),
+                actual: pointee.name(),
+            })
+    }
+}
+
+#[cfg(feature = "serde_json")]
+impl<'a> JsonPointerTarget<'a> for &'a serde_json::Value {
+    #[inline]
+    fn from_pointee(pointee: &'a dyn JsonPointee) -> Result<Self, JsonPointerTargetError> {
+        let any: &dyn Any = pointee;
+        any.downcast_ref::<serde_json::Value>()
+            .ok_or_else(|| JsonPointerTargetError {
+                expected: ::std::any::type_name::<serde_json::Value>(),
+                actual: pointee.name(),
+            })
+    }
+}
+
+/// Transparently resolves a [`JsonPointer`] against the contained value
+/// if [`Some`], or returns an error if [`None`].
+impl<T: JsonPointee> JsonPointee for Option<T> {
+    fn resolve(&self, pointer: &JsonPointer) -> Result<&dyn JsonPointee, JsonPointeeError> {
         match self {
             Some(value) => value.resolve(pointer),
             None => Err({
@@ -358,45 +473,25 @@ impl<T: JsonPointee> JsonPointee for Option<T> {
 }
 
 impl<T: JsonPointee> JsonPointee for Box<T> {
-    #[inline]
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
-
-    fn resolve(&self, pointer: &JsonPointer) -> Result<&dyn JsonPointee, JsonPointerResolveError> {
+    fn resolve(&self, pointer: &JsonPointer) -> Result<&dyn JsonPointee, JsonPointeeError> {
         (**self).resolve(pointer)
     }
 }
 
 impl<T: JsonPointee> JsonPointee for Arc<T> {
-    #[inline]
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
-
-    fn resolve(&self, pointer: &JsonPointer) -> Result<&dyn JsonPointee, JsonPointerResolveError> {
+    fn resolve(&self, pointer: &JsonPointer) -> Result<&dyn JsonPointee, JsonPointeeError> {
         (**self).resolve(pointer)
     }
 }
 
 impl<T: JsonPointee> JsonPointee for Rc<T> {
-    #[inline]
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
-
-    fn resolve(&self, pointer: &JsonPointer) -> Result<&dyn JsonPointee, JsonPointerResolveError> {
+    fn resolve(&self, pointer: &JsonPointer) -> Result<&dyn JsonPointee, JsonPointeeError> {
         (**self).resolve(pointer)
     }
 }
 
 impl<T: JsonPointee> JsonPointee for Vec<T> {
-    #[inline]
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
-
-    fn resolve(&self, pointer: &JsonPointer) -> Result<&dyn JsonPointee, JsonPointerResolveError> {
+    fn resolve(&self, pointer: &JsonPointer) -> Result<&dyn JsonPointee, JsonPointeeError> {
         let Some(key) = pointer.head() else {
             return Ok(self);
         };
@@ -404,7 +499,7 @@ impl<T: JsonPointee> JsonPointee for Vec<T> {
             if let Some(item) = self.get(index) {
                 item.resolve(pointer.tail())
             } else {
-                Err(JsonPointerResolveError::Index(index, 0..self.len()))
+                Err(JsonPointeeError::Index(index, 0..self.len()))
             }
         } else {
             Err({
@@ -423,12 +518,7 @@ where
     T: JsonPointee,
     H: BuildHasher + 'static,
 {
-    #[inline]
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
-
-    fn resolve(&self, pointer: &JsonPointer) -> Result<&dyn JsonPointee, JsonPointerResolveError> {
+    fn resolve(&self, pointer: &JsonPointer) -> Result<&dyn JsonPointee, JsonPointeeError> {
         let Some(key) = pointer.head() else {
             return Ok(self);
         };
@@ -451,12 +541,7 @@ where
 }
 
 impl<T: JsonPointee> JsonPointee for BTreeMap<String, T> {
-    #[inline]
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
-
-    fn resolve(&self, pointer: &JsonPointer) -> Result<&dyn JsonPointee, JsonPointerResolveError> {
+    fn resolve(&self, pointer: &JsonPointer) -> Result<&dyn JsonPointee, JsonPointeeError> {
         let Some(key) = pointer.head() else {
             return Ok(self);
         };
@@ -484,12 +569,7 @@ where
     T: JsonPointee,
     H: BuildHasher + 'static,
 {
-    #[inline]
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
-
-    fn resolve(&self, pointer: &JsonPointer) -> Result<&dyn JsonPointee, JsonPointerResolveError> {
+    fn resolve(&self, pointer: &JsonPointer) -> Result<&dyn JsonPointee, JsonPointeeError> {
         let Some(key) = pointer.head() else {
             return Ok(self);
         };
@@ -513,12 +593,7 @@ where
 
 #[cfg(feature = "serde_json")]
 impl JsonPointee for serde_json::Value {
-    #[inline]
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
-
-    fn resolve(&self, pointer: &JsonPointer) -> Result<&dyn JsonPointee, JsonPointerResolveError> {
+    fn resolve(&self, pointer: &JsonPointer) -> Result<&dyn JsonPointee, JsonPointeeError> {
         let Some(key) = pointer.head() else {
             return Ok(self);
         };
@@ -554,7 +629,7 @@ impl JsonPointee for serde_json::Value {
                 if let Some(item) = array.get(index) {
                     item.resolve(pointer.tail())
                 } else {
-                    Err(JsonPointerResolveError::Index(index, 0..array.len()))
+                    Err(JsonPointeeError::Index(index, 0..array.len()))
                 }
             }
             serde_json::Value::Null => Err({
@@ -581,12 +656,12 @@ pub enum JsonPointerError {
     #[error(transparent)]
     Syntax(#[from] JsonPointerSyntaxError),
     #[error(transparent)]
-    Resolve(#[from] JsonPointerResolveError),
-    #[error("expected `{pointer}` to be {expected}; got {actual}")]
+    Resolve(#[from] JsonPointeeError),
+    #[error("at `{pointer}`: {source}")]
     Type {
         pointer: JsonPointerBuf,
-        expected: &'static str,
-        actual: &'static str,
+        #[source]
+        source: JsonPointerTargetError,
     },
 }
 
@@ -595,9 +670,21 @@ pub enum JsonPointerError {
 #[error("JSON Pointer must start with `/`")]
 pub struct JsonPointerSyntaxError;
 
+/// An error returned when a [`JsonPointerTarget`] can't extract a typed value
+/// from a type-erased [`JsonPointee`] because the pointee's type doesn't match
+/// the target type.
+#[derive(Debug, thiserror::Error)]
+#[error("expected type `{expected}`; got `{actual}`")]
+pub struct JsonPointerTargetError {
+    /// The expected type name, from [`std::any::type_name`].
+    pub expected: &'static str,
+    /// The actual type name, from [`JsonPointee::name`].
+    pub actual: &'static str,
+}
+
 /// An error that occurs during traversal.
 #[derive(Debug, thiserror::Error)]
-pub enum JsonPointerResolveError {
+pub enum JsonPointeeError {
     #[error(transparent)]
     Key(#[from] JsonPointerKeyError),
     #[error("index {} out of range {}..{}", .0, .1.start, .1.end)]
@@ -616,7 +703,6 @@ pub struct JsonPointerKeyError {
 }
 
 impl JsonPointerKeyError {
-    #[cold]
     pub fn new(key: &JsonPointerSegment) -> Self {
         Self {
             key: key.to_str().into_owned(),
@@ -625,7 +711,6 @@ impl JsonPointerKeyError {
     }
 
     #[cfg(feature = "did-you-mean")]
-    #[cold]
     pub fn with_ty(key: &JsonPointerSegment, ty: JsonPointeeType) -> Self {
         Self {
             key: key.to_str().into_owned(),
@@ -705,7 +790,6 @@ impl JsonPointerTypeError {
     }
 
     #[cfg(feature = "did-you-mean")]
-    #[cold]
     pub fn with_ty(pointer: &JsonPointer, ty: JsonPointeeType) -> Self {
         Self {
             pointer: pointer.to_string(),
@@ -908,7 +992,7 @@ mod tests {
     fn test_resolve_vec() {
         let data = vec![1, 2, 3];
         let pointer = JsonPointer::parse("/1").unwrap();
-        let result = data.resolve(pointer).unwrap();
+        let result = data.resolve(pointer).unwrap() as &dyn Any;
         assert_eq!(result.downcast_ref::<i32>(), Some(&2));
     }
 
@@ -918,7 +1002,7 @@ mod tests {
         data.insert("foo".to_string(), 42);
 
         let pointer = JsonPointer::parse("/foo").unwrap();
-        let result = data.resolve(pointer).unwrap();
+        let result = data.resolve(pointer).unwrap() as &dyn Any;
         assert_eq!(result.downcast_ref::<i32>(), Some(&42));
     }
 
@@ -926,7 +1010,7 @@ mod tests {
     fn test_resolve_option() {
         let data = Some(42);
         let pointer = JsonPointer::parse("").unwrap();
-        let result = data.resolve(pointer).unwrap();
+        let result = data.resolve(pointer).unwrap() as &dyn Any;
         assert_eq!(result.downcast_ref::<i32>(), Some(&42));
     }
 
@@ -934,7 +1018,7 @@ mod tests {
     fn test_primitive_empty_path() {
         let data = 42;
         let pointer = JsonPointer::parse("").unwrap();
-        let result = data.resolve(pointer).unwrap();
+        let result = data.resolve(pointer).unwrap() as &dyn Any;
         assert_eq!(result.downcast_ref::<i32>(), Some(&42));
     }
 
@@ -948,23 +1032,23 @@ mod tests {
     #[test]
     fn test_pointer_vec_element() {
         let data = vec![10, 20, 30];
-        let result: &i32 = data.pointer("/1").unwrap();
-        assert_eq!(result, &20);
+        let result: i32 = data.pointer("/1").unwrap();
+        assert_eq!(result, 20);
     }
 
     #[test]
     fn test_pointer_hashmap_value() {
         let mut data = HashMap::new();
         data.insert("foo".to_owned(), 42);
-        let result: &i32 = data.pointer("/foo").unwrap();
-        assert_eq!(result, &42);
+        let result: i32 = data.pointer("/foo").unwrap();
+        assert_eq!(result, 42);
     }
 
     #[test]
     fn test_pointer_root() {
         let data = 42;
-        let result: &i32 = data.pointer("").unwrap();
-        assert_eq!(result, &42);
+        let result: i32 = data.pointer("").unwrap();
+        assert_eq!(result, 42);
     }
 
     #[test]
@@ -988,7 +1072,31 @@ mod tests {
     #[test]
     fn test_pointer_cast_error() {
         let data = vec![42];
-        let err = data.pointer::<String>("/0").unwrap_err();
+        let err = data.pointer::<&str>("/0").unwrap_err();
         assert!(matches!(err, JsonPointerError::Type { .. }));
+    }
+
+    #[test]
+    fn test_from_pointee_i32() {
+        let data = 42i32;
+        let pointee: &dyn JsonPointee = &data;
+        let result = i32::from_pointee(pointee).unwrap();
+        assert_eq!(result, 42);
+    }
+
+    #[test]
+    fn test_from_pointee_bool() {
+        let data = true;
+        let pointee: &dyn JsonPointee = &data;
+        let result = bool::from_pointee(pointee).unwrap();
+        assert!(result);
+    }
+
+    #[test]
+    fn test_from_pointee_wrong_type() {
+        let data = 42i32;
+        let pointee: &dyn JsonPointee = &data;
+        let result = bool::from_pointee(pointee);
+        assert!(result.is_err());
     }
 }

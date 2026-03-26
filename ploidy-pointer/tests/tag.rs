@@ -1,8 +1,10 @@
-use ploidy_pointer::{JsonPointee, JsonPointer};
+use std::any::Any;
+
+use ploidy_pointer::{JsonPointee, JsonPointer, JsonPointerTarget};
 
 #[test]
 fn test_basic_tag_named_variants() {
-    #[derive(JsonPointee)]
+    #[derive(JsonPointee, JsonPointerTarget)]
     #[ploidy(pointer(tag = "type"))]
     enum Response {
         Success { data: String },
@@ -15,27 +17,27 @@ fn test_basic_tag_named_variants() {
 
     // Tag field should return variant name.
     let pointer = JsonPointer::parse("/type").unwrap();
-    let result = response.resolve(pointer).unwrap();
+    let result = response.resolve(pointer).unwrap() as &dyn Any;
     assert_eq!(result.downcast_ref::<&str>(), Some(&"Success"));
 
     // Regular field should still be accessible.
     let pointer = JsonPointer::parse("/data").unwrap();
-    let result = response.resolve(pointer).unwrap();
+    let result = response.resolve(pointer).unwrap() as &dyn Any;
     assert_eq!(result.downcast_ref::<String>(), Some(&"hello".to_owned()));
 
     let response = Response::Error { code: 404 };
     let pointer = JsonPointer::parse("/type").unwrap();
-    let result = response.resolve(pointer).unwrap();
+    let result = response.resolve(pointer).unwrap() as &dyn Any;
     assert_eq!(result.downcast_ref::<&str>(), Some(&"Error"));
 
     let pointer = JsonPointer::parse("/code").unwrap();
-    let result = response.resolve(pointer).unwrap();
+    let result = response.resolve(pointer).unwrap() as &dyn Any;
     assert_eq!(result.downcast_ref::<i32>(), Some(&404));
 }
 
 #[test]
 fn test_tag_with_rename_all() {
-    #[derive(JsonPointee)]
+    #[derive(JsonPointee, JsonPointerTarget)]
     #[ploidy(pointer(tag = "type", rename_all = "camelCase"))]
     enum Response {
         SuccessResponse {
@@ -53,13 +55,13 @@ fn test_tag_with_rename_all() {
 
     // Tag should return camelCase-transformed variant name.
     let pointer = JsonPointer::parse("/type").unwrap();
-    let result = response.resolve(pointer).unwrap();
+    let result = response.resolve(pointer).unwrap() as &dyn Any;
     assert_eq!(result.downcast_ref::<&str>(), Some(&"successResponse"));
 }
 
 #[test]
 fn test_tag_with_variant_rename() {
-    #[derive(JsonPointee)]
+    #[derive(JsonPointee, JsonPointerTarget)]
     #[ploidy(pointer(tag = "kind"))]
     enum Message {
         #[ploidy(pointer(rename = "success"))]
@@ -74,20 +76,20 @@ fn test_tag_with_variant_rename() {
 
     // Tag should return the explicit rename.
     let pointer = JsonPointer::parse("/kind").unwrap();
-    let result = msg.resolve(pointer).unwrap();
+    let result = msg.resolve(pointer).unwrap() as &dyn Any;
     assert_eq!(result.downcast_ref::<&str>(), Some(&"success"));
 
     let msg = Message::Error {
         message: "fail".to_owned(),
     };
     let pointer = JsonPointer::parse("/kind").unwrap();
-    let result = msg.resolve(pointer).unwrap();
+    let result = msg.resolve(pointer).unwrap() as &dyn Any;
     assert_eq!(result.downcast_ref::<&str>(), Some(&"error"));
 }
 
 #[test]
 fn test_tag_with_unit_variants() {
-    #[derive(JsonPointee)]
+    #[derive(JsonPointee, JsonPointerTarget)]
     #[ploidy(pointer(tag = "status"))]
     enum Status {
         Pending,
@@ -101,7 +103,7 @@ fn test_tag_with_unit_variants() {
 
     // Tag is the only accessible field for unit variants.
     let pointer = JsonPointer::parse("/status").unwrap();
-    let result = status.resolve(pointer).unwrap();
+    let result = status.resolve(pointer).unwrap() as &dyn Any;
     assert_eq!(result.downcast_ref::<&str>(), Some(&"Pending"));
 
     // Any other field should error.
@@ -115,7 +117,7 @@ fn test_tag_with_unit_variants() {
 
 #[test]
 fn test_tag_with_newtype_variants() {
-    #[derive(JsonPointee)]
+    #[derive(JsonPointee, JsonPointerTarget)]
     #[ploidy(pointer(tag = "type"))]
     enum Wrapper {
         String(String),
@@ -127,19 +129,19 @@ fn test_tag_with_newtype_variants() {
 
     // Empty pointer should return the enum variant itself, not inner value.
     let pointer = JsonPointer::parse("").unwrap();
-    let result = wrapper.resolve(pointer).unwrap();
+    let result = wrapper.resolve(pointer).unwrap() as &dyn Any;
     // Should return the enum, not the inner `String`.
     assert!(result.downcast_ref::<String>().is_none());
 
     // Tag field should be accessible.
     let pointer = JsonPointer::parse("/type").unwrap();
-    let result = wrapper.resolve(pointer).unwrap();
+    let result = wrapper.resolve(pointer).unwrap() as &dyn Any;
     assert_eq!(result.downcast_ref::<&str>(), Some(&"String"));
 }
 
 #[test]
 fn test_tag_with_tuple_variants() {
-    #[derive(JsonPointee)]
+    #[derive(JsonPointee, JsonPointerTarget)]
     #[ploidy(pointer(tag = "type"))]
     enum Data {
         Pair(String, i32),
@@ -151,22 +153,22 @@ fn test_tag_with_tuple_variants() {
 
     // Tag should be accessible.
     let pointer = JsonPointer::parse("/type").unwrap();
-    let result = data.resolve(pointer).unwrap();
+    let result = data.resolve(pointer).unwrap() as &dyn Any;
     assert_eq!(result.downcast_ref::<&str>(), Some(&"Pair"));
 
     // Tuple indices should still work.
     let pointer = JsonPointer::parse("/0").unwrap();
-    let result = data.resolve(pointer).unwrap();
+    let result = data.resolve(pointer).unwrap() as &dyn Any;
     assert_eq!(result.downcast_ref::<String>(), Some(&"test".to_owned()));
 
     let pointer = JsonPointer::parse("/1").unwrap();
-    let result = data.resolve(pointer).unwrap();
+    let result = data.resolve(pointer).unwrap() as &dyn Any;
     assert_eq!(result.downcast_ref::<i32>(), Some(&42));
 }
 
 #[test]
 fn test_backward_compatibility_without_tag() {
-    #[derive(JsonPointee)]
+    #[derive(JsonPointee, JsonPointerTarget)]
     #[ploidy(pointer(untagged))]
     enum Response {
         Success {
@@ -184,7 +186,7 @@ fn test_backward_compatibility_without_tag() {
 
     // Without tag, should work as before.
     let pointer = JsonPointer::parse("/data").unwrap();
-    let result = response.resolve(pointer).unwrap();
+    let result = response.resolve(pointer).unwrap() as &dyn Any;
     assert_eq!(result.downcast_ref::<String>(), Some(&"hello".to_owned()));
 
     // No tag field should be accessible.
@@ -194,7 +196,7 @@ fn test_backward_compatibility_without_tag() {
 
 #[test]
 fn test_tag_with_skipped_variants() {
-    #[derive(JsonPointee)]
+    #[derive(JsonPointee, JsonPointerTarget)]
     #[ploidy(pointer(tag = "type"))]
     enum Response {
         #[allow(dead_code)]
@@ -210,7 +212,7 @@ fn test_tag_with_skipped_variants() {
 
     // Tag field should be accessible even for skipped variants.
     let pointer = JsonPointer::parse("/type").unwrap();
-    let result = response.resolve(pointer).unwrap();
+    let result = response.resolve(pointer).unwrap() as &dyn Any;
     assert_eq!(result.downcast_ref::<&str>(), Some(&"Internal"));
 
     // Other fields should be inaccessible.
@@ -224,7 +226,7 @@ fn test_tag_with_skipped_variants() {
 
 #[test]
 fn test_tag_error_suggestions() {
-    #[derive(JsonPointee)]
+    #[derive(JsonPointee, JsonPointerTarget)]
     #[ploidy(pointer(tag = "type"))]
     enum Response {
         Success { data: String },
@@ -241,7 +243,7 @@ fn test_tag_error_suggestions() {
 
 #[test]
 fn test_tag_with_mixed_variant_types() {
-    #[derive(JsonPointee)]
+    #[derive(JsonPointee, JsonPointerTarget)]
     #[ploidy(pointer(tag = "kind"))]
     enum Mixed {
         Unit,
@@ -253,37 +255,37 @@ fn test_tag_with_mixed_variant_types() {
     // Unit variant.
     let m = Mixed::Unit;
     let pointer = JsonPointer::parse("/kind").unwrap();
-    let result = m.resolve(pointer).unwrap();
+    let result = m.resolve(pointer).unwrap() as &dyn Any;
     assert_eq!(result.downcast_ref::<&str>(), Some(&"Unit"));
 
     // Newtype variant.
     let m = Mixed::Newtype("test".to_owned());
     let pointer = JsonPointer::parse("/kind").unwrap();
-    let result = m.resolve(pointer).unwrap();
+    let result = m.resolve(pointer).unwrap() as &dyn Any;
     assert_eq!(result.downcast_ref::<&str>(), Some(&"Newtype"));
 
     // Tuple variant.
     let m = Mixed::Tuple(1, 2);
     let pointer = JsonPointer::parse("/kind").unwrap();
-    let result = m.resolve(pointer).unwrap();
+    let result = m.resolve(pointer).unwrap() as &dyn Any;
     assert_eq!(result.downcast_ref::<&str>(), Some(&"Tuple"));
     let pointer = JsonPointer::parse("/0").unwrap();
-    let result = m.resolve(pointer).unwrap();
+    let result = m.resolve(pointer).unwrap() as &dyn Any;
     assert_eq!(result.downcast_ref::<i32>(), Some(&1));
 
     // Struct variant.
     let m = Mixed::Struct { x: 10, y: 20 };
     let pointer = JsonPointer::parse("/kind").unwrap();
-    let result = m.resolve(pointer).unwrap();
+    let result = m.resolve(pointer).unwrap() as &dyn Any;
     assert_eq!(result.downcast_ref::<&str>(), Some(&"Struct"));
     let pointer = JsonPointer::parse("/x").unwrap();
-    let result = m.resolve(pointer).unwrap();
+    let result = m.resolve(pointer).unwrap() as &dyn Any;
     assert_eq!(result.downcast_ref::<i32>(), Some(&10));
 }
 
 #[test]
 fn test_tag_priority_explicit_rename_over_rename_all() {
-    #[derive(JsonPointee)]
+    #[derive(JsonPointee, JsonPointerTarget)]
     #[ploidy(pointer(tag = "type", rename_all = "SCREAMING_SNAKE_CASE"))]
     enum Response {
         #[ploidy(pointer(rename = "custom_success"))]
@@ -301,19 +303,19 @@ fn test_tag_priority_explicit_rename_over_rename_all() {
 
     // Explicit rename should take priority.
     let pointer = JsonPointer::parse("/type").unwrap();
-    let result = response.resolve(pointer).unwrap();
+    let result = response.resolve(pointer).unwrap() as &dyn Any;
     assert_eq!(result.downcast_ref::<&str>(), Some(&"custom_success"));
 
     // Error variant should use `rename_all`.
     let response = Response::Error { code: 404 };
     let pointer = JsonPointer::parse("/type").unwrap();
-    let result = response.resolve(pointer).unwrap();
+    let result = response.resolve(pointer).unwrap() as &dyn Any;
     assert_eq!(result.downcast_ref::<&str>(), Some(&"ERROR"));
 }
 
 #[test]
 fn test_newtype_variant_empty_pointer_returns_enum() {
-    #[derive(JsonPointee)]
+    #[derive(JsonPointee, JsonPointerTarget)]
     #[ploidy(pointer(tag = "type"))]
     enum Container {
         Value(String),
@@ -323,13 +325,13 @@ fn test_newtype_variant_empty_pointer_returns_enum() {
 
     // Empty pointer should return the enum variant, not the inner string.
     let pointer = JsonPointer::parse("").unwrap();
-    let result = container.resolve(pointer).unwrap();
+    let result = container.resolve(pointer).unwrap() as &dyn Any;
     assert!(result.is::<Container>());
 }
 
 #[test]
 fn test_untagged_newtype_transparent() {
-    #[derive(JsonPointee)]
+    #[derive(JsonPointee, JsonPointerTarget)]
     #[ploidy(pointer(untagged))]
     enum Container {
         Value(String),
@@ -339,7 +341,7 @@ fn test_untagged_newtype_transparent() {
 
     // Without tag, newtype variants are transparent.
     let pointer = JsonPointer::parse("").unwrap();
-    let result = container.resolve(pointer).unwrap();
+    let result = container.resolve(pointer).unwrap() as &dyn Any;
 
     // Should give us the inner `String` directly.
     assert_eq!(result.downcast_ref::<String>(), Some(&"test".to_owned()));
@@ -347,7 +349,7 @@ fn test_untagged_newtype_transparent() {
 
 #[test]
 fn test_external_tag_named_variants() {
-    #[derive(JsonPointee)]
+    #[derive(JsonPointee, JsonPointerTarget)]
     enum Response {
         Success { data: String },
         Error { code: i32 },
@@ -359,17 +361,17 @@ fn test_external_tag_named_variants() {
 
     // Empty pointer returns self.
     let pointer = JsonPointer::parse("").unwrap();
-    let result = response.resolve(pointer).unwrap();
+    let result = response.resolve(pointer).unwrap() as &dyn Any;
     assert!(result.is::<Response>());
 
     // First segment must be variant name.
     let pointer = JsonPointer::parse("/Success").unwrap();
-    let result = response.resolve(pointer).unwrap();
+    let result = response.resolve(pointer).unwrap() as &dyn Any;
     assert!(result.is::<Response>());
 
     // Access field through variant wrapper.
     let pointer = JsonPointer::parse("/Success/data").unwrap();
-    let result = response.resolve(pointer).unwrap();
+    let result = response.resolve(pointer).unwrap() as &dyn Any;
     assert_eq!(result.downcast_ref::<String>(), Some(&"hello".to_owned()));
 
     // Wrong variant name should error.
@@ -378,13 +380,13 @@ fn test_external_tag_named_variants() {
 
     let response = Response::Error { code: 404 };
     let pointer = JsonPointer::parse("/Error/code").unwrap();
-    let result = response.resolve(pointer).unwrap();
+    let result = response.resolve(pointer).unwrap() as &dyn Any;
     assert_eq!(result.downcast_ref::<i32>(), Some(&404));
 }
 
 #[test]
 fn test_external_tag_tuple_variants() {
-    #[derive(JsonPointee)]
+    #[derive(JsonPointee, JsonPointerTarget)]
     enum Value {
         #[allow(dead_code)]
         Single(String),
@@ -395,11 +397,11 @@ fn test_external_tag_tuple_variants() {
 
     // Access through variant wrapper and index.
     let pointer = JsonPointer::parse("/Pair/0").unwrap();
-    let result = value.resolve(pointer).unwrap();
+    let result = value.resolve(pointer).unwrap() as &dyn Any;
     assert_eq!(result.downcast_ref::<i32>(), Some(&42));
 
     let pointer = JsonPointer::parse("/Pair/1").unwrap();
-    let result = value.resolve(pointer).unwrap();
+    let result = value.resolve(pointer).unwrap() as &dyn Any;
     assert_eq!(result.downcast_ref::<String>(), Some(&"test".to_owned()));
 
     // Wrong variant name should error.
@@ -409,7 +411,7 @@ fn test_external_tag_tuple_variants() {
 
 #[test]
 fn test_external_tag_unit_variants() {
-    #[derive(JsonPointee)]
+    #[derive(JsonPointee, JsonPointerTarget)]
     enum Status {
         Pending,
         #[allow(dead_code)]
@@ -422,7 +424,7 @@ fn test_external_tag_unit_variants() {
 
     // Variant name is accessible.
     let pointer = JsonPointer::parse("/Pending").unwrap();
-    let result = status.resolve(pointer).unwrap();
+    let result = status.resolve(pointer).unwrap() as &dyn Any;
     assert!(result.is::<Status>());
 
     // Any further navigation should error.
@@ -436,7 +438,7 @@ fn test_external_tag_unit_variants() {
 
 #[test]
 fn test_external_tag_newtype_variants() {
-    #[derive(JsonPointee)]
+    #[derive(JsonPointee, JsonPointerTarget)]
     enum Wrapper {
         Text(String),
         #[allow(dead_code)]
@@ -447,7 +449,7 @@ fn test_external_tag_newtype_variants() {
 
     // Access through variant name wrapper.
     let pointer = JsonPointer::parse("/Text").unwrap();
-    let result = wrapper.resolve(pointer).unwrap();
+    let result = wrapper.resolve(pointer).unwrap() as &dyn Any;
     assert_eq!(result.downcast_ref::<String>(), Some(&"hello".to_owned()));
 
     // Wrong variant should error.
@@ -457,7 +459,7 @@ fn test_external_tag_newtype_variants() {
 
 #[test]
 fn test_external_tag_with_rename_all() {
-    #[derive(JsonPointee)]
+    #[derive(JsonPointee, JsonPointerTarget)]
     #[ploidy(pointer(rename_all = "snake_case"))]
     enum Response {
         SuccessResponse {
@@ -475,13 +477,13 @@ fn test_external_tag_with_rename_all() {
 
     // Variant name should be snake_case.
     let pointer = JsonPointer::parse("/success_response/data").unwrap();
-    let result = response.resolve(pointer).unwrap();
+    let result = response.resolve(pointer).unwrap() as &dyn Any;
     assert_eq!(result.downcast_ref::<String>(), Some(&"hello".to_owned()));
 }
 
 #[test]
 fn test_external_tag_with_variant_rename() {
-    #[derive(JsonPointee)]
+    #[derive(JsonPointee, JsonPointerTarget)]
     enum Message {
         #[ploidy(pointer(rename = "ok"))]
         Success { text: String },
@@ -496,13 +498,13 @@ fn test_external_tag_with_variant_rename() {
 
     // Should use explicit rename.
     let pointer = JsonPointer::parse("/ok/text").unwrap();
-    let result = msg.resolve(pointer).unwrap();
+    let result = msg.resolve(pointer).unwrap() as &dyn Any;
     assert_eq!(result.downcast_ref::<String>(), Some(&"good".to_owned()));
 }
 
 #[test]
 fn test_external_tag_mixed_variants() {
-    #[derive(JsonPointee)]
+    #[derive(JsonPointee, JsonPointerTarget)]
     enum Mixed {
         Unit,
         Named { value: String },
@@ -518,23 +520,23 @@ fn test_external_tag_mixed_variants() {
         value: "test".to_owned(),
     };
     let pointer = JsonPointer::parse("/Named/value").unwrap();
-    let result = named.resolve(pointer).unwrap();
+    let result = named.resolve(pointer).unwrap() as &dyn Any;
     assert_eq!(result.downcast_ref::<String>(), Some(&"test".to_owned()));
 
     let tuple = Mixed::Tuple(1, 2);
     let pointer = JsonPointer::parse("/Tuple/0").unwrap();
-    let result = tuple.resolve(pointer).unwrap();
+    let result = tuple.resolve(pointer).unwrap() as &dyn Any;
     assert_eq!(result.downcast_ref::<i32>(), Some(&1));
 
     let newtype = Mixed::Newtype("wrapped".to_owned());
     let pointer = JsonPointer::parse("/Newtype").unwrap();
-    let result = newtype.resolve(pointer).unwrap();
+    let result = newtype.resolve(pointer).unwrap() as &dyn Any;
     assert_eq!(result.downcast_ref::<String>(), Some(&"wrapped".to_owned()));
 }
 
 #[test]
 fn test_adjacent_tag_named_variants() {
-    #[derive(JsonPointee)]
+    #[derive(JsonPointee, JsonPointerTarget)]
     #[ploidy(pointer(tag = "type", content = "value"))]
     enum Response {
         Success { data: String },
@@ -547,27 +549,27 @@ fn test_adjacent_tag_named_variants() {
 
     // Tag field should return variant name.
     let pointer = JsonPointer::parse("/type").unwrap();
-    let result = response.resolve(pointer).unwrap();
+    let result = response.resolve(pointer).unwrap() as &dyn Any;
     assert_eq!(result.downcast_ref::<&str>(), Some(&"Success"));
 
     // Content field should contain the data.
     let pointer = JsonPointer::parse("/value/data").unwrap();
-    let result = response.resolve(pointer).unwrap();
+    let result = response.resolve(pointer).unwrap() as &dyn Any;
     assert_eq!(result.downcast_ref::<String>(), Some(&"hello".to_owned()));
 
     let response = Response::Error { code: 404 };
     let pointer = JsonPointer::parse("/type").unwrap();
-    let result = response.resolve(pointer).unwrap();
+    let result = response.resolve(pointer).unwrap() as &dyn Any;
     assert_eq!(result.downcast_ref::<&str>(), Some(&"Error"));
 
     let pointer = JsonPointer::parse("/value/code").unwrap();
-    let result = response.resolve(pointer).unwrap();
+    let result = response.resolve(pointer).unwrap() as &dyn Any;
     assert_eq!(result.downcast_ref::<i32>(), Some(&404));
 }
 
 #[test]
 fn test_adjacent_tag_tuple_variants() {
-    #[derive(JsonPointee)]
+    #[derive(JsonPointee, JsonPointerTarget)]
     #[ploidy(pointer(tag = "t", content = "c"))]
     enum Value {
         #[allow(dead_code)]
@@ -579,22 +581,22 @@ fn test_adjacent_tag_tuple_variants() {
 
     // Tag field.
     let pointer = JsonPointer::parse("/t").unwrap();
-    let result = value.resolve(pointer).unwrap();
+    let result = value.resolve(pointer).unwrap() as &dyn Any;
     assert_eq!(result.downcast_ref::<&str>(), Some(&"Pair"));
 
     // Content with index.
     let pointer = JsonPointer::parse("/c/0").unwrap();
-    let result = value.resolve(pointer).unwrap();
+    let result = value.resolve(pointer).unwrap() as &dyn Any;
     assert_eq!(result.downcast_ref::<i32>(), Some(&42));
 
     let pointer = JsonPointer::parse("/c/1").unwrap();
-    let result = value.resolve(pointer).unwrap();
+    let result = value.resolve(pointer).unwrap() as &dyn Any;
     assert_eq!(result.downcast_ref::<String>(), Some(&"test".to_owned()));
 }
 
 #[test]
 fn test_adjacent_tag_unit_variants() {
-    #[derive(JsonPointee)]
+    #[derive(JsonPointee, JsonPointerTarget)]
     #[ploidy(pointer(tag = "type", content = "data"))]
     enum Status {
         Pending,
@@ -608,7 +610,7 @@ fn test_adjacent_tag_unit_variants() {
 
     // Tag field is accessible.
     let pointer = JsonPointer::parse("/type").unwrap();
-    let result = status.resolve(pointer).unwrap();
+    let result = status.resolve(pointer).unwrap() as &dyn Any;
     assert_eq!(result.downcast_ref::<&str>(), Some(&"Pending"));
 
     // Content field should error for unit variants.
@@ -618,7 +620,7 @@ fn test_adjacent_tag_unit_variants() {
 
 #[test]
 fn test_adjacent_tag_newtype_variants() {
-    #[derive(JsonPointee)]
+    #[derive(JsonPointee, JsonPointerTarget)]
     #[ploidy(pointer(tag = "kind", content = "payload"))]
     enum Wrapper {
         Text(String),
@@ -630,18 +632,18 @@ fn test_adjacent_tag_newtype_variants() {
 
     // Tag field.
     let pointer = JsonPointer::parse("/kind").unwrap();
-    let result = wrapper.resolve(pointer).unwrap();
+    let result = wrapper.resolve(pointer).unwrap() as &dyn Any;
     assert_eq!(result.downcast_ref::<&str>(), Some(&"Text"));
 
     // Content field delegates to inner value.
     let pointer = JsonPointer::parse("/payload").unwrap();
-    let result = wrapper.resolve(pointer).unwrap();
+    let result = wrapper.resolve(pointer).unwrap() as &dyn Any;
     assert_eq!(result.downcast_ref::<String>(), Some(&"hello".to_owned()));
 }
 
 #[test]
 fn test_adjacent_tag_with_rename_all() {
-    #[derive(JsonPointee)]
+    #[derive(JsonPointee, JsonPointerTarget)]
     #[ploidy(pointer(tag = "type", content = "value", rename_all = "SCREAMING_SNAKE_CASE"))]
     enum Response {
         SuccessResponse {
@@ -659,13 +661,13 @@ fn test_adjacent_tag_with_rename_all() {
 
     // Tag should return transformed variant name.
     let pointer = JsonPointer::parse("/type").unwrap();
-    let result = response.resolve(pointer).unwrap();
+    let result = response.resolve(pointer).unwrap() as &dyn Any;
     assert_eq!(result.downcast_ref::<&str>(), Some(&"SUCCESS_RESPONSE"));
 }
 
 #[test]
 fn test_adjacent_tag_with_variant_rename() {
-    #[derive(JsonPointee)]
+    #[derive(JsonPointee, JsonPointerTarget)]
     #[ploidy(pointer(tag = "kind", content = "data"))]
     enum Message {
         #[ploidy(pointer(rename = "success"))]
@@ -681,13 +683,13 @@ fn test_adjacent_tag_with_variant_rename() {
 
     // Tag should return the explicit rename.
     let pointer = JsonPointer::parse("/kind").unwrap();
-    let result = msg.resolve(pointer).unwrap();
+    let result = msg.resolve(pointer).unwrap() as &dyn Any;
     assert_eq!(result.downcast_ref::<&str>(), Some(&"success"));
 }
 
 #[test]
 fn test_adjacent_tag_mixed_variants() {
-    #[derive(JsonPointee)]
+    #[derive(JsonPointee, JsonPointerTarget)]
     #[ploidy(pointer(tag = "type", content = "value"))]
     enum Mixed {
         Unit,
@@ -699,7 +701,7 @@ fn test_adjacent_tag_mixed_variants() {
     // Unit variant.
     let unit = Mixed::Unit;
     let pointer = JsonPointer::parse("/type").unwrap();
-    let result = unit.resolve(pointer).unwrap();
+    let result = unit.resolve(pointer).unwrap() as &dyn Any;
     assert_eq!(result.downcast_ref::<&str>(), Some(&"Unit"));
     // Content should error.
     let pointer = JsonPointer::parse("/value").unwrap();
@@ -710,34 +712,34 @@ fn test_adjacent_tag_mixed_variants() {
         value: "test".to_owned(),
     };
     let pointer = JsonPointer::parse("/type").unwrap();
-    let result = named.resolve(pointer).unwrap();
+    let result = named.resolve(pointer).unwrap() as &dyn Any;
     assert_eq!(result.downcast_ref::<&str>(), Some(&"Named"));
     let pointer = JsonPointer::parse("/value/value").unwrap();
-    let result = named.resolve(pointer).unwrap();
+    let result = named.resolve(pointer).unwrap() as &dyn Any;
     assert_eq!(result.downcast_ref::<String>(), Some(&"test".to_owned()));
 
     // Tuple variant.
     let tuple = Mixed::Tuple(1, 2);
     let pointer = JsonPointer::parse("/type").unwrap();
-    let result = tuple.resolve(pointer).unwrap();
+    let result = tuple.resolve(pointer).unwrap() as &dyn Any;
     assert_eq!(result.downcast_ref::<&str>(), Some(&"Tuple"));
     let pointer = JsonPointer::parse("/value/0").unwrap();
-    let result = tuple.resolve(pointer).unwrap();
+    let result = tuple.resolve(pointer).unwrap() as &dyn Any;
     assert_eq!(result.downcast_ref::<i32>(), Some(&1));
 
     // Newtype variant.
     let newtype = Mixed::Newtype("wrapped".to_owned());
     let pointer = JsonPointer::parse("/type").unwrap();
-    let result = newtype.resolve(pointer).unwrap();
+    let result = newtype.resolve(pointer).unwrap() as &dyn Any;
     assert_eq!(result.downcast_ref::<&str>(), Some(&"Newtype"));
     let pointer = JsonPointer::parse("/value").unwrap();
-    let result = newtype.resolve(pointer).unwrap();
+    let result = newtype.resolve(pointer).unwrap() as &dyn Any;
     assert_eq!(result.downcast_ref::<String>(), Some(&"wrapped".to_owned()));
 }
 
 #[test]
 fn test_external_tag_wrong_variant_error() {
-    #[derive(JsonPointee)]
+    #[derive(JsonPointee, JsonPointerTarget)]
     enum Response {
         Success {
             data: String,
@@ -763,7 +765,7 @@ fn test_external_tag_wrong_variant_error() {
 
 #[test]
 fn test_adjacent_tag_wrong_field_error() {
-    #[derive(JsonPointee)]
+    #[derive(JsonPointee, JsonPointerTarget)]
     #[ploidy(pointer(tag = "type", content = "value"))]
     enum Response {
         Success { data: String },
@@ -784,7 +786,7 @@ fn test_adjacent_tag_wrong_field_error() {
 
 #[test]
 fn test_external_tag_skipped_variant() {
-    #[derive(JsonPointee)]
+    #[derive(JsonPointee, JsonPointerTarget)]
     enum Response {
         #[allow(dead_code)]
         Success { data: String },
@@ -807,7 +809,7 @@ fn test_external_tag_skipped_variant() {
 
 #[test]
 fn test_adjacent_tag_skipped_variant() {
-    #[derive(JsonPointee)]
+    #[derive(JsonPointee, JsonPointerTarget)]
     #[ploidy(pointer(tag = "type", content = "value"))]
     enum Response {
         #[allow(dead_code)]
@@ -823,7 +825,7 @@ fn test_adjacent_tag_skipped_variant() {
 
     // Tag field is accessible.
     let pointer = JsonPointer::parse("/type").unwrap();
-    let result = response.resolve(pointer).unwrap();
+    let result = response.resolve(pointer).unwrap() as &dyn Any;
     assert_eq!(result.downcast_ref::<&str>(), Some(&"Internal"));
 
     // Content field should error.

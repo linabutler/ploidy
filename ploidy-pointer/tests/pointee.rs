@@ -1,4 +1,4 @@
-use std::{rc::Rc, sync::Arc};
+use std::{any::Any, rc::Rc, sync::Arc};
 
 use ploidy_pointer::{JsonPointee, JsonPointer};
 
@@ -16,7 +16,7 @@ fn test_rename_field() {
 
     // Should be accessible via `"customName"`, not `"my_field"`.
     let pointer = JsonPointer::parse("/customName").unwrap();
-    let result = s.resolve(pointer).unwrap();
+    let result = s.resolve(pointer).unwrap() as &dyn Any;
     assert_eq!(result.downcast_ref::<String>(), Some(&"hello".to_owned()));
 
     // Original name should fail.
@@ -62,11 +62,11 @@ fn test_rename_all_camel_case() {
 
     // Should be accessible via camelCase.
     let pointer = JsonPointer::parse("/myField").unwrap();
-    let result = s.resolve(pointer).unwrap();
+    let result = s.resolve(pointer).unwrap() as &dyn Any;
     assert_eq!(result.downcast_ref::<String>(), Some(&"hello".to_owned()));
 
     let pointer = JsonPointer::parse("/anotherField").unwrap();
-    let result = s.resolve(pointer).unwrap();
+    let result = s.resolve(pointer).unwrap() as &dyn Any;
     assert_eq!(result.downcast_ref::<i32>(), Some(&42));
 
     // Original snake_case should fail.
@@ -164,7 +164,7 @@ fn test_enum_with_rename() {
 
     // Should be accessible via camelCase.
     let pointer = JsonPointer::parse("/myField").unwrap();
-    let result = e.resolve(pointer).unwrap();
+    let result = e.resolve(pointer).unwrap() as &dyn Any;
     assert_eq!(result.downcast_ref::<String>(), Some(&"hello".to_owned()));
 
     // Original name should fail.
@@ -174,7 +174,7 @@ fn test_enum_with_rename() {
     let e = MyEnum::VariantB { another_field: 123 };
 
     let pointer = JsonPointer::parse("/anotherField").unwrap();
-    let result = e.resolve(pointer).unwrap();
+    let result = e.resolve(pointer).unwrap() as &dyn Any;
     assert_eq!(result.downcast_ref::<i32>(), Some(&123));
 }
 
@@ -199,7 +199,7 @@ fn test_flatten_field() {
 
     // Should be able to access `inner_field` directly through the flattened field.
     let pointer = JsonPointer::parse("/inner_field").unwrap();
-    let result = outer.resolve(pointer).unwrap();
+    let result = outer.resolve(pointer).unwrap() as &dyn Any;
     assert_eq!(result.downcast_ref::<String>(), Some(&"hello".to_owned()));
 }
 
@@ -232,12 +232,12 @@ fn test_multiple_flattened_fields() {
 
     // Should access `field1` from first flattened field.
     let pointer = JsonPointer::parse("/field1").unwrap();
-    let result = outer.resolve(pointer).unwrap();
+    let result = outer.resolve(pointer).unwrap() as &dyn Any;
     assert_eq!(result.downcast_ref::<String>(), Some(&"hello".to_owned()));
 
     // Should access `field2` from second flattened field.
     let pointer = JsonPointer::parse("/field2").unwrap();
-    let result = outer.resolve(pointer).unwrap();
+    let result = outer.resolve(pointer).unwrap() as &dyn Any;
     assert_eq!(result.downcast_ref::<i32>(), Some(&42));
 }
 
@@ -265,7 +265,7 @@ fn test_priority_regular_over_flattened() {
 
     // Should access the regular field, not the flattened one.
     let pointer = JsonPointer::parse("/my_field").unwrap();
-    let result = outer.resolve(pointer).unwrap();
+    let result = outer.resolve(pointer).unwrap() as &dyn Any;
     assert_eq!(result.downcast_ref::<i32>(), Some(&42));
 }
 
@@ -298,7 +298,7 @@ fn test_nested_flattening() {
 
     // Should be able to access `deep_field` through nested flattening.
     let pointer = JsonPointer::parse("/deep_field").unwrap();
-    let result = outer.resolve(pointer).unwrap();
+    let result = outer.resolve(pointer).unwrap() as &dyn Any;
     assert_eq!(result.downcast_ref::<String>(), Some(&"hello".to_owned()));
 }
 
@@ -354,12 +354,12 @@ fn test_enum_variant_flatten() {
 
     // Should access regular field normally.
     let pointer = JsonPointer::parse("/regular_field").unwrap();
-    let result = e.resolve(pointer).unwrap();
+    let result = e.resolve(pointer).unwrap() as &dyn Any;
     assert_eq!(result.downcast_ref::<i32>(), Some(&42));
 
     // Should access `inner_field` through flattened field.
     let pointer = JsonPointer::parse("/inner_field").unwrap();
-    let result = e.resolve(pointer).unwrap();
+    let result = e.resolve(pointer).unwrap() as &dyn Any;
     assert_eq!(result.downcast_ref::<String>(), Some(&"hello".to_owned()));
 }
 
@@ -388,12 +388,12 @@ fn test_flatten_with_rename_all() {
 
     // Regular field should use camelCase.
     let pointer = JsonPointer::parse("/regularField").unwrap();
-    let result = outer.resolve(pointer).unwrap();
+    let result = outer.resolve(pointer).unwrap() as &dyn Any;
     assert_eq!(result.downcast_ref::<i32>(), Some(&42));
 
     // Flattened field's fields should also use camelCase.
     let pointer = JsonPointer::parse("/innerField").unwrap();
-    let result = outer.resolve(pointer).unwrap();
+    let result = outer.resolve(pointer).unwrap() as &dyn Any;
     assert_eq!(result.downcast_ref::<String>(), Some(&"hello".to_owned()));
 }
 
@@ -426,7 +426,7 @@ fn test_flatten_order_matters() {
 
     // Should resolve to the first flattened field's value.
     let pointer = JsonPointer::parse("/shared_field").unwrap();
-    let result = outer.resolve(pointer).unwrap();
+    let result = outer.resolve(pointer).unwrap() as &dyn Any;
     assert_eq!(result.downcast_ref::<String>(), Some(&"hello".to_owned()));
 }
 
@@ -439,7 +439,7 @@ fn test_pointer_to_chrono_datetime() {
 
     // Empty pointer should return the timestamp itself.
     let pointer = JsonPointer::parse("").unwrap();
-    let result = timestamp.resolve(pointer).unwrap();
+    let result = timestamp.resolve(pointer).unwrap() as &dyn Any;
     assert!(result.is::<DateTime<Utc>>());
 
     // Non-empty pointer should fail.
@@ -456,7 +456,7 @@ fn test_pointer_to_url() {
 
     // Empty pointer should return the URL itself.
     let pointer = JsonPointer::parse("").unwrap();
-    let result = url.resolve(pointer).unwrap();
+    let result = url.resolve(pointer).unwrap() as &dyn Any;
     assert!(result.is::<Url>());
 
     // Non-empty pointer should fail.
@@ -480,22 +480,22 @@ fn test_pointer_to_serde_json() {
 
     // Test object field access.
     let pointer = JsonPointer::parse("/name").unwrap();
-    let result = data.resolve(pointer).unwrap();
+    let result = data.resolve(pointer).unwrap() as &dyn Any;
     assert!(result.is::<serde_json::Value>());
 
     // Test array index access.
     let pointer = JsonPointer::parse("/items/1").unwrap();
-    let result = data.resolve(pointer).unwrap();
+    let result = data.resolve(pointer).unwrap() as &dyn Any;
     assert!(result.is::<serde_json::Value>());
 
     // Test nested object access.
     let pointer = JsonPointer::parse("/nested/field").unwrap();
-    let result = data.resolve(pointer).unwrap();
+    let result = data.resolve(pointer).unwrap() as &dyn Any;
     assert!(result.is::<serde_json::Value>());
 
     // Test empty pointer returns the whole value.
     let pointer = JsonPointer::parse("").unwrap();
-    let result = data.resolve(pointer).unwrap();
+    let result = data.resolve(pointer).unwrap() as &dyn Any;
     assert!(result.is::<serde_json::Value>());
 
     // Test nonexistent key.
@@ -519,16 +519,16 @@ fn test_indexmap() {
 
     // Test accessing values.
     let pointer = JsonPointer::parse("/first").unwrap();
-    let result = map.resolve(pointer).unwrap();
+    let result = map.resolve(pointer).unwrap() as &dyn Any;
     assert_eq!(result.downcast_ref::<i32>(), Some(&10));
 
     let pointer = JsonPointer::parse("/second").unwrap();
-    let result = map.resolve(pointer).unwrap();
+    let result = map.resolve(pointer).unwrap() as &dyn Any;
     assert_eq!(result.downcast_ref::<i32>(), Some(&20));
 
     // Test empty pointer returns the map itself.
     let pointer = JsonPointer::parse("").unwrap();
-    let result = map.resolve(pointer).unwrap();
+    let result = map.resolve(pointer).unwrap() as &dyn Any;
     assert!(result.is::<IndexMap<String, i32>>());
 
     // Test nonexistent key.
@@ -552,7 +552,7 @@ fn test_skip_field() {
 
     // `visible` field should be accessible.
     let pointer = JsonPointer::parse("/visible").unwrap();
-    let result = s.resolve(pointer).unwrap();
+    let result = s.resolve(pointer).unwrap() as &dyn Any;
     assert_eq!(result.downcast_ref::<String>(), Some(&"hello".to_owned()));
 
     // `hidden` field should not be accessible.
@@ -582,7 +582,7 @@ fn test_skip_not_in_suggestions() {
     // Try accessing a nonexistent field.
     let pointer = JsonPointer::parse("/nonexistent").unwrap();
     match s.resolve(pointer) {
-        Err(ploidy_pointer::JsonPointerResolveError::Key(key_err)) => {
+        Err(ploidy_pointer::JsonPointeeError::Key(key_err)) => {
             // Suggestion should be `"visible"`, not `"hidden"`.
             assert_eq!(
                 key_err
@@ -613,7 +613,7 @@ fn test_skip_with_rename_all() {
 
     // `my_field` should be accessible as camelCase.
     let pointer = JsonPointer::parse("/myField").unwrap();
-    let result = s.resolve(pointer).unwrap();
+    let result = s.resolve(pointer).unwrap() as &dyn Any;
     assert_eq!(result.downcast_ref::<String>(), Some(&"hello".to_owned()));
 
     // `hidden_field` should not be accessible (even as `hiddenField`).
@@ -684,12 +684,12 @@ fn test_skip_and_flatten_on_different_fields() {
 
     // Flattened field's content should be accessible.
     let pointer = JsonPointer::parse("/inner_field").unwrap();
-    let result = outer.resolve(pointer).unwrap();
+    let result = outer.resolve(pointer).unwrap() as &dyn Any;
     assert_eq!(result.downcast_ref::<String>(), Some(&"hello".to_owned()));
 
     // Regular visible field accessible.
     let pointer = JsonPointer::parse("/visible").unwrap();
-    let result = outer.resolve(pointer).unwrap();
+    let result = outer.resolve(pointer).unwrap() as &dyn Any;
     assert_eq!(result.downcast_ref::<i32>(), Some(&42));
 
     // Hidden field not accessible.
@@ -715,7 +715,7 @@ fn test_skip_in_enum_variant() {
     };
 
     let pointer = JsonPointer::parse("/visible").unwrap();
-    let result = e.resolve(pointer).unwrap();
+    let result = e.resolve(pointer).unwrap() as &dyn Any;
     assert_eq!(result.downcast_ref::<String>(), Some(&"hello".to_owned()));
 
     let pointer = JsonPointer::parse("/hidden").unwrap();
@@ -731,7 +731,7 @@ fn test_skip_in_tuple_struct() {
 
     // Index 0 accessible.
     let pointer = JsonPointer::parse("/0").unwrap();
-    let result = t.resolve(pointer).unwrap();
+    let result = t.resolve(pointer).unwrap() as &dyn Any;
     assert_eq!(result.downcast_ref::<String>(), Some(&"hello".to_owned()));
 
     // Index 1 not accessible (skipped).
@@ -740,7 +740,7 @@ fn test_skip_in_tuple_struct() {
 
     // Index 2 accessible.
     let pointer = JsonPointer::parse("/2").unwrap();
-    let result = t.resolve(pointer).unwrap();
+    let result = t.resolve(pointer).unwrap() as &dyn Any;
     assert_eq!(result.downcast_ref::<i32>(), Some(&42));
 }
 
@@ -811,7 +811,7 @@ fn test_skip_newtype_variant() {
     // Non-skipped newtype variant should transparently resolve to inner value.
     let e = MyEnum::Value("hello".to_owned());
     let pointer = JsonPointer::parse("").unwrap();
-    let result = e.resolve(pointer).unwrap();
+    let result = e.resolve(pointer).unwrap() as &dyn Any;
     assert_eq!(result.downcast_ref::<String>(), Some(&"hello".to_owned()));
 }
 
@@ -846,7 +846,7 @@ fn test_skip_struct_variant() {
         field: "hello".to_owned(),
     };
     let pointer = JsonPointer::parse("/field").unwrap();
-    let result = e.resolve(pointer).unwrap();
+    let result = e.resolve(pointer).unwrap() as &dyn Any;
     assert_eq!(result.downcast_ref::<String>(), Some(&"hello".to_owned()));
 }
 
@@ -919,7 +919,7 @@ fn test_generic_type_with_bounds() {
 
     // Should be able to resolve into the wrapped value's fields.
     let pointer = JsonPointer::parse("/field").unwrap();
-    let result = wrapped.resolve(pointer).unwrap();
+    let result = wrapped.resolve(pointer).unwrap() as &dyn Any;
     assert_eq!(result.downcast_ref::<String>(), Some(&"hello".to_owned()));
 
     // Test the None variant.
@@ -949,12 +949,12 @@ fn test_generic_struct_with_bounds() {
 
     // Access the name field.
     let pointer = JsonPointer::parse("/name").unwrap();
-    let result = container.resolve(pointer).unwrap();
+    let result = container.resolve(pointer).unwrap() as &dyn Any;
     assert_eq!(result.downcast_ref::<String>(), Some(&"test".to_owned()));
 
     // Access nested field through the generic type.
     let pointer = JsonPointer::parse("/value/id").unwrap();
-    let result = container.resolve(pointer).unwrap();
+    let result = container.resolve(pointer).unwrap() as &dyn Any;
     assert_eq!(result.downcast_ref::<i32>(), Some(&42));
 }
 
@@ -986,12 +986,12 @@ fn test_multiple_generic_parameters_with_bounds() {
 
     // Access first generic parameter's field.
     let pointer = JsonPointer::parse("/first/left_value").unwrap();
-    let result = pair.resolve(pointer).unwrap();
+    let result = pair.resolve(pointer).unwrap() as &dyn Any;
     assert_eq!(result.downcast_ref::<String>(), Some(&"left".to_owned()));
 
     // Access second generic parameter's field.
     let pointer = JsonPointer::parse("/second/right_value").unwrap();
-    let result = pair.resolve(pointer).unwrap();
+    let result = pair.resolve(pointer).unwrap() as &dyn Any;
     assert_eq!(result.downcast_ref::<i32>(), Some(&100));
 }
 
@@ -1005,7 +1005,7 @@ fn test_downcast_box() {
     let boxed = Box::new(Inner {
         value: "hello".to_owned(),
     });
-    let pointee = boxed.resolve(JsonPointer::empty()).unwrap();
+    let pointee = boxed.resolve(JsonPointer::empty()).unwrap() as &dyn Any;
 
     // `resolve` should return `Inner`, not `Box<Inner>`.
     assert!(pointee.downcast_ref::<Inner>().is_some());
@@ -1022,7 +1022,7 @@ fn test_downcast_arc() {
     let arced = Arc::new(Inner {
         value: "hello".to_owned(),
     });
-    let pointee = arced.resolve(JsonPointer::empty()).unwrap();
+    let pointee = arced.resolve(JsonPointer::empty()).unwrap() as &dyn Any;
 
     // `resolve` should return `Inner`, not `Arc<Inner>`.
     assert!(pointee.downcast_ref::<Inner>().is_some());
@@ -1039,7 +1039,7 @@ fn test_downcast_rc() {
     let rced = Rc::new(Inner {
         value: "hello".to_owned(),
     });
-    let pointee = rced.resolve(JsonPointer::empty()).unwrap();
+    let pointee = rced.resolve(JsonPointer::empty()).unwrap() as &dyn Any;
 
     // `resolve` should return `Inner`, not `Rc<Inner>`.
     assert!(pointee.downcast_ref::<Inner>().is_some());
@@ -1058,7 +1058,7 @@ fn test_box_resolve_is_transparent() {
     });
     let result = boxed
         .resolve(JsonPointer::parse("/value").unwrap())
-        .unwrap();
+        .unwrap() as &dyn Any;
 
     // Resolving through a `Box` should reach the inner struct's fields.
     assert_eq!(result.downcast_ref::<String>(), Some(&"hello".to_owned()));
@@ -1074,9 +1074,9 @@ fn test_option_resolve_is_transparent() {
     let some = Some(Inner {
         value: "hello".to_owned(),
     });
-    let inner = some.resolve(JsonPointer::empty()).unwrap();
+    let inner = some.resolve(JsonPointer::empty()).unwrap() as &dyn Any;
     assert_eq!(inner.downcast_ref::<Inner>(), some.as_ref());
-    let value = some.resolve(JsonPointer::parse("/value").unwrap()).unwrap();
+    let value = some.resolve(JsonPointer::parse("/value").unwrap()).unwrap() as &dyn Any;
     assert_eq!(value.downcast_ref::<String>(), Some(&"hello".to_owned()));
 
     let none = None::<Inner>;

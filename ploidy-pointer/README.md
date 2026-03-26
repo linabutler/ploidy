@@ -7,17 +7,17 @@ This crate provides a way to traverse typed Rust data structures using JSON Poin
 ## Features
 
 - Parse and resolve JSON Pointer strings.
-- Built-in `JsonPointee` implementations for primitives, collections, and common external types.
-- Derive `JsonPointee` implementations for your own types.
+- Built-in `JsonPointee` and `JsonPointerTarget` implementations for primitives, collections, and common external types.
+- Derive `JsonPointee` and `JsonPointerTarget` implementations for your own types.
 
 ### Cargo features
 
-- `derive` (_default_): Enables the `#[derive(JsonPointee)]` macro.
+- `derive` (_default_): Enables the `#[derive(JsonPointee)]` and `#[derive(JsonPointerTarget)]` macros.
 - `did-you-mean`: Adds suggestions for typos to error messages.
-- `serde_json`: Implements `JsonPointee` for `serde_json::Value`.
-- `chrono`: Implements `JsonPointee` for `chrono::DateTime<Utc>`.
-- `url`: Implements `JsonPointee` for `url::Url`.
-- `indexmap`: Implements `JsonPointee` for `indexmap::IndexMap`.
+- `serde_json`: Implements `Json{Pointee, PointerTarget}` for `serde_json::Value`.
+- `chrono`: Implements `Json{Pointee, PointerTarget}` for `chrono::DateTime<Utc>`.
+- `url`: Implements `Json{Pointee, PointerTarget}` for `url::Url`.
+- `indexmap`: Implements `Json{Pointee, PointerTarget}` for `indexmap::IndexMap`.
 - `full`: Enables all features.
 
 ## JSON Pointer Syntax
@@ -36,30 +36,25 @@ Note that `"/"` (a single slash) does _not_ reference the root; it references a 
 ## Usage
 
 ```rust
-use ploidy_pointer::{JsonPointee, JsonPointer};
+use ploidy_pointer::JsonPointeeExt;
 use std::collections::HashMap;
 
 let mut data = HashMap::new();
 data.insert("foo".to_owned(), vec![1, 2, 3]);
 
-// Parse a JSON Pointer.
-let pointer = JsonPointer::parse("/foo/1").unwrap();
-
-// Resolve it against your data.
-let result = data.resolve(pointer).unwrap();
-
-// Downcast to the expected type.
-assert_eq!(result.downcast_ref::<i32>(), Some(&2));
+assert_eq!(data.pointer::<i32>("/foo/1").unwrap(), 2);
 ```
 
 ### Deriving `JsonPointee` for your own types
 
-The `#[derive(JsonPointee)]` macro can generate implementations of `JsonPointer` for structs and enums, and supports [Serde](https://serde.rs)-like attributes for customizing the implementations. For more details, please see the [**ploidy-pointer-derive** docs](https://docs.rs/ploidy-pointer-derive).
+The `#[derive(JsonPointee)]` macro generates implementations of `JsonPointee` for structs and enums, with [Serde](https://serde.rs)-like attributes for customization. `#[derive(JsonPointerTarget)]` generates an implementation of `JsonPointerTarget` that extracts a reference to the concrete type from a type-erased `JsonPointee`.
+
+For more details, please see the [**ploidy-pointer-derive** docs](https://docs.rs/ploidy-pointer-derive).
 
 ```rust
-use ploidy_pointer::{JsonPointee, JsonPointer};
+use ploidy_pointer::{JsonPointee, JsonPointer, JsonPointerTarget, JsonPointeeExt};
 
-#[derive(JsonPointee)]
+#[derive(JsonPointee, JsonPointerTarget)]
 struct User {
     name: String,
     age: u32,
@@ -70,9 +65,14 @@ let user = User {
     age: 30,
 };
 
-let pointer = JsonPointer::parse("/name").unwrap();
-let result = user.resolve(pointer).unwrap();
-assert_eq!(result.downcast_ref::<String>(), Some(&"Alice".to_owned()));
+// Use `pointer()` to resolve and extract in one step...
+let name: &str = user.pointer("/name").unwrap();
+assert_eq!(name, "Alice");
+
+// ...Or parse and `follow()` the pointer separately.
+let pointer = JsonPointer::parse("/age").unwrap();
+let age: u32 = pointer.follow(&user).unwrap();
+assert_eq!(age, 30);
 ```
 
 ### Errors
