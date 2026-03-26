@@ -107,7 +107,7 @@ date-time-format = "unix-seconds"
 
 #### Minimum Rust version for generated code
 
-The MSRV for the generated crate is **Rust 1.85.0**, the first stable release to support the [2024 edition](https://doc.rust-lang.org/edition-guide/rust-2024/index.html).
+The MSRV for the generated crate is **Rust 1.86.0**.
 
 ## Why Ploidy?
 
