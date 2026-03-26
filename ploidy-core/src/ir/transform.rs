@@ -1,5 +1,4 @@
 use itertools::Itertools;
-use ploidy_pointer::JsonPointee;
 use rustc_hash::FxHashMap;
 
 use crate::{
@@ -263,12 +262,11 @@ impl<'context, 'a> IrTransformer<'context, 'a> {
                         // `#/components/schemas/Address` becomes `address`.
                         let name = StructFieldName::Name(self.arena().alloc_str(&r.path.name()));
                         let ty: &_ = self.arena().alloc(SpecType::Ref(&r.path));
-                        let desc = self
-                            .context
-                            .doc
-                            .resolve(r.path.pointer())
+                        let desc = r
+                            .path
+                            .pointer()
+                            .follow::<&Schema>(self.context.doc)
                             .ok()
-                            .and_then(|p| p.downcast_ref::<Schema>())
                             .and_then(|s| s.description.as_deref());
                         (name, ty, desc)
                     }
@@ -663,26 +661,20 @@ impl<'context, 'a> IrTransformer<'context, 'a> {
                 };
                 let description = match field_schema {
                     RefOrSchema::Other(schema) => schema.description.as_deref(),
-                    RefOrSchema::Ref(r) => self
-                        .context
-                        .doc
-                        .resolve(r.path.pointer())
+                    RefOrSchema::Ref(r) => r
+                        .path
+                        .pointer()
+                        .follow::<&Schema>(self.context.doc)
                         .ok()
-                        .and_then(|p| p.downcast_ref::<Schema>())
                         .and_then(|schema| schema.description.as_deref()),
                 };
                 let nullable = match field_schema {
                     RefOrSchema::Other(schema) if schema.nullable => true,
-                    RefOrSchema::Ref(r) => {
-                        if let Ok(resolved) = self.context.doc.resolve(r.path.pointer())
-                            && let Some(schema) = resolved.downcast_ref::<Schema>()
-                            && schema.nullable
-                        {
-                            true
-                        } else {
-                            false
-                        }
-                    }
+                    RefOrSchema::Ref(r) => r
+                        .path
+                        .pointer()
+                        .follow::<&Schema>(self.context.doc)
+                        .is_ok_and(|schema| schema.nullable),
                     _ => false,
                 };
                 // Wrap the type in `Optional` if the field is either

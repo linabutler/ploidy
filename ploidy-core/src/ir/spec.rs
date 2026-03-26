@@ -1,6 +1,5 @@
 use indexmap::IndexMap;
 use itertools::Itertools;
-use ploidy_pointer::JsonPointee;
 
 use crate::{
     arena::Arena,
@@ -81,10 +80,9 @@ impl<'a> Spec<'a> {
                 let params = arena.alloc_slice(op.parameters.iter().filter_map(|param_or_ref| {
                     let param = match param_or_ref {
                         RefOrParameter::Other(p) => p,
-                        RefOrParameter::Ref(r) => doc
-                            .resolve(r.path.pointer())
-                            .ok()
-                            .and_then(|p| p.downcast_ref::<Parameter>())?,
+                        RefOrParameter::Ref(r) => {
+                            r.path.pointer().follow::<&Parameter>(doc).ok()?
+                        }
                     };
                     let ty: &_ = match &param.schema {
                         Some(RefOrSchema::Ref(r)) => arena.alloc(SpecType::Ref(&r.path)),
@@ -150,10 +148,9 @@ impl<'a> Spec<'a> {
                     .and_then(|request_or_ref| {
                         let request = match request_or_ref {
                             RefOrRequestBody::Other(rb) => rb,
-                            RefOrRequestBody::Ref(r) => doc
-                                .resolve(r.path.pointer())
-                                .ok()
-                                .and_then(|p| p.downcast_ref::<RequestBody>())?,
+                            RefOrRequestBody::Ref(r) => {
+                                r.path.pointer().follow::<&RequestBody>(doc).ok()?
+                            }
                         };
 
                         Some(if request.content.contains_key("multipart/form-data") {
@@ -221,10 +218,9 @@ impl<'a> Spec<'a> {
                         .and_then(|response_or_ref| {
                             let response = match response_or_ref {
                                 RefOrResponse::Other(r) => r,
-                                RefOrResponse::Ref(r) => doc
-                                    .resolve(r.path.pointer())
-                                    .ok()
-                                    .and_then(|p| p.downcast_ref::<Response>())?,
+                                RefOrResponse::Ref(r) => {
+                                    r.path.pointer().follow::<&Response>(doc).ok()?
+                                }
                             };
                             response.content.as_ref()
                         })

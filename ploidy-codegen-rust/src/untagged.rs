@@ -62,7 +62,7 @@ impl ToTokens for CodegenUntagged<'_> {
 
         tokens.append_all(quote! {
             #doc_attrs
-            #[derive(Debug, Clone, PartialEq, #(#extra_derives,)* ::ploidy_util::serde::Serialize, ::ploidy_util::serde::Deserialize, ::ploidy_util::pointer::JsonPointee)]
+            #[derive(Debug, Clone, PartialEq, #(#extra_derives,)* ::ploidy_util::serde::Serialize, ::ploidy_util::serde::Deserialize, ::ploidy_util::pointer::JsonPointee, ::ploidy_util::pointer::JsonPointerTarget)]
             #[serde(crate = "::ploidy_util::serde", untagged)]
             #[ploidy(pointer(crate = "::ploidy_util::pointer", untagged))]
             pub enum #type_name_ident {
@@ -118,7 +118,7 @@ mod tests {
 
         let actual: syn::ItemEnum = parse_quote!(#untagged);
         let expected: syn::ItemEnum = parse_quote! {
-            #[derive(Debug, Clone, PartialEq, Eq, Hash, ::ploidy_util::serde::Serialize, ::ploidy_util::serde::Deserialize, ::ploidy_util::pointer::JsonPointee)]
+            #[derive(Debug, Clone, PartialEq, Eq, Hash, ::ploidy_util::serde::Serialize, ::ploidy_util::serde::Deserialize, ::ploidy_util::pointer::JsonPointee, ::ploidy_util::pointer::JsonPointerTarget)]
             #[serde(crate = "::ploidy_util::serde", untagged)]
             #[ploidy(pointer(crate = "::ploidy_util::pointer", untagged))]
             pub enum StringOrInt {
@@ -159,7 +159,7 @@ mod tests {
 
         let actual: syn::ItemEnum = parse_quote!(#untagged);
         let expected: syn::ItemEnum = parse_quote! {
-            #[derive(Debug, Clone, PartialEq, Eq, Hash, ::ploidy_util::serde::Serialize, ::ploidy_util::serde::Deserialize, ::ploidy_util::pointer::JsonPointee)]
+            #[derive(Debug, Clone, PartialEq, Eq, Hash, ::ploidy_util::serde::Serialize, ::ploidy_util::serde::Deserialize, ::ploidy_util::pointer::JsonPointee, ::ploidy_util::pointer::JsonPointerTarget)]
             #[serde(crate = "::ploidy_util::serde", untagged)]
             #[ploidy(pointer(crate = "::ploidy_util::pointer", untagged))]
             pub enum DateOrUnix {
@@ -211,7 +211,7 @@ mod tests {
 
         let actual: syn::ItemEnum = parse_quote!(#untagged);
         let expected: syn::ItemEnum = parse_quote! {
-            #[derive(Debug, Clone, PartialEq, Eq, Hash, ::ploidy_util::serde::Serialize, ::ploidy_util::serde::Deserialize, ::ploidy_util::pointer::JsonPointee)]
+            #[derive(Debug, Clone, PartialEq, Eq, Hash, ::ploidy_util::serde::Serialize, ::ploidy_util::serde::Deserialize, ::ploidy_util::pointer::JsonPointee, ::ploidy_util::pointer::JsonPointerTarget)]
             #[serde(crate = "::ploidy_util::serde", untagged)]
             #[ploidy(pointer(crate = "::ploidy_util::pointer", untagged))]
             pub enum Animal {
@@ -256,7 +256,7 @@ mod tests {
         let actual: syn::ItemEnum = parse_quote!(#untagged);
         let expected: syn::ItemEnum = parse_quote! {
             #[doc = "A union that can be either a string or an integer."]
-            #[derive(Debug, Clone, PartialEq, Eq, Hash, ::ploidy_util::serde::Serialize, ::ploidy_util::serde::Deserialize, ::ploidy_util::pointer::JsonPointee)]
+            #[derive(Debug, Clone, PartialEq, Eq, Hash, ::ploidy_util::serde::Serialize, ::ploidy_util::serde::Deserialize, ::ploidy_util::pointer::JsonPointee, ::ploidy_util::pointer::JsonPointerTarget)]
             #[serde(crate = "::ploidy_util::serde", untagged)]
             #[ploidy(pointer(crate = "::ploidy_util::pointer", untagged))]
             pub enum StringOrInt {
@@ -299,7 +299,7 @@ mod tests {
 
         let actual: syn::ItemEnum = parse_quote!(#untagged);
         let expected: syn::ItemEnum = parse_quote! {
-            #[derive(Debug, Clone, PartialEq, ::ploidy_util::serde::Serialize, ::ploidy_util::serde::Deserialize, ::ploidy_util::pointer::JsonPointee)]
+            #[derive(Debug, Clone, PartialEq, ::ploidy_util::serde::Serialize, ::ploidy_util::serde::Deserialize, ::ploidy_util::pointer::JsonPointee, ::ploidy_util::pointer::JsonPointerTarget)]
             #[serde(crate = "::ploidy_util::serde", untagged)]
             #[ploidy(pointer(crate = "::ploidy_util::pointer", untagged))]
             pub enum StringOrFloat {
@@ -342,7 +342,7 @@ mod tests {
 
         let actual: syn::ItemEnum = parse_quote!(#untagged);
         let expected: syn::ItemEnum = parse_quote! {
-            #[derive(Debug, Clone, PartialEq, ::ploidy_util::serde::Serialize, ::ploidy_util::serde::Deserialize, ::ploidy_util::pointer::JsonPointee)]
+            #[derive(Debug, Clone, PartialEq, ::ploidy_util::serde::Serialize, ::ploidy_util::serde::Deserialize, ::ploidy_util::pointer::JsonPointee, ::ploidy_util::pointer::JsonPointerTarget)]
             #[serde(crate = "::ploidy_util::serde", untagged)]
             #[ploidy(pointer(crate = "::ploidy_util::pointer", untagged))]
             pub enum StringOrDouble {

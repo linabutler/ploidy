@@ -107,7 +107,7 @@ impl ToTokens for CodegenTagged<'_> {
         let type_name = &self.name;
         let main = quote! {
             #doc_attrs
-            #[derive(Debug, Clone, PartialEq, #(#extra_derives,)* ::ploidy_util::serde::Serialize, ::ploidy_util::serde::Deserialize, ::ploidy_util::pointer::JsonPointee)]
+            #[derive(Debug, Clone, PartialEq, #(#extra_derives,)* ::ploidy_util::serde::Serialize, ::ploidy_util::serde::Deserialize, ::ploidy_util::pointer::JsonPointee, ::ploidy_util::pointer::JsonPointerTarget)]
             #[serde(crate = "::ploidy_util::serde", tag = #discriminator_field_literal)]
             #[ploidy(pointer(crate = "::ploidy_util::pointer", tag = #discriminator_field_literal))]
             pub enum #type_name {
@@ -180,7 +180,7 @@ mod tests {
 
         let actual: syn::File = parse_quote!(#codegen);
         let expected: syn::File = parse_quote! {
-            #[derive(Debug, Clone, PartialEq, Eq, Hash, ::ploidy_util::serde::Serialize, ::ploidy_util::serde::Deserialize, ::ploidy_util::pointer::JsonPointee)]
+            #[derive(Debug, Clone, PartialEq, Eq, Hash, ::ploidy_util::serde::Serialize, ::ploidy_util::serde::Deserialize, ::ploidy_util::pointer::JsonPointee, ::ploidy_util::pointer::JsonPointerTarget)]
             #[serde(crate = "::ploidy_util::serde", tag = "petType")]
             #[ploidy(pointer(crate = "::ploidy_util::pointer", tag = "petType"))]
             pub enum Pet {
@@ -250,7 +250,7 @@ mod tests {
 
         let actual: syn::File = parse_quote!(#codegen);
         let expected: syn::File = parse_quote! {
-            #[derive(Debug, Clone, PartialEq, Eq, Hash, ::ploidy_util::serde::Serialize, ::ploidy_util::serde::Deserialize, ::ploidy_util::pointer::JsonPointee)]
+            #[derive(Debug, Clone, PartialEq, Eq, Hash, ::ploidy_util::serde::Serialize, ::ploidy_util::serde::Deserialize, ::ploidy_util::pointer::JsonPointee, ::ploidy_util::pointer::JsonPointerTarget)]
             #[serde(crate = "::ploidy_util::serde", tag = "type")]
             #[ploidy(pointer(crate = "::ploidy_util::pointer", tag = "type"))]
             pub enum Pet {
@@ -315,7 +315,7 @@ mod tests {
 
         let actual: syn::File = parse_quote!(#codegen);
         let expected: syn::File = parse_quote! {
-            #[derive(Debug, Clone, PartialEq, Eq, Hash, ::ploidy_util::serde::Serialize, ::ploidy_util::serde::Deserialize, ::ploidy_util::pointer::JsonPointee)]
+            #[derive(Debug, Clone, PartialEq, Eq, Hash, ::ploidy_util::serde::Serialize, ::ploidy_util::serde::Deserialize, ::ploidy_util::pointer::JsonPointee, ::ploidy_util::pointer::JsonPointerTarget)]
             #[serde(crate = "::ploidy_util::serde", tag = "type")]
             #[ploidy(pointer(crate = "::ploidy_util::pointer", tag = "type"))]
             pub enum Pet {
@@ -379,7 +379,7 @@ mod tests {
         let actual: syn::File = parse_quote!(#codegen);
         let expected: syn::File = parse_quote! {
             #[doc = "Represents different types of pets"]
-            #[derive(Debug, Clone, PartialEq, Eq, Hash, ::ploidy_util::serde::Serialize, ::ploidy_util::serde::Deserialize, ::ploidy_util::pointer::JsonPointee)]
+            #[derive(Debug, Clone, PartialEq, Eq, Hash, ::ploidy_util::serde::Serialize, ::ploidy_util::serde::Deserialize, ::ploidy_util::pointer::JsonPointee, ::ploidy_util::pointer::JsonPointerTarget)]
             #[serde(crate = "::ploidy_util::serde", tag = "type")]
             #[ploidy(pointer(crate = "::ploidy_util::pointer", tag = "type"))]
             pub enum Pet {
@@ -446,7 +446,7 @@ mod tests {
 
         let actual: syn::File = parse_quote!(#codegen);
         let expected: syn::File = parse_quote! {
-            #[derive(Debug, Clone, PartialEq, Eq, Hash, ::ploidy_util::serde::Serialize, ::ploidy_util::serde::Deserialize, ::ploidy_util::pointer::JsonPointee)]
+            #[derive(Debug, Clone, PartialEq, Eq, Hash, ::ploidy_util::serde::Serialize, ::ploidy_util::serde::Deserialize, ::ploidy_util::pointer::JsonPointee, ::ploidy_util::pointer::JsonPointerTarget)]
             #[serde(crate = "::ploidy_util::serde", tag = "petType")]
             #[ploidy(pointer(crate = "::ploidy_util::pointer", tag = "petType"))]
             pub enum Pet {
@@ -526,7 +526,7 @@ mod tests {
 
         let actual: syn::File = parse_quote!(#codegen);
         let expected: syn::File = parse_quote! {
-            #[derive(Debug, Clone, PartialEq, Eq, Hash, ::ploidy_util::serde::Serialize, ::ploidy_util::serde::Deserialize, ::ploidy_util::pointer::JsonPointee)]
+            #[derive(Debug, Clone, PartialEq, Eq, Hash, ::ploidy_util::serde::Serialize, ::ploidy_util::serde::Deserialize, ::ploidy_util::pointer::JsonPointee, ::ploidy_util::pointer::JsonPointerTarget)]
             #[serde(crate = "::ploidy_util::serde", tag = "kind")]
             #[ploidy(pointer(crate = "::ploidy_util::pointer", tag = "kind"))]
             pub enum Pet {
@@ -583,7 +583,7 @@ mod tests {
 
         let actual: syn::File = parse_quote!(#codegen);
         let expected: syn::File = parse_quote! {
-            #[derive(Debug, Clone, PartialEq, Eq, Hash, ::ploidy_util::serde::Serialize, ::ploidy_util::serde::Deserialize, ::ploidy_util::pointer::JsonPointee)]
+            #[derive(Debug, Clone, PartialEq, Eq, Hash, ::ploidy_util::serde::Serialize, ::ploidy_util::serde::Deserialize, ::ploidy_util::pointer::JsonPointee, ::ploidy_util::pointer::JsonPointerTarget)]
             #[serde(crate = "::ploidy_util::serde", tag = "kind")]
             #[ploidy(pointer(crate = "::ploidy_util::pointer", tag = "kind"))]
             pub enum Pet {
@@ -660,7 +660,7 @@ mod tests {
         // `Dog` is inlined, so `Pet::Dog` holds the inline type.
         // `Cat` isn't inlined, so `Pet::Cat` holds the schema type.
         let expected: syn::File = parse_quote! {
-            #[derive(Debug, Clone, PartialEq, Eq, Hash, ::ploidy_util::serde::Serialize, ::ploidy_util::serde::Deserialize, ::ploidy_util::pointer::JsonPointee)]
+            #[derive(Debug, Clone, PartialEq, Eq, Hash, ::ploidy_util::serde::Serialize, ::ploidy_util::serde::Deserialize, ::ploidy_util::pointer::JsonPointee, ::ploidy_util::pointer::JsonPointerTarget)]
             #[serde(crate = "::ploidy_util::serde", tag = "kind")]
             #[ploidy(pointer(crate = "::ploidy_util::pointer", tag = "kind"))]
             pub enum Pet {

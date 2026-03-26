@@ -1,13 +1,13 @@
 use std::{borrow::Cow, str::FromStr};
 
 use indexmap::IndexMap;
-use ploidy_pointer::{JsonPointee, JsonPointer, JsonPointerBuf};
+use ploidy_pointer::{JsonPointee, JsonPointer, JsonPointerBuf, JsonPointerTarget};
 use serde::{Deserialize, Deserializer};
 
 use crate::error::SerdeError;
 
 /// An OpenAPI document.
-#[derive(Debug, Deserialize, JsonPointee)]
+#[derive(Debug, Deserialize, JsonPointee, JsonPointerTarget)]
 pub struct Document {
     pub openapi: String,
     pub info: Info,
@@ -26,7 +26,7 @@ impl Document {
     }
 }
 
-#[derive(Clone, Debug, Deserialize, JsonPointee)]
+#[derive(Clone, Debug, Deserialize, JsonPointee, JsonPointerTarget)]
 pub struct Info {
     pub title: String,
     #[serde(default)]
@@ -35,7 +35,7 @@ pub struct Info {
 }
 
 /// Operation definitions for a single path.
-#[derive(Debug, Deserialize, JsonPointee)]
+#[derive(Debug, Deserialize, JsonPointee, JsonPointerTarget)]
 pub struct PathItem {
     #[serde(default)]
     pub get: Option<Operation>,
@@ -74,7 +74,7 @@ impl PathItem {
 }
 
 /// An HTTP operation.
-#[derive(Debug, Deserialize, JsonPointee)]
+#[derive(Debug, Deserialize, JsonPointee, JsonPointerTarget)]
 #[serde(rename_all = "camelCase")]
 #[ploidy(pointer(rename_all = "camelCase"))]
 pub struct Operation {
@@ -98,7 +98,7 @@ impl Operation {
 }
 
 /// A path, query, header, or cookie parameter.
-#[derive(Clone, Debug, Deserialize, JsonPointee)]
+#[derive(Clone, Debug, Deserialize, JsonPointee, JsonPointerTarget)]
 pub struct Parameter {
     pub name: String,
     #[serde(rename = "in")]
@@ -116,7 +116,7 @@ pub struct Parameter {
     pub explode: Option<bool>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, JsonPointee)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, JsonPointee, JsonPointerTarget)]
 #[serde(rename_all = "lowercase")]
 #[ploidy(pointer(untagged, rename_all = "lowercase"))]
 pub enum ParameterLocation {
@@ -126,7 +126,7 @@ pub enum ParameterLocation {
     Cookie,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, JsonPointee)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, JsonPointee, JsonPointerTarget)]
 #[serde(rename_all = "camelCase")]
 #[ploidy(pointer(untagged, rename_all = "camelCase"))]
 pub enum ParameterStyle {
@@ -140,7 +140,7 @@ pub enum ParameterStyle {
 }
 
 /// Request body definition.
-#[derive(Clone, Debug, Deserialize, JsonPointee)]
+#[derive(Clone, Debug, Deserialize, JsonPointee, JsonPointerTarget)]
 pub struct RequestBody {
     #[serde(default)]
     pub description: Option<String>,
@@ -151,7 +151,7 @@ pub struct RequestBody {
 }
 
 /// Response definition.
-#[derive(Clone, Debug, Deserialize, JsonPointee)]
+#[derive(Clone, Debug, Deserialize, JsonPointee, JsonPointerTarget)]
 pub struct Response {
     #[serde(default)]
     pub description: Option<String>,
@@ -160,49 +160,49 @@ pub struct Response {
 }
 
 /// Example definition (placeholder).
-#[derive(Debug, Deserialize, JsonPointee)]
+#[derive(Debug, Deserialize, JsonPointee, JsonPointerTarget)]
 pub struct Example {
     #[serde(flatten)]
     pub extensions: IndexMap<String, serde_json::Value>,
 }
 
 /// Header definition (placeholder).
-#[derive(Debug, Deserialize, JsonPointee)]
+#[derive(Debug, Deserialize, JsonPointee, JsonPointerTarget)]
 pub struct Header {
     #[serde(flatten)]
     pub extensions: IndexMap<String, serde_json::Value>,
 }
 
 /// Security scheme definition (placeholder).
-#[derive(Debug, Deserialize, JsonPointee)]
+#[derive(Debug, Deserialize, JsonPointee, JsonPointerTarget)]
 pub struct SecurityScheme {
     #[serde(flatten)]
     pub extensions: IndexMap<String, serde_json::Value>,
 }
 
 /// Link definition (placeholder).
-#[derive(Debug, Deserialize, JsonPointee)]
+#[derive(Debug, Deserialize, JsonPointee, JsonPointerTarget)]
 pub struct Link {
     #[serde(flatten)]
     pub extensions: IndexMap<String, serde_json::Value>,
 }
 
 /// Callback definition (placeholder).
-#[derive(Debug, Deserialize, JsonPointee)]
+#[derive(Debug, Deserialize, JsonPointee, JsonPointerTarget)]
 pub struct Callback {
     #[serde(flatten)]
     pub extensions: IndexMap<String, serde_json::Value>,
 }
 
 /// Media type content.
-#[derive(Clone, Debug, Deserialize, JsonPointee)]
+#[derive(Clone, Debug, Deserialize, JsonPointee, JsonPointerTarget)]
 pub struct MediaType {
     #[serde(default)]
     pub schema: Option<RefOrSchema>,
 }
 
 /// Components section containing reusable schemas.
-#[derive(Debug, Default, Deserialize, JsonPointee)]
+#[derive(Debug, Default, Deserialize, JsonPointee, JsonPointerTarget)]
 #[serde(rename_all = "camelCase")]
 #[ploidy(pointer(rename_all = "camelCase"))]
 pub struct Components {
@@ -236,7 +236,7 @@ pub struct Components {
 ///
 /// The type uses `#[serde(untagged)]` to match the OpenAPI specification's
 /// untagged union semantics, and `#[ploidy(pointer(untagged))]` for JSON Pointer traversal.
-#[derive(Clone, Debug, Deserialize, JsonPointee)]
+#[derive(Clone, Debug, Deserialize, JsonPointee, JsonPointerTarget)]
 #[serde(untagged)]
 #[ploidy(pointer(untagged))]
 pub enum RefOr<T> {
@@ -266,7 +266,7 @@ pub struct Ref {
     pub path: ComponentRef,
 }
 
-#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, JsonPointee)]
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, JsonPointee, JsonPointerTarget)]
 #[serde(rename_all = "lowercase")]
 #[ploidy(pointer(untagged, rename_all = "lowercase"))]
 pub enum Ty {
@@ -279,7 +279,7 @@ pub enum Ty {
     Null,
 }
 
-#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, JsonPointee)]
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, JsonPointee, JsonPointerTarget)]
 #[serde(rename_all = "lowercase")]
 #[ploidy(pointer(untagged, rename_all = "lowercase"))]
 pub enum Format {
@@ -306,7 +306,7 @@ pub enum Format {
     Other,
 }
 
-#[derive(Clone, Debug, Deserialize, JsonPointee)]
+#[derive(Clone, Debug, Deserialize, JsonPointee, JsonPointerTarget)]
 #[serde(untagged)]
 #[ploidy(pointer(untagged))]
 pub enum AdditionalProperties {
@@ -315,7 +315,7 @@ pub enum AdditionalProperties {
 }
 
 /// An OpenAPI schema definition.
-#[derive(Debug, Clone, Default, Deserialize, JsonPointee)]
+#[derive(Debug, Clone, Default, Deserialize, JsonPointee, JsonPointerTarget)]
 #[serde(rename_all = "camelCase")]
 #[ploidy(pointer(rename_all = "camelCase"))]
 pub struct Schema {
@@ -368,7 +368,7 @@ impl Schema {
 }
 
 /// A discriminator for a polymorphic type.
-#[derive(Debug, Clone, Deserialize, JsonPointee)]
+#[derive(Debug, Clone, Deserialize, JsonPointee, JsonPointerTarget)]
 #[serde(rename_all = "camelCase")]
 #[ploidy(pointer(rename_all = "camelCase"))]
 pub struct Discriminator {
@@ -378,7 +378,7 @@ pub struct Discriminator {
 }
 
 /// A JSON Pointer reference to a component in the current document.
-#[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, JsonPointee)]
+#[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, JsonPointee, JsonPointerTarget)]
 pub struct ComponentRef {
     #[ploidy(pointer(skip))]
     pointer: JsonPointerBuf,

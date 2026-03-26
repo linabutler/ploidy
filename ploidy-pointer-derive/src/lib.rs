@@ -1,8 +1,13 @@
-//! Derive macro for the [`JsonPointee`] trait.
+//! Derive macros for the [`JsonPointee`] and [`JsonPointerTarget`] traits.
 //!
-//! This crate provides a derive macro to generate a [`JsonPointee`]
-//! implementation for a Rust data structure. The macro can generate implementations for
-//! structs and enums, and supports [Serde][serde]-like attributes.
+//! This crate provides two derive macros:
+//!
+//! * [`JsonPointee`] generates an implementation of the [`JsonPointee`][pointee]
+//!   trait for traversing structs and enums with JSON Pointer (RFC 6901)
+//!   syntax. This macro supports [Serde][serde]-like attributes.
+//! * [`JsonPointerTarget`] generates an implementation of the
+//!   [`JsonPointerTarget`][target] trait for extracting a reference to the
+//!   concrete target type from a type-erased pointee.
 //!
 //! # Container attributes
 //!
@@ -44,16 +49,16 @@
 //! ## Struct flattening
 //!
 //! ```ignore
-//! # use ploidy_pointer::{JsonPointerError, JsonPointee, JsonPointer};
+//! # use ploidy_pointer::{JsonPointerTarget, JsonPointee, JsonPointeeExt};
 //! # fn main() -> Result<(), Box<dyn std::error::Error>> {
-//! #[derive(JsonPointee)]
+//! #[derive(JsonPointee, JsonPointerTarget)]
 //! struct User {
 //!     name: String,
 //!     #[ploidy(pointer(flatten))]
 //!     contact: ContactInfo,
 //! }
 //!
-//! #[derive(JsonPointee)]
+//! #[derive(JsonPointee, JsonPointerTarget)]
 //! struct ContactInfo {
 //!     email: String,
 //!     phone: String,
@@ -66,18 +71,12 @@
 //!         phone: "555-1234".to_owned(),
 //!     },
 //! };
-//! assert_eq!(
-//!     user.resolve(JsonPointer::parse("/name")?)?.downcast_ref::<String>(),
-//!     Some(&"Alice".to_owned()),
-//! );
-//! assert_eq!(
-//!     user.resolve(JsonPointer::parse("/email")?)?.downcast_ref::<String>(),
-//!     Some(&"a@example.com".to_owned()),
-//! );
-//! assert_eq!(
-//!     user.resolve(JsonPointer::parse("/phone")?)?.downcast_ref::<String>(),
-//!     Some(&"555-1234".to_owned()),
-//! );
+//! let name: &str = user.pointer("/name")?;
+//! assert_eq!(name, "Alice");
+//! let email: &str = user.pointer("/email")?;
+//! assert_eq!(email, "a@example.com");
+//! let phone: &str = user.pointer("/phone")?;
+//! assert_eq!(phone, "555-1234");
 //! # Ok(())
 //! # }
 //! ```
@@ -85,9 +84,9 @@
 //! ## Renaming fields
 //!
 //! ```ignore
-//! # use ploidy_pointer::{JsonPointerError, JsonPointee, JsonPointer};
+//! # use ploidy_pointer::{JsonPointerTarget, JsonPointee, JsonPointeeExt};
 //! # fn main() -> Result<(), Box<dyn std::error::Error>> {
-//! #[derive(JsonPointee)]
+//! #[derive(JsonPointee, JsonPointerTarget)]
 //! #[ploidy(pointer(rename_all = "snake_case"))]
 //! enum ApiResponse {
 //!     SuccessResponse { data: String },
@@ -98,18 +97,14 @@
 //! let success = ApiResponse::SuccessResponse {
 //!     data: "ok".to_owned(),
 //! };
-//! assert_eq!(
-//!     success.resolve(JsonPointer::parse("/success_response/data")?)?.downcast_ref::<String>(),
-//!     Some(&"ok".to_owned()),
-//! );
+//! let data: &str = success.pointer("/success_response/data")?;
+//! assert_eq!(data, "ok");
 //!
 //! let error = ApiResponse::ErrorResponse {
 //!     message: "failed".to_owned(),
 //! };
-//! assert_eq!(
-//!     error.resolve(JsonPointer::parse("/error/message")?)?.downcast_ref::<String>(),
-//!     Some(&"failed".to_owned()),
-//! );
+//! let message: &str = error.pointer("/error/message")?;
+//! assert_eq!(message, "failed");
 //! # Ok(())
 //! # }
 //! ```
@@ -124,9 +119,9 @@
 //! This is the default enum representation. The variant's tag wraps the contents.
 //!
 //! ```ignore
-//! # use ploidy_pointer::{JsonPointerError, JsonPointee, JsonPointer};
+//! # use ploidy_pointer::{JsonPointerTarget, JsonPointee, JsonPointeeExt};
 //! # fn main() -> Result<(), Box<dyn std::error::Error>> {
-//! #[derive(JsonPointee)]
+//! #[derive(JsonPointee, JsonPointerTarget)]
 //! enum Message {
 //!     Text { content: String },
 //!     Image { url: String },
@@ -135,10 +130,8 @@
 //! let message = Message::Text {
 //!     content: "hello".to_owned(),
 //! };
-//! assert_eq!(
-//!     message.resolve(JsonPointer::parse("/Text/content")?)?.downcast_ref::<String>(),
-//!     Some(&"hello".to_owned()),
-//! );
+//! let content: &str = message.pointer("/Text/content")?;
+//! assert_eq!(content, "hello");
 //! # Ok(())
 //! # }
 //! ```
@@ -149,9 +142,9 @@
 //! is next to the variant's fields.
 //!
 //! ```ignore
-//! # use ploidy_pointer::{JsonPointerError, JsonPointee, JsonPointer};
+//! # use ploidy_pointer::{JsonPointerTarget, JsonPointee, JsonPointeeExt};
 //! # fn main() -> Result<(), Box<dyn std::error::Error>> {
-//! #[derive(JsonPointee)]
+//! #[derive(JsonPointee, JsonPointerTarget)]
 //! #[ploidy(pointer(tag = "type"))]
 //! enum Message {
 //!     Text { content: String },
@@ -161,14 +154,10 @@
 //! let message = Message::Text {
 //!     content: "hello".to_owned(),
 //! };
-//! assert_eq!(
-//!     message.resolve(JsonPointer::parse("/type")?)?.downcast_ref::<&str>(),
-//!     Some(&"Text"),
-//! );
-//! assert_eq!(
-//!     message.resolve(JsonPointer::parse("/content")?)?.downcast_ref::<String>(),
-//!     Some(&"hello".to_owned()),
-//! );
+//! let tag: &str = message.pointer("/type")?;
+//! assert_eq!(tag, "Text");
+//! let content: &str = message.pointer("/content")?;
+//! assert_eq!(content, "hello");
 //! # Ok(())
 //! # }
 //! ```
@@ -179,9 +168,9 @@
 //! to each other, as two fields in the same object.
 //!
 //! ```ignore
-//! # use ploidy_pointer::{JsonPointerError, JsonPointee, JsonPointer};
+//! # use ploidy_pointer::{JsonPointerTarget, JsonPointee, JsonPointeeExt};
 //! # fn main() -> Result<(), Box<dyn std::error::Error>> {
-//! #[derive(JsonPointee)]
+//! #[derive(JsonPointee, JsonPointerTarget)]
 //! #[ploidy(pointer(tag = "type", content = "value"))]
 //! enum Message {
 //!     Text { content: String },
@@ -191,14 +180,10 @@
 //! let message = Message::Text {
 //!     content: "hello".to_owned(),
 //! };
-//! assert_eq!(
-//!     message.resolve(JsonPointer::parse("/type")?)?.downcast_ref::<&str>(),
-//!     Some(&"Text"),
-//! );
-//! assert_eq!(
-//!     message.resolve(JsonPointer::parse("/value/content")?)?.downcast_ref::<String>(),
-//!     Some(&"hello".to_owned()),
-//! );
+//! let tag: &str = message.pointer("/type")?;
+//! assert_eq!(tag, "Text");
+//! let content: &str = message.pointer("/value/content")?;
+//! assert_eq!(content, "hello");
 //! # Ok(())
 //! # }
 //! ```
@@ -209,9 +194,9 @@
 //! and pointers are resolved against the variant's contents.
 //!
 //! ```ignore
-//! # use ploidy_pointer::{JsonPointerError, JsonPointee, JsonPointer};
+//! # use ploidy_pointer::{JsonPointerTarget, JsonPointee, JsonPointeeExt};
 //! # fn main() -> Result<(), Box<dyn std::error::Error>> {
-//! #[derive(JsonPointee)]
+//! #[derive(JsonPointee, JsonPointerTarget)]
 //! #[ploidy(pointer(untagged))]
 //! enum Message {
 //!     Text { content: String },
@@ -221,15 +206,15 @@
 //! let message = Message::Text {
 //!     content: "hello".to_owned(),
 //! };
-//! assert_eq!(
-//!     message.resolve(JsonPointer::parse("/content")?)?.downcast_ref::<String>(),
-//!     Some(&"hello".to_owned()),
-//! );
+//! let content: &str = message.pointer("/content")?;
+//! assert_eq!(content, "hello");
 //! # Ok(())
 //! # }
 //! ```
 //!
 //! [serde]: https://serde.rs
+//! [pointee]: https://docs.rs/ploidy-pointer/latest/ploidy_pointer/trait.JsonPointee.html
+//! [target]: https://docs.rs/ploidy-pointer/latest/ploidy_pointer/trait.JsonPointerTarget.html
 
 use std::{borrow::Cow, fmt::Display};
 
@@ -241,7 +226,7 @@ use proc_macro2::{Span, TokenStream};
 use quote::{ToTokens, TokenStreamExt, format_ident, quote};
 use syn::{
     Attribute, Data, DataEnum, DataStruct, DeriveInput, Field, Fields, GenericParam, Ident,
-    parse_macro_input,
+    Lifetime, parse_macro_input,
 };
 
 /// Derives the `JsonPointee` trait for JSON Pointer (RFC 6901) traversal.
@@ -250,26 +235,31 @@ use syn::{
 #[proc_macro_derive(JsonPointee, attributes(ploidy))]
 pub fn derive_pointee(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
     let input = parse_macro_input!(input as DeriveInput);
-    derive_for(&input)
+    derive_pointee_for(&input)
         .unwrap_or_else(|err| err.to_compile_error())
         .into()
 }
 
-fn derive_for(input: &DeriveInput) -> syn::Result<TokenStream> {
+/// Derives the `JsonPointerTarget` trait for downcasting a type-erased
+/// `JsonPointee` reference to a concrete type reference.
+///
+/// Note that this macro generates an `impl JsonPointerTarget<'a>` for `&'a T`,
+/// **not for** `T`.
+///
+/// The only supported container attribute is
+/// `#[ploidy(pointer(crate = "path"))]` to override the crate path.
+#[proc_macro_derive(JsonPointerTarget, attributes(ploidy))]
+pub fn derive_pointer_target(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
+    let input = parse_macro_input!(input as DeriveInput);
+    derive_pointer_target_for(&input)
+        .unwrap_or_else(|err| err.to_compile_error())
+        .into()
+}
+
+fn derive_pointee_for(input: &DeriveInput) -> syn::Result<TokenStream> {
     let name = &input.ident;
-    let attrs: Vec<_> = input
-        .attrs
-        .iter()
-        .map(ContainerAttr::parse_all)
-        .flatten_ok()
-        .try_collect()?;
-    let root = attrs
-        .iter()
-        .find_map(|attr| match attr {
-            ContainerAttr::Crate(path) => Some(Cow::Borrowed(path)),
-            _ => None,
-        })
-        .unwrap_or_else(|| Cow::Owned(syn::parse_quote!(::ploidy_pointer)));
+    let attrs = ContainerAttr::parse_all(&input.attrs)?;
+    let root = crate_path(&attrs);
     let container = ContainerInfo::new(name, &root, &attrs)
         .map_err(|err| syn::Error::new_spanned(input, err))?;
 
@@ -291,7 +281,7 @@ fn derive_for(input: &DeriveInput) -> syn::Result<TokenStream> {
     let where_clause = {
         // Add or extend the `where` clause with `T: JsonPointee` bounds
         // for all generic type parameters.
-        let bounds = input
+        let type_param_bounds = input
             .generics
             .params
             .iter()
@@ -303,24 +293,65 @@ fn derive_for(input: &DeriveInput) -> syn::Result<TokenStream> {
                 _ => None,
             })
             .collect_vec();
-        if bounds.is_empty() {
+        if type_param_bounds.is_empty() {
             quote! { #where_clause }
         } else if let Some(where_clause) = where_clause {
-            quote! { #where_clause #(#bounds),* }
+            quote! { #where_clause #(#type_param_bounds),* }
         } else {
-            quote! { where #(#bounds),* }
+            quote! { where #(#type_param_bounds),* }
         }
     };
 
     Ok(quote! {
         #[automatically_derived]
         impl #impl_generics #root::JsonPointee for #name #ty_generics #where_clause {
-            #[inline]
-            fn as_any(&self) -> &dyn ::std::any::Any { self }
-
             fn resolve(&self, #pointer: &#root::JsonPointer)
-                -> ::std::result::Result<&dyn #root::JsonPointee, #root::JsonPointerResolveError> {
+                -> ::std::result::Result<&dyn #root::JsonPointee, #root::JsonPointeeError> {
                 #body
+            }
+        }
+    })
+}
+
+fn derive_pointer_target_for(input: &DeriveInput) -> syn::Result<TokenStream> {
+    let name = &input.ident;
+    let attrs = ContainerAttr::parse_all(&input.attrs)?;
+    let root = crate_path(&attrs);
+
+    // Hygienic lifetime parameter for `impl JsonPointerTarget<'pointee>`.
+    let lifetime = Lifetime::new("'pointee", Span::mixed_site());
+
+    let (_, ty_generics, where_clause) = input.generics.split_for_impl();
+    let generics = {
+        let mut generics = input.generics.clone();
+        generics.params.push(syn::parse_quote!(#lifetime));
+        generics
+    };
+    let (impl_generics, _, _) = generics.split_for_impl();
+    let where_clause = match where_clause {
+        // `downcast_ref::<T>` requires `T: Any`.
+        Some(where_clause) => {
+            let s = quote! { #name #ty_generics: ::std::any::Any };
+            quote! { #where_clause, #s }
+        }
+        None => quote! { where #name #ty_generics: ::std::any::Any },
+    };
+
+    Ok(quote! {
+        #[automatically_derived]
+        impl #impl_generics #root::JsonPointerTarget<#lifetime>
+            for &#lifetime #name #ty_generics
+        #where_clause
+        {
+            #[inline]
+            fn from_pointee(
+                pointee: &#lifetime dyn #root::JsonPointee,
+            ) -> ::std::result::Result<Self, #root::JsonPointerTargetError> {
+                let any: &dyn ::std::any::Any = pointee;
+                any.downcast_ref().ok_or_else(|| #root::JsonPointerTargetError {
+                    expected: ::std::any::type_name::<#name #ty_generics>(),
+                    actual: pointee.name(),
+                })
             }
         }
     })
@@ -398,7 +429,7 @@ fn derive_for_enum(
             let attrs: Vec<_> = variant
                 .attrs
                 .iter()
-                .map(VariantAttr::parse_all)
+                .map(VariantAttr::parse_one)
                 .flatten_ok()
                 .try_collect()?;
             let info = VariantInfo::new(container, name, &attrs);
@@ -567,6 +598,18 @@ fn derive_for_enum(
     })
 }
 
+/// Extracts the `#[ploidy(pointer(crate = "..."))]` attribute,
+/// falling back to `::ploidy_pointer` if not present.
+fn crate_path(attrs: &[ContainerAttr]) -> Cow<'_, syn::Path> {
+    attrs
+        .iter()
+        .find_map(|attr| match attr {
+            ContainerAttr::Crate(path) => Some(Cow::Borrowed(path)),
+            _ => None,
+        })
+        .unwrap_or_else(|| Cow::Owned(syn::parse_quote!(::ploidy_pointer)))
+}
+
 #[derive(Clone, Copy)]
 struct ContainerInfo<'a> {
     name: &'a Ident,
@@ -646,7 +689,7 @@ impl<'a> NamedFieldInfo<'a> {
         let attrs: Vec<_> = f
             .attrs
             .iter()
-            .map(FieldAttr::parse_all)
+            .map(FieldAttr::parse_one)
             .flatten_ok()
             .try_collect()?;
 
@@ -691,7 +734,7 @@ impl TupleFieldInfo {
         let attrs: Vec<_> = f
             .attrs
             .iter()
-            .map(FieldAttr::parse_all)
+            .map(FieldAttr::parse_one)
             .flatten_ok()
             .try_collect()?;
 
@@ -995,7 +1038,7 @@ impl ToTokens for TuplePointeeBody<'_> {
             };
             match #idx {
                 #(#arms,)*
-                _ => Err(#root::JsonPointerResolveError::Index(#idx, 0..#len))
+                _ => Err(#root::JsonPointeeError::Index(#idx, 0..#len))
             }
         };
 
@@ -1517,7 +1560,15 @@ enum ContainerAttr {
 }
 
 impl ContainerAttr {
-    fn parse_all(attr: &Attribute) -> syn::Result<Vec<Self>> {
+    fn parse_all(attrs: &[Attribute]) -> syn::Result<Vec<Self>> {
+        attrs
+            .iter()
+            .map(ContainerAttr::parse_one)
+            .flatten_ok()
+            .try_collect()
+    }
+
+    fn parse_one(attr: &Attribute) -> syn::Result<Vec<Self>> {
         if !attr.path().is_ident("ploidy") {
             return Ok(vec![]);
         }
@@ -1568,7 +1619,7 @@ enum FieldAttr {
 }
 
 impl FieldAttr {
-    fn parse_all(attr: &Attribute) -> syn::Result<Vec<Self>> {
+    fn parse_one(attr: &Attribute) -> syn::Result<Vec<Self>> {
         if !attr.path().is_ident("ploidy") {
             return Ok(vec![]);
         }
@@ -1605,7 +1656,7 @@ enum VariantAttr {
 }
 
 impl VariantAttr {
-    fn parse_all(attr: &Attribute) -> syn::Result<Vec<Self>> {
+    fn parse_one(attr: &Attribute) -> syn::Result<Vec<Self>> {
         if !attr.path().is_ident("ploidy") {
             return Ok(vec![]);
         }
