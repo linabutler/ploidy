@@ -118,13 +118,13 @@ jobs:
       fail-fast: false
       matrix:
         rust:
-          - "1.85.0"
+          - "1.86.0"
           - "1.89.0"
         features:
           - all
           - none
         include:
-          - rust: "1.85.0"
+          - rust: "1.86.0"
             packages:
               - ploidy-pointer
               - ploidy-pointer-derive
