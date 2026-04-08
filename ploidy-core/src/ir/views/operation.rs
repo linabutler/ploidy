@@ -217,7 +217,7 @@ impl<'a> View<'a> for OperationView<'a> {
         &self,
         reach: Reach,
         filter: F,
-    ) -> impl Iterator<Item = TypeView<'a>> + use<'a, F>
+    ) -> impl Iterator<Item = (EdgeKind, TypeView<'a>)> + use<'a, F>
     where
         F: Fn(EdgeKind, &TypeView<'a>) -> Traversal,
     {
@@ -232,7 +232,7 @@ impl<'a> View<'a> for OperationView<'a> {
                         let view = TypeView::new(cooked, index);
                         filter(kind, &view)
                     })
-                    .map(|index| TypeView::new(cooked, index))
+                    .map(|(kind, index)| (kind, TypeView::new(cooked, index)))
             }
         })
     }
@@ -346,7 +346,7 @@ impl<'view, 'a, T> View<'a> for ParameterView<'view, 'a, T> {
         &self,
         reach: Reach,
         filter: F,
-    ) -> impl Iterator<Item = TypeView<'a>> + use<'view, 'a, T, F>
+    ) -> impl Iterator<Item = (EdgeKind, TypeView<'a>)> + use<'view, 'a, T, F>
     where
         F: Fn(EdgeKind, &TypeView<'a>) -> Traversal,
     {
@@ -360,7 +360,7 @@ impl<'view, 'a, T> View<'a> for ParameterView<'view, 'a, T> {
                         let view = TypeView::new(cooked, index);
                         filter(kind, &view)
                     })
-                    .map(|index| TypeView::new(cooked, index))
+                    .map(|(kind, index)| (kind, TypeView::new(cooked, index)))
             }
         })
     }

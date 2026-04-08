@@ -2120,8 +2120,7 @@ fn test_untagged_union_with_properties() {
     // The untagged union should store its own `properties` directly.
     let base_field_names = base_untagged
         .fields()
-        .iter()
-        .map(|f| match f.name {
+        .map(|f| match f.name() {
             StructFieldName::Name(n) => n,
             other => panic!("expected named field; got `{other:?}`"),
         })

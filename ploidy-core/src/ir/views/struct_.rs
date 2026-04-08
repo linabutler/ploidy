@@ -115,11 +115,7 @@ impl<'a> StructView<'a> {
             ancestors
                 .flatten()
                 .filter(move |field| seen.insert(field.name))
-                .map(|field| StructFieldView {
-                    parent: self,
-                    field,
-                    inherited: true,
-                }),
+                .map(|field| StructFieldView::new(self, field, true)),
             // Own fields.
             self.own_fields(),
         )
@@ -129,11 +125,10 @@ impl<'a> StructView<'a> {
     /// excluding inherited fields.
     #[inline]
     pub fn own_fields(&self) -> impl Iterator<Item = StructFieldView<'_, 'a>> {
-        self.ty.fields.iter().map(move |field| StructFieldView {
-            parent: self,
-            field,
-            inherited: false,
-        })
+        self.ty
+            .fields
+            .iter()
+            .map(move |field| StructFieldView::new(self, field, false))
     }
 
     /// Returns an iterator over immediate parent types from `allOf`,
@@ -160,14 +155,31 @@ impl<'a> ViewNode<'a> for StructView<'a> {
 }
 
 /// A graph-aware view of a [struct field][GraphStructField].
+pub type StructFieldView<'view, 'a> = FieldView<'view, 'a, StructView<'a>>;
+
+/// A graph-aware view of a struct or union field.
 #[derive(Debug)]
-pub struct StructFieldView<'view, 'a> {
-    parent: &'view StructView<'a>,
+pub struct FieldView<'view, 'a, P> {
+    parent: &'view P,
     field: &'a GraphStructField<'a>,
     inherited: bool,
 }
 
-impl<'view, 'a> StructFieldView<'view, 'a> {
+#[allow(private_bounds, reason = "`ViewNode` is sealed")]
+impl<'view, 'a, P: ViewNode<'a>> FieldView<'view, 'a, P> {
+    #[inline]
+    pub(in crate::ir) fn new(
+        parent: &'view P,
+        field: &'a GraphStructField<'a>,
+        inherited: bool,
+    ) -> Self {
+        Self {
+            parent,
+            field,
+            inherited,
+        }
+    }
+
     /// Returns the field name.
     #[inline]
     pub fn name(&self) -> StructFieldName<'a> {
@@ -177,7 +189,7 @@ impl<'view, 'a> StructFieldView<'view, 'a> {
     /// Returns a view of the inner type that this type wraps.
     #[inline]
     pub fn ty(&self) -> TypeView<'a> {
-        TypeView::new(self.parent.cooked, self.field.ty)
+        TypeView::new(self.parent.cooked(), self.field.ty)
     }
 
     /// Returns `true` if this field is listed in `required`.
@@ -192,6 +204,21 @@ impl<'view, 'a> StructFieldView<'view, 'a> {
         self.field.description
     }
 
+    /// Returns `true` if this field is flattened from an
+    /// `anyOf` parent.
+    #[inline]
+    pub fn flattened(&self) -> bool {
+        self.field.flattened
+    }
+}
+
+impl<'view, 'a> FieldView<'view, 'a, StructView<'a>> {
+    /// Returns `true` if this field was inherited from a parent via `allOf`.
+    #[inline]
+    pub fn inherited(&self) -> bool {
+        self.inherited
+    }
+
     /// Returns `true` if this field is a tag.
     ///
     /// A field is a tag if it matches the tag of a tagged union
@@ -201,11 +228,11 @@ impl<'view, 'a> StructFieldView<'view, 'a> {
         let StructFieldName::Name(name) = self.field.name else {
             return false;
         };
-        self.parent
-            .cooked
+        let cooked = self.parent.cooked();
+        cooked
             .graph
-            .neighbors_directed(self.parent.index, Direction::Incoming)
-            .filter_map(|index| match self.parent.cooked.graph[index] {
+            .neighbors_directed(self.parent.index(), Direction::Incoming)
+            .filter_map(|index| match cooked.graph[index] {
                 GraphType::Schema(GraphSchemaType::Tagged(_, tagged))
                 | GraphType::Inline(GraphInlineType::Tagged(_, tagged)) => Some(tagged),
                 _ => None,
@@ -213,27 +240,14 @@ impl<'view, 'a> StructFieldView<'view, 'a> {
             .any(|neighbor| neighbor.tag == name)
     }
 
-    /// Returns `true` if this field is flattened from an
-    /// `anyOf` parent.
-    #[inline]
-    pub fn flattened(&self) -> bool {
-        self.field.flattened
-    }
-
-    /// Returns `true` if this field was inherited from a parent via `allOf`.
-    #[inline]
-    pub fn inherited(&self) -> bool {
-        self.inherited
-    }
-
     /// Returns `true` if this field needs indirection to break a cycle.
     ///
     /// A field needs indirection if its target type is in the same strongly
-    /// connected component as the struct that contains it.
+    /// connected component as the type that contains it.
     #[inline]
     pub fn needs_indirection(&self) -> bool {
-        let graph = self.parent.cooked;
-        graph.metadata.scc_indices[self.parent.index.index()]
+        let graph = self.parent.cooked();
+        graph.metadata.scc_indices[self.parent.index().index()]
             == graph.metadata.scc_indices[self.field.ty.index()]
     }
 }

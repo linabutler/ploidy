@@ -91,7 +91,7 @@ pub trait View<'a> {
         &self,
         reach: Reach,
         filter: F,
-    ) -> impl Iterator<Item = TypeView<'a>> + use<'a, Self, F>
+    ) -> impl Iterator<Item = (EdgeKind, TypeView<'a>)> + use<'a, Self, F>
     where
         F: Fn(EdgeKind, &TypeView<'a>) -> Traversal;
 }
@@ -165,7 +165,7 @@ where
         &self,
         reach: Reach,
         filter: F,
-    ) -> impl Iterator<Item = TypeView<'a>> + use<'a, T, F>
+    ) -> impl Iterator<Item = (EdgeKind, TypeView<'a>)> + use<'a, T, F>
     where
         F: Fn(EdgeKind, &TypeView<'a>) -> Traversal,
     {
@@ -182,7 +182,7 @@ where
             let view = TypeView::new(cooked, index);
             filter(kind, &view)
         })
-        .map(|index| TypeView::new(cooked, index))
+        .map(|(kind, index)| (kind, TypeView::new(cooked, index)))
     }
 }
 

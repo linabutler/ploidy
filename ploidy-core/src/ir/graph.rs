@@ -925,7 +925,10 @@ impl<'a> Traverse<'a> {
         }
     }
 
-    pub fn run<F>(mut self, filter: F) -> impl Iterator<Item = NodeIndex<usize>> + use<'a, F>
+    pub fn run<F>(
+        mut self,
+        filter: F,
+    ) -> impl Iterator<Item = (EdgeKind, NodeIndex<usize>)> + use<'a, F>
     where
         F: Fn(EdgeKind, NodeIndex<usize>) -> Traversal,
     {
@@ -943,7 +946,7 @@ impl<'a> Traverse<'a> {
                 }
 
                 if matches!(traversal, Traversal::Visit | Traversal::Stop) {
-                    return Some(index);
+                    return Some((kind, index));
                 }
 
                 // `Skip` and `Ignore` continue the loop without yielding.

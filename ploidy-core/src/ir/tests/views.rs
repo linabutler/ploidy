@@ -801,7 +801,7 @@ fn test_traverse_skip_excludes_node_but_continues_traversal() {
                 _ => Traversal::Visit,
             }
         })
-        .filter_map(|view| match view {
+        .filter_map(|(_, view)| match view {
             TypeView::Schema(s) => Some(s.name()),
             _ => None,
         })
@@ -855,7 +855,7 @@ fn test_traverse_stop_includes_node_but_stops_traversal() {
                 _ => Traversal::Visit,
             }
         })
-        .filter_map(|view| match view {
+        .filter_map(|(_, view)| match view {
             TypeView::Schema(s) => Some(s.name()),
             _ => None,
         })
@@ -908,7 +908,7 @@ fn test_traverse_ignore_excludes_node_and_stops_traversal() {
                 _ => Traversal::Visit,
             }
         })
-        .filter_map(|view| match view {
+        .filter_map(|(_, view)| match view {
             TypeView::Schema(s) => Some(s.name()),
             _ => None,
         })
@@ -958,7 +958,7 @@ fn test_traverse_dependents_yields_types_that_depend_on_node() {
             assert_eq!(kind, EdgeKind::Reference);
             Traversal::Visit
         })
-        .filter_map(|view| match view {
+        .filter_map(|(_, view)| match view {
             TypeView::Schema(s) => Some(s.name()),
             _ => None,
         })
@@ -1010,7 +1010,7 @@ fn test_traverse_filter_on_edge_kind() {
             EdgeKind::Inherits => Traversal::Visit,
             EdgeKind::Reference => Traversal::Ignore,
         })
-        .filter_map(|view| match view {
+        .filter_map(|(_, view)| match view {
             TypeView::Schema(s) => Some(s.name()),
             _ => None,
         })
@@ -1023,7 +1023,7 @@ fn test_traverse_filter_on_edge_kind() {
             EdgeKind::Reference => Traversal::Visit,
             EdgeKind::Inherits => Traversal::Ignore,
         })
-        .filter_map(|view| match view {
+        .filter_map(|(_, view)| match view {
             TypeView::Schema(s) => Some(s.name()),
             _ => None,
         })

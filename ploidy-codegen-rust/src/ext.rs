@@ -14,11 +14,51 @@ pub(crate) trait ViewExt {
 
 impl<'a, T: View<'a>> ViewExt for T {
     fn hashable(&self) -> bool {
-        self.dependencies().all(|view| match view {
-            TypeView::Inline(InlineTypeView::Primitive(_, view))
-            | TypeView::Schema(SchemaTypeView::Primitive(_, view)) => {
-                !matches!(view.ty(), PrimitiveType::F32 | PrimitiveType::F64)
-            }
+        self.traverse(Reach::Dependencies, |kind, view| match kind {
+            EdgeKind::Inherits => match view {
+                // A tagged or untagged variant "is-a" member of a union,
+                // it doesn't "have-a" union. Yield the union itself
+                // to check its common fields, but don't explore its
+                // other variants.
+                TypeView::Schema(SchemaTypeView::Tagged(..) | SchemaTypeView::Untagged(..))
+                | TypeView::Inline(InlineTypeView::Tagged(..) | InlineTypeView::Untagged(..)) => {
+                    Traversal::Stop
+                }
+
+                // For other parent types (e.g., structs), skip the type
+                // itself, but explore its neighbors.
+                _ => Traversal::Skip,
+            },
+            EdgeKind::Reference => Traversal::Visit,
+        })
+        .all(|(kind, view)| match (kind, view) {
+            // We're a variant, and this is our union.
+            // Check the common fields that we inherit.
+            (
+                EdgeKind::Inherits,
+                TypeView::Schema(SchemaTypeView::Tagged(_, tagged))
+                | TypeView::Inline(InlineTypeView::Tagged(_, tagged)),
+            ) => tagged
+                .fields()
+                .map(|f| UnionFieldTypeExt(f.ty()))
+                .all(|v| v.hashable()),
+            (
+                EdgeKind::Inherits,
+                TypeView::Schema(SchemaTypeView::Untagged(_, untagged))
+                | TypeView::Inline(InlineTypeView::Untagged(_, untagged)),
+            ) => untagged
+                .fields()
+                .map(|f| UnionFieldTypeExt(f.ty()))
+                .all(|v| v.hashable()),
+
+            // Floating-point numbers aren't `Eq` or `Hash`. If we
+            // transitively contain one, we aren't hashable.
+            (
+                EdgeKind::Reference,
+                TypeView::Inline(InlineTypeView::Primitive(_, p))
+                | TypeView::Schema(SchemaTypeView::Primitive(_, p)),
+            ) if matches!(p.ty(), PrimitiveType::F32 | PrimitiveType::F64) => false,
+
             _ => true,
         })
     }
@@ -45,40 +85,112 @@ impl<'a, T: View<'a>> ViewExt for T {
                     // its fields to determine which ones are defaultable.
                     Traversal::Skip
                 }
+                (
+                    EdgeKind::Inherits,
+                    TypeView::Schema(SchemaTypeView::Tagged(..) | SchemaTypeView::Untagged(..))
+                    | TypeView::Inline(InlineTypeView::Tagged(..) | InlineTypeView::Untagged(..)),
+                ) => {
+                    // A tagged or untagged variant "is-a" member of a union,
+                    // it doesn't "have-a" union. Yield the union itself
+                    // to check its common fields, but don't explore its
+                    // other variants.
+                    Traversal::Stop
+                }
                 (EdgeKind::Inherits, _) => {
-                    // Explore parents to check their defaultability.
+                    // Struct inheritance: explore inherited fields.
                     Traversal::Skip
                 }
                 (EdgeKind::Reference, _) => {
-                    // Any other type that this struct references must be defaultable
-                    // for this struct to derive `Default`.
+                    // Any other type that this struct references must be
+                    // defaultable for this struct to derive `Default`.
                     Traversal::Visit
                 }
             }
         })
-        .all(|view| {
-            match view {
-                // `serde_json::Value` implements `Default`.
-                TypeView::Inline(InlineTypeView::Any(..))
-                | TypeView::Schema(SchemaTypeView::Any(..)) => true,
-                // `Url` doesn't implement `Default`, but other primitives do.
-                TypeView::Inline(InlineTypeView::Primitive(_, prim))
-                | TypeView::Schema(SchemaTypeView::Primitive(_, prim))
-                    if matches!(prim.ty(), PrimitiveType::Url) =>
-                {
-                    false
-                }
-                TypeView::Inline(InlineTypeView::Primitive(..))
-                | TypeView::Schema(SchemaTypeView::Primitive(..)) => true,
-                // Representable enums derive `Default` via their
-                // `Other` variants; unrepresentable enums become
-                // `String` type aliases, which also implement `Default`.
-                TypeView::Inline(InlineTypeView::Enum(..))
-                | TypeView::Schema(SchemaTypeView::Enum(..)) => true,
-                // Other types aren't defaultable.
-                _ => false,
+        .all(|(kind, view)| {
+            match (kind, view) {
+                // We're a variant, and this is our union.
+                // Check the common fields that we inherit.
+                (
+                    EdgeKind::Inherits,
+                    TypeView::Schema(SchemaTypeView::Tagged(_, tagged))
+                    | TypeView::Inline(InlineTypeView::Tagged(_, tagged)),
+                ) => tagged
+                    .fields()
+                    .map(|f| UnionFieldTypeExt(f.ty()))
+                    .all(|f| f.defaultable()),
+                (
+                    EdgeKind::Inherits,
+                    TypeView::Schema(SchemaTypeView::Untagged(_, untagged))
+                    | TypeView::Inline(InlineTypeView::Untagged(_, untagged)),
+                ) => untagged
+                    .fields()
+                    .map(|f| UnionFieldTypeExt(f.ty()))
+                    .all(|f| f.defaultable()),
+
+                // `Url` doesn't implement `Default`. If we transitively
+                // contain one, we aren't defaultable.
+                (
+                    EdgeKind::Reference,
+                    TypeView::Inline(InlineTypeView::Primitive(_, p))
+                    | TypeView::Schema(SchemaTypeView::Primitive(_, p)),
+                ) => !matches!(p.ty(), PrimitiveType::Url),
+
+                // Tagged and untagged unions aren't defaultable. If we
+                // transitively contain one, we aren't defaultable.
+                (
+                    EdgeKind::Reference,
+                    TypeView::Schema(SchemaTypeView::Tagged(..) | SchemaTypeView::Untagged(..))
+                    | TypeView::Inline(InlineTypeView::Tagged(..) | InlineTypeView::Untagged(..)),
+                ) => false,
+
+                _ => true,
             }
         })
+    }
+}
+
+/// Implements [`ViewExt`] for a tagged or untagged union's
+/// common field type.
+#[derive(Debug)]
+struct UnionFieldTypeExt<'a>(TypeView<'a>);
+
+impl<'a> ViewExt for UnionFieldTypeExt<'a> {
+    fn hashable(&self) -> bool {
+        !self
+            .0
+            .dependencies()
+            .chain(std::iter::once(self.0.reborrow()))
+            .any(|view| match view {
+                TypeView::Inline(InlineTypeView::Primitive(_, p))
+                | TypeView::Schema(SchemaTypeView::Primitive(_, p)) => {
+                    matches!(p.ty(), PrimitiveType::F32 | PrimitiveType::F64)
+                }
+                _ => false,
+            })
+    }
+
+    fn defaultable(&self) -> bool {
+        !self
+            .0
+            .dependencies()
+            .chain(std::iter::once(self.0.reborrow()))
+            .any(|view| match view {
+                // `Url` doesn't implement `Default`; all other primitives do.
+                TypeView::Inline(InlineTypeView::Primitive(_, p))
+                | TypeView::Schema(SchemaTypeView::Primitive(_, p)) => {
+                    matches!(p.ty(), PrimitiveType::Url)
+                }
+                // Tagged and untagged unions aren't defaultable;
+                // there's no meaningful default variant.
+                TypeView::Schema(SchemaTypeView::Tagged(..) | SchemaTypeView::Untagged(..))
+                | TypeView::Inline(InlineTypeView::Tagged(..) | InlineTypeView::Untagged(..)) => {
+                    true
+                }
+                // All other types are transparent; their transitive
+                // dependencies determine whether they're defaultable.
+                _ => false,
+            })
     }
 }
 

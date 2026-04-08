@@ -30,10 +30,10 @@ use petgraph::graph::NodeIndex;
 use crate::ir::{
     UntaggedVariantNameHint,
     graph::CookedGraph,
-    types::{GraphStructField, GraphUntagged, GraphUntaggedVariant},
+    types::{GraphUntagged, GraphUntaggedVariant},
 };
 
-use super::{ViewNode, ir::TypeView};
+use super::{ViewNode, ir::TypeView, struct_::FieldView};
 
 /// A graph-aware view of an [untagged union type][GraphUntagged].
 #[derive(Debug)]
@@ -62,8 +62,11 @@ impl<'a> UntaggedView<'a> {
     /// Returns the common fields declared alongside `oneOf`,
     /// shared across all variants.
     #[inline]
-    pub fn fields(&self) -> &'a [GraphStructField<'a>] {
-        self.ty.fields
+    pub fn fields(&self) -> impl Iterator<Item = UntaggedFieldView<'_, 'a>> {
+        self.ty
+            .fields
+            .iter()
+            .map(move |field| UntaggedFieldView::new(self, field, false))
     }
 
     /// Returns an iterator over this untagged union's variants.
@@ -87,6 +90,9 @@ impl<'a> ViewNode<'a> for UntaggedView<'a> {
         self.index
     }
 }
+
+/// A graph-aware view of a common untagged union field.
+pub type UntaggedFieldView<'view, 'a> = FieldView<'view, 'a, UntaggedView<'a>>;
 
 /// A graph-aware view of an [untagged union variant][GraphUntaggedVariant].
 #[derive(Debug)]

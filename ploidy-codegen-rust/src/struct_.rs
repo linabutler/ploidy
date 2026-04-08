@@ -688,6 +688,381 @@ mod tests {
         assert_eq!(actual, expected);
     }
 
+    #[test]
+    fn test_struct_derives_hash_eq_despite_inheriting_from_unhashable_tagged_union() {
+        // `TextAction` inherits from tagged union `Action`, and has
+        // all hashable fields; it should still derive `Eq` and `Hash`
+        // despite its sibling `MetricAction` having unhashable (`f64`) fields.
+        let doc = Document::from_yaml(indoc::indoc! {"
+            openapi: 3.0.0
+            info:
+              title: Test API
+              version: 1.0.0
+            paths: {}
+            components:
+              schemas:
+                TextAction:
+                  type: object
+                  allOf:
+                    - $ref: '#/components/schemas/Action'
+                  properties:
+                    label:
+                      type: string
+                  required:
+                    - label
+                MetricAction:
+                  type: object
+                  properties:
+                    score:
+                      type: number
+                      format: double
+                  required:
+                    - score
+                Action:
+                  oneOf:
+                    - $ref: '#/components/schemas/TextAction'
+                    - $ref: '#/components/schemas/MetricAction'
+                  discriminator:
+                    propertyName: type
+                    mapping:
+                      text: '#/components/schemas/TextAction'
+                      metric: '#/components/schemas/MetricAction'
+        "})
+        .unwrap();
+
+        let arena = Arena::new();
+        let spec = Spec::from_doc(&arena, &doc).unwrap();
+        let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
+
+        let schema = graph.schemas().find(|s| s.name() == "TextAction");
+        let Some(schema @ SchemaTypeView::Struct(_, struct_view)) = &schema else {
+            panic!("expected struct `TextAction`; got `{schema:?}`");
+        };
+
+        let name = CodegenTypeName::Schema(schema);
+        let codegen = CodegenStruct::new(name, struct_view);
+
+        let actual: syn::ItemStruct = parse_quote!(#codegen);
+        let expected: syn::ItemStruct = parse_quote! {
+            #[derive(Debug, Clone, PartialEq, Eq, Hash, Default, ::ploidy_util::serde::Serialize, ::ploidy_util::serde::Deserialize, ::ploidy_util::pointer::JsonPointee, ::ploidy_util::pointer::JsonPointerTarget)]
+            #[serde(crate = "::ploidy_util::serde")]
+            #[ploidy(pointer(crate = "::ploidy_util::pointer"))]
+            pub struct TextAction {
+                pub label: ::std::string::String,
+            }
+        };
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn test_struct_derives_hash_eq_despite_inheriting_from_unhashable_untagged_union() {
+        // `TextAction` inherits from untagged union `Action`, and has
+        // all hashable fields; it should still derive `Eq` and `Hash`
+        // despite its sibling `MetricAction` having unhashable (`f64`) fields.
+        let doc = Document::from_yaml(indoc::indoc! {"
+            openapi: 3.0.0
+            info:
+              title: Test API
+              version: 1.0.0
+            paths: {}
+            components:
+              schemas:
+                TextAction:
+                  type: object
+                  allOf:
+                    - $ref: '#/components/schemas/Action'
+                  properties:
+                    label:
+                      type: string
+                  required:
+                    - label
+                MetricAction:
+                  type: object
+                  properties:
+                    score:
+                      type: number
+                      format: double
+                  required:
+                    - score
+                Action:
+                  oneOf:
+                    - $ref: '#/components/schemas/TextAction'
+                    - $ref: '#/components/schemas/MetricAction'
+        "})
+        .unwrap();
+
+        let arena = Arena::new();
+        let spec = Spec::from_doc(&arena, &doc).unwrap();
+        let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
+
+        let schema = graph.schemas().find(|s| s.name() == "TextAction");
+        let Some(schema @ SchemaTypeView::Struct(_, struct_view)) = &schema else {
+            panic!("expected struct `TextAction`; got `{schema:?}`");
+        };
+
+        let name = CodegenTypeName::Schema(schema);
+        let codegen = CodegenStruct::new(name, struct_view);
+
+        let actual: syn::ItemStruct = parse_quote!(#codegen);
+        let expected: syn::ItemStruct = parse_quote! {
+            #[derive(Debug, Clone, PartialEq, Eq, Hash, Default, ::ploidy_util::serde::Serialize, ::ploidy_util::serde::Deserialize, ::ploidy_util::pointer::JsonPointee, ::ploidy_util::pointer::JsonPointerTarget)]
+            #[serde(crate = "::ploidy_util::serde")]
+            #[ploidy(pointer(crate = "::ploidy_util::pointer"))]
+            pub struct TextAction {
+                pub label: ::std::string::String,
+            }
+        };
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn test_struct_omits_hash_eq_when_inheriting_unhashable_field_from_tagged_union() {
+        // `TextAction` inherits from tagged union `Action`, which declares
+        // common field `score: f64`, so neither `Action` nor `TextAction`
+        // can derive `Eq` or `Hash`.
+        let doc = Document::from_yaml(indoc::indoc! {"
+            openapi: 3.0.0
+            info:
+              title: Test API
+              version: 1.0.0
+            paths: {}
+            components:
+              schemas:
+                TextAction:
+                  type: object
+                  allOf:
+                    - $ref: '#/components/schemas/Action'
+                  properties:
+                    label:
+                      type: string
+                  required:
+                    - label
+                MetricAction:
+                  type: object
+                  properties:
+                    value:
+                      type: string
+                  required:
+                    - value
+                Action:
+                  oneOf:
+                    - $ref: '#/components/schemas/TextAction'
+                    - $ref: '#/components/schemas/MetricAction'
+                  discriminator:
+                    propertyName: type
+                    mapping:
+                      text: '#/components/schemas/TextAction'
+                      metric: '#/components/schemas/MetricAction'
+                  properties:
+                    type:
+                      type: string
+                    score:
+                      type: number
+                      format: double
+                  required:
+                    - type
+                    - score
+        "})
+        .unwrap();
+
+        let arena = Arena::new();
+        let spec = Spec::from_doc(&arena, &doc).unwrap();
+        let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
+
+        let schema = graph.schemas().find(|s| s.name() == "TextAction");
+        let Some(schema @ SchemaTypeView::Struct(_, struct_view)) = &schema else {
+            panic!("expected struct `TextAction`; got `{schema:?}`");
+        };
+
+        let name = CodegenTypeName::Schema(schema);
+        let codegen = CodegenStruct::new(name, struct_view);
+
+        let actual: syn::ItemStruct = parse_quote!(#codegen);
+        let expected: syn::ItemStruct = parse_quote! {
+            #[derive(Debug, Clone, PartialEq, Default, ::ploidy_util::serde::Serialize, ::ploidy_util::serde::Deserialize, ::ploidy_util::pointer::JsonPointee, ::ploidy_util::pointer::JsonPointerTarget)]
+            #[serde(crate = "::ploidy_util::serde")]
+            #[ploidy(pointer(crate = "::ploidy_util::pointer"))]
+            pub struct TextAction {
+                pub score: f64,
+                pub label: ::std::string::String,
+            }
+        };
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn test_struct_omits_hash_eq_when_inheriting_unhashable_field_from_untagged_union() {
+        // `TextAction` inherits from untagged union `Action`, which declares
+        // common field `score: f64`, so neither `Action` nor `TextAction`
+        // can derive `Eq` or `Hash`.
+        let doc = Document::from_yaml(indoc::indoc! {"
+            openapi: 3.0.0
+            info:
+              title: Test API
+              version: 1.0.0
+            paths: {}
+            components:
+              schemas:
+                TextAction:
+                  type: object
+                  allOf:
+                    - $ref: '#/components/schemas/Action'
+                  properties:
+                    label:
+                      type: string
+                  required:
+                    - label
+                MetricAction:
+                  type: object
+                  properties:
+                    value:
+                      type: string
+                  required:
+                    - value
+                Action:
+                  oneOf:
+                    - $ref: '#/components/schemas/TextAction'
+                    - $ref: '#/components/schemas/MetricAction'
+                  properties:
+                    score:
+                      type: number
+                      format: double
+                  required:
+                    - score
+        "})
+        .unwrap();
+
+        let arena = Arena::new();
+        let spec = Spec::from_doc(&arena, &doc).unwrap();
+        let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
+
+        let schema = graph.schemas().find(|s| s.name() == "TextAction");
+        let Some(schema @ SchemaTypeView::Struct(_, struct_view)) = &schema else {
+            panic!("expected struct `TextAction`; got `{schema:?}`");
+        };
+
+        let name = CodegenTypeName::Schema(schema);
+        let codegen = CodegenStruct::new(name, struct_view);
+
+        let actual: syn::ItemStruct = parse_quote!(#codegen);
+        let expected: syn::ItemStruct = parse_quote! {
+            #[derive(Debug, Clone, PartialEq, Default, ::ploidy_util::serde::Serialize, ::ploidy_util::serde::Deserialize, ::ploidy_util::pointer::JsonPointee, ::ploidy_util::pointer::JsonPointerTarget)]
+            #[serde(crate = "::ploidy_util::serde")]
+            #[ploidy(pointer(crate = "::ploidy_util::pointer"))]
+            pub struct TextAction {
+                pub score: f64,
+                pub label: ::std::string::String,
+            }
+        };
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn test_struct_pessimistically_omits_hash_eq_when_union_common_field_inherits_from_unhashable_union()
+     {
+        // `TextAction` inherits from tagged union `Action`, which declares
+        // common field `metadata: ActionMetadata`. `ActionMetadata`
+        // inherits from a different tagged union `MetadataKind`, whose
+        // variant `NumericMetadata` has `f64`.
+        //
+        // `TextAction` _could_ derive `Eq` and `Hash` because
+        // neither it nor `ActionMetadata` directly contain floats.
+        // However, `UnionFieldTypeExt` checks all transitive edges,
+        // so it can't distinguish inheritance and reference edges,
+        // and conservatively treats `ActionMetadata` as unhashable.
+        let doc = Document::from_yaml(indoc::indoc! {"
+            openapi: 3.0.0
+            info:
+              title: Test API
+              version: 1.0.0
+            paths: {}
+            components:
+              schemas:
+                TextAction:
+                  type: object
+                  allOf:
+                    - $ref: '#/components/schemas/Action'
+                  properties:
+                    label:
+                      type: string
+                  required:
+                    - label
+                MetricAction:
+                  type: object
+                  properties:
+                    value:
+                      type: string
+                  required:
+                    - value
+                Action:
+                  oneOf:
+                    - $ref: '#/components/schemas/TextAction'
+                    - $ref: '#/components/schemas/MetricAction'
+                  discriminator:
+                    propertyName: type
+                    mapping:
+                      text: '#/components/schemas/TextAction'
+                      metric: '#/components/schemas/MetricAction'
+                  properties:
+                    metadata:
+                      $ref: '#/components/schemas/ActionMetadata'
+                  required:
+                    - type
+                    - metadata
+                ActionMetadata:
+                  type: object
+                  allOf:
+                    - $ref: '#/components/schemas/MetadataKind'
+                  properties:
+                    timestamp:
+                      type: string
+                  required:
+                    - timestamp
+                NumericMetadata:
+                  type: object
+                  properties:
+                    score:
+                      type: number
+                      format: double
+                  required:
+                    - score
+                MetadataKind:
+                  oneOf:
+                    - $ref: '#/components/schemas/ActionMetadata'
+                    - $ref: '#/components/schemas/NumericMetadata'
+                  discriminator:
+                    propertyName: kind
+                    mapping:
+                      action: '#/components/schemas/ActionMetadata'
+                      numeric: '#/components/schemas/NumericMetadata'
+        "})
+        .unwrap();
+
+        let arena = Arena::new();
+        let spec = Spec::from_doc(&arena, &doc).unwrap();
+        let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
+
+        let schema = graph.schemas().find(|s| s.name() == "TextAction");
+        let Some(schema @ SchemaTypeView::Struct(_, struct_view)) = &schema else {
+            panic!("expected struct `TextAction`; got `{schema:?}`");
+        };
+
+        let name = CodegenTypeName::Schema(schema);
+        let codegen = CodegenStruct::new(name, struct_view);
+
+        let actual: syn::ItemStruct = parse_quote!(#codegen);
+        let expected: syn::ItemStruct = parse_quote! {
+            #[derive(Debug, Clone, PartialEq, ::ploidy_util::serde::Serialize, ::ploidy_util::serde::Deserialize, ::ploidy_util::pointer::JsonPointee, ::ploidy_util::pointer::JsonPointerTarget)]
+            #[serde(crate = "::ploidy_util::serde")]
+            #[ploidy(pointer(crate = "::ploidy_util::pointer"))]
+            pub struct TextAction {
+                pub metadata: crate::types::ActionMetadata,
+                pub label: ::std::string::String,
+            }
+        };
+        assert_eq!(actual, expected);
+    }
+
     // MARK: `Default`
 
     #[test]
@@ -1470,6 +1845,133 @@ mod tests {
                 pub source: ::ploidy_util::url::Url,
                 #[serde(default, skip_serializing_if = "::ploidy_util::absent::AbsentOr::is_absent")]
                 pub name: ::ploidy_util::absent::AbsentOr<::std::string::String>,
+            }
+        };
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn test_struct_derives_default_despite_inheriting_from_non_defaultable_tagged_union() {
+        // `TextAction` inherits from tagged union `Action`, and has
+        // all defaultable fields; it should still derive `Default`
+        // despite its sibling `LinkAction` having non-defaultable
+        // (`Url`) fields.
+        let doc = Document::from_yaml(indoc::indoc! {"
+            openapi: 3.0.0
+            info:
+              title: Test API
+              version: 1.0.0
+            paths: {}
+            components:
+              schemas:
+                TextAction:
+                  type: object
+                  allOf:
+                    - $ref: '#/components/schemas/Action'
+                  properties:
+                    label:
+                      type: string
+                LinkAction:
+                  type: object
+                  properties:
+                    url:
+                      type: string
+                      format: uri
+                  required:
+                    - url
+                Action:
+                  oneOf:
+                    - $ref: '#/components/schemas/TextAction'
+                    - $ref: '#/components/schemas/LinkAction'
+                  discriminator:
+                    propertyName: type
+                    mapping:
+                      text: '#/components/schemas/TextAction'
+                      link: '#/components/schemas/LinkAction'
+        "})
+        .unwrap();
+
+        let arena = Arena::new();
+        let spec = Spec::from_doc(&arena, &doc).unwrap();
+        let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
+
+        let schema = graph.schemas().find(|s| s.name() == "TextAction");
+        let Some(schema @ SchemaTypeView::Struct(_, struct_view)) = &schema else {
+            panic!("expected struct `TextAction`; got `{schema:?}`");
+        };
+
+        let name = CodegenTypeName::Schema(schema);
+        let codegen = CodegenStruct::new(name, struct_view);
+
+        let actual: syn::ItemStruct = parse_quote!(#codegen);
+        let expected: syn::ItemStruct = parse_quote! {
+            #[derive(Debug, Clone, PartialEq, Eq, Hash, Default, ::ploidy_util::serde::Serialize, ::ploidy_util::serde::Deserialize, ::ploidy_util::pointer::JsonPointee, ::ploidy_util::pointer::JsonPointerTarget)]
+            #[serde(crate = "::ploidy_util::serde")]
+            #[ploidy(pointer(crate = "::ploidy_util::pointer"))]
+            pub struct TextAction {
+                #[serde(default, skip_serializing_if = "::ploidy_util::absent::AbsentOr::is_absent")]
+                pub label: ::ploidy_util::absent::AbsentOr<::std::string::String>,
+            }
+        };
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn test_struct_derives_default_despite_inheriting_from_non_defaultable_untagged_union() {
+        // `TextAction` inherits from untagged union `Action`, and has
+        // all defaultable fields; it should still derive `Default`
+        // despite its sibling `LinkAction` having non-defaultable
+        // (`Url`) fields.
+        let doc = Document::from_yaml(indoc::indoc! {"
+            openapi: 3.0.0
+            info:
+              title: Test API
+              version: 1.0.0
+            paths: {}
+            components:
+              schemas:
+                TextAction:
+                  type: object
+                  allOf:
+                    - $ref: '#/components/schemas/Action'
+                  properties:
+                    label:
+                      type: string
+                LinkAction:
+                  type: object
+                  properties:
+                    url:
+                      type: string
+                      format: uri
+                  required:
+                    - url
+                Action:
+                  oneOf:
+                    - $ref: '#/components/schemas/TextAction'
+                    - $ref: '#/components/schemas/LinkAction'
+        "})
+        .unwrap();
+
+        let arena = Arena::new();
+        let spec = Spec::from_doc(&arena, &doc).unwrap();
+        let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
+
+        let schema = graph.schemas().find(|s| s.name() == "TextAction");
+        let Some(schema @ SchemaTypeView::Struct(_, struct_view)) = &schema else {
+            panic!("expected struct `TextAction`; got `{schema:?}`");
+        };
+
+        let name = CodegenTypeName::Schema(schema);
+        let codegen = CodegenStruct::new(name, struct_view);
+
+        let actual: syn::ItemStruct = parse_quote!(#codegen);
+        let expected: syn::ItemStruct = parse_quote! {
+            #[derive(Debug, Clone, PartialEq, Eq, Hash, Default, ::ploidy_util::serde::Serialize, ::ploidy_util::serde::Deserialize, ::ploidy_util::pointer::JsonPointee, ::ploidy_util::pointer::JsonPointerTarget)]
+            #[serde(crate = "::ploidy_util::serde")]
+            #[ploidy(pointer(crate = "::ploidy_util::pointer"))]
+            pub struct TextAction {
+                #[serde(default, skip_serializing_if = "::ploidy_util::absent::AbsentOr::is_absent")]
+                pub label: ::ploidy_util::absent::AbsentOr<::std::string::String>,
             }
         };
         assert_eq!(actual, expected);

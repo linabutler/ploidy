@@ -7,7 +7,7 @@
 
 use petgraph::graph::NodeIndex;
 
-use crate::ir::{graph::CookedGraph, types::GraphType};
+use crate::ir::{graph::CookedGraph, types::GraphType, views::ViewNode};
 
 use super::{View, container::ContainerView, inline::InlineTypeView, schema::SchemaTypeView};
 
@@ -56,5 +56,14 @@ impl<'a> TypeView<'a> {
             Self::Schema(v) => v.dependencies(),
             Self::Inline(v) => v.dependencies(),
         })
+    }
+
+    /// Reborrows this view with a shorter lifetime.
+    #[inline]
+    pub fn reborrow(&self) -> TypeView<'_> {
+        match self {
+            Self::Schema(v) => TypeView::new(v.cooked(), v.index()),
+            Self::Inline(v) => TypeView::new(v.cooked(), v.index()),
+        }
     }
 }

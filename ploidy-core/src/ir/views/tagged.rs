@@ -37,10 +37,10 @@ use petgraph::graph::NodeIndex;
 
 use crate::ir::{
     graph::CookedGraph,
-    types::{GraphStructField, GraphTagged, GraphTaggedVariant},
+    types::{GraphTagged, GraphTaggedVariant},
 };
 
-use super::{ViewNode, ir::TypeView};
+use super::{ViewNode, ir::TypeView, struct_::FieldView};
 
 /// A graph-aware view of a [tagged union type][GraphTagged].
 #[derive(Debug)]
@@ -75,8 +75,11 @@ impl<'a> TaggedView<'a> {
     /// Returns the common fields declared alongside `oneOf`,
     /// shared across all variants.
     #[inline]
-    pub fn fields(&self) -> &'a [GraphStructField<'a>] {
-        self.ty.fields
+    pub fn fields(&self) -> impl Iterator<Item = TaggedFieldView<'_, 'a>> {
+        self.ty
+            .fields
+            .iter()
+            .map(move |field| TaggedFieldView::new(self, field, false))
     }
 
     /// Returns an iterator over this tagged union's variants.
@@ -100,6 +103,9 @@ impl<'a> ViewNode<'a> for TaggedView<'a> {
         self.index
     }
 }
+
+/// A graph-aware view of a common tagged union field.
+pub type TaggedFieldView<'view, 'a> = FieldView<'view, 'a, TaggedView<'a>>;
 
 /// A graph-aware view of a [tagged union variant][GraphTaggedVariant].
 #[derive(Debug)]
