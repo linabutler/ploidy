@@ -2,9 +2,10 @@
 
 use petgraph::graph::NodeIndex;
 
-use super::shape::{
-    Container, InlineType, Inner, Operation, Parameter, ParameterInfo, Request, Response,
-    SchemaType, Struct, StructField, Tagged, TaggedVariant, Untagged, UntaggedVariant,
+use super::{
+    Enum, InlineTypePath, PrimitiveType, SchemaTypeInfo, StructFieldName, UntaggedVariantNameHint,
+    shape::{Operation, Parameter, ParameterInfo, Request, Response},
+    spec::{SpecContainer, SpecInlineType, SpecSchemaType},
 };
 
 /// A type in the dependency graph.
@@ -14,36 +15,212 @@ pub enum GraphType<'a> {
     Inline(GraphInlineType<'a>),
 }
 
-/// A named schema type with graph node references.
-pub type GraphSchemaType<'a> = SchemaType<'a, NodeIndex<usize>>;
+/// A named schema type in the graph.
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub enum GraphSchemaType<'a> {
+    /// An enum with named variants.
+    Enum(SchemaTypeInfo<'a>, Enum<'a>),
+    /// A struct with fields.
+    Struct(SchemaTypeInfo<'a>, GraphStruct<'a>),
+    /// A tagged union.
+    Tagged(SchemaTypeInfo<'a>, GraphTagged<'a>),
+    /// An untagged union.
+    Untagged(SchemaTypeInfo<'a>, GraphUntagged<'a>),
+    /// A named container.
+    Container(SchemaTypeInfo<'a>, GraphContainer<'a>),
+    /// A primitive type.
+    Primitive(SchemaTypeInfo<'a>, PrimitiveType),
+    /// Any JSON value.
+    Any(SchemaTypeInfo<'a>),
+}
 
-/// An array, map, or optional type with graph node references.
-pub type GraphContainer<'a> = Container<'a, NodeIndex<usize>>;
+impl<'a> GraphSchemaType<'a> {
+    #[inline]
+    pub fn name(&self) -> &'a str {
+        let (Self::Enum(info, ..)
+        | Self::Struct(info, ..)
+        | Self::Tagged(info, ..)
+        | Self::Untagged(info, ..)
+        | Self::Container(info, ..)
+        | Self::Primitive(info, ..)
+        | Self::Any(info)) = self;
+        info.name
+    }
 
-/// A struct type with graph node references.
-pub type GraphStruct<'a> = Struct<'a, NodeIndex<usize>>;
+    #[inline]
+    pub fn resource(&self) -> Option<&'a str> {
+        let (Self::Enum(info, ..)
+        | Self::Struct(info, ..)
+        | Self::Tagged(info, ..)
+        | Self::Untagged(info, ..)
+        | Self::Container(info, ..)
+        | Self::Primitive(info, ..)
+        | Self::Any(info)) = self;
+        info.resource
+    }
+}
 
-/// A struct field with graph node references.
-pub type GraphStructField<'a> = StructField<'a, NodeIndex<usize>>;
+impl<'a> From<SpecSchemaType<'a>> for GraphSchemaType<'a> {
+    fn from(spec: SpecSchemaType<'a>) -> Self {
+        match spec {
+            SpecSchemaType::Enum(info, e) => Self::Enum(info, e),
+            SpecSchemaType::Struct(info, s) => Self::Struct(
+                info,
+                GraphStruct {
+                    description: s.description,
+                },
+            ),
+            SpecSchemaType::Tagged(info, t) => Self::Tagged(
+                info,
+                GraphTagged {
+                    description: t.description,
+                    tag: t.tag,
+                },
+            ),
+            SpecSchemaType::Untagged(info, u) => Self::Untagged(
+                info,
+                GraphUntagged {
+                    description: u.description,
+                },
+            ),
+            SpecSchemaType::Container(info, c) => Self::Container(info, c.into()),
+            SpecSchemaType::Primitive(info, p) => Self::Primitive(info, p),
+            SpecSchemaType::Any(info) => Self::Any(info),
+        }
+    }
+}
 
-/// A tagged union with graph node references.
-pub type GraphTagged<'a> = Tagged<'a, NodeIndex<usize>>;
+/// An inline type in the graph.
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub enum GraphInlineType<'a> {
+    Enum(InlineTypePath<'a>, Enum<'a>),
+    Struct(InlineTypePath<'a>, GraphStruct<'a>),
+    Tagged(InlineTypePath<'a>, GraphTagged<'a>),
+    Untagged(InlineTypePath<'a>, GraphUntagged<'a>),
+    Container(InlineTypePath<'a>, GraphContainer<'a>),
+    Primitive(InlineTypePath<'a>, PrimitiveType),
+    Any(InlineTypePath<'a>),
+}
 
-/// A variant of a tagged union with graph node references.
-pub type GraphTaggedVariant<'a> = TaggedVariant<'a, NodeIndex<usize>>;
+impl<'a> GraphInlineType<'a> {
+    #[inline]
+    pub fn path(&self) -> &InlineTypePath<'a> {
+        let (Self::Enum(path, _)
+        | Self::Struct(path, _)
+        | Self::Tagged(path, _)
+        | Self::Untagged(path, _)
+        | Self::Container(path, _)
+        | Self::Primitive(path, _)
+        | Self::Any(path)) = self;
+        path
+    }
+}
 
-/// An untagged union with graph node references.
-pub type GraphUntagged<'a> = Untagged<'a, NodeIndex<usize>>;
+impl<'a> From<SpecInlineType<'a>> for GraphInlineType<'a> {
+    fn from(spec: SpecInlineType<'a>) -> Self {
+        match spec {
+            SpecInlineType::Enum(path, e) => Self::Enum(path, e),
+            SpecInlineType::Struct(path, s) => Self::Struct(
+                path,
+                GraphStruct {
+                    description: s.description,
+                },
+            ),
+            SpecInlineType::Tagged(path, t) => Self::Tagged(
+                path,
+                GraphTagged {
+                    description: t.description,
+                    tag: t.tag,
+                },
+            ),
+            SpecInlineType::Untagged(path, u) => Self::Untagged(
+                path,
+                GraphUntagged {
+                    description: u.description,
+                },
+            ),
+            SpecInlineType::Container(path, c) => Self::Container(path, c.into()),
+            SpecInlineType::Primitive(path, p) => Self::Primitive(path, p),
+            SpecInlineType::Any(path) => Self::Any(path),
+        }
+    }
+}
 
-/// A variant of an untagged union with graph node references.
-pub type GraphUntaggedVariant = UntaggedVariant<NodeIndex<usize>>;
+/// A struct in the graph.
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub struct GraphStruct<'a> {
+    pub description: Option<&'a str>,
+}
 
-/// An inline type with graph node references.
-pub type GraphInlineType<'a> = InlineType<'a, NodeIndex<usize>>;
+/// A tagged union in the graph.
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub struct GraphTagged<'a> {
+    pub description: Option<&'a str>,
+    pub tag: &'a str,
+}
 
-/// The type contained within an array, map, or optional type,
-/// with graph node references.
-pub type GraphInner<'a> = Inner<'a, NodeIndex<usize>>;
+/// An untagged union in the graph.
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub struct GraphUntagged<'a> {
+    pub description: Option<&'a str>,
+}
+
+/// A container in the graph.
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub enum GraphContainer<'a> {
+    Array { description: Option<&'a str> },
+    Map { description: Option<&'a str> },
+    Optional { description: Option<&'a str> },
+}
+
+impl<'a> From<SpecContainer<'a>> for GraphContainer<'a> {
+    fn from(spec: SpecContainer<'a>) -> Self {
+        match spec {
+            SpecContainer::Array(inner) => Self::Array {
+                description: inner.description,
+            },
+            SpecContainer::Map(inner) => Self::Map {
+                description: inner.description,
+            },
+            SpecContainer::Optional(inner) => Self::Optional {
+                description: inner.description,
+            },
+        }
+    }
+}
+
+/// Metadata for a struct or union field.
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub struct FieldMeta<'a> {
+    pub name: StructFieldName<'a>,
+    pub required: bool,
+    pub description: Option<&'a str>,
+    pub flattened: bool,
+}
+
+/// Metadata for a tagged or untagged union variant.
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub enum VariantMeta<'a> {
+    /// A tagged union variant with a discriminator.
+    Tagged(TaggedVariantMeta<'a>),
+    /// An untagged union variant with a name hint.
+    Untagged(UntaggedVariantNameHint),
+    /// A variant without an associated type.
+    Unit,
+}
+
+impl<'a> From<TaggedVariantMeta<'a>> for VariantMeta<'a> {
+    fn from(meta: TaggedVariantMeta<'a>) -> Self {
+        Self::Tagged(meta)
+    }
+}
+
+/// Metadata for a tagged union variant.
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub struct TaggedVariantMeta<'a> {
+    pub name: &'a str,
+    pub aliases: &'a [&'a str],
+}
 
 /// An operation with graph node references.
 pub type GraphOperation<'a> = Operation<'a, NodeIndex<usize>>;

@@ -1,6 +1,4 @@
-use ploidy_core::ir::{
-    InlineTypeView, PrimitiveType, SchemaTypeView, SomeUntaggedVariant, TypeView, UntaggedView,
-};
+use ploidy_core::ir::{UntaggedView, View};
 use proc_macro2::TokenStream;
 use quote::{ToTokens, TokenStreamExt, quote};
 
@@ -42,20 +40,9 @@ impl ToTokens for CodegenUntagged<'_> {
         let doc_attrs = self.ty.description().map(doc_attrs);
 
         let mut extra_derives = vec![];
-        let is_hashable = self.ty.variants().all(|variant| match variant.ty() {
-            Some(SomeUntaggedVariant { view, .. }) => view
-                .dependencies()
-                .chain(std::iter::once(view))
-                .all(|view| match view {
-                    TypeView::Inline(InlineTypeView::Primitive(_, view))
-                    | TypeView::Schema(SchemaTypeView::Primitive(_, view)) => {
-                        !matches!(view.ty(), PrimitiveType::F32 | PrimitiveType::F64)
-                    }
-                    _ => true,
-                }),
-            None => true,
-        });
-        if is_hashable {
+
+        // Derive `Eq` and `Hash` if all variants are transitively hashable.
+        if self.ty.hashable() {
             extra_derives.push(ExtraDerive::Eq);
             extra_derives.push(ExtraDerive::Hash);
         }

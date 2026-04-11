@@ -207,7 +207,7 @@ impl<'context, 'a> IrTransformer<'context, 'a> {
             | [SpecUntaggedVariant::Null, SpecUntaggedVariant::Some(_, ty)] => {
                 let container = SpecContainer::Optional(SpecInner {
                     description: self.schema.description.as_deref(),
-                    ty: *ty,
+                    ty,
                 });
                 match self.name {
                     TypeInfo::Schema(info) => SpecSchemaType::Container(info, container).into(),

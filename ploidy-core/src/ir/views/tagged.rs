@@ -37,7 +37,7 @@ use petgraph::graph::NodeIndex;
 
 use crate::ir::{
     graph::CookedGraph,
-    types::{GraphTagged, GraphTaggedVariant},
+    types::{GraphTagged, TaggedVariantMeta, VariantMeta},
 };
 
 use super::{ViewNode, ir::TypeView, struct_::FieldView};
@@ -76,19 +76,22 @@ impl<'a> TaggedView<'a> {
     /// shared across all variants.
     #[inline]
     pub fn fields(&self) -> impl Iterator<Item = TaggedFieldView<'_, 'a>> {
-        self.ty
-            .fields
-            .iter()
-            .map(move |field| TaggedFieldView::new(self, field, false))
+        self.cooked
+            .fields(self.index)
+            .map(move |info| TaggedFieldView::new(self, info.meta, info.target, false))
     }
 
     /// Returns an iterator over this tagged union's variants.
     #[inline]
     pub fn variants(&self) -> impl Iterator<Item = TaggedVariantView<'a>> {
-        self.ty
-            .variants
-            .iter()
-            .map(move |variant| TaggedVariantView::new(self.cooked, variant.ty, variant))
+        self.cooked
+            .variants(self.index)
+            .filter_map(move |info| match info.meta {
+                VariantMeta::Tagged(meta) => {
+                    Some(TaggedVariantView::new(self.cooked, info.target, meta))
+                }
+                _ => None,
+            })
     }
 }
 
@@ -107,12 +110,12 @@ impl<'a> ViewNode<'a> for TaggedView<'a> {
 /// A graph-aware view of a common tagged union field.
 pub type TaggedFieldView<'view, 'a> = FieldView<'view, 'a, TaggedView<'a>>;
 
-/// A graph-aware view of a [tagged union variant][GraphTaggedVariant].
+/// A graph-aware view of a tagged union variant.
 #[derive(Debug)]
 pub struct TaggedVariantView<'a> {
     cooked: &'a CookedGraph<'a>,
     index: NodeIndex<usize>,
-    variant: &'a GraphTaggedVariant<'a>,
+    meta: TaggedVariantMeta<'a>,
 }
 
 impl<'a> TaggedVariantView<'a> {
@@ -120,12 +123,12 @@ impl<'a> TaggedVariantView<'a> {
     fn new(
         cooked: &'a CookedGraph<'a>,
         index: NodeIndex<usize>,
-        variant: &'a GraphTaggedVariant<'a>,
+        meta: TaggedVariantMeta<'a>,
     ) -> Self {
         Self {
             cooked,
             index,
-            variant,
+            meta,
         }
     }
 
@@ -133,20 +136,20 @@ impl<'a> TaggedVariantView<'a> {
     /// variant.
     #[inline]
     pub fn name(&self) -> &'a str {
-        self.variant.name
+        self.meta.name
     }
 
     /// Returns additional discriminator values that also
     /// select this variant.
     #[inline]
     pub fn aliases(&self) -> &'a [&'a str] {
-        self.variant.aliases
+        self.meta.aliases
     }
 
     /// Returns a view of this variant's type.
     #[inline]
     pub fn ty(&self) -> TypeView<'a> {
-        TypeView::new(self.cooked, self.variant.ty)
+        TypeView::new(self.cooked, self.index)
     }
 }
 
