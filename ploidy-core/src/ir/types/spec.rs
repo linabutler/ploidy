@@ -3,9 +3,9 @@
 
 use crate::parse::ComponentRef;
 
-use super::shape::{
-    Container, InlineType, Inner, Operation, Parameter, ParameterInfo, Request, Response,
-    SchemaType, Struct, StructField, Tagged, TaggedVariant, Untagged, UntaggedVariant,
+use super::{
+    Enum, InlineTypePath, PrimitiveType, SchemaTypeInfo, StructFieldName, UntaggedVariantNameHint,
+    shape::{Operation, Parameter, ParameterInfo, Request, Response},
 };
 
 /// A type or reference in an OpenAPI spec.
@@ -32,35 +32,158 @@ impl<'a> From<SpecInlineType<'a>> for SpecType<'a> {
 }
 
 /// A named schema type with [`SpecType`] references.
-pub type SpecSchemaType<'a> = SchemaType<'a, &'a SpecType<'a>>;
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub enum SpecSchemaType<'a> {
+    /// An enum with named variants.
+    Enum(SchemaTypeInfo<'a>, Enum<'a>),
+    /// A struct with fields.
+    Struct(SchemaTypeInfo<'a>, SpecStruct<'a>),
+    /// A tagged union.
+    Tagged(SchemaTypeInfo<'a>, SpecTagged<'a>),
+    /// An untagged union.
+    Untagged(SchemaTypeInfo<'a>, SpecUntagged<'a>),
+    /// A named container.
+    Container(SchemaTypeInfo<'a>, SpecContainer<'a>),
+    /// A primitive type.
+    Primitive(SchemaTypeInfo<'a>, PrimitiveType),
+    /// Any JSON value.
+    Any(SchemaTypeInfo<'a>),
+}
+
+impl<'a> SpecSchemaType<'a> {
+    #[inline]
+    pub fn name(&self) -> &'a str {
+        let (Self::Enum(info, ..)
+        | Self::Struct(info, ..)
+        | Self::Tagged(info, ..)
+        | Self::Untagged(info, ..)
+        | Self::Container(info, ..)
+        | Self::Primitive(info, ..)
+        | Self::Any(info)) = self;
+        info.name
+    }
+
+    #[inline]
+    pub fn resource(&self) -> Option<&'a str> {
+        let (Self::Enum(info, ..)
+        | Self::Struct(info, ..)
+        | Self::Tagged(info, ..)
+        | Self::Untagged(info, ..)
+        | Self::Container(info, ..)
+        | Self::Primitive(info, ..)
+        | Self::Any(info)) = self;
+        info.resource
+    }
+}
+
+/// An inline schema type with [`SpecType`] references.
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub enum SpecInlineType<'a> {
+    Enum(InlineTypePath<'a>, Enum<'a>),
+    Struct(InlineTypePath<'a>, SpecStruct<'a>),
+    Tagged(InlineTypePath<'a>, SpecTagged<'a>),
+    Untagged(InlineTypePath<'a>, SpecUntagged<'a>),
+    Container(InlineTypePath<'a>, SpecContainer<'a>),
+    Primitive(InlineTypePath<'a>, PrimitiveType),
+    Any(InlineTypePath<'a>),
+}
+
+impl<'a> SpecInlineType<'a> {
+    #[inline]
+    pub fn path(&self) -> &InlineTypePath<'a> {
+        let (Self::Enum(path, _)
+        | Self::Struct(path, _)
+        | Self::Tagged(path, _)
+        | Self::Untagged(path, _)
+        | Self::Container(path, _)
+        | Self::Primitive(path, _)
+        | Self::Any(path)) = self;
+        path
+    }
+}
+
+/// A struct, created from a schema with named properties.
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub struct SpecStruct<'a> {
+    pub description: Option<&'a str>,
+    pub fields: &'a [SpecStructField<'a>],
+    /// Immediate parent types from `allOf`, in declaration order.
+    pub parents: &'a [&'a SpecType<'a>],
+}
+
+/// A field in a spec struct.
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub struct SpecStructField<'a> {
+    pub name: StructFieldName<'a>,
+    pub ty: &'a SpecType<'a>,
+    pub required: bool,
+    pub description: Option<&'a str>,
+    pub flattened: bool,
+}
+
+/// A tagged union, created from a `oneOf` schema
+/// with an explicit `discriminator`.
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub struct SpecTagged<'a> {
+    pub description: Option<&'a str>,
+    pub tag: &'a str,
+    pub variants: &'a [SpecTaggedVariant<'a>],
+    /// Own fields that the union declares as `properties`.
+    pub fields: &'a [SpecStructField<'a>],
+}
+
+/// A variant of a tagged union.
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub struct SpecTaggedVariant<'a> {
+    pub name: &'a str,
+    pub aliases: &'a [&'a str],
+    pub ty: &'a SpecType<'a>,
+}
+
+/// An untagged union, created from a `oneOf` schema
+/// without a discriminator, or an OpenAPI 3.1 schema
+/// with multiple types in its `type` field.
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub struct SpecUntagged<'a> {
+    pub description: Option<&'a str>,
+    pub variants: &'a [SpecUntaggedVariant<'a>],
+    /// Own fields that the union declares as `properties`.
+    pub fields: &'a [SpecStructField<'a>],
+}
+
+/// A variant of an untagged union.
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub enum SpecUntaggedVariant<'a> {
+    Some(UntaggedVariantNameHint, &'a SpecType<'a>),
+    Null,
+}
 
 /// An array, map, or optional type with [`SpecType`] references.
-pub type SpecContainer<'a> = Container<'a, &'a SpecType<'a>>;
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub enum SpecContainer<'a> {
+    /// An array of items.
+    Array(SpecInner<'a>),
+    /// A map with string keys.
+    Map(SpecInner<'a>),
+    /// A nullable value, or an optional struct field.
+    Optional(SpecInner<'a>),
+}
 
-/// A struct type with [`SpecType`] references.
-pub type SpecStruct<'a> = Struct<'a, &'a SpecType<'a>>;
+impl<'a> SpecContainer<'a> {
+    /// Returns a reference to the inner type of this container.
+    #[inline]
+    pub fn inner(&self) -> &SpecInner<'a> {
+        let (Self::Array(inner) | Self::Map(inner) | Self::Optional(inner)) = self;
+        inner
+    }
+}
 
-/// A struct field with [`SpecType`] references.
-pub type SpecStructField<'a> = StructField<'a, &'a SpecType<'a>>;
-
-/// A tagged union with [`SpecType`] references.
-pub type SpecTagged<'a> = Tagged<'a, &'a SpecType<'a>>;
-
-/// A variant of a tagged union with [`SpecType`] references.
-pub type SpecTaggedVariant<'a> = TaggedVariant<'a, &'a SpecType<'a>>;
-
-/// An untagged union with [`SpecType`] references.
-pub type SpecUntagged<'a> = Untagged<'a, &'a SpecType<'a>>;
-
-/// A variant of an untagged union with [`SpecType`] references.
-pub type SpecUntaggedVariant<'a> = UntaggedVariant<&'a SpecType<'a>>;
-
-/// An inline type with [`SpecType`] references.
-pub type SpecInlineType<'a> = InlineType<'a, &'a SpecType<'a>>;
-
-/// The type contained within an array, map, or optional type,
-/// with [`SpecType`] references.
-pub type SpecInner<'a> = Inner<'a, &'a SpecType<'a>>;
+/// The inner type of a [`SpecContainer`].
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub struct SpecInner<'a> {
+    pub description: Option<&'a str>,
+    pub ty: &'a SpecType<'a>,
+}
 
 /// An operation with [`SpecType`] references.
 pub type SpecOperation<'a> = Operation<'a, &'a SpecType<'a>>;

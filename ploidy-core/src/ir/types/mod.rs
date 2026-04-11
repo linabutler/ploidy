@@ -10,7 +10,6 @@ use crate::arena::Arena;
 pub use self::{graph::*, spec::*};
 
 mod graph;
-pub(crate) mod mapper;
 pub mod shape;
 mod spec;
 

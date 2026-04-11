@@ -17,8 +17,13 @@
 //!   and topological ordering.
 //! * [`View::dependents()`] iterates over all types that transitively depend on
 //!   this type. Useful for impact analysis or invalidation.
-//! * [`View::traverse()`] traverses the graph breadth-first with a filter that
-//!   controls which nodes to yield and explore.
+//!
+//! These methods answer Rust-specific questions that require transitive
+//! graph traversal. Computing them here, where the type graph is available,
+//! is much simpler than replicating the traversal in codegen:
+//!
+//! * [`View::hashable()`] returns whether this type can implement `Eq` and `Hash`.
+//! * [`View::defaultable()`] returns whether this type can implement `Default`.
 //!
 //! # Extensions
 //!
@@ -29,14 +34,13 @@ use std::{any::TypeId, fmt::Debug};
 
 use atomic_refcell::{AtomicRef, AtomicRefMut};
 use petgraph::{
-    Direction,
     graph::NodeIndex,
     visit::{Bfs, EdgeFiltered, EdgeRef},
 };
 use ref_cast::{RefCastCustom, ref_cast_custom};
 
 use super::{
-    graph::{CookedGraph, EdgeKind, Extension, ExtensionMap, Traversal, Traverse},
+    graph::{CookedGraph, Extension, ExtensionMap},
     types::GraphType,
 };
 
@@ -77,23 +81,11 @@ pub trait View<'a> {
     /// Complexity: O(n), where `n` is the number of dependent types.
     fn dependents(&self) -> impl Iterator<Item = TypeView<'a>> + use<'a, Self>;
 
-    /// Traverses this type's dependencies or dependents breadth-first,
-    /// using `filter` to control which nodes are yielded and explored.
-    ///
-    /// The filter receives the [`EdgeKind`] describing how the node
-    /// was reached, and returns a [`Traversal`].
-    ///
-    /// A node reachable via multiple edge kinds may be yielded more
-    /// than once, once per distinct edge kind.
-    ///
-    /// Complexity: O(V + E) over the visited subgraph.
-    fn traverse<F>(
-        &self,
-        reach: Reach,
-        filter: F,
-    ) -> impl Iterator<Item = (EdgeKind, TypeView<'a>)> + use<'a, Self, F>
-    where
-        F: Fn(EdgeKind, &TypeView<'a>) -> Traversal;
+    /// Returns `true` if this type can implement `Eq` and `Hash`.
+    fn hashable(&self) -> bool;
+
+    /// Returns `true` if this type can implement `Default`.
+    fn defaultable(&self) -> bool;
 }
 
 /// A view of a graph type with extended data.
@@ -120,69 +112,60 @@ where
     #[inline]
     fn inlines(&self) -> impl Iterator<Item = InlineTypeView<'a>> + use<'a, T> {
         let cooked = self.cooked();
-        // Only include edges to other inline schemas.
-        let filtered = EdgeFiltered::from_fn(&cooked.graph, |e| {
-            matches!(cooked.graph[e.target()], GraphType::Inline(_))
+        // Follow edges to inline schemas, skipping shadow edges.
+        // See `GraphEdge::shadow()` for an explanation.
+        let filtered = EdgeFiltered::from_fn(&cooked.graph, move |e| {
+            !e.weight().shadow() && matches!(cooked.graph[e.target()], GraphType::Inline(_))
         });
         let mut bfs = Bfs::new(&cooked.graph, self.index());
-        std::iter::from_fn(move || bfs.next(&filtered)).filter_map(|index| {
-            match cooked.graph[index] {
+        std::iter::from_fn(move || bfs.next(&filtered))
+            .skip(1) // Skip the starting node.
+            .filter_map(|index| match cooked.graph[index] {
                 GraphType::Inline(ty) => Some(InlineTypeView::new(cooked, index, ty)),
                 _ => None,
-            }
-        })
+            })
     }
 
     #[inline]
     fn used_by(&self) -> impl Iterator<Item = OperationView<'a>> + use<'a, T> {
         let cooked = self.cooked();
-        let meta = &cooked.metadata.schemas[self.index().index()];
-        meta.used_by.iter().map(|op| OperationView::new(cooked, op))
+        cooked.metadata.used_by[self.index().index()]
+            .iter()
+            .map(|op| OperationView::new(cooked, op))
     }
 
     #[inline]
     fn dependencies(&self) -> impl Iterator<Item = TypeView<'a>> + use<'a, T> {
         let cooked = self.cooked();
-        let meta = &cooked.metadata.schemas[self.index().index()];
-        meta.dependencies
-            .ones()
-            .map(NodeIndex::new)
+        let start = self.index();
+        cooked
+            .metadata
+            .closure
+            .dependencies_of(start)
+            .filter(move |&index| index != start)
             .map(|index| TypeView::new(cooked, index))
     }
 
     #[inline]
     fn dependents(&self) -> impl Iterator<Item = TypeView<'a>> + use<'a, T> {
         let cooked = self.cooked();
-        let meta = &cooked.metadata.schemas[self.index().index()];
-        meta.dependents
-            .ones()
-            .map(NodeIndex::new)
-            .map(move |index| TypeView::new(cooked, index))
+        let start = self.index();
+        cooked
+            .metadata
+            .closure
+            .dependents_of(start)
+            .filter(move |&index| index != start)
+            .map(|index| TypeView::new(cooked, index))
     }
 
     #[inline]
-    fn traverse<F>(
-        &self,
-        reach: Reach,
-        filter: F,
-    ) -> impl Iterator<Item = (EdgeKind, TypeView<'a>)> + use<'a, T, F>
-    where
-        F: Fn(EdgeKind, &TypeView<'a>) -> Traversal,
-    {
-        let cooked = self.cooked();
-        let t = Traverse::from_neighbors(
-            &cooked.graph,
-            self.index(),
-            match reach {
-                Reach::Dependencies => Direction::Outgoing,
-                Reach::Dependents => Direction::Incoming,
-            },
-        );
-        t.run(move |kind, index| {
-            let view = TypeView::new(cooked, index);
-            filter(kind, &view)
-        })
-        .map(|(kind, index)| (kind, TypeView::new(cooked, index)))
+    fn hashable(&self) -> bool {
+        self.cooked().metadata.hashable[self.index().index()]
+    }
+
+    #[inline]
+    fn defaultable(&self) -> bool {
+        self.cooked().metadata.defaultable[self.index().index()]
     }
 }
 
@@ -215,9 +198,7 @@ where
     where
         'graph: 'view,
     {
-        self.cooked().metadata.schemas[self.index().index()]
-            .extensions
-            .borrow()
+        self.cooked().metadata.extensions[self.index().index()].borrow()
     }
 
     #[inline]
@@ -225,9 +206,7 @@ where
     where
         'graph: 'b,
     {
-        self.cooked().metadata.schemas[self.index().index()]
-            .extensions
-            .borrow_mut()
+        self.cooked().metadata.extensions[self.index().index()].borrow_mut()
     }
 }
 
@@ -277,15 +256,6 @@ impl<X> Debug for ViewExtensions<X> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_tuple("ViewExtensions").finish_non_exhaustive()
     }
-}
-
-/// Selects which edge direction to follow during traversal.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum Reach {
-    /// Traverse out toward types that this node depends on.
-    Dependencies,
-    /// Traverse in toward types that depend on this node.
-    Dependents,
 }
 
 mod internal {

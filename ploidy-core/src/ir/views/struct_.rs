@@ -43,17 +43,20 @@
 //! [`ContainerView::Optional`]: super::container::ContainerView::Optional
 //! [tagged union]: super::tagged::TaggedView
 
+use std::collections::VecDeque;
+
+use fixedbitset::FixedBitSet;
+use itertools::Itertools;
 use petgraph::{
     Direction,
     graph::NodeIndex,
-    visit::{DfsPostOrder, EdgeFiltered},
+    visit::{EdgeFiltered, EdgeRef, IntoNeighbors},
 };
 use rustc_hash::FxHashSet;
 
 use crate::ir::{
-    GraphInlineType,
-    graph::{CookedGraph, EdgeKind},
-    types::{GraphSchemaType, GraphStruct, GraphStructField, GraphType, StructFieldName},
+    graph::{CookedGraph, GraphEdge},
+    types::{FieldMeta, GraphInlineType, GraphSchemaType, GraphStruct, GraphType, StructFieldName},
 };
 
 use super::{ViewNode, ir::TypeView};
@@ -86,59 +89,72 @@ impl<'a> StructView<'a> {
     /// from `allOf` schemas. Fields are returned in declaration order:
     /// ancestor fields first, in the order of their parents in `allOf`;
     /// then this struct's own fields.
+    #[inline]
     pub fn fields(&self) -> impl Iterator<Item = StructFieldView<'_, 'a>> {
-        // Walk inheritance edges in post-order so that the most distant
-        // ancestors are yielded first. `DfsPostOrder` also tracks visited
-        // nodes internally, which handles circular `allOf` references.
+        let all = self
+            .inherited_fields()
+            .chain(self.own_fields()) // Not a `DoubleEndedIterator`; can't be reversed directly.
+            .collect_vec();
+
+        // Deduplicate fields right-to-left, so that later (closer) fields
+        // win over earlier (distant) ones; then reverse again to
+        // restore declaration order.
+        let mut seen = FxHashSet::default();
+        let deduped = all
+            .into_iter()
+            .rev()
+            .filter(|f| seen.insert(f.meta.name))
+            .collect_vec();
+        deduped.into_iter().rev()
+    }
+
+    /// Returns an iterator over all fields inherited from
+    /// this struct's ancestors.
+    fn inherited_fields(&self) -> impl Iterator<Item = StructFieldView<'_, 'a>> {
+        // Walk inheritance edges in post-order, so that the most distant
+        // ancestors are yielded first. The LIFO stack explores ancestors in
+        // reverse declaration order (right-to-left); collecting them into a
+        // `VecDeque` lets us iterate over them in declaration order.
         let inherits = EdgeFiltered::from_fn(&self.cooked.graph, |e| {
-            matches!(e.weight(), EdgeKind::Inherits)
+            matches!(e.weight(), GraphEdge::Inherits { .. })
         });
-        let mut dfs = DfsPostOrder::new(&inherits, self.index);
-        let ancestors = std::iter::from_fn(move || dfs.next(&inherits))
-            .filter(move |&index| index != self.index)
-            .filter_map(|index| match self.cooked.graph[index] {
-                GraphType::Schema(GraphSchemaType::Struct(_, s))
-                | GraphType::Inline(GraphInlineType::Struct(_, s)) => Some(s.fields),
-                GraphType::Schema(GraphSchemaType::Tagged(_, t))
-                | GraphType::Inline(GraphInlineType::Tagged(_, t)) => Some(t.fields),
-                GraphType::Schema(GraphSchemaType::Untagged(_, u))
-                | GraphType::Inline(GraphInlineType::Untagged(_, u)) => Some(u.fields),
-                _ => None,
-            });
+        let mut stack = vec![self.index];
+        let mut visited = FixedBitSet::with_capacity(self.cooked.graph.node_count());
+        let mut ancestors = VecDeque::new();
+        while let Some(node) = stack.pop() {
+            if visited.put(node.index()) {
+                continue;
+            }
+            if node != self.index {
+                ancestors.push_front(node);
+            }
+            for child in inherits.neighbors(node) {
+                stack.push(child);
+            }
+        }
 
-        // Track our own field names, so that we can skip yielding
-        // overridden inherited fields.
-        let mut seen: FxHashSet<_> = self.ty.fields.iter().map(|field| field.name).collect();
-
-        itertools::chain!(
-            // Inherited fields first, in declaration order.
-            ancestors
-                .flatten()
-                .filter(move |field| seen.insert(field.name))
-                .map(|field| StructFieldView::new(self, field, true)),
-            // Own fields.
-            self.own_fields(),
-        )
+        ancestors
+            .into_iter()
+            .flat_map(|index| self.cooked.fields(index))
+            .map(|info| StructFieldView::new(self, info.meta, info.target, true))
     }
 
     /// Returns an iterator over fields declared directly on this struct,
     /// excluding inherited fields.
     #[inline]
     pub fn own_fields(&self) -> impl Iterator<Item = StructFieldView<'_, 'a>> {
-        self.ty
-            .fields
-            .iter()
-            .map(move |field| StructFieldView::new(self, field, false))
+        self.cooked
+            .fields(self.index)
+            .map(move |info| StructFieldView::new(self, info.meta, info.target, false))
     }
 
     /// Returns an iterator over immediate parent types from `allOf`,
     /// including named and inline schemas.
     #[inline]
     pub fn parents(&self) -> impl Iterator<Item = TypeView<'a>> {
-        self.ty
-            .parents
-            .iter()
-            .map(move |&parent| TypeView::new(self.cooked, parent))
+        self.cooked
+            .inherits(self.index)
+            .map(move |info| TypeView::new(self.cooked, info.target))
     }
 }
 
@@ -154,14 +170,15 @@ impl<'a> ViewNode<'a> for StructView<'a> {
     }
 }
 
-/// A graph-aware view of a [struct field][GraphStructField].
+/// A graph-aware view of a struct field.
 pub type StructFieldView<'view, 'a> = FieldView<'view, 'a, StructView<'a>>;
 
 /// A graph-aware view of a struct or union field.
 #[derive(Debug)]
 pub struct FieldView<'view, 'a, P> {
     parent: &'view P,
-    field: &'a GraphStructField<'a>,
+    meta: FieldMeta<'a>,
+    ty: NodeIndex<usize>,
     inherited: bool,
 }
 
@@ -170,12 +187,14 @@ impl<'view, 'a, P: ViewNode<'a>> FieldView<'view, 'a, P> {
     #[inline]
     pub(in crate::ir) fn new(
         parent: &'view P,
-        field: &'a GraphStructField<'a>,
+        meta: FieldMeta<'a>,
+        ty: NodeIndex<usize>,
         inherited: bool,
     ) -> Self {
         Self {
             parent,
-            field,
+            meta,
+            ty,
             inherited,
         }
     }
@@ -183,32 +202,32 @@ impl<'view, 'a, P: ViewNode<'a>> FieldView<'view, 'a, P> {
     /// Returns the field name.
     #[inline]
     pub fn name(&self) -> StructFieldName<'a> {
-        self.field.name
+        self.meta.name
     }
 
     /// Returns a view of the inner type that this type wraps.
     #[inline]
     pub fn ty(&self) -> TypeView<'a> {
-        TypeView::new(self.parent.cooked(), self.field.ty)
+        TypeView::new(self.parent.cooked(), self.ty)
     }
 
     /// Returns `true` if this field is listed in `required`.
     #[inline]
     pub fn required(&self) -> bool {
-        self.field.required
+        self.meta.required
     }
 
     /// Returns the description, if present in the schema.
     #[inline]
     pub fn description(&self) -> Option<&'a str> {
-        self.field.description
+        self.meta.description
     }
 
     /// Returns `true` if this field is flattened from an
     /// `anyOf` parent.
     #[inline]
     pub fn flattened(&self) -> bool {
-        self.field.flattened
+        self.meta.flattened
     }
 }
 
@@ -221,18 +240,24 @@ impl<'view, 'a> FieldView<'view, 'a, StructView<'a>> {
 
     /// Returns `true` if this field is a tag.
     ///
-    /// A field is a tag if it matches the tag of a tagged union
-    /// that references this struct as one of its variants.
+    /// A field is a tag only if this struct inherits from or is a variant of
+    /// a tagged union, and the field name matches that union's tag.
     #[inline]
     pub fn tag(&self) -> bool {
-        let StructFieldName::Name(name) = self.field.name else {
+        let StructFieldName::Name(name) = self.meta.name else {
             return false;
         };
         let cooked = self.parent.cooked();
         cooked
             .graph
-            .neighbors_directed(self.parent.index(), Direction::Incoming)
-            .filter_map(|index| match cooked.graph[index] {
+            .edges_directed(self.parent.index(), Direction::Incoming)
+            .filter(|e| {
+                matches!(
+                    e.weight(),
+                    GraphEdge::Variant(_) | GraphEdge::Inherits { .. }
+                )
+            })
+            .filter_map(|e| match cooked.graph[e.source()] {
                 GraphType::Schema(GraphSchemaType::Tagged(_, tagged))
                 | GraphType::Inline(GraphInlineType::Tagged(_, tagged)) => Some(tagged),
                 _ => None,
@@ -248,6 +273,6 @@ impl<'view, 'a> FieldView<'view, 'a, StructView<'a>> {
     pub fn needs_indirection(&self) -> bool {
         let graph = self.parent.cooked();
         graph.metadata.scc_indices[self.parent.index().index()]
-            == graph.metadata.scc_indices[self.field.ty.index()]
+            == graph.metadata.scc_indices[self.ty.index()]
     }
 }

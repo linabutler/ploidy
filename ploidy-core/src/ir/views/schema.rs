@@ -70,9 +70,10 @@ impl<'a> SchemaTypeView<'a> {
     /// Returns whether this type transitively depends on `other`.
     #[inline]
     pub fn depends_on(&self, other: &SchemaTypeView<'a>) -> bool {
-        self.cooked().metadata.schemas[self.index().index()]
-            .dependencies
-            .contains(other.index().index())
+        self.cooked()
+            .metadata
+            .closure
+            .depends_on(self.index(), other.index())
     }
 
     /// Returns the resource name that this schema type declares

@@ -54,17 +54,16 @@
 //! [response]: OperationView::response
 //! [resource name]: OperationView::resource
 
-use std::marker::PhantomData;
+use std::{collections::VecDeque, marker::PhantomData};
 
 use petgraph::{
-    Direction,
     graph::NodeIndex,
-    visit::{Bfs, EdgeFiltered, EdgeRef, VisitMap, Visitable},
+    visit::{Bfs, EdgeFiltered, EdgeRef, Visitable},
 };
 
 use crate::{
     ir::{
-        graph::{CookedGraph, EdgeKind, Traversal, Traverse},
+        graph::CookedGraph,
         types::{
             GraphOperation, GraphParameter, GraphParameterInfo, GraphRequest, GraphResponse,
             GraphType, ParameterStyle,
@@ -73,7 +72,7 @@ use crate::{
     parse::{Method, path::PathSegment},
 };
 
-use super::{Reach, View, inline::InlineTypeView, ir::TypeView};
+use super::{View, inline::InlineTypeView, ir::TypeView};
 
 /// A graph-aware view of an [operation][GraphOperation].
 #[derive(Debug)]
@@ -152,16 +151,16 @@ impl<'a> View<'a> for OperationView<'a> {
     #[inline]
     fn inlines(&self) -> impl Iterator<Item = InlineTypeView<'a>> + use<'a> {
         let cooked = self.cooked;
-        // Only include edges to other inline schemas.
+        // Follow edges to inline schemas, skipping shadow edges.
+        // See `GraphEdge::shadow()` for an explanation.
         let filtered = EdgeFiltered::from_fn(&cooked.graph, |e| {
-            matches!(cooked.graph[e.target()], GraphType::Inline(_))
+            !e.weight().shadow() && matches!(cooked.graph[e.target()], GraphType::Inline(_))
         });
         let mut bfs = {
-            let meta = &self.cooked.metadata.operations[self.op];
-            let stack = meta
-                .types
-                .ones()
-                .map(NodeIndex::new)
+            let stack: VecDeque<_> = self
+                .op
+                .types()
+                .copied()
                 .filter(|&index| {
                     // Exclude operation types that aren't inline schemas;
                     // those types, and their inlines, are already emitted
@@ -170,11 +169,11 @@ impl<'a> View<'a> for OperationView<'a> {
                 })
                 .collect();
             let mut discovered = self.cooked.graph.visit_map();
-            for &index in &stack {
-                discovered.visit(index);
-            }
+            discovered.extend(stack.iter().copied().map(NodeIndex::index));
             Bfs { stack, discovered }
         };
+        // Unlike `View::inlines()`, we include the starting nodes:
+        // the operation contains types; it's not a type itself.
         std::iter::from_fn(move || bfs.next(&filtered)).filter_map(|index| {
             match cooked.graph[index] {
                 GraphType::Inline(ty) => Some(InlineTypeView::new(cooked, index, ty)),
@@ -192,18 +191,11 @@ impl<'a> View<'a> for OperationView<'a> {
 
     #[inline]
     fn dependencies(&self) -> impl Iterator<Item = TypeView<'a>> + use<'a> {
-        let meta = &self.cooked.metadata.operations[self.op];
-        let mut types = meta.types.clone();
-        // Collect the transitive dependencies of each of the operation's
-        // direct dependencies.
-        for node in meta.types.ones() {
-            let meta = &self.cooked.metadata.schemas[node];
-            types.union_with(&meta.dependencies);
-        }
-        types
-            .into_ones()
+        let cooked = self.cooked;
+        cooked.metadata.uses[self.op]
+            .ones()
             .map(NodeIndex::new)
-            .map(|index| TypeView::new(self.cooked, index))
+            .map(move |index| TypeView::new(cooked, index))
     }
 
     /// Returns an empty iterator. Operations don't have dependents.
@@ -213,28 +205,13 @@ impl<'a> View<'a> for OperationView<'a> {
     }
 
     #[inline]
-    fn traverse<F>(
-        &self,
-        reach: Reach,
-        filter: F,
-    ) -> impl Iterator<Item = (EdgeKind, TypeView<'a>)> + use<'a, F>
-    where
-        F: Fn(EdgeKind, &TypeView<'a>) -> Traversal,
-    {
-        either!(match reach {
-            Reach::Dependents => std::iter::empty(),
-            Reach::Dependencies => {
-                let cooked = self.cooked;
-                let meta = &cooked.metadata.operations[self.op];
-                let traverse = Traverse::at_roots(&cooked.graph, &meta.types, Direction::Outgoing);
-                traverse
-                    .run(move |kind, index| {
-                        let view = TypeView::new(cooked, index);
-                        filter(kind, &view)
-                    })
-                    .map(|(kind, index)| (kind, TypeView::new(cooked, index)))
-            }
-        })
+    fn hashable(&self) -> bool {
+        false
+    }
+
+    #[inline]
+    fn defaultable(&self) -> bool {
+        false
     }
 }
 
@@ -312,10 +289,26 @@ impl<'view, 'a, T> ParameterView<'view, 'a, T> {
 impl<'view, 'a, T> View<'a> for ParameterView<'view, 'a, T> {
     fn inlines(&self) -> impl Iterator<Item = InlineTypeView<'a>> + use<'view, 'a, T> {
         let cooked = self.op.cooked;
+        let start = self.info.ty;
+        // Follow edges to inline schemas, skipping shadow edges.
+        // See `GraphEdge::shadow()` for an explanation.
         let filtered = EdgeFiltered::from_fn(&cooked.graph, |e| {
-            matches!(cooked.graph[e.target()], GraphType::Inline(_))
+            !e.weight().shadow() && matches!(cooked.graph[e.target()], GraphType::Inline(_))
         });
-        let mut bfs = Bfs::new(&cooked.graph, self.info.ty);
+        let mut bfs = {
+            // Exclude parameter types that aren't inline schemas;
+            // those types, and their inlines, are already emitted as
+            // named schema types.
+            let stack = match cooked.graph[start] {
+                GraphType::Inline(_) => std::iter::once(start).collect(),
+                _ => VecDeque::new(),
+            };
+            let mut discovered = cooked.graph.visit_map();
+            discovered.extend(stack.iter().copied().map(NodeIndex::index));
+            Bfs { stack, discovered }
+        };
+        // Unlike `View::inlines()`, we include the starting node:
+        // the parameter references a type; it's not a type itself.
         std::iter::from_fn(move || bfs.next(&filtered)).filter_map(|index| {
             match cooked.graph[index] {
                 GraphType::Inline(ty) => Some(InlineTypeView::new(cooked, index, ty)),
@@ -330,11 +323,11 @@ impl<'view, 'a, T> View<'a> for ParameterView<'view, 'a, T> {
 
     fn dependencies(&self) -> impl Iterator<Item = TypeView<'a>> + use<'view, 'a, T> {
         let cooked = self.op.cooked;
-        let meta = &cooked.metadata.schemas[self.info.ty.index()];
-        // Include the parameter's own type and its transitive dependencies.
-        std::iter::once(self.info.ty)
-            .chain(meta.dependencies.ones().map(NodeIndex::new))
-            .map(|index| TypeView::new(cooked, index))
+        cooked
+            .metadata
+            .closure
+            .dependencies_of(self.info.ty)
+            .map(move |index| TypeView::new(cooked, index))
     }
 
     /// Returns an empty iterator; other types don't depend on parameters.
@@ -342,27 +335,14 @@ impl<'view, 'a, T> View<'a> for ParameterView<'view, 'a, T> {
         std::iter::empty()
     }
 
-    fn traverse<F>(
-        &self,
-        reach: Reach,
-        filter: F,
-    ) -> impl Iterator<Item = (EdgeKind, TypeView<'a>)> + use<'view, 'a, T, F>
-    where
-        F: Fn(EdgeKind, &TypeView<'a>) -> Traversal,
-    {
-        either!(match reach {
-            Reach::Dependents => std::iter::empty(),
-            Reach::Dependencies => {
-                let cooked = self.op.cooked;
-                let traverse = Traverse::at_root(&cooked.graph, self.info.ty, Direction::Outgoing);
-                traverse
-                    .run(move |kind, index| {
-                        let view = TypeView::new(cooked, index);
-                        filter(kind, &view)
-                    })
-                    .map(|(kind, index)| (kind, TypeView::new(cooked, index)))
-            }
-        })
+    #[inline]
+    fn hashable(&self) -> bool {
+        self.op.cooked.metadata.hashable[self.info.ty.index()]
+    }
+
+    #[inline]
+    fn defaultable(&self) -> bool {
+        self.op.cooked.metadata.defaultable[self.info.ty.index()]
     }
 }
 

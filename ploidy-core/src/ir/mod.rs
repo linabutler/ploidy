@@ -30,11 +30,11 @@ pub mod views;
 #[cfg(test)]
 mod tests;
 
-pub use graph::{CookedGraph, EdgeKind, RawGraph, Traversal};
+pub use graph::{CookedGraph, RawGraph};
 pub use spec::Spec;
 pub use types::*;
 
 pub use views::{
-    ExtendableView, Reach, View, any::*, container::*, enum_::*, inline::*, ir::*, operation::*,
+    ExtendableView, View, any::*, container::*, enum_::*, inline::*, ir::*, operation::*,
     primitive::*, schema::*, struct_::*, tagged::*, untagged::*,
 };

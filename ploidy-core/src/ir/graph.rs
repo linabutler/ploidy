@@ -5,7 +5,6 @@ use std::{
 };
 
 use atomic_refcell::AtomicRefCell;
-use enum_map::{Enum, EnumMap, enum_map};
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use petgraph::{
@@ -15,28 +14,32 @@ use petgraph::{
     data::Build,
     graph::{DiGraph, NodeIndex},
     stable_graph::StableDiGraph,
-    visit::{DfsPostOrder, EdgeFiltered, EdgeRef, IntoNeighbors, VisitMap, Visitable},
+    visit::{
+        DfsPostOrder, EdgeFiltered, EdgeRef, IntoNeighbors, IntoNeighborsDirected,
+        IntoNodeIdentifiers, NodeCount, NodeIndexable,
+    },
 };
-use rustc_hash::{FxHashMap, FxHashSet};
+use rustc_hash::{FxBuildHasher, FxHashMap};
 
-use crate::{arena::Arena, parse::Info};
+use crate::{arena::Arena, ir::SchemaTypeInfo, parse::Info};
 
 use super::{
     spec::{ResolvedSpecType, Spec},
     types::{
-        GraphInlineType, GraphOperation, GraphSchemaType, GraphStruct, GraphTagged,
-        GraphTaggedVariant, GraphType, InlineTypePath, InlineTypePathRoot, InlineTypePathSegment,
-        SchemaTypeInfo, SpecInlineType, SpecSchemaType, SpecType, SpecUntaggedVariant,
-        StructFieldName, mapper::TypeMapper,
+        FieldMeta, GraphInlineType, GraphOperation, GraphSchemaType, GraphStruct, GraphTagged,
+        GraphType, InlineTypePath, InlineTypePathRoot, InlineTypePathSegment, PrimitiveType,
+        SpecInlineType, SpecSchemaType, SpecType, SpecUntaggedVariant, StructFieldName,
+        TaggedVariantMeta, VariantMeta,
+        shape::{Operation, Parameter, ParameterInfo, Request, Response},
     },
     views::{operation::OperationView, primitive::PrimitiveView, schema::SchemaTypeView},
 };
 
 /// The mutable, sparse graph used for transformations.
-type RawDiGraph<'a> = StableDiGraph<GraphType<'a>, EdgeKind, usize>;
+type RawDiGraph<'a> = StableDiGraph<GraphType<'a>, GraphEdge<'a>, usize>;
 
 /// The immutable, dense graph used for code generation.
-type CookedDiGraph<'a> = DiGraph<GraphType<'a>, EdgeKind, usize>;
+type CookedDiGraph<'a> = DiGraph<GraphType<'a>, GraphEdge<'a>, usize>;
 
 /// A mutable intermediate dependency graph of all the types in a [`Spec`],
 /// backed by a sparse [`StableDiGraph`].
@@ -57,6 +60,7 @@ pub struct RawGraph<'a> {
 }
 
 impl<'a> RawGraph<'a> {
+    /// Builds a raw type graph from the given spec.
     pub fn new(arena: &'a Arena, spec: &'a Spec<'a>) -> Self {
         // All roots (named schemas, parameters, request and response bodies),
         // and all the types within them (inline schemas and primitives).
@@ -66,13 +70,13 @@ impl<'a> RawGraph<'a> {
                 .chain(spec.operations.iter().flat_map(|op| op.types().copied())),
         );
 
-        // Build the nodes and edges.
+        // Inflate a graph from the traversal.
         let mut indices = FxHashMap::default();
         let mut schemas = FxHashMap::default();
-        let mut nodes = vec![];
-        let mut edges = vec![];
-        for (parent, kind, child) in tys {
+        let mut graph = RawDiGraph::default();
+        for (parent, child) in tys {
             use std::collections::hash_map::Entry;
+
             let source = spec.resolve(child);
             let &mut to = match indices.entry(source) {
                 Entry::Occupied(entry) => entry.into_mut(),
@@ -80,54 +84,91 @@ impl<'a> RawGraph<'a> {
                     // We might see the same schema multiple times if it's
                     // referenced multiple times in the spec. Only add
                     // a new node for the schema if we haven't seen it before.
-                    let index = NodeIndex::new(nodes.len());
-                    nodes.push(*entry.key());
+                    let index = graph.add_node(match *entry.key() {
+                        ResolvedSpecType::Schema(&ty) => GraphType::Schema(ty.into()),
+                        ResolvedSpecType::Inline(&ty) => GraphType::Inline(ty.into()),
+                    });
+                    if let ResolvedSpecType::Schema(ty) = source {
+                        schemas.entry(ty.name()).or_insert(index);
+                    }
                     entry.insert(index)
                 }
             };
-            // Track schema names for later lookup.
-            if let ResolvedSpecType::Schema(ty) = source {
-                schemas.entry(ty.name()).or_insert(to);
-            }
-            if let Some(parent) = parent {
+
+            if let Some((parent, edge)) = parent {
                 let destination = spec.resolve(parent);
                 let &mut from = match indices.entry(destination) {
                     Entry::Occupied(entry) => entry.into_mut(),
                     Entry::Vacant(entry) => {
-                        let index = NodeIndex::new(nodes.len());
-                        nodes.push(*entry.key());
+                        let index = graph.add_node(match *entry.key() {
+                            ResolvedSpecType::Schema(&ty) => GraphType::Schema(ty.into()),
+                            ResolvedSpecType::Inline(&ty) => GraphType::Inline(ty.into()),
+                        });
+                        if let ResolvedSpecType::Schema(ty) = destination {
+                            schemas.entry(ty.name()).or_insert(index);
+                        }
                         entry.insert(index)
                     }
                 };
-                if let ResolvedSpecType::Schema(ty) = destination {
-                    schemas.entry(ty.name()).or_insert(from);
-                }
-                edges.push((from, to, kind));
+                graph.add_edge(from, to, edge);
             }
         }
 
-        // Construct a graph from the nodes and edges,
-        // mapping schema type references to graph indices.
-        let mut graph = RawDiGraph::with_capacity(nodes.len(), edges.len());
-        let mapper = TypeMapper::new(arena, |ty: &SpecType<'_>| match ty {
-            SpecType::Schema(s) => indices[&ResolvedSpecType::Schema(s)],
-            SpecType::Inline(i) => indices[&ResolvedSpecType::Inline(i)],
-            SpecType::Ref(r) => schemas[&*r.name()],
-        });
-        for node in nodes {
-            let mapped = match node {
-                ResolvedSpecType::Schema(ty) => GraphType::Schema(mapper.schema(ty)),
-                ResolvedSpecType::Inline(ty) => GraphType::Inline(mapper.inline(ty)),
-            };
-            let index = graph.add_node(mapped);
-            debug_assert_eq!(index, indices[&node]);
-        }
-        for (from, to, kind) in edges {
-            graph.add_edge(from, to, kind);
-        }
+        // Map type references in operations to graph indices.
+        let ops = arena.alloc_slice_exact(spec.operations.iter().map(|op| {
+            let params = arena.alloc_slice_exact(op.params.iter().map(|param| match param {
+                Parameter::Path(info) => Parameter::Path(ParameterInfo {
+                    name: info.name,
+                    ty: match info.ty {
+                        SpecType::Schema(s) => indices[&ResolvedSpecType::Schema(s)],
+                        SpecType::Inline(i) => indices[&ResolvedSpecType::Inline(i)],
+                        SpecType::Ref(r) => schemas[&*r.name()],
+                    },
+                    required: info.required,
+                    description: info.description,
+                    style: info.style,
+                }),
+                Parameter::Query(info) => Parameter::Query(ParameterInfo {
+                    name: info.name,
+                    ty: match info.ty {
+                        SpecType::Schema(s) => indices[&ResolvedSpecType::Schema(s)],
+                        SpecType::Inline(i) => indices[&ResolvedSpecType::Inline(i)],
+                        SpecType::Ref(r) => schemas[&*r.name()],
+                    },
+                    required: info.required,
+                    description: info.description,
+                    style: info.style,
+                }),
+            }));
 
-        // Map schema type references in operations.
-        let ops = arena.alloc_slice_exact(spec.operations.iter().map(|op| mapper.operation(op)));
+            let request = op.request.as_ref().map(|r| match r {
+                Request::Json(ty) => Request::Json(match ty {
+                    SpecType::Schema(s) => indices[&ResolvedSpecType::Schema(s)],
+                    SpecType::Inline(i) => indices[&ResolvedSpecType::Inline(i)],
+                    SpecType::Ref(r) => schemas[&*r.name()],
+                }),
+                Request::Multipart => Request::Multipart,
+            });
+
+            let response = op.response.as_ref().map(|r| match r {
+                Response::Json(ty) => Response::Json(match ty {
+                    SpecType::Schema(s) => indices[&ResolvedSpecType::Schema(s)],
+                    SpecType::Inline(i) => indices[&ResolvedSpecType::Inline(i)],
+                    SpecType::Ref(r) => schemas[&*r.name()],
+                }),
+            });
+
+            &*arena.alloc(Operation {
+                id: op.id,
+                method: op.method,
+                path: op.path,
+                resource: op.resource,
+                description: op.description,
+                params,
+                request,
+                response,
+            })
+        }));
 
         Self {
             arena,
@@ -141,11 +182,11 @@ impl<'a> RawGraph<'a> {
     /// with different tags.
     ///
     /// In OpenAPI's model of tagged unions, the tag always references a field
-    /// that's defined on each struct variant. This model works well for Python
-    /// and TypeScript, but not Rust; Serde doesn't allow struct variants to
+    /// that's defined on each variant struct. This model works well for Python
+    /// and TypeScript, but not Rust; Serde doesn't allow variant structs to
     /// declare fields with the same name as the tag. The Rust generator
     /// excludes tag fields when generating structs, but this introduces a
-    /// new problem: a struct can't appear a variant of multiple unions
+    /// new problem: a struct can't appear as a variant of multiple unions
     /// with different tags [^1].
     ///
     /// This transformation finds and inlines these structs, so that
@@ -157,230 +198,85 @@ impl<'a> RawGraph<'a> {
     /// should be excluded when A is used in D; but this can't be modeled
     /// in Serde without splitting A into two distinct types.
     pub fn inline_tagged_variants(&mut self) -> &mut Self {
-        struct TaggedPlan<'a> {
-            tagged_index: NodeIndex<usize>,
-            info: SchemaTypeInfo<'a>,
-            tagged: GraphTagged<'a>,
-            inlines: Vec<VariantInline<'a>>,
-        }
-        struct VariantInline<'a> {
-            node: GraphType<'a>,
-            variant_index: NodeIndex<usize>,
-            parent_indices: &'a [NodeIndex<usize>],
-            name: &'a str,
-            aliases: &'a [&'a str],
-        }
-
-        // Compute the set of types used (as query params, request and response
-        // bodies, etc.) by operations. Operations don't create graph edges,
-        // but still need to be considered when deciding whether to inline a
-        // struct variant. Otherwise, a struct that's used by same-tag unions
-        // _and_ an operation wouldn't be inlined, causing the Rust generator to
-        // incorrectly exclude the tag field from the struct.
-        let used_by_ops: FixedBitSet = self
-            .ops
-            .iter()
-            .flat_map(|op| op.types())
-            .map(|node| node.index())
-            .collect();
-
         // Collect all inlining decisions before mutating the graph,
         // so that we can check inlinability per variant.
-        let plans = self
-            .graph
-            .node_indices()
-            .filter_map(|index| {
-                let GraphType::Schema(GraphSchemaType::Tagged(info, tagged)) = self.graph[index]
-                else {
-                    return None;
-                };
-                let mut inlines = vec![];
+        let inlinables = self.inlinable_tagged_variants().collect_vec();
 
-                for variant in tagged.variants {
-                    let variant_index = variant.ty;
-                    let GraphType::Schema(GraphSchemaType::Struct(variant_info, variant_struct)) =
-                        self.graph[variant_index]
-                    else {
-                        continue;
-                    };
+        let mut retargets = FxHashMap::default();
+        retargets.reserve(inlinables.len());
 
-                    // A struct variant only needs inlining if it has multiple
-                    // distinct uses. Skip if (1) no operation uses the struct,
-                    // _and_ (2) every incoming edge is from a tagged union with
-                    // the same tag and fields. If both hold, all uses agree, so
-                    // the struct can be used directly without inlining.
-                    if !used_by_ops.contains(variant_index.index()) {
-                        let Some(first) = ({
-                            self.graph
-                                .neighbors_directed(variant_index, Direction::Incoming)
-                                .find_map(|neighbor| match self.graph[neighbor] {
-                                    GraphType::Schema(GraphSchemaType::Tagged(_, t)) => Some(t),
-                                    _ => None,
-                                })
-                        }) else {
-                            continue;
-                        };
-                        // Check that all the variant's inbound edges are from
-                        // tagged unions, and that all their tags and fields
-                        // match the first union we found.
-                        let all_agree = self
-                            .graph
-                            .neighbors_directed(variant_index, Direction::Incoming)
-                            .all(|neighbor| {
-                                matches!(
-                                    self.graph[neighbor],
-                                    GraphType::Schema(GraphSchemaType::Tagged(_, t))
-                                        if t.tag == first.tag && t.fields == first.fields,
-                                )
-                            });
-                        if all_agree {
-                            continue;
-                        }
-                    }
+        // Add nodes for the inlined variant structs,
+        // and their outgoing edges.
+        for InlinableVariant { tagged, variant } in inlinables {
+            // Duplicate the variant struct as an inline type,
+            // with its original metadata.
+            let index = self
+                .graph
+                .add_node(GraphType::Inline(GraphInlineType::Struct(
+                    InlineTypePath {
+                        root: InlineTypePathRoot::Type(tagged.info.name),
+                        segments: self.arena.alloc_slice_copy(&[
+                            InlineTypePathSegment::TaggedVariant(variant.info.name),
+                        ]),
+                    },
+                    variant.ty,
+                )));
 
-                    // Skip inlining when the inline copy would be
-                    // identical to the original. This happens when
-                    // the variant doesn't declare the tag as a field _and_
-                    // either (a) the union has no own fields, or
-                    // (b) the variant already inherits from this union,
-                    // so its fields are already reachable.
-                    let (has_tag_field, already_inherits) = {
-                        let inherits = EdgeFiltered::from_fn(&self.graph, |e| {
-                            matches!(e.weight(), EdgeKind::Inherits)
-                        });
-                        let mut dfs = DfsPostOrder::new(&inherits, variant_index);
-                        let mut has_tag_field = false;
-                        let mut already_inherits = false;
-                        while let Some(ancestor) = dfs.next(&inherits)
-                            && !(has_tag_field && already_inherits)
-                        {
-                            already_inherits |= ancestor == index;
-                            has_tag_field |= match self.graph[ancestor] {
-                                GraphType::Schema(GraphSchemaType::Struct(_, s))
-                                | GraphType::Inline(GraphInlineType::Struct(_, s)) => {
-                                    // Check own and inherited fields; OpenAPI 3.2
-                                    // clarifies that the tag can be inherited.
-                                    s.fields.iter().any(|f| {
-                                        matches!(
-                                            f.name,
-                                            StructFieldName::Name(n) if n == tagged.tag,
-                                        )
-                                    })
-                                }
-                                _ => false,
-                            };
-                        }
-                        (has_tag_field, already_inherits)
-                    };
-                    if !has_tag_field && (tagged.fields.is_empty() || already_inherits) {
-                        continue;
-                    }
-
-                    // Build our new inline type, with the same attributes
-                    // as the schema type, but a distinct inline type path.
-                    // The inline struct is a clone of the original, plus
-                    // an inheritance edge to the tagged union for its fields.
-                    let parents = self.arena.alloc_slice(itertools::chain!(
-                        variant_struct.parents.iter().copied(),
-                        std::iter::once(index),
-                    ));
-                    let node = GraphType::Inline(GraphInlineType::Struct(
-                        InlineTypePath {
-                            root: InlineTypePathRoot::Type(info.name),
-                            segments: self.arena.alloc_slice_copy(&[
-                                InlineTypePathSegment::TaggedVariant(variant_info.name),
-                            ]),
-                        },
-                        GraphStruct {
-                            description: variant_struct.description,
-                            fields: variant_struct.fields,
-                            parents,
-                        },
-                    ));
-
-                    inlines.push(VariantInline {
-                        node,
-                        variant_index,
-                        parent_indices: parents,
-                        name: variant.name,
-                        aliases: variant.aliases,
-                    });
-                }
-                if inlines.is_empty() {
-                    return None;
-                }
-
-                Some(TaggedPlan {
-                    tagged_index: index,
-                    info,
-                    tagged,
-                    inlines,
-                })
-            })
-            .collect_vec();
-
-        // Apply the plans to the graph.
-        for plan in plans {
-            let mut new_variants = FxHashMap::default();
-
-            // Add nodes and edges for the inline types.
-            for entry in &plan.inlines {
-                let node_index = self.graph.add_node(entry.node);
-
-                // Reference the original variant so that the inline
-                // inherits the original's transitive dependencies and
-                // SCC membership, but not its inline subtree.
-                self.graph
-                    .add_edge(node_index, entry.variant_index, EdgeKind::Reference);
-
-                // Add inheritance edges back to the inline's parents.
-                for &parent_index in entry.parent_indices {
-                    self.graph
-                        .add_edge(node_index, parent_index, EdgeKind::Inherits);
-                }
-
-                new_variants.insert(
-                    entry.variant_index,
-                    GraphTaggedVariant {
-                        name: entry.name,
-                        aliases: entry.aliases,
-                        ty: node_index,
+            // Create shadow edges to the original variant struct's fields.
+            // These serve two purposes:
+            //
+            // 1. If a field is recursive, the duplicate joins the field's SCC,
+            //    not the original's SCC, so field edges to the original type
+            //    won't be treated as cyclic.
+            // 2. Hiding the originals' inlines from the duplicate's inlines.
+            //
+            // `fields()` yields edges in reverse order of addition;
+            // we collect and reverse to add them in their original order.
+            let original_field_edges = self.fields(variant.index).collect_vec();
+            for edge in original_field_edges.into_iter().rev() {
+                self.graph.add_edge(
+                    index,
+                    edge.target,
+                    GraphEdge::Field {
+                        meta: edge.meta,
+                        shadow: true,
                     },
                 );
             }
 
-            // Retarget reference edges from the tagged union to point to
-            // the new inline variants. We only update edges targeting a
-            // replaced variant; other edges stay.
-            let edges_to_retarget = self
-                .graph
-                .edges_directed(plan.tagged_index, Direction::Outgoing)
-                .filter(|e| {
-                    matches!(e.weight(), EdgeKind::Reference)
-                        && new_variants.contains_key(&e.target())
-                })
-                .map(|e| (e.id(), new_variants[&e.target()].ty))
-                .collect_vec();
-            for (edge_id, new_target) in edges_to_retarget {
-                self.graph.remove_edge(edge_id);
-                self.graph
-                    .add_edge(plan.tagged_index, new_target, EdgeKind::Reference);
-            }
+            // Inherit from the tagged union (to pick up its own fields)
+            // and the original variant struct (to pick up its ancestors).
+            // The union is added first so that its fields appear first _and_
+            // can be overridden by the variant's fields.
+            self.graph
+                .add_edge(index, tagged.index, GraphEdge::Inherits { shadow: true });
+            self.graph
+                .add_edge(index, variant.index, GraphEdge::Inherits { shadow: true });
 
-            // Replace the node for the tagged union itself.
-            let modified_tagged = GraphTagged {
-                description: plan.tagged.description,
-                tag: plan.tagged.tag,
-                variants: self.arena.alloc_slice_exact(
-                    plan.tagged
-                        .variants
-                        .iter()
-                        .map(|&v| new_variants.get(&v.ty).copied().unwrap_or(v)),
-                ),
-                fields: plan.tagged.fields,
-            };
-            self.graph[plan.tagged_index] =
-                GraphType::Schema(GraphSchemaType::Tagged(plan.info, modified_tagged));
+            retargets.insert((tagged.index, variant.index), index);
+        }
+
+        // Retarget every tagged union's variant edges to the new structs.
+        let taggeds: FixedBitSet = retargets
+            .keys()
+            .map(|&(tagged, _)| tagged.index())
+            .collect();
+        for index in taggeds.ones().map(NodeIndex::new) {
+            let old_edges = self
+                .graph
+                .edges_directed(index, Direction::Outgoing)
+                .filter(|e| matches!(e.weight(), GraphEdge::Variant(_)))
+                .map(|e| (e.id(), *e.weight(), e.target()))
+                .collect_vec();
+            for &(id, _, _) in &old_edges {
+                self.graph.remove_edge(id);
+            }
+            // Re-add edges. `edges_directed` yields edges in reverse order
+            // of addition; reversing them adds edges in their original order.
+            for (_, weight, target) in old_edges.into_iter().rev() {
+                let new_target = retargets.get(&(index, target)).copied().unwrap_or(target);
+                self.graph.add_edge(index, new_target, weight);
+            }
         }
 
         self
@@ -390,6 +286,141 @@ impl<'a> RawGraph<'a> {
     #[inline]
     pub fn cook(&self) -> CookedGraph<'a> {
         CookedGraph::new(self)
+    }
+
+    /// Returns an iterator over all the fields of a struct or union type,
+    /// in reverse insertion order.
+    fn fields(&self, node: NodeIndex<usize>) -> impl Iterator<Item = OutgoingEdge<FieldMeta<'a>>> {
+        self.graph
+            .edges_directed(node, Direction::Outgoing)
+            .filter_map(|e| match e.weight() {
+                &GraphEdge::Field { meta, .. } => {
+                    let target = e.target();
+                    Some(OutgoingEdge { meta, target })
+                }
+                _ => None,
+            })
+    }
+
+    /// Returns an iterator over all the tagged union variant structs
+    /// that should be inlined.
+    fn inlinable_tagged_variants(&self) -> impl Iterator<Item = InlinableVariant<'a>> {
+        // Compute the set of types used by all operations.
+        // Operations don't participate in the graph, but
+        // still need to be considered when deciding
+        // whether to inline a variant struct.
+        //
+        // Otherwise, a struct that's used by same-tag unions
+        // _and_ an operation wouldn't be inlined, incorrectly
+        // removing its tag field.
+        let used_by_ops: FixedBitSet = self
+            .ops
+            .iter()
+            .flat_map(|op| op.types())
+            .map(|index| index.index())
+            .collect();
+
+        self.graph
+            .node_indices()
+            .filter_map(|index| match self.graph[index] {
+                GraphType::Schema(GraphSchemaType::Tagged(info, ty)) => {
+                    Some(Node { index, info, ty })
+                }
+                _ => None,
+            })
+            .flat_map(move |tagged| {
+                self.graph
+                    .edges_directed(tagged.index, Direction::Outgoing)
+                    .filter(|e| matches!(e.weight(), GraphEdge::Variant(_)))
+                    .filter_map(move |e| match self.graph[e.target()] {
+                        GraphType::Schema(GraphSchemaType::Struct(info, ty)) => {
+                            let index = e.target();
+                            Some((tagged, Node { index, info, ty }))
+                        }
+                        _ => None,
+                    })
+            })
+            .filter_map(move |(tagged, variant)| {
+                // A variant struct only needs inlining if it has multiple
+                // distinct uses. Skip if (1) no operation uses the struct,
+                // _and_ (2) every incoming edge is from a tagged union with
+                // the same tag and fields. If both hold, all uses agree, so
+                // the struct can be used directly without inlining.
+                if used_by_ops[variant.index.index()] {
+                    return Some((tagged, variant));
+                }
+
+                // Check that all the variant's inbound edges are from
+                // tagged unions, and that all their tags and field
+                // edges match the first union we found.
+                let first_tagged = self
+                    .graph
+                    .neighbors_directed(variant.index, Direction::Incoming)
+                    .find_map(|index| match self.graph[index] {
+                        GraphType::Schema(GraphSchemaType::Tagged(info, ty)) => {
+                            Some(Node { index, info, ty })
+                        }
+                        _ => None,
+                    })?;
+                let all_agree = self
+                    .graph
+                    .neighbors_directed(variant.index, Direction::Incoming)
+                    .all(|index| match self.graph[index] {
+                        GraphType::Schema(GraphSchemaType::Tagged(_, ty)) => {
+                            ty.tag == first_tagged.ty.tag
+                                && self.fields(index).eq(self.fields(first_tagged.index))
+                        }
+                        _ => false,
+                    });
+                if all_agree {
+                    return None;
+                }
+                Some((tagged, variant))
+            })
+            .filter_map(|(tagged, variant)| {
+                // Skip inlining when the inline copy would be identical
+                // to the original. This happens when the variant
+                // doesn't declare the tag as a field _and_ either
+                // (a) the union has no own fields, or (b) the variant
+                // inherits from the union.
+                let ancestors = EdgeFiltered::from_fn(&self.graph, |e| {
+                    matches!(e.weight(), GraphEdge::Inherits { .. })
+                });
+                let mut dfs = DfsPostOrder::new(&ancestors, variant.index);
+                let has_tag_field = std::iter::from_fn(|| dfs.next(&ancestors))
+                    .filter(|&n| {
+                        matches!(
+                            self.graph[n],
+                            GraphType::Schema(GraphSchemaType::Struct(..))
+                                | GraphType::Inline(GraphInlineType::Struct(..))
+                        )
+                    })
+                    .any(|n| {
+                        self.fields(n).any(|f| {
+                            matches!(f.meta.name, StructFieldName::Name(name)
+                                if name == tagged.ty.tag)
+                        })
+                    });
+
+                // If the variant declares or inherits the tag field,
+                // we must inline, so that the inline copy can safely
+                // omit the tag.
+                if has_tag_field {
+                    return Some(InlinableVariant { tagged, variant });
+                }
+
+                // If the DFS visited the union, the variant already inherits
+                // its fields; the inline copy would be identical.
+                if dfs.discovered[tagged.index.index()] {
+                    return None;
+                }
+
+                // If the variant doesn't inherit from the union, but the union
+                // has no fields of its own, the inline copy would be identical.
+                self.fields(tagged.index).next()?;
+
+                Some(InlinableVariant { tagged, variant })
+            })
     }
 }
 
@@ -409,142 +440,73 @@ pub struct CookedGraph<'a> {
 
 impl<'a> CookedGraph<'a> {
     fn new(raw: &RawGraph<'a>) -> Self {
-        // Assign a cooked node index to each raw node index.
-        let indices: FxHashMap<_, _> = raw
-            .graph
-            .node_indices()
-            .enumerate()
-            .map(|(cooked, raw)| (raw, NodeIndex::new(cooked)))
-            .collect();
-
-        // Map sparse graph indices to dense cooked indices.
-        let mapper = TypeMapper::new(raw.arena, |index| indices[&index]);
-
-        // Build a dense graph.
-        let mut graph = CookedDiGraph::with_capacity(indices.len(), raw.graph.edge_count());
-        for index in raw.graph.node_indices() {
-            let node = raw.graph[index];
-            let mapped = match node {
-                GraphType::Schema(ty) => GraphType::Schema(mapper.schema(&ty)),
-                GraphType::Inline(ty) => GraphType::Inline(mapper.inline(&ty)),
-            };
-            let cooked = graph.add_node(mapped);
-            debug_assert_eq!(indices[&index], cooked);
+        // Build a dense graph, mapping sparse raw node indices to
+        // dense cooked node indices.
+        let mut graph =
+            CookedDiGraph::with_capacity(raw.graph.node_count(), raw.graph.edge_count());
+        let mut indices =
+            FxHashMap::with_capacity_and_hasher(raw.graph.node_count(), FxBuildHasher);
+        for raw_index in raw.graph.node_indices() {
+            let cooked_index = graph.add_node(raw.graph[raw_index]);
+            indices.insert(raw_index, cooked_index);
         }
 
-        // Add edges, preserving original insertion order.
+        // Copy edges.
+        //
+        // `raw.graph.edges()` yields edges in reverse order of addition.
+        // The raw graph adds edges in declaration order, so `edges()`
+        // yields them reversed. Re-adding them to the cooked graph in that
+        // reversed order means they're now stored in reverse-declaration order,
+        // letting the cooked graph's accessors yield edges in declaration order
+        // without any extra work.
         for index in raw.graph.node_indices() {
             let from = indices[&index];
-            // `RawDiGraph::edges` yields edges in reverse insertion
-            // order; collect and reverse to preserve the original order.
             let edges = raw
                 .graph
                 .edges(index)
-                .map(|e| (indices[&e.target()], *e.weight()))
-                .collect_vec();
-            for (to, kind) in edges.into_iter().rev() {
+                .map(|e| (indices[&e.target()], *e.weight()));
+            for (to, kind) in edges {
                 graph.add_edge(from, to, kind);
             }
         }
 
-        let sccs = TopoSccs::new(&graph);
+        // Remap schema type references in operations.
+        let ops: &_ = raw.arena.alloc_slice_exact(raw.ops.iter().map(|&op| {
+            &*raw.arena.alloc(Operation {
+                id: op.id,
+                method: op.method,
+                path: op.path,
+                resource: op.resource,
+                description: op.description,
+                params: raw
+                    .arena
+                    .alloc_slice_exact(op.params.iter().map(|p| match p {
+                        Parameter::Path(info) => Parameter::Path(ParameterInfo {
+                            name: info.name,
+                            ty: indices[&info.ty],
+                            required: info.required,
+                            description: info.description,
+                            style: info.style,
+                        }),
+                        Parameter::Query(info) => Parameter::Query(ParameterInfo {
+                            name: info.name,
+                            ty: indices[&info.ty],
+                            required: info.required,
+                            description: info.description,
+                            style: info.style,
+                        }),
+                    })),
+                request: op.request.as_ref().map(|r| match r {
+                    Request::Json(ty) => Request::Json(indices[ty]),
+                    Request::Multipart => Request::Multipart,
+                }),
+                response: op.response.as_ref().map(|r| match r {
+                    Response::Json(ty) => Response::Json(indices[ty]),
+                }),
+            })
+        }));
 
-        let (metadata, ops) = {
-            let mut metadata = CookedGraphMetadata {
-                scc_indices: {
-                    // Precompute SCC indices, using just the reference edges.
-                    // Inheritance edges don't contribute to cycles.
-                    let refs = EdgeFiltered::from_fn(&graph, |e| {
-                        matches!(e.weight(), EdgeKind::Reference)
-                    });
-                    let mut scc = TarjanScc::new();
-                    scc.run(&refs, |_| ());
-                    graph
-                        .node_indices()
-                        .map(|node| scc.node_component_index(&refs, node))
-                        .collect()
-                },
-                // `GraphNodeMeta` can't implement `Clone` because it contains
-                // an `AtomicRefCell`, so we use this idiom instead of `vec!`.
-                schemas: std::iter::repeat_with(GraphNodeMeta::default)
-                    .take(graph.node_count())
-                    .collect(),
-                operations: FxHashMap::default(),
-            };
-
-            // Remap schema type references in operations.
-            let ops: &_ = raw
-                .arena
-                .alloc_slice_exact(raw.ops.iter().map(|&op| mapper.operation(op)));
-
-            // Precompute the set of type indices that each operation
-            // references directly.
-            for &&op in ops {
-                metadata.operations.entry(op).or_default().types =
-                    op.types().map(|node| node.index()).collect();
-            }
-
-            // Forward propagation: for each type, compute all the types
-            // that it depends on, directly and transitively.
-            {
-                // Condense each of the original graph's strongly connected components
-                // into a single node, forming a DAG.
-                let condensation = sccs.condensation();
-
-                // Compute the transitive closure; discard the reduction.
-                let (_, closure) = tred::dag_transitive_reduction_closure(&condensation);
-
-                // Compute dependencies between SCCs.
-                let mut scc_deps =
-                    vec![FixedBitSet::with_capacity(graph.node_count()); sccs.scc_count()];
-                for (scc, deps) in scc_deps.iter_mut().enumerate() {
-                    // Include the SCC itself, so that cycle members appear
-                    // in each other's dependencies; and its
-                    // transitive neighbors.
-                    deps.extend(
-                        std::iter::once(scc)
-                            .chain(closure.neighbors(scc))
-                            .flat_map(|scc| sccs.sccs[scc].ones()),
-                    );
-                }
-
-                // Expand SCC dependencies to node dependencies, and
-                // transpose dependencies to build dependents.
-                let mut node_dependents =
-                    vec![FixedBitSet::with_capacity(graph.node_count()); graph.node_count()];
-                for node in graph.node_indices() {
-                    let mut deps = scc_deps[sccs.topo_index(node)].clone();
-                    deps.remove(node.index()); // We don't depend on ourselves.
-                    for dep in deps.ones() {
-                        node_dependents[dep].insert(node.index());
-                    }
-                    metadata.schemas[node.index()].dependencies = deps;
-                }
-                for (index, dependents) in node_dependents.into_iter().enumerate() {
-                    metadata.schemas[index].dependents = dependents;
-                }
-            }
-
-            // Backward propagation: propagate each operation to all the
-            // types that it uses, directly and transitively.
-            for &&op in ops {
-                let meta = &metadata.operations[&op];
-
-                // Collect all the types that this operation depends on.
-                let mut transitive_deps = FixedBitSet::with_capacity(graph.node_count());
-                for node in meta.types.ones() {
-                    transitive_deps.insert(node);
-                    transitive_deps.union_with(&metadata.schemas[node].dependencies);
-                }
-
-                // Mark each type as being used by this operation.
-                for node in transitive_deps.ones() {
-                    metadata.schemas[node].used_by.insert(op);
-                }
-            }
-
-            (metadata, ops)
-        };
+        let metadata = MetadataBuilder::new(&graph, ops).build();
 
         Self {
             graph,
@@ -591,95 +553,436 @@ impl<'a> CookedGraph<'a> {
     pub fn operations(&self) -> impl Iterator<Item = OperationView<'_>> {
         self.ops.iter().map(move |&op| OperationView::new(self, op))
     }
+
+    #[inline]
+    pub(super) fn inherits(
+        &self,
+        node: NodeIndex<usize>,
+    ) -> impl Iterator<Item = OutgoingEdge<()>> {
+        self.graph
+            .edges_directed(node, Direction::Outgoing)
+            .filter(|e| matches!(e.weight(), GraphEdge::Inherits { .. }))
+            .map(|e| OutgoingEdge {
+                meta: (),
+                target: e.target(),
+            })
+    }
+
+    #[inline]
+    pub(super) fn fields(
+        &self,
+        node: NodeIndex<usize>,
+    ) -> impl Iterator<Item = OutgoingEdge<FieldMeta<'a>>> {
+        self.graph
+            .edges_directed(node, Direction::Outgoing)
+            .filter_map(|e| match e.weight() {
+                &GraphEdge::Field { meta, .. } => {
+                    let target = e.target();
+                    Some(OutgoingEdge { meta, target })
+                }
+                _ => None,
+            })
+    }
+
+    #[inline]
+    pub(super) fn variants(
+        &self,
+        node: NodeIndex<usize>,
+    ) -> impl Iterator<Item = OutgoingEdge<VariantMeta<'a>>> {
+        self.graph
+            .edges_directed(node, Direction::Outgoing)
+            .filter_map(|e| match e.weight() {
+                &GraphEdge::Variant(meta) => {
+                    let target = e.target();
+                    Some(OutgoingEdge { meta, target })
+                }
+                _ => None,
+            })
+    }
+}
+
+/// A variant that should be inlined into its tagged union.
+struct InlinableVariant<'a> {
+    /// The tagged union that owns this variant.
+    tagged: Node<'a, GraphTagged<'a>>,
+    /// The original variant struct node.
+    variant: Node<'a, GraphStruct<'a>>,
 }
 
 /// An edge between two types in the type graph.
-#[derive(Clone, Copy, Debug, Enum, Eq, Hash, PartialEq)]
-pub enum EdgeKind {
-    /// The source type contains or references the target type.
-    Reference,
+///
+/// Edges describe the relationship between their source and target types.
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub enum GraphEdge<'a> {
     /// The source type inherits from the target type.
-    Inherits,
+    Inherits {
+        /// Marks a copied inheritance edge on an inlined variant struct.
+        ///
+        /// Shadow inheritance edges are excluded from a type's [inlines],
+        /// preventing the type from claiming the original's inline ancestors.
+        ///
+        /// [inlines]: crate::ir::views::View::inlines
+        shadow: bool,
+    },
+    /// The source struct, tagged union, or untagged union
+    /// has the target type as a field.
+    Field {
+        /// Marks a copied field edge on an inlined variant struct.
+        ///
+        /// Shadow field edges are excluded from a type's [inlines],
+        /// preventing the type from claiming the original's inlines.
+        ///
+        /// [inlines]: crate::ir::views::View::inlines
+        shadow: bool,
+        meta: FieldMeta<'a>,
+    },
+    /// The source union has the target type as a variant.
+    Variant(VariantMeta<'a>),
+    /// The source type is an array, map, or optional that contains
+    /// the target type.
+    Contains,
+}
+
+impl GraphEdge<'_> {
+    /// Returns `true` if this is a shadow edge. [Transitive closures]
+    /// follow shadow edges; [inlines] don't.
+    ///
+    /// [Transitive closures]: crate::ir::views::View::dependencies
+    /// [inlines]: crate::ir::views::View::inlines
+    #[inline]
+    pub fn shadow(&self) -> bool {
+        matches!(
+            self,
+            GraphEdge::Field { shadow: true, .. } | GraphEdge::Inherits { shadow: true }
+        )
+    }
+}
+
+/// Metadata describing an edge from a source to a target type.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct OutgoingEdge<T> {
+    pub meta: T,
+    pub target: NodeIndex<usize>,
+}
+
+#[derive(Clone, Copy)]
+struct Node<'a, Ty> {
+    index: NodeIndex<usize>,
+    info: SchemaTypeInfo<'a>,
+    ty: Ty,
 }
 
 /// Precomputed metadata for schema types and operations in the graph.
-#[derive(Debug, Default)]
 pub(super) struct CookedGraphMetadata<'a> {
     /// Maps each node index to its strongly connected component index.
     /// Nodes in the same SCC form a cycle.
     pub scc_indices: Vec<usize>,
-    pub schemas: Vec<GraphNodeMeta<'a>>,
-    pub operations: FxHashMap<GraphOperation<'a>, GraphOperationMeta>,
+    /// Transitive closure over the type graph.
+    pub closure: Closure,
+    /// Whether each type can implement `Eq` and `Hash`.
+    pub hashable: FixedBitSet,
+    /// Whether each type can implement `Default`.
+    pub defaultable: FixedBitSet,
+    /// Maps each type to the operations that use it.
+    pub used_by: Vec<Vec<GraphOperation<'a>>>,
+    /// Maps each operation to the types that it uses.
+    pub uses: FxHashMap<GraphOperation<'a>, FixedBitSet>,
+    /// Opaque extended data for each type.
+    pub extensions: Vec<AtomicRefCell<ExtensionMap>>,
+}
+
+impl Debug for CookedGraphMetadata<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("CookedGraphMetadata")
+            .field("scc_indices", &self.scc_indices)
+            .field("closure", &self.closure)
+            .field("hashable", &self.hashable)
+            .field("defaultable", &self.defaultable)
+            .field("used_by", &self.used_by)
+            .field("uses", &self.uses)
+            .finish_non_exhaustive()
+    }
+}
+
+/// Precomputed bitsets indicating which types can derive
+/// `Eq` / `Hash` and `Default`.
+struct HashDefault {
+    hashable: FixedBitSet,
+    defaultable: FixedBitSet,
 }
 
 /// Precomputed metadata for an operation that references
 /// types in the graph.
-#[derive(Debug, Default)]
-pub(super) struct GraphOperationMeta {
-    /// Indices of all the types that this operation directly depends on:
-    /// parameters, request body, and response body.
-    pub types: FixedBitSet,
+struct Operations<'a> {
+    /// All the types that each operation depends on, directly and transitively.
+    pub uses: FxHashMap<GraphOperation<'a>, FixedBitSet>,
+    /// All the operations that use each type, directly and transitively.
+    pub used_by: Vec<Vec<GraphOperation<'a>>>,
 }
 
-/// Precomputed metadata for a schema type in the graph.
-#[derive(Default)]
-pub(super) struct GraphNodeMeta<'a> {
-    /// Operations that use this type.
-    pub used_by: FxHashSet<GraphOperation<'a>>,
-    /// Indices of other types that this type transitively depends on.
-    pub dependencies: FixedBitSet,
-    /// Indices of other types that transitively depend on this type.
-    pub dependents: FixedBitSet,
-    /// Opaque extended data for this type.
-    pub extensions: AtomicRefCell<ExtensionMap>,
+struct MetadataBuilder<'graph, 'a> {
+    graph: &'graph CookedDiGraph<'a>,
+    ops: &'graph [&'graph GraphOperation<'a>],
+    /// The full transitive closure of each type's dependencies.
+    closure: Closure,
 }
 
-impl Debug for GraphNodeMeta<'_> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("GraphNodeMeta")
-            .field("used_by", &self.used_by)
-            .field("dependencies", &self.dependencies)
-            .field("dependents", &self.dependents)
-            .finish_non_exhaustive()
+impl<'graph, 'a> MetadataBuilder<'graph, 'a> {
+    fn new(graph: &'graph CookedDiGraph<'a>, ops: &'graph [&'graph GraphOperation<'a>]) -> Self {
+        Self {
+            graph,
+            ops,
+            closure: Closure::new(graph),
+        }
+    }
+
+    fn build(self) -> CookedGraphMetadata<'a> {
+        let scc_indices = self.scc_indices().collect_vec();
+        let operations = self.operations();
+        let HashDefault {
+            hashable,
+            defaultable,
+        } = self.hash_default();
+        CookedGraphMetadata {
+            scc_indices,
+            closure: self.closure,
+            hashable,
+            defaultable,
+            used_by: operations.used_by,
+            uses: operations.uses,
+            // `AtomicRefCell` doesn't implement `Clone`,
+            // so we use this idiom instead of `vec!`.
+            extensions: std::iter::repeat_with(AtomicRefCell::default)
+                .take(self.graph.node_count())
+                .collect(),
+        }
+    }
+
+    /// Computes SCC indices for all types in the graph.
+    fn scc_indices(&self) -> impl Iterator<Item = usize> {
+        // Precompute SCC indices, excluding inheritance edges.
+        let refs = EdgeFiltered::from_fn(&self.graph, |e| {
+            // Inheritance edges don't contribute to cycles;
+            // a type can't inherit from itself.
+            !matches!(e.weight(), GraphEdge::Inherits { .. })
+        });
+        let mut scc = TarjanScc::new();
+        scc.run(&refs, |_| ());
+        self.graph
+            .node_indices()
+            .map(move |node| scc.node_component_index(&refs, node))
+    }
+
+    fn operations(&self) -> Operations<'a> {
+        let mut operations = Operations {
+            uses: FxHashMap::default(),
+            used_by: vec![vec![]; self.graph.node_count()],
+        };
+
+        for &&op in self.ops {
+            // Forward propagation: start from the direct types, then
+            // expand to the full transitive dependency set.
+            let mut dependencies = FixedBitSet::with_capacity(self.graph.node_count());
+            for &node in op.types() {
+                dependencies.extend(self.closure.dependencies_of(node).map(|n| n.index()));
+            }
+            operations.uses.entry(op).insert_entry(dependencies);
+        }
+
+        // Backward propagation: mark types as used by their operations.
+        for (op, deps) in &operations.uses {
+            for node in deps.ones() {
+                operations.used_by[node].push(*op);
+            }
+        }
+
+        operations
+    }
+
+    fn hash_default(&self) -> HashDefault {
+        // Mark all leaf types that can't derive `Eq` / `Hash` or `Default`.
+        let n = self.graph.node_count();
+        let mut unhashable = FixedBitSet::with_capacity(n);
+        let mut undefaultable = FixedBitSet::with_capacity(n);
+        for node in self.graph.node_indices() {
+            use {GraphType::*, PrimitiveType::*};
+            match &self.graph[node] {
+                Schema(GraphSchemaType::Primitive(_, F32 | F64))
+                | Inline(GraphInlineType::Primitive(_, F32 | F64)) => {
+                    unhashable.insert(node.index());
+                }
+                Schema(
+                    GraphSchemaType::Primitive(_, Url)
+                    | GraphSchemaType::Tagged(_, _)
+                    | GraphSchemaType::Untagged(_, _),
+                )
+                | Inline(
+                    GraphInlineType::Primitive(_, Url)
+                    | GraphInlineType::Tagged(_, _)
+                    | GraphInlineType::Untagged(_, _),
+                ) => {
+                    undefaultable.insert(node.index());
+                }
+                _ => (),
+            }
+        }
+
+        // Propagate marked leaves backward through the non-inheritance edges
+        // that affect each trait. A reverse BFS from the leaves marks each type
+        // that transitively reaches an unhashable or undefaultable leaf.
+        {
+            let mut queue: VecDeque<_> = unhashable.ones().map(NodeIndex::new).collect();
+            while let Some(node) = queue.pop_front() {
+                for edge in self.graph.edges_directed(node, Direction::Incoming) {
+                    if !matches!(
+                        edge.weight(),
+                        GraphEdge::Field { .. } | GraphEdge::Contains | GraphEdge::Variant(_)
+                    ) {
+                        continue;
+                    }
+                    let source = edge.source();
+                    if !unhashable[source.index()] {
+                        unhashable.insert(source.index());
+                        queue.push_back(source);
+                    }
+                }
+            }
+
+            let mut queue: VecDeque<_> = undefaultable.ones().map(NodeIndex::new).collect();
+            while let Some(node) = queue.pop_front() {
+                for edge in self.graph.edges_directed(node, Direction::Incoming) {
+                    // Optional fields become `AbsentOr<T>`, which is always
+                    // `Default`, so only required field edges propagate.
+                    if !matches!(
+                        edge.weight(),
+                        GraphEdge::Field { meta, .. } if meta.required
+                    ) {
+                        continue;
+                    }
+                    let source = edge.source();
+                    if !undefaultable[source.index()] {
+                        undefaultable.insert(source.index());
+                        queue.push_back(source);
+                    }
+                }
+            }
+        }
+
+        // Compute the transitive closure over the inheritance subgraph.
+        // The BFS above doesn't follow inheritance edges, because it would
+        // propagate a parent's intrinsic undefaultability to its children:
+        // e.g., a tagged union is never `Default`, but all its variants can be.
+        // The closure lets us account for this.
+        let ancestors = Closure::new(&EdgeFiltered::from_fn(self.graph, |e| {
+            matches!(e.weight(), GraphEdge::Inherits { .. })
+        }));
+
+        // Visit nodes in reverse topological order so that each node
+        // has a complete view of the types it depends on.
+        let mut hashable = FixedBitSet::with_capacity(n);
+        let mut defaultable = FixedBitSet::with_capacity(n);
+        for node in self.closure.topo_nodes().rev() {
+            // Are we intrinsically hashable / defaultable?
+            let mut h = !unhashable[node.index()];
+            let mut d = !undefaultable[node.index()];
+
+            // Are all our inner types and inherited fields
+            // hashable / defaultable?
+            let contained = self
+                .graph
+                .edges_directed(node, Direction::Outgoing)
+                .filter(|e| !matches!(e.weight(), GraphEdge::Inherits { .. }));
+            let inherited = ancestors
+                .dependencies_of(node) // All transitive ancestors of the node.
+                .skip(1) // Skip the node itself.
+                .flat_map(|ancestor| {
+                    self.graph
+                        .edges_directed(ancestor, Direction::Outgoing)
+                        .filter(|e| matches!(e.weight(), GraphEdge::Field { .. }))
+                });
+            let node_scc = self.closure.scc_index_of(node);
+            for edge in contained
+                .chain(inherited)
+                // Ignore types in our SCC; the BFS already marks them.
+                .filter(|e| self.closure.scc_index_of(e.target()) != node_scc)
+            {
+                match edge.weight() {
+                    GraphEdge::Field { meta, .. } => {
+                        h &= hashable[edge.target().index()];
+                        if meta.required {
+                            d &= defaultable[edge.target().index()];
+                        }
+                    }
+                    GraphEdge::Contains | GraphEdge::Variant(_) => {
+                        h &= hashable[edge.target().index()];
+                    }
+                    _ => {}
+                }
+            }
+
+            if h {
+                hashable.insert(node.index());
+            }
+            if d {
+                defaultable.insert(node.index());
+            }
+        }
+
+        HashDefault {
+            hashable,
+            defaultable,
+        }
     }
 }
 
 /// Visits all the types and references contained within a [`SpecType`].
 #[derive(Debug)]
 struct SpecTypeVisitor<'a> {
-    stack: Vec<(Option<&'a SpecType<'a>>, EdgeKind, &'a SpecType<'a>)>,
+    stack: Vec<(Option<(&'a SpecType<'a>, GraphEdge<'a>)>, &'a SpecType<'a>)>,
 }
 
 impl<'a> SpecTypeVisitor<'a> {
     /// Creates a visitor with `roots` on the stack of types to visit.
     #[inline]
     fn new(roots: impl Iterator<Item = &'a SpecType<'a>>) -> Self {
-        let mut stack = roots
-            .map(|root| (None, EdgeKind::Reference, root))
-            .collect_vec();
+        let mut stack = roots.map(|root| (None, root)).collect_vec();
         stack.reverse();
         Self { stack }
     }
 }
 
 impl<'a> Iterator for SpecTypeVisitor<'a> {
-    type Item = (Option<&'a SpecType<'a>>, EdgeKind, &'a SpecType<'a>);
+    type Item = (Option<(&'a SpecType<'a>, GraphEdge<'a>)>, &'a SpecType<'a>);
 
     fn next(&mut self) -> Option<Self::Item> {
-        let (parent, kind, top) = self.stack.pop()?;
+        let (parent, top) = self.stack.pop()?;
+        if matches!(parent, Some((_, GraphEdge::Variant(VariantMeta::Unit)))) {
+            // Unit variants form self-edges; skip them
+            // to avoid an infinite loop.
+            return Some((parent, top));
+        }
         match top {
             SpecType::Schema(SpecSchemaType::Struct(_, ty))
             | SpecType::Inline(SpecInlineType::Struct(_, ty)) => {
                 self.stack.extend(
                     itertools::chain!(
-                        ty.fields
-                            .iter()
-                            .map(|field| (EdgeKind::Reference, field.ty)),
+                        ty.fields.iter().map(|field| (
+                            GraphEdge::Field {
+                                shadow: false,
+                                meta: FieldMeta {
+                                    name: field.name,
+                                    required: field.required,
+                                    description: field.description,
+                                    flattened: field.flattened,
+                                },
+                            },
+                            field.ty
+                        )),
                         ty.parents
                             .iter()
-                            .map(|parent| (EdgeKind::Inherits, *parent)),
+                            .map(|parent| (GraphEdge::Inherits { shadow: false }, *parent)),
                     )
-                    .map(|(kind, ty)| (Some(top), kind, ty))
+                    .map(|(edge, ty)| (Some((top, edge)), ty))
                     .rev(),
                 );
             }
@@ -687,17 +990,30 @@ impl<'a> Iterator for SpecTypeVisitor<'a> {
             | SpecType::Inline(SpecInlineType::Untagged(_, ty)) => {
                 self.stack.extend(
                     itertools::chain!(
-                        ty.fields
-                            .iter()
-                            .map(|field| (EdgeKind::Reference, field.ty)),
-                        ty.variants.iter().filter_map(|variant| match variant {
-                            SpecUntaggedVariant::Some(_, ty) => {
-                                Some((EdgeKind::Reference, *ty))
+                        ty.fields.iter().map(|field| (
+                            GraphEdge::Field {
+                                shadow: false,
+                                meta: FieldMeta {
+                                    name: field.name,
+                                    required: field.required,
+                                    description: field.description,
+                                    flattened: field.flattened,
+                                },
+                            },
+                            field.ty
+                        )),
+                        ty.variants.iter().map(|variant| match variant {
+                            &SpecUntaggedVariant::Some(hint, ty) => {
+                                (GraphEdge::Variant(VariantMeta::Untagged(hint)), ty)
                             }
-                            _ => None,
+                            // `null` variants have no target type;
+                            // we represent these variants as self-edges.
+                            SpecUntaggedVariant::Null => {
+                                (GraphEdge::Variant(VariantMeta::Unit), top)
+                            }
                         }),
                     )
-                    .map(|(kind, ty)| (Some(top), kind, ty))
+                    .map(|(edge, ty)| (Some((top, edge)), ty))
                     .rev(),
                 );
             }
@@ -705,21 +1021,37 @@ impl<'a> Iterator for SpecTypeVisitor<'a> {
             | SpecType::Inline(SpecInlineType::Tagged(_, ty)) => {
                 self.stack.extend(
                     itertools::chain!(
-                        ty.fields
-                            .iter()
-                            .map(|field| (EdgeKind::Reference, field.ty)),
-                        ty.variants
-                            .iter()
-                            .map(|variant| (EdgeKind::Reference, variant.ty)),
+                        ty.fields.iter().map(|field| (
+                            GraphEdge::Field {
+                                shadow: false,
+                                meta: FieldMeta {
+                                    name: field.name,
+                                    required: field.required,
+                                    description: field.description,
+                                    flattened: field.flattened,
+                                },
+                            },
+                            field.ty
+                        )),
+                        ty.variants.iter().map(|variant| (
+                            GraphEdge::Variant(
+                                TaggedVariantMeta {
+                                    name: variant.name,
+                                    aliases: variant.aliases,
+                                }
+                                .into()
+                            ),
+                            variant.ty
+                        )),
                     )
-                    .map(|(kind, ty)| (Some(top), kind, ty))
+                    .map(|(edge, ty)| (Some((top, edge)), ty))
                     .rev(),
                 );
             }
             SpecType::Schema(SpecSchemaType::Container(_, container))
             | SpecType::Inline(SpecInlineType::Container(_, container)) => {
                 self.stack
-                    .push((Some(top), EdgeKind::Reference, container.inner().ty));
+                    .push((Some((top, GraphEdge::Contains)), container.inner().ty));
             }
             SpecType::Schema(
                 SpecSchemaType::Enum(..) | SpecSchemaType::Primitive(..) | SpecSchemaType::Any(_),
@@ -729,7 +1061,7 @@ impl<'a> Iterator for SpecTypeVisitor<'a> {
             ) => (),
             SpecType::Ref(_) => (),
         }
-        Some((parent, kind, top))
+        Some((parent, top))
     }
 }
 
@@ -760,14 +1092,17 @@ impl<T: Send + Sync + 'static> Extension for T {
 /// and provides topological ordering, efficient membership testing, and
 /// condensation for computing the transitive closure. These are
 /// building blocks for cycle detection and dependency propagation.
-struct TopoSccs<'a, N, E> {
-    graph: &'a DiGraph<N, E, usize>,
+struct TopoSccs<G> {
+    graph: G,
     tarjan: TarjanScc<NodeIndex<usize>>,
-    sccs: Vec<FixedBitSet>,
+    sccs: Vec<Vec<usize>>,
 }
 
-impl<'a, N, E> TopoSccs<'a, N, E> {
-    fn new(graph: &'a DiGraph<N, E, usize>) -> Self {
+impl<G> TopoSccs<G>
+where
+    G: Closable<NodeIndex<usize>> + Copy,
+{
+    fn new(graph: G) -> Self {
         let mut sccs = Vec::new();
         let mut tarjan = TarjanScc::new();
         tarjan.run(graph, |scc_nodes| {
@@ -796,12 +1131,6 @@ impl<'a, N, E> TopoSccs<'a, N, E> {
         self.sccs.len() - 1 - self.tarjan.node_component_index(self.graph, node)
     }
 
-    /// Iterates over the SCCs in topological order.
-    #[cfg(test)]
-    fn iter(&self) -> std::slice::Iter<'_, FixedBitSet> {
-        self.sccs.iter()
-    }
-
     /// Builds a condensed DAG of SCCs.
     ///
     /// The condensed graph is represented as an adjacency list, where both
@@ -812,12 +1141,13 @@ impl<'a, N, E> TopoSccs<'a, N, E> {
         let mut dag = UnweightedList::with_capacity(self.scc_count());
         for to in 0..self.scc_count() {
             dag.add_node();
-            for index in self.sccs[to].ones().map(NodeIndex::new) {
-                for neighbor in self.graph.neighbors_directed(index, Direction::Incoming) {
-                    let from = self.topo_index(neighbor);
-                    if from != to {
-                        dag.update_edge(from, to, ());
-                    }
+            for neighbor in self.sccs[to].iter().flat_map(|&index| {
+                self.graph
+                    .neighbors_directed(NodeIndex::new(index), Direction::Incoming)
+            }) {
+                let from = self.topo_index(neighbor);
+                if from != to {
+                    dag.update_edge(from, to, ());
                 }
             }
         }
@@ -825,160 +1155,133 @@ impl<'a, N, E> TopoSccs<'a, N, E> {
     }
 }
 
-/// Controls how to continue traversing the graph when at a node.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum Traversal {
-    /// Yield this node, then explore its neighbors.
-    Visit,
-    /// Yield this node, but skip its neighbors.
-    Stop,
-    /// Don't yield this node, but explore its neighbors.
-    Skip,
-    /// Don't yield this node, and skip its neighbors.
-    Ignore,
+/// The transitive closure of a graph.
+#[derive(Debug)]
+pub(super) struct Closure {
+    /// Maps each node index to its SCC's topological index.
+    scc_indices: Vec<usize>,
+    /// Members of each SCC, indexed by topological SCC index.
+    scc_members: Vec<Vec<usize>>,
+    /// Maps each SCC to a list of all the SCCs that it transitively depends on,
+    /// excluding itself.
+    scc_deps: Vec<Vec<usize>>,
+    /// Maps each SCC to a list of all the SCCs that transitively depend on it,
+    /// excluding itself.
+    scc_rdeps: Vec<Vec<usize>>,
 }
 
-/// Edge-kind-aware breadth-first traversal of the type graph.
-///
-/// [`Traverse`] tracks discovered nodes separately per [`EdgeKind`],
-/// so a node that's reachable via both reference and inheritance edges
-/// is visited once for each kind.
-///
-/// Use [`Traverse::run`] with a filter to control which nodes are
-/// yielded and explored.
-pub struct Traverse<'a> {
-    graph: &'a CookedDiGraph<'a>,
-    stack: VecDeque<(EdgeKind, NodeIndex<usize>)>,
-    discovered: EnumMap<EdgeKind, FixedBitSet>,
-    direction: Direction,
-}
-
-impl<'a> Traverse<'a> {
-    /// Starts a breadth-first traversal at a `root` node,
-    /// including `root` in the traversal.
-    pub fn at_root(
-        graph: &'a CookedDiGraph<'a>,
-        root: NodeIndex<usize>,
-        direction: Direction,
-    ) -> Self {
-        let mut discovered = enum_map!(_ => graph.visit_map());
-        discovered[EdgeKind::Reference].grow_and_insert(root.index());
-        Self {
-            graph,
-            stack: VecDeque::from([(EdgeKind::Reference, root)]),
-            discovered,
-            direction,
-        }
-    }
-
-    /// Starts a breadth-first traversal at multiple `roots`,
-    /// including each root in the traversal.
-    pub fn at_roots(
-        graph: &'a CookedDiGraph<'a>,
-        roots: &FixedBitSet,
-        direction: Direction,
-    ) -> Self {
-        let mut stack = VecDeque::new();
-        let mut discovered = enum_map!(_ => graph.visit_map());
-        stack.extend(
-            roots
-                .ones()
-                .map(|index| (EdgeKind::Reference, NodeIndex::new(index))),
-        );
-        discovered[EdgeKind::Reference].union_with(roots);
-        Self {
-            graph,
-            stack,
-            discovered,
-            direction,
-        }
-    }
-
-    /// Starts a breadth-first traversal from the immediate neighbors of `root`,
-    /// excluding `root` itself from the traversal.
-    pub fn from_neighbors(
-        graph: &'a CookedDiGraph<'a>,
-        root: NodeIndex<usize>,
-        direction: Direction,
-    ) -> Self {
-        let mut stack = VecDeque::new();
-        let mut discovered = enum_map! {
-            _ => {
-                let mut map = graph.visit_map();
-                map.visit(root);
-                map
-            }
-        };
-        for (kind, neighbors) in neighbors(graph, root, direction) {
-            stack.extend(
-                neighbors
-                    .difference(&discovered[kind])
-                    .map(|index| (kind, NodeIndex::new(index))),
-            );
-            discovered[kind].union_with(&neighbors);
-        }
-        Self {
-            graph,
-            stack,
-            discovered,
-            direction,
-        }
-    }
-
-    pub fn run<F>(
-        mut self,
-        filter: F,
-    ) -> impl Iterator<Item = (EdgeKind, NodeIndex<usize>)> + use<'a, F>
+impl Closure {
+    /// Computes the transitive closure of a graph.
+    fn new<G>(graph: G) -> Self
     where
-        F: Fn(EdgeKind, NodeIndex<usize>) -> Traversal,
+        G: Closable<NodeIndex<usize>> + Copy,
     {
-        std::iter::from_fn(move || {
-            while let Some((kind, index)) = self.stack.pop_front() {
-                let traversal = filter(kind, index);
+        let sccs = TopoSccs::new(graph);
+        let condensation = sccs.condensation();
+        let (_, closure) = tred::dag_transitive_reduction_closure(&condensation);
 
-                if matches!(traversal, Traversal::Visit | Traversal::Skip) {
-                    for (kind, neighbors) in neighbors(self.graph, index, self.direction) {
-                        for neighbor in neighbors.difference(&self.discovered[kind]) {
-                            self.stack.push_back((kind, NodeIndex::new(neighbor)));
-                        }
-                        self.discovered[kind].union_with(&neighbors);
-                    }
-                }
-
-                if matches!(traversal, Traversal::Visit | Traversal::Stop) {
-                    return Some((kind, index));
-                }
-
-                // `Skip` and `Ignore` continue the loop without yielding.
+        // Build the forward and reverse adjacency lists
+        // from the transitive closure graph.
+        let scc_deps = (0..sccs.scc_count())
+            .map(|scc| closure.neighbors(scc).collect_vec())
+            .collect_vec();
+        let mut scc_rdeps = vec![vec![]; sccs.scc_count()];
+        for (scc, deps) in scc_deps.iter().enumerate() {
+            for &dep in deps {
+                scc_rdeps[dep].push(scc);
             }
-            None
-        })
+        }
+
+        let mut scc_indices = vec![0; graph.node_count()];
+        for node in graph.node_identifiers() {
+            scc_indices[node.index()] = sccs.topo_index(node);
+        }
+
+        Closure {
+            scc_indices,
+            scc_members: sccs.sccs.iter().cloned().collect_vec(),
+            scc_deps,
+            scc_rdeps,
+        }
+    }
+
+    /// Iterates over all nodes in topological order.
+    ///
+    /// The order of nodes within an SCC is arbitrary, since all members
+    /// of an SCC share the same dependencies.
+    #[inline]
+    pub fn topo_nodes(&self) -> impl DoubleEndedIterator<Item = NodeIndex<usize>> + use<> {
+        let mut by_scc = vec![vec![]; self.scc_members.len()];
+        for (node, &scc) in self.scc_indices.iter().enumerate() {
+            by_scc[scc].push(NodeIndex::new(node));
+        }
+        by_scc.into_iter().flatten()
+    }
+
+    /// Returns the topological SCC index for the given node.
+    #[inline]
+    pub fn scc_index_of(&self, node: NodeIndex<usize>) -> usize {
+        self.scc_indices[node.index()]
+    }
+
+    /// Iterates over all nodes that `node` transitively depends on,
+    /// including `node` and all members of its SCC.
+    pub fn dependencies_of(
+        &self,
+        node: NodeIndex<usize>,
+    ) -> impl Iterator<Item = NodeIndex<usize>> {
+        let scc = self.scc_index_of(node);
+        std::iter::once(scc)
+            .chain(self.scc_deps[scc].iter().copied())
+            .flat_map(|s| self.scc_members[s].iter().copied()) // Expand SCCs to nodes.
+            .map(NodeIndex::new)
+    }
+
+    /// Iterates over all nodes that transitively depend on `node`,
+    /// including `node` and all members of its SCC.
+    pub fn dependents_of(&self, node: NodeIndex<usize>) -> impl Iterator<Item = NodeIndex<usize>> {
+        let scc = self.scc_index_of(node);
+        std::iter::once(scc)
+            .chain(self.scc_rdeps[scc].iter().copied())
+            .flat_map(|s| self.scc_members[s].iter().copied())
+            .map(NodeIndex::new)
+    }
+
+    /// Returns whether `node` transitively depends on `other`.
+    /// Returns `false` when `node == other`.
+    #[inline]
+    pub fn depends_on(&self, node: NodeIndex<usize>, other: NodeIndex<usize>) -> bool {
+        if node == other {
+            return false;
+        }
+        let scc = self.scc_index_of(node);
+        let other_scc = self.scc_index_of(other);
+        scc == other_scc || self.scc_deps[scc].contains(&other_scc)
     }
 }
 
-/// Returns the neighbors of `node` in the given `direction`,
-/// grouped by their [`EdgeKind`].
-fn neighbors(
-    graph: &CookedDiGraph<'_>,
-    node: NodeIndex<usize>,
-    direction: Direction,
-) -> EnumMap<EdgeKind, FixedBitSet> {
-    let mut neighbors = enum_map!(_ => graph.visit_map());
-    for edge in graph.edges_directed(node, direction) {
-        let neighbor = match direction {
-            Direction::Outgoing => edge.target(),
-            Direction::Incoming => edge.source(),
-        };
-        neighbors[*edge.weight()].insert(neighbor.index());
-    }
-    neighbors
+/// Trait requirements for computing a transitive closure.
+trait Closable<N>:
+    NodeCount
+    + IntoNodeIdentifiers<NodeId = N>
+    + IntoNeighbors<NodeId = N>
+    + IntoNeighborsDirected<NodeId = N>
+    + NodeIndexable<NodeId = N>
+{
+}
+
+impl<N, G> Closable<N> for G where
+    G: NodeCount
+        + IntoNodeIdentifiers<NodeId = N>
+        + IntoNeighbors<NodeId = N>
+        + IntoNeighborsDirected<NodeId = N>
+        + NodeIndexable<NodeId = N>
+{
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    use petgraph::visit::NodeCount;
 
     use crate::tests::assert_matches;
 
@@ -1009,7 +1312,7 @@ mod tests {
     fn test_linear_graph_has_singleton_sccs() {
         let g = linear_graph();
         let sccs = TopoSccs::new(&g);
-        let sizes = sccs.iter().map(|scc| scc.count_ones(..)).collect_vec();
+        let sizes = sccs.sccs.iter().map(|scc| scc.len()).collect_vec();
         assert_matches!(&*sizes, [1, 1, 1]);
     }
 
@@ -1020,7 +1323,7 @@ mod tests {
 
         // A-B-C form one SCC; D is its own SCC. Since D has an edge to
         // the cycle, D must precede the cycle in topological order.
-        let sizes = sccs.iter().map(|scc| scc.count_ones(..)).collect_vec();
+        let sizes = sccs.sccs.iter().map(|scc| scc.len()).collect_vec();
         assert_matches!(&*sizes, [1, 3]);
     }
 

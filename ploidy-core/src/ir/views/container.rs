@@ -31,10 +31,11 @@
 //! [map]: ContainerView::Map
 //! [opt]: ContainerView::Optional
 
-use petgraph::graph::NodeIndex;
+use itertools::Itertools;
+use petgraph::{Direction, graph::NodeIndex, visit::EdgeRef};
 
 use crate::ir::{
-    graph::CookedGraph,
+    graph::{CookedGraph, GraphEdge},
     types::{GraphContainer, GraphInlineType, GraphSchemaType, GraphType},
 };
 
@@ -89,10 +90,18 @@ impl<'a> InnerView<'a> {
     #[inline]
     pub fn description(&self) -> Option<&'a str> {
         match self.cooked.graph[self.container] {
-            GraphType::Schema(GraphSchemaType::Container(_, container))
-            | GraphType::Inline(GraphInlineType::Container(_, container)) => {
-                container.inner().description
-            }
+            GraphType::Schema(GraphSchemaType::Container(
+                _,
+                GraphContainer::Array { description }
+                | GraphContainer::Map { description }
+                | GraphContainer::Optional { description },
+            ))
+            | GraphType::Inline(GraphInlineType::Container(
+                _,
+                GraphContainer::Array { description }
+                | GraphContainer::Map { description }
+                | GraphContainer::Optional { description },
+            )) => description,
             _ => None,
         }
     }
@@ -105,24 +114,24 @@ impl<'a> ContainerView<'a> {
         index: NodeIndex<usize>,
         container: GraphContainer<'a>,
     ) -> Self {
+        // Container nodes always have a `Contains` edge
+        // to their inner type.
+        let inner = cooked
+            .graph
+            .edges_directed(index, Direction::Outgoing)
+            .filter(|e| matches!(e.weight(), GraphEdge::Contains))
+            .map(|e| e.target())
+            .exactly_one()
+            .unwrap();
         let inner = InnerView {
             cooked,
             container: index,
-            inner: container.inner().ty,
+            inner,
         };
         match container {
-            GraphContainer::Array(_) => Self::Array(inner),
-            GraphContainer::Map(_) => Self::Map(inner),
-            GraphContainer::Optional(_) => Self::Optional(inner),
+            GraphContainer::Array { .. } => Self::Array(inner),
+            GraphContainer::Map { .. } => Self::Map(inner),
+            GraphContainer::Optional { .. } => Self::Optional(inner),
         }
-    }
-
-    /// Returns an iterator over all the types that this container depends on.
-    #[inline]
-    pub fn dependencies(&self) -> impl Iterator<Item = TypeView<'a>> + use<'a> {
-        let (Self::Array(view) | Self::Map(view) | Self::Optional(view)) = self;
-        let inner = TypeView::new(view.cooked, view.inner);
-        let dependencies = inner.dependencies();
-        std::iter::once(inner).chain(dependencies)
     }
 }

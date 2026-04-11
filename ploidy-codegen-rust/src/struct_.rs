@@ -5,7 +5,7 @@ use ploidy_core::{
     codegen::UniqueNames,
     ir::{
         ContainerView, InlineTypeView, SchemaTypeView, StructFieldName, StructFieldNameHint,
-        StructFieldView, StructView, TypeView,
+        StructFieldView, StructView, TypeView, View,
     },
 };
 use proc_macro2::TokenStream;
@@ -14,7 +14,6 @@ use quote::{ToTokens, TokenStreamExt, quote};
 use super::{
     derives::ExtraDerive,
     doc_attrs,
-    ext::ViewExt,
     naming::{CodegenIdentRef, CodegenIdentScope, CodegenIdentUsage, CodegenTypeName},
     ref_::CodegenRef,
 };
@@ -73,19 +72,15 @@ impl ToTokens for CodegenStruct<'_> {
 
         let mut extra_derives = vec![];
 
-        // Derive `Eq` and `Hash` if all transitively referenced types
-        // are hashable.
+        // Derive `Eq` and `Hash` if all fields are transitively hashable.
         let all_hashable = self.ty.hashable();
         if all_hashable {
             extra_derives.push(ExtraDerive::Eq);
             extra_derives.push(ExtraDerive::Hash);
         }
 
-        // Derive `Default` if all non-tag fields are optional
-        // (they become `AbsentOr<T>`, which is unconditionally `Default`),
-        // or if all transitively referenced types are defaultable.
-        let all_optional = self.ty.fields().filter(|f| !f.tag()).all(|f| !f.required());
-        if all_optional || self.ty.defaultable() {
+        // Derive `Default` if all fields are transitively defaultable.
+        if self.ty.defaultable() {
             extra_derives.push(ExtraDerive::Default);
         }
 
@@ -958,18 +953,15 @@ mod tests {
     }
 
     #[test]
-    fn test_struct_pessimistically_omits_hash_eq_when_union_common_field_inherits_from_unhashable_union()
-     {
+    fn test_struct_derives_hash_eq_when_union_common_field_inherits_from_unhashable_union() {
         // `TextAction` inherits from tagged union `Action`, which declares
         // common field `metadata: ActionMetadata`. `ActionMetadata`
         // inherits from a different tagged union `MetadataKind`, whose
         // variant `NumericMetadata` has `f64`.
         //
-        // `TextAction` _could_ derive `Eq` and `Hash` because
-        // neither it nor `ActionMetadata` directly contain floats.
-        // However, `UnionFieldTypeExt` checks all transitive edges,
-        // so it can't distinguish inheritance and reference edges,
-        // and conservatively treats `ActionMetadata` as unhashable.
+        // `TextAction` can derive `Eq` and `Hash` because neither it nor
+        // `ActionMetadata` directly contains `f64`. `NumericMetadata` is
+        // a sibling variant of `MetadataKind`, not an ancestor.
         let doc = Document::from_yaml(indoc::indoc! {"
             openapi: 3.0.0
             info:
@@ -1052,7 +1044,7 @@ mod tests {
 
         let actual: syn::ItemStruct = parse_quote!(#codegen);
         let expected: syn::ItemStruct = parse_quote! {
-            #[derive(Debug, Clone, PartialEq, ::ploidy_util::serde::Serialize, ::ploidy_util::serde::Deserialize, ::ploidy_util::pointer::JsonPointee, ::ploidy_util::pointer::JsonPointerTarget)]
+            #[derive(Debug, Clone, PartialEq, Eq, Hash, Default, ::ploidy_util::serde::Serialize, ::ploidy_util::serde::Deserialize, ::ploidy_util::pointer::JsonPointee, ::ploidy_util::pointer::JsonPointerTarget)]
             #[serde(crate = "::ploidy_util::serde")]
             #[ploidy(pointer(crate = "::ploidy_util::pointer"))]
             pub struct TextAction {
@@ -2015,8 +2007,9 @@ mod tests {
         let codegen = CodegenStruct::new(name, struct_view);
 
         let actual: syn::ItemStruct = parse_quote!(#codegen);
-        // `next` is required and recursive, so it should be boxed. `value` is a
-        // string which implements `Default`, so the struct can derive `Default`.
+        // `next` is required and recursive, so it should be boxed.
+        // `value` is a string which implements `Default`, so the struct can
+        // derive `Default`.
         let expected: syn::ItemStruct = parse_quote! {
             #[derive(Debug, Clone, PartialEq, Eq, Hash, Default, ::ploidy_util::serde::Serialize, ::ploidy_util::serde::Deserialize, ::ploidy_util::pointer::JsonPointee, ::ploidy_util::pointer::JsonPointerTarget)]
             #[serde(crate = "::ploidy_util::serde")]

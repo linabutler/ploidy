@@ -1,7 +1,7 @@
 use itertools::Itertools;
 use ploidy_core::{
     codegen::UniqueNames,
-    ir::{OperationView, ParameterStyle, ParameterView, QueryParameter},
+    ir::{OperationView, ParameterStyle, ParameterView, QueryParameter, View},
 };
 use proc_macro2::TokenStream;
 use quote::{ToTokens, TokenStreamExt, format_ident, quote};
@@ -9,7 +9,6 @@ use quote::{ToTokens, TokenStreamExt, format_ident, quote};
 use super::{
     derives::ExtraDerive,
     ext::ParameterViewExt,
-    ext::ViewExt,
     naming::{CodegenIdent, CodegenIdentScope, CodegenIdentUsage},
     ref_::CodegenRef,
 };

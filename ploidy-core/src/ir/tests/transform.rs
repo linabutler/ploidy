@@ -5,9 +5,8 @@ use crate::{
     ir::{
         Enum, EnumVariant, InlineTypePath, InlineTypePathRoot, InlineTypePathSegment,
         PrimitiveType, SchemaTypeInfo, SpecContainer, SpecInlineType, SpecInner, SpecSchemaType,
-        SpecStructField, SpecTaggedVariant, SpecType, SpecUntaggedVariant, StructFieldName,
-        StructFieldNameHint, UntaggedVariantNameHint,
-        shape::{Struct, Tagged, Untagged},
+        SpecStruct, SpecStructField, SpecTagged, SpecTaggedVariant, SpecType, SpecUntagged,
+        SpecUntaggedVariant, StructFieldName, StructFieldNameHint, UntaggedVariantNameHint,
         transform::transform,
     },
     parse::{Document, Schema},
@@ -466,7 +465,7 @@ fn test_struct_with_own_properties() {
         result,
         SpecType::Schema(SpecSchemaType::Struct(
             SchemaTypeInfo { name: "Person", .. },
-            Struct {
+            SpecStruct {
                 fields: [
                     SpecStructField {
                         name: StructFieldName::Name("name"),
@@ -515,7 +514,7 @@ fn test_struct_with_additional_properties_ref() {
         result,
         SpecType::Schema(SpecSchemaType::Struct(
             SchemaTypeInfo { name: "Config", .. },
-            Struct {
+            SpecStruct {
                 fields: [
                     _,
                     SpecStructField {
@@ -569,7 +568,7 @@ fn test_struct_with_additional_properties_inline() {
         result,
         SpecType::Schema(SpecSchemaType::Struct(
             SchemaTypeInfo { name: "Config", .. },
-            Struct {
+            SpecStruct {
                 fields: [
                     SpecStructField {
                         name: StructFieldName::Name("name"),
@@ -640,7 +639,7 @@ fn test_struct_with_additional_properties_true() {
                 name: "DynamicMap",
                 ..
             },
-            Struct {
+            SpecStruct {
                 fields: [SpecStructField {
                     name: StructFieldName::Hint(StructFieldNameHint::AdditionalProperties),
                     flattened: true,
@@ -721,7 +720,7 @@ fn test_struct_with_required_fields() {
         result,
         SpecType::Schema(SpecSchemaType::Struct(
             SchemaTypeInfo { name: "User", .. },
-            Struct {
+            SpecStruct {
                 fields: [
                     SpecStructField {
                         name: StructFieldName::Name("name"),
@@ -772,7 +771,7 @@ fn test_struct_with_nullable_field_ref() {
                 name: "Container",
                 ..
             },
-            Struct {
+            SpecStruct {
                 fields: [SpecStructField {
                     name: StructFieldName::Name("value"),
                     ty: SpecType::Inline(SpecInlineType::Container(
@@ -818,7 +817,7 @@ fn test_struct_with_nullable_field_inline() {
                 name: "Container",
                 ..
             },
-            Struct {
+            SpecStruct {
                 fields: [SpecStructField {
                     name: StructFieldName::Name("value"),
                     ty: SpecType::Inline(SpecInlineType::Container(
@@ -870,7 +869,7 @@ fn test_struct_with_nullable_field_openapi_31_syntax() {
                 name: "Container",
                 ..
             },
-            Struct {
+            SpecStruct {
                 fields: [SpecStructField {
                     name: StructFieldName::Name("value"),
                     ty: SpecType::Inline(SpecInlineType::Container(
@@ -921,7 +920,7 @@ fn test_struct_ref_field_description() {
         result,
         SpecType::Schema(SpecSchemaType::Struct(
             SchemaTypeInfo { name: "Entity", .. },
-            Struct {
+            SpecStruct {
                 fields: [SpecStructField {
                     name: StructFieldName::Name("id"),
                     description: Some("An identifier"),
@@ -958,7 +957,7 @@ fn test_struct_inline_field_description() {
         result,
         SpecType::Schema(SpecSchemaType::Struct(
             SchemaTypeInfo { name: "User", .. },
-            Struct {
+            SpecStruct {
                 fields: [SpecStructField {
                     name: StructFieldName::Name("name"),
                     description: Some("A user's name"),
@@ -1002,7 +1001,7 @@ fn test_struct_inline_all_of_becomes_parent() {
         result,
         SpecType::Schema(SpecSchemaType::Struct(
             SchemaTypeInfo { name: "Person", .. },
-            Struct {
+            SpecStruct {
                 // The struct's own field is `email`; inherited fields
                 // come from parents.
                 fields: [SpecStructField {
@@ -1016,7 +1015,7 @@ fn test_struct_inline_all_of_becomes_parent() {
                             root: InlineTypePathRoot::Type("Person"),
                             segments: [InlineTypePathSegment::Parent(1)],
                         },
-                        Struct {
+                        SpecStruct {
                             fields: [SpecStructField {
                                 name: StructFieldName::Name("name"),
                                 ..
@@ -1029,7 +1028,7 @@ fn test_struct_inline_all_of_becomes_parent() {
                             root: InlineTypePathRoot::Type("Person"),
                             segments: [InlineTypePathSegment::Parent(2)],
                         },
-                        Struct {
+                        SpecStruct {
                             fields: [SpecStructField {
                                 name: StructFieldName::Name("age"),
                                 ..
@@ -1077,7 +1076,7 @@ fn test_struct_mixed_all_of_ref_and_inline() {
         result,
         SpecType::Schema(SpecSchemaType::Struct(
             SchemaTypeInfo { name: "Child", .. },
-            Struct {
+            SpecStruct {
                 // No own fields; all fields come from parents.
                 fields: [],
                 // Parents include both the named and inline schemas.
@@ -1088,7 +1087,7 @@ fn test_struct_mixed_all_of_ref_and_inline() {
                             root: InlineTypePathRoot::Type("Child"),
                             segments: [InlineTypePathSegment::Parent(2)],
                         },
-                        Struct {
+                        SpecStruct {
                             fields: [SpecStructField {
                                 name: StructFieldName::Name("name"),
                                 ..
@@ -1145,7 +1144,7 @@ fn test_tagged_with_mapping() {
         result,
         SpecType::Schema(SpecSchemaType::Tagged(
             SchemaTypeInfo { name: "Animal", .. },
-            Tagged {
+            SpecTagged {
                 tag: "type",
                 variants: [
                     SpecTaggedVariant {
@@ -1205,7 +1204,7 @@ fn test_tagged_filters_non_refs() {
         result,
         SpecType::Schema(SpecSchemaType::Untagged(
             SchemaTypeInfo { name: "Animal", .. },
-            Untagged {
+            SpecUntagged {
                 variants: [
                     SpecUntaggedVariant::Some(UntaggedVariantNameHint::Index(1), SpecType::Ref(_)),
                     SpecUntaggedVariant::Some(
@@ -1254,7 +1253,7 @@ fn test_tagged_multiple_aliases() {
         result,
         SpecType::Schema(SpecSchemaType::Tagged(
             SchemaTypeInfo { name: "Result", .. },
-            Tagged {
+            SpecTagged {
                 variants: [SpecTaggedVariant {
                     name: "Success",
                     aliases: ["good", "ok", "success"],
@@ -1300,7 +1299,7 @@ fn test_tagged_description() {
         result,
         SpecType::Schema(SpecSchemaType::Tagged(
             SchemaTypeInfo { name: "Animal", .. },
-            Tagged {
+            SpecTagged {
                 description: Some("A tagged union of animals"),
                 tag: "type",
                 variants: [SpecTaggedVariant {
@@ -1353,7 +1352,7 @@ fn test_tagged_without_mapping() {
         result,
         SpecType::Schema(SpecSchemaType::Tagged(
             SchemaTypeInfo { name: "Pet", .. },
-            Tagged {
+            SpecTagged {
                 tag: "petType",
                 variants: [
                     SpecTaggedVariant {
@@ -1414,7 +1413,7 @@ fn test_tagged_with_partial_mapping() {
         result,
         SpecType::Schema(SpecSchemaType::Tagged(
             SchemaTypeInfo { name: "Animal", .. },
-            Tagged {
+            SpecTagged {
                 tag: "type",
                 variants: [
                     SpecTaggedVariant {
@@ -1468,7 +1467,7 @@ fn test_untagged_basic() {
                 name: "StringOrNumber",
                 ..
             },
-            Untagged {
+            SpecUntagged {
                 variants: [
                     SpecUntaggedVariant::Some(UntaggedVariantNameHint::Index(1), SpecType::Ref(_)),
                     SpecUntaggedVariant::Some(UntaggedVariantNameHint::Index(2), SpecType::Ref(_)),
@@ -1578,7 +1577,7 @@ fn test_untagged_variant_numbering() {
         result,
         SpecType::Schema(SpecSchemaType::Untagged(
             SchemaTypeInfo { name: "ABC", .. },
-            Untagged {
+            SpecUntagged {
                 variants: [
                     SpecUntaggedVariant::Some(UntaggedVariantNameHint::Index(1), _),
                     SpecUntaggedVariant::Some(UntaggedVariantNameHint::Index(2), _),
@@ -1662,7 +1661,7 @@ fn test_any_of_fields_marked_flattened_not_required() {
                 name: "Contact",
                 ..
             },
-            Struct {
+            SpecStruct {
                 fields: [
                     SpecStructField {
                         name: StructFieldName::Name("Address"),
@@ -1718,7 +1717,7 @@ fn test_any_of_ref_uses_type_name() {
                 name: "Contact",
                 ..
             },
-            Struct {
+            SpecStruct {
                 fields: [
                     SpecStructField {
                         name: StructFieldName::Name("Address"),
@@ -1765,7 +1764,7 @@ fn test_any_of_inline_uses_index_hint() {
         result,
         SpecType::Schema(SpecSchemaType::Struct(
             SchemaTypeInfo { name: "Mixed", .. },
-            Struct {
+            SpecStruct {
                 fields: [
                     SpecStructField {
                         name: StructFieldName::Hint(StructFieldNameHint::Index(1)),
@@ -1827,7 +1826,7 @@ fn test_any_of_with_properties() {
                 name: "Combined",
                 ..
             },
-            Struct {
+            SpecStruct {
                 fields: [
                     SpecStructField {
                         name: StructFieldName::Name("Extra2"),
@@ -1886,7 +1885,7 @@ fn test_any_of_nullable_refs() {
                 name: "Container",
                 ..
             },
-            Struct {
+            SpecStruct {
                 fields: [
                     SpecStructField {
                         name: StructFieldName::Name("NullableString1"),
@@ -1952,7 +1951,7 @@ fn test_any_of_with_all_of() {
                 name: "Combined",
                 ..
             },
-            Struct {
+            SpecStruct {
                 fields: [
                     SpecStructField {
                         name: StructFieldName::Name("Extra1"),
@@ -2101,7 +2100,7 @@ fn test_object_with_empty_properties_produces_struct() {
                 name: "EmptyObject",
                 ..
             },
-            Struct { fields: [], .. },
+            SpecStruct { fields: [], .. },
         )),
     );
 }
@@ -2265,7 +2264,7 @@ fn test_multiple_types_string_and_integer_untagged() {
                 name: "StringOrInt",
                 ..
             },
-            Untagged {
+            SpecUntagged {
                 variants: [
                     SpecUntaggedVariant::Some(
                         UntaggedVariantNameHint::Primitive(PrimitiveType::String),
@@ -2307,7 +2306,7 @@ fn test_type_array_with_format_produces_inline_variants() {
                 name: "DateOrUnix",
                 ..
             },
-            Untagged {
+            SpecUntagged {
                 variants: [
                     SpecUntaggedVariant::Some(
                         UntaggedVariantNameHint::Primitive(PrimitiveType::DateTime),
@@ -2355,7 +2354,7 @@ fn test_deeply_nested_inline_types() {
         result,
         SpecType::Schema(SpecSchemaType::Struct(
             SchemaTypeInfo { name: "Outer", .. },
-            Struct {
+            SpecStruct {
                 fields: [SpecStructField {
                     name: StructFieldName::Name("items"),
                     ty: SpecType::Inline(SpecInlineType::Container(
@@ -2376,7 +2375,7 @@ fn test_deeply_nested_inline_types() {
                                         InlineTypePathSegment::ArrayItem,
                                     ],
                                 },
-                                Struct {
+                                SpecStruct {
                                     fields: [SpecStructField {
                                         name: StructFieldName::Name("field"),
                                         ty: SpecType::Inline(SpecInlineType::Primitive(
@@ -2460,7 +2459,7 @@ fn test_additional_properties_false_creates_struct() {
                 name: "StrictObject",
                 ..
             },
-            Struct {
+            SpecStruct {
                 fields: [SpecStructField {
                     name: StructFieldName::Name("name"),
                     ty: SpecType::Inline(SpecInlineType::Primitive(_, PrimitiveType::String)),
@@ -2588,7 +2587,7 @@ fn test_struct_inline_path_construction() {
         result,
         SpecType::Schema(SpecSchemaType::Struct(
             SchemaTypeInfo { name: "Outer", .. },
-            Struct {
+            SpecStruct {
                 fields: [SpecStructField {
                     name: StructFieldName::Name("nested"),
                     ty: SpecType::Inline(SpecInlineType::Struct(
@@ -2657,7 +2656,7 @@ fn test_inline_tagged_union_in_struct_field() {
                 name: "Container",
                 ..
             },
-            Struct {
+            SpecStruct {
                 fields: [SpecStructField {
                     name: StructFieldName::Name("animal"),
                     ty: SpecType::Inline(SpecInlineType::Tagged(
@@ -2667,7 +2666,7 @@ fn test_inline_tagged_union_in_struct_field() {
                                 "animal",
                             ))],
                         },
-                        Tagged {
+                        SpecTagged {
                             tag: "kind",
                             variants: [
                                 SpecTaggedVariant {
@@ -2729,7 +2728,7 @@ fn test_recursive_all_of_ref_nullable() {
         result,
         SpecType::Schema(SpecSchemaType::Struct(
             SchemaTypeInfo { name: "Node", .. },
-            Struct {
+            SpecStruct {
                 fields: [
                     SpecStructField {
                         name: StructFieldName::Name("value"),
@@ -2783,7 +2782,7 @@ fn test_recursive_all_of_ref() {
         result,
         SpecType::Schema(SpecSchemaType::Struct(
             SchemaTypeInfo { name: "Node", .. },
-            Struct {
+            SpecStruct {
                 fields: [
                     SpecStructField {
                         name: StructFieldName::Name("value"),
@@ -2846,7 +2845,7 @@ fn test_recursive_multi_all_of_ref_no_stack_overflow() {
         result,
         SpecType::Schema(SpecSchemaType::Struct(
             SchemaTypeInfo { name: "Node", .. },
-            Struct {
+            SpecStruct {
                 fields: [
                     SpecStructField {
                         name: StructFieldName::Name("value"),
@@ -3147,7 +3146,7 @@ fn test_inline_array_produces_inline_container() {
                 name: "Container",
                 ..
             },
-            Struct {
+            SpecStruct {
                 fields: [SpecStructField {
                     name: StructFieldName::Name("items"),
                     ty: SpecType::Inline(SpecInlineType::Container(_, SpecContainer::Array(_))),
@@ -3187,7 +3186,7 @@ fn test_optional_field_container_description_is_not_parent_schema() {
         result,
         SpecType::Schema(SpecSchemaType::Struct(
             SchemaTypeInfo { name: "Parent", .. },
-            Struct {
+            SpecStruct {
                 fields: [SpecStructField {
                     name: StructFieldName::Name("nickname"),
                     ty: SpecType::Inline(SpecInlineType::Container(

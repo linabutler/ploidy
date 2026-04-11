@@ -5,10 +5,10 @@ use itertools::Itertools;
 use crate::{
     arena::Arena,
     ir::{
-        ContainerView, EdgeKind, EnumVariant, ExtendableView, InlineTypePathRoot,
-        InlineTypePathSegment, InlineTypeView, ParameterStyle, PrimitiveType, RawGraph, Reach,
+        ContainerView, EnumVariant, ExtendableView, InlineTypePath, InlineTypePathRoot,
+        InlineTypePathSegment, InlineTypeView, ParameterStyle, PrimitiveType, RawGraph,
         RequestView, ResponseView, SchemaTypeInfo, SchemaTypeView, SomeUntaggedVariant, Spec,
-        StructFieldName, Traversal, TypeView, View,
+        StructFieldName, TypeView, View,
     },
     parse::{Document, Method, path::PathFragment},
     tests::assert_matches,
@@ -449,7 +449,7 @@ fn test_dependencies_from_array_includes_inner_types() {
 
     // The `dependencies()` of the array should include the schema reference
     // and the primitive field in `Item`, but not the array itself.
-    let dep_types = container_view.dependencies().collect_vec();
+    let dep_types = container_view.ty().dependencies().collect_vec();
     assert_eq!(dep_types.len(), 2);
 
     // Verify the `Item` schema is a dependency.
@@ -516,7 +516,7 @@ fn test_dependencies_from_map_includes_inner_types() {
 
     // The `dependencies()` of the map should include the schema reference,
     // and the primitive field in `Item`, but not the map itself.
-    let dep_types = container_view.dependencies().collect_vec();
+    let dep_types = container_view.ty().dependencies().collect_vec();
     assert_eq!(dep_types.len(), 2);
 
     // Verify the `Item` schema is a dependency.
@@ -582,7 +582,7 @@ fn test_dependencies_from_nullable_includes_inner_types() {
 
     // The `dependencies()` of the optional should include the schema reference,
     // and the primitive field in `Item`, but not the optional itself.
-    let dep_types = container_view.dependencies().collect_vec();
+    let dep_types = container_view.ty().dependencies().collect_vec();
     assert_eq!(dep_types.len(), 2);
 
     // Verify the `Item` schema is a dependency.
@@ -757,280 +757,6 @@ fn test_dependencies_from_any_returns_empty() {
     assert_eq!(untyped_view.dependencies().count(), 0);
 }
 
-#[test]
-fn test_traverse_skip_excludes_node_but_continues_traversal() {
-    // Graph: Root -> Middle -> Leaf. Skipping `Middle` should yield
-    // `[Leaf]` only, excluding both `Root` and `Middle`.
-    let doc = Document::from_yaml(indoc::indoc! {"
-        openapi: 3.0.0
-        info:
-          title: Test
-          version: 1.0.0
-        components:
-          schemas:
-            Leaf:
-              type: object
-              properties:
-                value:
-                  type: string
-            Middle:
-              type: object
-              properties:
-                leaf:
-                  $ref: '#/components/schemas/Leaf'
-            Root:
-              type: object
-              properties:
-                middle:
-                  $ref: '#/components/schemas/Middle'
-    "})
-    .unwrap();
-
-    let arena = Arena::new();
-    let spec = Spec::from_doc(&arena, &doc).unwrap();
-    let graph = RawGraph::new(&arena, &spec).cook();
-
-    let root = graph.schemas().find(|s| s.name() == "Root").unwrap();
-
-    // Skip `Middle`, but continue into its neighbors.
-    let dep_names = root
-        .traverse(Reach::Dependencies, |kind, view| {
-            assert_eq!(kind, EdgeKind::Reference);
-            match view {
-                TypeView::Schema(s) if s.name() == "Middle" => Traversal::Skip,
-                _ => Traversal::Visit,
-            }
-        })
-        .filter_map(|(_, view)| match view {
-            TypeView::Schema(s) => Some(s.name()),
-            _ => None,
-        })
-        .collect_vec();
-
-    // `Middle` is skipped, but `Leaf` is still reachable through it.
-    assert_eq!(dep_names, vec!["Leaf"]);
-}
-
-#[test]
-fn test_traverse_stop_includes_node_but_stops_traversal() {
-    // Graph: Root -> Middle -> Leaf. Stopping at `Middle`
-    // should yield just `[Middle]`.
-    let doc = Document::from_yaml(indoc::indoc! {"
-        openapi: 3.0.0
-        info:
-          title: Test
-          version: 1.0.0
-        components:
-          schemas:
-            Leaf:
-              type: object
-              properties:
-                value:
-                  type: string
-            Middle:
-              type: object
-              properties:
-                leaf:
-                  $ref: '#/components/schemas/Leaf'
-            Root:
-              type: object
-              properties:
-                middle:
-                  $ref: '#/components/schemas/Middle'
-    "})
-    .unwrap();
-
-    let arena = Arena::new();
-    let spec = Spec::from_doc(&arena, &doc).unwrap();
-    let graph = RawGraph::new(&arena, &spec).cook();
-
-    let root = graph.schemas().find(|s| s.name() == "Root").unwrap();
-
-    // Stop at `Middle`; don't descend into its children.
-    let dep_names = root
-        .traverse(Reach::Dependencies, |kind, view| {
-            assert_eq!(kind, EdgeKind::Reference);
-            match view {
-                TypeView::Schema(s) if s.name() == "Middle" => Traversal::Stop,
-                _ => Traversal::Visit,
-            }
-        })
-        .filter_map(|(_, view)| match view {
-            TypeView::Schema(s) => Some(s.name()),
-            _ => None,
-        })
-        .collect_vec();
-
-    // `Middle` is included, but `Leaf` isn't because we stopped at `Middle`.
-    assert_eq!(dep_names, vec!["Middle"]);
-}
-
-#[test]
-fn test_traverse_ignore_excludes_node_and_stops_traversal() {
-    // Graph: Root -> Middle -> Leaf. Ignoring `Middle` should yield nothing.
-    let doc = Document::from_yaml(indoc::indoc! {"
-        openapi: 3.0.0
-        info:
-          title: Test
-          version: 1.0.0
-        components:
-          schemas:
-            Leaf:
-              type: object
-              properties:
-                value:
-                  type: string
-            Middle:
-              type: object
-              properties:
-                leaf:
-                  $ref: '#/components/schemas/Leaf'
-            Root:
-              type: object
-              properties:
-                middle:
-                  $ref: '#/components/schemas/Middle'
-    "})
-    .unwrap();
-
-    let arena = Arena::new();
-    let spec = Spec::from_doc(&arena, &doc).unwrap();
-    let graph = RawGraph::new(&arena, &spec).cook();
-
-    let root = graph.schemas().find(|s| s.name() == "Root").unwrap();
-
-    // Ignore `Middle`: don't yield it, and don't visit its neighbors.
-    let dep_names = root
-        .traverse(Reach::Dependencies, |kind, view| {
-            assert_eq!(kind, EdgeKind::Reference);
-            match view {
-                TypeView::Schema(s) if s.name() == "Middle" => Traversal::Ignore,
-                _ => Traversal::Visit,
-            }
-        })
-        .filter_map(|(_, view)| match view {
-            TypeView::Schema(s) => Some(s.name()),
-            _ => None,
-        })
-        .collect_vec();
-
-    // `Middle` is ignored entirely, so `Leaf` is also unreachable.
-    assert!(dep_names.is_empty());
-}
-
-#[test]
-fn test_traverse_dependents_yields_types_that_depend_on_node() {
-    // Graph: Root -> Middle -> Leaf. Traversing dependents from `Leaf` should
-    // yield everything that transitively depends on `Leaf`: `[Middle, Root]`.
-    let doc = Document::from_yaml(indoc::indoc! {"
-        openapi: 3.0.0
-        info:
-          title: Test
-          version: 1.0.0
-        components:
-          schemas:
-            Leaf:
-              type: object
-              properties:
-                value:
-                  type: string
-            Middle:
-              type: object
-              properties:
-                leaf:
-                  $ref: '#/components/schemas/Leaf'
-            Root:
-              type: object
-              properties:
-                middle:
-                  $ref: '#/components/schemas/Middle'
-    "})
-    .unwrap();
-
-    let arena = Arena::new();
-    let spec = Spec::from_doc(&arena, &doc).unwrap();
-    let graph = RawGraph::new(&arena, &spec).cook();
-
-    let leaf = graph.schemas().find(|s| s.name() == "Leaf").unwrap();
-
-    let dependent_names = leaf
-        .traverse(Reach::Dependents, |kind, _| {
-            assert_eq!(kind, EdgeKind::Reference);
-            Traversal::Visit
-        })
-        .filter_map(|(_, view)| match view {
-            TypeView::Schema(s) => Some(s.name()),
-            _ => None,
-        })
-        .collect_vec();
-
-    assert_eq!(dependent_names, vec!["Middle", "Root"]);
-}
-
-#[test]
-fn test_traverse_filter_on_edge_kind() {
-    // `Child` inherits from `Parent` via `allOf` (an inheritance edge)
-    // and has its own field referencing `Leaf` (a reference edge).
-    let doc = Document::from_yaml(indoc::indoc! {"
-        openapi: 3.0.0
-        info:
-          title: Test
-          version: 1.0.0
-        components:
-          schemas:
-            Leaf:
-              type: object
-              properties:
-                value:
-                  type: string
-            Parent:
-              type: object
-              properties:
-                id:
-                  type: integer
-            Child:
-              allOf:
-                - $ref: '#/components/schemas/Parent'
-              type: object
-              properties:
-                leaf:
-                  $ref: '#/components/schemas/Leaf'
-    "})
-    .unwrap();
-
-    let arena = Arena::new();
-    let spec = Spec::from_doc(&arena, &doc).unwrap();
-    let graph = RawGraph::new(&arena, &spec).cook();
-
-    let child = graph.schemas().find(|s| s.name() == "Child").unwrap();
-
-    // Including just inheritance edges should yield the `allOf` parent.
-    let inherits_only = child
-        .traverse(Reach::Dependencies, |kind, _| match kind {
-            EdgeKind::Inherits => Traversal::Visit,
-            EdgeKind::Reference => Traversal::Ignore,
-        })
-        .filter_map(|(_, view)| match view {
-            TypeView::Schema(s) => Some(s.name()),
-            _ => None,
-        })
-        .collect_vec();
-    assert_eq!(inherits_only, vec!["Parent"]);
-
-    // Including just reference edges should yield the field target.
-    let references_only = child
-        .traverse(Reach::Dependencies, |kind, _| match kind {
-            EdgeKind::Reference => Traversal::Visit,
-            EdgeKind::Inherits => Traversal::Ignore,
-        })
-        .filter_map(|(_, view)| match view {
-            TypeView::Schema(s) => Some(s.name()),
-            _ => None,
-        })
-        .collect_vec();
-    assert_eq!(references_only, vec!["Leaf"]);
-}
-
 // MARK: `inlines()`
 
 #[test]
@@ -1131,6 +857,60 @@ fn test_inlines_empty_for_schemas_with_no_inlines() {
     assert_eq!(simple_schema.inlines().count(), 1);
 }
 
+#[test]
+fn test_inlines_discovers_nested_inline_all_of_parents() {
+    // An inline `allOf` parent that itself has an inline `allOf`
+    // parent. Both inline parents and their field types must be
+    // discovered — inline types never get their own codegen pass,
+    // so the root schema is responsible for the full chain.
+    let doc = Document::from_yaml(indoc::indoc! {"
+        openapi: 3.0.0
+        info:
+          title: Test
+          version: 1.0.0
+        components:
+          schemas:
+            Child:
+              allOf:
+                - allOf:
+                    - type: object
+                      properties:
+                        grandparent_field:
+                          type: object
+                          properties:
+                            deep:
+                              type: string
+                  properties:
+                    parent_field:
+                      type: string
+                - type: object
+                  properties:
+                    own_field:
+                      type: string
+    "})
+    .unwrap();
+
+    let arena = Arena::new();
+    let spec = Spec::from_doc(&arena, &doc).unwrap();
+    let graph = RawGraph::new(&arena, &spec).cook();
+
+    let child = graph.schemas().find(|s| s.name() == "Child").unwrap();
+    let inlines = child.inlines().collect_vec();
+
+    // The grandparent inline struct (with `grandparent_field`) must
+    // be discovered, along with its `grandparent_field` inline struct.
+    let has_grandparent_field_struct = inlines.iter().any(|i| {
+        matches!(i, InlineTypeView::Struct(path, _)
+            if path.segments.iter().any(|s| matches!(s,
+                InlineTypePathSegment::Field(StructFieldName::Name("grandparent_field")))))
+    });
+    assert!(
+        has_grandparent_field_struct,
+        "expected `Child.inlines()` to discover the grandparent's \
+         inline field struct; got {inlines:?}"
+    );
+}
+
 // MARK: Tagged union variant views
 
 #[test]
@@ -1174,8 +954,7 @@ fn test_tagged_variant_names_and_aliases() {
         other => panic!("expected tagged union `Animal`; got {other:?}"),
     };
 
-    let mut variant_names = tagged_view.variants().map(|v| v.name()).collect_vec();
-    variant_names.sort();
+    let variant_names = tagged_view.variants().map(|v| v.name()).collect_vec();
     assert_matches!(&*variant_names, ["Cat", "Dog"]);
 
     let variant = tagged_view.variants().next().unwrap();
@@ -1679,8 +1458,8 @@ fn test_inline_view_with_view_trait_methods() {
     let used_by = inline_enum.used_by().map(|op| op.resource()).collect_vec();
     assert_matches!(&*used_by, [None]);
 
-    // `inlines()` includes the starting node.
-    assert_eq!(inline_enum.inlines().count(), 1);
+    // `inlines()` excludes the starting node.
+    assert_eq!(inline_enum.inlines().count(), 0);
 
     // `dependencies()` should be empty for an inline enum.
     assert_eq!(inline_enum.dependencies().count(), 0);
@@ -1748,6 +1527,76 @@ fn test_untagged_variant_with_null_type() {
     // The third variant should be `null`, returning `None`.
     let null_variant = &variants[2];
     assert!(null_variant.ty().is_none());
+}
+
+#[test]
+fn test_null_variant_demotes_tagged_to_untagged() {
+    // A `oneOf` with a discriminator that includes `{type: "null"}`
+    // falls through `try_tagged` (which rejects inline schemas) and
+    // becomes an untagged union. The null variant is `Unit`.
+    let doc = Document::from_yaml(indoc::indoc! {"
+        openapi: 3.0.0
+        info:
+          title: Test
+          version: 1.0.0
+        components:
+          schemas:
+            Cat:
+              type: object
+              properties:
+                kind:
+                  type: string
+                meow:
+                  type: string
+            Dog:
+              type: object
+              properties:
+                kind:
+                  type: string
+                bark:
+                  type: string
+            Animal:
+              oneOf:
+                - $ref: '#/components/schemas/Cat'
+                - $ref: '#/components/schemas/Dog'
+                - type: 'null'
+              discriminator:
+                propertyName: kind
+                mapping:
+                  cat: '#/components/schemas/Cat'
+                  dog: '#/components/schemas/Dog'
+    "})
+    .unwrap();
+
+    let arena = Arena::new();
+    let spec = Spec::from_doc(&arena, &doc).unwrap();
+    let graph = RawGraph::new(&arena, &spec).cook();
+
+    // The discriminator is ignored because `{type: "null"}` is an
+    // inline schema, causing `try_tagged` to bail.
+    let animal = graph.schemas().find(|s| s.name() == "Animal").unwrap();
+    let SchemaTypeView::Untagged(_, untagged) = animal else {
+        panic!("expected untagged `Animal`; got `{animal:?}`");
+    };
+
+    let variants = untagged.variants().collect_vec();
+    assert_eq!(variants.len(), 3);
+
+    assert_matches!(
+        variants[0].ty(),
+        Some(SomeUntaggedVariant {
+            view: TypeView::Schema(view),
+            ..
+        }) if view.name() == "Cat",
+    );
+    assert_matches!(
+        variants[1].ty(),
+        Some(SomeUntaggedVariant {
+            view: TypeView::Schema(view),
+            ..
+        }) if view.name() == "Dog",
+    );
+    assert!(variants[2].ty().is_none());
 }
 
 // MARK: Enum views
@@ -2688,6 +2537,194 @@ fn test_operation_request_and_response() {
     );
 }
 
+// MARK: Parameter views
+
+#[test]
+fn test_parameter_inlines_finds_inline_types() {
+    let doc = Document::from_yaml(indoc::indoc! {"
+        openapi: 3.0.0
+        info:
+          title: Test
+          version: 1.0
+        paths:
+          /users/{id}:
+            get:
+              operationId: getUser
+              x-resource-name: user
+              parameters:
+                - name: id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+                - name: filter
+                  in: query
+                  schema:
+                    type: object
+                    properties:
+                      status:
+                        type: string
+                      nested:
+                        type: object
+                        properties:
+                          depth:
+                            type: integer
+              responses:
+                '200':
+                  description: OK
+    "})
+    .unwrap();
+
+    let arena = Arena::new();
+    let spec = Spec::from_doc(&arena, &doc).unwrap();
+    let graph = RawGraph::new(&arena, &spec).cook();
+
+    let operation = graph.operations().next().unwrap();
+
+    // A primitive path parameter has a single inline: the primitive itself.
+    let id_param = operation.path().params().next().unwrap();
+    let id_inlines = id_param.inlines().collect_vec();
+    assert_eq!(id_inlines.len(), 1);
+    assert_matches!(id_inlines[0], InlineTypeView::Primitive(_, _));
+
+    // The `filter` query parameter has an inline object with nested inlines:
+    // (1) `filter` struct, (2) optional `status`, (3) `status` string primitive,
+    // (4) optional `nested`, (5) inline `nested` struct, (6) optional `depth`,
+    // (7) `depth` integer primitive.
+    let filter_param = operation.query().find(|p| p.name() == "filter").unwrap();
+    let filter_inlines = filter_param.inlines().collect_vec();
+    assert_eq!(filter_inlines.len(), 7);
+
+    // The root inline is the `filter` struct itself.
+    let root = filter_inlines
+        .iter()
+        .filter_map(|inline| match inline {
+            InlineTypeView::Struct(path, _) => Some(path),
+            _ => None,
+        })
+        .next()
+        .unwrap();
+    assert_matches!(
+        root,
+        InlineTypePath {
+            root: InlineTypePathRoot::Resource(Some("user")),
+            segments: [
+                InlineTypePathSegment::Operation("getUser"),
+                InlineTypePathSegment::Parameter("filter"),
+            ],
+        },
+    );
+
+    // The nested struct carries the full path.
+    let nested = filter_inlines
+        .iter()
+        .filter_map(|inline| match inline {
+            InlineTypeView::Struct(path, _) => Some(path),
+            _ => None,
+        })
+        .skip(1)
+        .exactly_one()
+        .unwrap();
+    assert_matches!(
+        nested,
+        InlineTypePath {
+            root: InlineTypePathRoot::Resource(Some("user")),
+            segments: [
+                InlineTypePathSegment::Operation("getUser"),
+                InlineTypePathSegment::Parameter("filter"),
+                InlineTypePathSegment::Field(StructFieldName::Name("nested")),
+            ],
+        },
+    );
+}
+
+#[test]
+fn test_parameter_inlines_empty_for_ref() {
+    let doc = Document::from_yaml(indoc::indoc! {"
+        openapi: 3.0.0
+        info:
+          title: Test
+          version: 1.0
+        paths:
+          /users:
+            get:
+              operationId: listUsers
+              parameters:
+                - name: sort
+                  in: query
+                  schema:
+                    $ref: '#/components/schemas/SortOrder'
+              responses:
+                '200':
+                  description: OK
+        components:
+          schemas:
+            SortOrder:
+              type: string
+              enum:
+                - asc
+                - desc
+    "})
+    .unwrap();
+
+    let arena = Arena::new();
+    let spec = Spec::from_doc(&arena, &doc).unwrap();
+    let graph = RawGraph::new(&arena, &spec).cook();
+
+    let operation = graph.operations().next().unwrap();
+
+    // A parameter referencing a named schema has no inlines.
+    let sort_param = operation.query().next().unwrap();
+    assert_eq!(sort_param.inlines().count(), 0);
+}
+
+#[test]
+fn test_parameter_inlines_empty_for_ref_with_nested_inlines() {
+    let doc = Document::from_yaml(indoc::indoc! {"
+        openapi: 3.0.0
+        info:
+          title: Test
+          version: 1.0
+        paths:
+          /users:
+            get:
+              operationId: listUsers
+              parameters:
+                - name: filter
+                  in: query
+                  schema:
+                    $ref: '#/components/schemas/Filter'
+              responses:
+                '200':
+                  description: OK
+        components:
+          schemas:
+            Filter:
+              type: object
+              properties:
+                status:
+                  type: string
+                nested:
+                  type: object
+                  properties:
+                    depth:
+                      type: integer
+    "})
+    .unwrap();
+
+    let arena = Arena::new();
+    let spec = Spec::from_doc(&arena, &doc).unwrap();
+    let graph = RawGraph::new(&arena, &spec).cook();
+
+    let operation = graph.operations().next().unwrap();
+
+    // A parameter referencing a named schema has no inlines, even
+    // when the schema itself contains inline types. Those inlines
+    // belong to the schema, not the parameter.
+    let filter_param = operation.query().next().unwrap();
+    assert_eq!(filter_param.inlines().count(), 0);
+}
+
 // MARK: Discriminator fields
 
 #[test]
@@ -3083,8 +3120,7 @@ fn test_inline_tagged_view_construction() {
     assert_eq!(tagged_view.tag(), "kind");
 
     // Verify the variants.
-    let mut variant_names = tagged_view.variants().map(|v| v.name()).collect_vec();
-    variant_names.sort();
+    let variant_names = tagged_view.variants().map(|v| v.name()).collect_vec();
     assert_matches!(&*variant_names, ["Cat", "Dog"]);
 }
 
@@ -3196,6 +3232,817 @@ fn test_inlines_finds_inline_tagged_unions() {
             InlineTypeView::Tagged(_, _)
         ]
     );
+}
+
+// MARK: `hashable()` and `defaultable()`
+
+#[test]
+fn test_struct_not_hashable_when_inherited_field_type_inherits_float() {
+    // `S` inherits from tagged union `U`, which has common field `data: T`.
+    // `T` has no own fields, but inherits from `Parent`, which has an
+    // `f64` field. `S` can't be hashable because it inherits an `f64`.
+    let doc = Document::from_yaml(indoc::indoc! {"
+        openapi: 3.0.0
+        info:
+          title: Test API
+          version: 1.0.0
+        paths: {}
+        components:
+          schemas:
+            Parent:
+              type: object
+              properties:
+                val:
+                  type: number
+                  format: double
+              required:
+                - val
+            T:
+              type: object
+              allOf:
+                - $ref: '#/components/schemas/Parent'
+            S:
+              type: object
+              allOf:
+                - $ref: '#/components/schemas/U'
+              properties:
+                name:
+                  type: string
+              required:
+                - name
+            OtherVariant:
+              type: object
+              properties:
+                label:
+                  type: string
+              required:
+                - label
+            U:
+              oneOf:
+                - $ref: '#/components/schemas/S'
+                - $ref: '#/components/schemas/OtherVariant'
+              discriminator:
+                propertyName: type
+              properties:
+                data:
+                  $ref: '#/components/schemas/T'
+              required:
+                - type
+                - data
+    "})
+    .unwrap();
+
+    let arena = Arena::new();
+    let spec = Spec::from_doc(&arena, &doc).unwrap();
+    let graph = RawGraph::new(&arena, &spec).cook();
+
+    // `s.data` reaches an `f64` through `Parent`, so `s` is unhashable.
+    let s = graph.schemas().find(|s| s.name() == "S").unwrap();
+    assert!(!s.hashable());
+}
+
+#[test]
+fn test_struct_not_defaultable_when_inherited_field_type_inherits_non_defaultable() {
+    // Same inheritance chain as the hashable test above, but for `Default`:
+    // `S` inherits from tagged union `U`, which has required common field
+    // `data: T`. `T` has no own fields, but inherits from `Parent`, which has
+    // a required tagged union field. `S` can't be defaultable.
+    let doc = Document::from_yaml(indoc::indoc! {"
+        openapi: 3.0.0
+        info:
+          title: Test API
+          version: 1.0.0
+        paths: {}
+        components:
+          schemas:
+            Kind:
+              oneOf:
+                - $ref: '#/components/schemas/KindA'
+                - $ref: '#/components/schemas/KindB'
+              discriminator:
+                propertyName: type
+            KindA:
+              type: object
+              allOf:
+                - $ref: '#/components/schemas/Kind'
+              properties:
+                a:
+                  type: string
+            KindB:
+              type: object
+              allOf:
+                - $ref: '#/components/schemas/Kind'
+              properties:
+                b:
+                  type: string
+            Parent:
+              type: object
+              properties:
+                kind:
+                  $ref: '#/components/schemas/Kind'
+              required:
+                - kind
+            T:
+              type: object
+              allOf:
+                - $ref: '#/components/schemas/Parent'
+            S:
+              type: object
+              allOf:
+                - $ref: '#/components/schemas/U'
+              properties:
+                name:
+                  type: string
+              required:
+                - name
+            OtherVariant:
+              type: object
+              properties:
+                label:
+                  type: string
+              required:
+                - label
+            U:
+              oneOf:
+                - $ref: '#/components/schemas/S'
+                - $ref: '#/components/schemas/OtherVariant'
+              discriminator:
+                propertyName: type
+              properties:
+                data:
+                  $ref: '#/components/schemas/T'
+              required:
+                - type
+                - data
+    "})
+    .unwrap();
+
+    let arena = Arena::new();
+    let spec = Spec::from_doc(&arena, &doc).unwrap();
+    let graph = RawGraph::new(&arena, &spec).cook();
+
+    // `s.data` reaches tagged union `Kind` through `Parent`,
+    // so `s` is undefaultable.
+    let s = graph.schemas().find(|s| s.name() == "S").unwrap();
+    assert!(!s.defaultable());
+}
+
+#[test]
+fn test_struct_not_hashable_when_own_field_type_inherits_float() {
+    // `X` has own field `t: T`. `T` inherits from `Parent`, which has
+    // a required `f64` field. `X` should not be hashable because its
+    // own-field chain crosses an `Inherits` edge to reach `f64`.
+    let doc = Document::from_yaml(indoc::indoc! {"
+        openapi: 3.0.0
+        info:
+          title: Test API
+          version: 1.0.0
+        paths: {}
+        components:
+          schemas:
+            Parent:
+              type: object
+              properties:
+                val:
+                  type: number
+                  format: double
+              required:
+                - val
+            T:
+              type: object
+              allOf:
+                - $ref: '#/components/schemas/Parent'
+            X:
+              type: object
+              properties:
+                t:
+                  $ref: '#/components/schemas/T'
+              required:
+                - t
+    "})
+    .unwrap();
+
+    let arena = Arena::new();
+    let spec = Spec::from_doc(&arena, &doc).unwrap();
+    let graph = RawGraph::new(&arena, &spec).cook();
+
+    let x = graph.schemas().find(|s| s.name() == "X").unwrap();
+    assert!(!x.hashable());
+    // `T` itself is also not hashable.
+    let t = graph.schemas().find(|s| s.name() == "T").unwrap();
+    assert!(!t.hashable());
+}
+
+#[test]
+fn test_struct_not_defaultable_when_own_field_type_inherits_non_defaultable() {
+    // `X` has required field `t: T`. `T` inherits from `Parent`, which
+    // has a required tagged union field. `X` should not be defaultable.
+    let doc = Document::from_yaml(indoc::indoc! {"
+        openapi: 3.0.0
+        info:
+          title: Test API
+          version: 1.0.0
+        paths: {}
+        components:
+          schemas:
+            Kind:
+              oneOf:
+                - $ref: '#/components/schemas/KindA'
+                - $ref: '#/components/schemas/KindB'
+              discriminator:
+                propertyName: type
+            KindA:
+              type: object
+              allOf:
+                - $ref: '#/components/schemas/Kind'
+              properties:
+                a:
+                  type: string
+            KindB:
+              type: object
+              allOf:
+                - $ref: '#/components/schemas/Kind'
+              properties:
+                b:
+                  type: string
+            Parent:
+              type: object
+              properties:
+                kind:
+                  $ref: '#/components/schemas/Kind'
+              required:
+                - kind
+            T:
+              type: object
+              allOf:
+                - $ref: '#/components/schemas/Parent'
+            X:
+              type: object
+              properties:
+                t:
+                  $ref: '#/components/schemas/T'
+              required:
+                - t
+    "})
+    .unwrap();
+
+    let arena = Arena::new();
+    let spec = Spec::from_doc(&arena, &doc).unwrap();
+    let graph = RawGraph::new(&arena, &spec).cook();
+
+    let x = graph.schemas().find(|s| s.name() == "X").unwrap();
+    assert!(!x.defaultable());
+}
+
+#[test]
+fn test_struct_not_hashable_when_own_field_is_float() {
+    // Direct own-field case: `X { f: f64 }` → not hashable.
+    let doc = Document::from_yaml(indoc::indoc! {"
+        openapi: 3.0.0
+        info:
+          title: Test API
+          version: 1.0.0
+        paths: {}
+        components:
+          schemas:
+            X:
+              type: object
+              properties:
+                f:
+                  type: number
+                  format: double
+              required:
+                - f
+    "})
+    .unwrap();
+
+    let arena = Arena::new();
+    let spec = Spec::from_doc(&arena, &doc).unwrap();
+    let graph = RawGraph::new(&arena, &spec).cook();
+
+    let x = graph.schemas().find(|s| s.name() == "X").unwrap();
+    assert!(!x.hashable());
+}
+
+#[test]
+fn test_struct_not_hashable_when_container_field_holds_float() {
+    // `X { f: Array<f64> }` — the `Contains` edge path to `f64`.
+    let doc = Document::from_yaml(indoc::indoc! {"
+        openapi: 3.0.0
+        info:
+          title: Test API
+          version: 1.0.0
+        paths: {}
+        components:
+          schemas:
+            X:
+              type: object
+              properties:
+                f:
+                  type: array
+                  items:
+                    type: number
+                    format: double
+              required:
+                - f
+    "})
+    .unwrap();
+
+    let arena = Arena::new();
+    let spec = Spec::from_doc(&arena, &doc).unwrap();
+    let graph = RawGraph::new(&arena, &spec).cook();
+
+    let x = graph.schemas().find(|s| s.name() == "X").unwrap();
+    assert!(!x.hashable());
+}
+
+#[test]
+fn test_struct_not_hashable_when_union_field_has_unhashable_variant() {
+    // `X { u: U }` where `U` is a tagged union with variant `V` that has
+    // an `f64` field. `X` depends on the full union type, so it is not
+    // hashable.
+    let doc = Document::from_yaml(indoc::indoc! {"
+        openapi: 3.0.0
+        info:
+          title: Test API
+          version: 1.0.0
+        paths: {}
+        components:
+          schemas:
+            V:
+              type: object
+              allOf:
+                - $ref: '#/components/schemas/U'
+              properties:
+                score:
+                  type: number
+                  format: double
+              required:
+                - score
+            W:
+              type: object
+              allOf:
+                - $ref: '#/components/schemas/U'
+              properties:
+                label:
+                  type: string
+              required:
+                - label
+            U:
+              oneOf:
+                - $ref: '#/components/schemas/V'
+                - $ref: '#/components/schemas/W'
+              discriminator:
+                propertyName: type
+            X:
+              type: object
+              properties:
+                u:
+                  $ref: '#/components/schemas/U'
+              required:
+                - u
+    "})
+    .unwrap();
+
+    let arena = Arena::new();
+    let spec = Spec::from_doc(&arena, &doc).unwrap();
+    let graph = RawGraph::new(&arena, &spec).cook();
+
+    let x = graph.schemas().find(|s| s.name() == "X").unwrap();
+    assert!(!x.hashable());
+}
+
+#[test]
+fn test_struct_defaultable_when_all_fields_optional() {
+    // All fields optional → `AbsentOr<T>` wrapping, which is always
+    // `Default`. Validates the `Optional` → `AbsentOr` interaction.
+    let doc = Document::from_yaml(indoc::indoc! {"
+        openapi: 3.0.0
+        info:
+          title: Test API
+          version: 1.0.0
+        paths: {}
+        components:
+          schemas:
+            X:
+              type: object
+              properties:
+                name:
+                  type: string
+                count:
+                  type: integer
+                  format: int32
+    "})
+    .unwrap();
+
+    let arena = Arena::new();
+    let spec = Spec::from_doc(&arena, &doc).unwrap();
+    let graph = RawGraph::new(&arena, &spec).cook();
+
+    let x = graph.schemas().find(|s| s.name() == "X").unwrap();
+    assert!(x.defaultable());
+}
+
+#[test]
+fn test_recursive_struct_is_hashable() {
+    // A self-referential type with no `f64` in its closure is hashable.
+    // Validates that the same-SCC skip in Pass 3 does not incorrectly
+    // taint recursive types.
+    let doc = Document::from_yaml(indoc::indoc! {"
+        openapi: 3.0.0
+        info:
+          title: Test API
+          version: 1.0.0
+        paths: {}
+        components:
+          schemas:
+            Node:
+              type: object
+              properties:
+                value:
+                  type: string
+                next:
+                  $ref: '#/components/schemas/Node'
+              required:
+                - value
+                - next
+    "})
+    .unwrap();
+
+    let arena = Arena::new();
+    let spec = Spec::from_doc(&arena, &doc).unwrap();
+    let graph = RawGraph::new(&arena, &spec).cook();
+
+    let node = graph.schemas().find(|s| s.name() == "Node").unwrap();
+    assert!(node.hashable());
+}
+
+#[test]
+fn test_recursive_struct_defaultable_when_self_reference_optional() {
+    // A self-referential type where the recursive field is optional.
+    // `AbsentOr<Box<Node>>` is always `Default` (defaults to absent),
+    // so the recursion is broken and the type is defaultable.
+    let doc = Document::from_yaml(indoc::indoc! {"
+        openapi: 3.0.0
+        info:
+          title: Test API
+          version: 1.0.0
+        paths: {}
+        components:
+          schemas:
+            Node:
+              type: object
+              properties:
+                value:
+                  type: string
+                next:
+                  $ref: '#/components/schemas/Node'
+              required:
+                - value
+    "})
+    .unwrap();
+
+    let arena = Arena::new();
+    let spec = Spec::from_doc(&arena, &doc).unwrap();
+    let graph = RawGraph::new(&arena, &spec).cook();
+
+    let node = graph.schemas().find(|s| s.name() == "Node").unwrap();
+    assert!(node.defaultable());
+}
+
+#[test]
+fn test_recursive_struct_defaultable_when_self_reference_required() {
+    // A self-referential type where the recursive field is required.
+    // `Box<T>` implements `Default` when `T: Default`, so the derive
+    // is valid.
+    let doc = Document::from_yaml(indoc::indoc! {"
+        openapi: 3.0.0
+        info:
+          title: Test API
+          version: 1.0.0
+        paths: {}
+        components:
+          schemas:
+            Node:
+              type: object
+              properties:
+                value:
+                  type: string
+                next:
+                  $ref: '#/components/schemas/Node'
+              required:
+                - value
+                - next
+    "})
+    .unwrap();
+
+    let arena = Arena::new();
+    let spec = Spec::from_doc(&arena, &doc).unwrap();
+    let graph = RawGraph::new(&arena, &spec).cook();
+
+    let node = graph.schemas().find(|s| s.name() == "Node").unwrap();
+    assert!(node.defaultable());
+}
+
+#[test]
+fn test_struct_hashable_when_field_and_inheritance_form_cycle() {
+    // `A.child: B`, where `B` inherits from `A`, creates a
+    // `Field` + `Inherits` cycle in the graph. Neither type has
+    // a floating-point field, so both should be hashable.
+    // This verifies that the ancestors closure and same-SCC skip
+    // handle mixed-edge SCCs.
+    let doc = Document::from_yaml(indoc::indoc! {"
+        openapi: 3.0.0
+        info:
+          title: Test API
+          version: 1.0.0
+        paths: {}
+        components:
+          schemas:
+            A:
+              type: object
+              properties:
+                child:
+                  $ref: '#/components/schemas/B'
+              required:
+                - child
+            B:
+              type: object
+              allOf:
+                - $ref: '#/components/schemas/A'
+              properties:
+                name:
+                  type: string
+              required:
+                - name
+    "})
+    .unwrap();
+
+    let arena = Arena::new();
+    let spec = Spec::from_doc(&arena, &doc).unwrap();
+    let graph = RawGraph::new(&arena, &spec).cook();
+
+    let a = graph.schemas().find(|s| s.name() == "A").unwrap();
+    let b = graph.schemas().find(|s| s.name() == "B").unwrap();
+    assert!(a.hashable());
+    assert!(b.hashable());
+    assert!(a.defaultable());
+    assert!(b.defaultable());
+}
+
+#[test]
+fn test_struct_not_hashable_when_field_and_inheritance_cycle_reaches_float() {
+    // Same `Field` + `Inherits`, but `A` now has an `f64` field.
+    // Both types should be unhashable: `A` directly, and `B` via
+    // the inherited field `val`.
+    let doc = Document::from_yaml(indoc::indoc! {"
+        openapi: 3.0.0
+        info:
+          title: Test API
+          version: 1.0.0
+        paths: {}
+        components:
+          schemas:
+            A:
+              type: object
+              properties:
+                child:
+                  $ref: '#/components/schemas/B'
+                val:
+                  type: number
+                  format: double
+              required:
+                - child
+                - val
+            B:
+              type: object
+              allOf:
+                - $ref: '#/components/schemas/A'
+              properties:
+                name:
+                  type: string
+              required:
+                - name
+    "})
+    .unwrap();
+
+    let arena = Arena::new();
+    let spec = Spec::from_doc(&arena, &doc).unwrap();
+    let graph = RawGraph::new(&arena, &spec).cook();
+
+    let a = graph.schemas().find(|s| s.name() == "A").unwrap();
+    let b = graph.schemas().find(|s| s.name() == "B").unwrap();
+    assert!(!a.hashable());
+    assert!(!b.hashable());
+}
+
+// MARK: Shadow edge visibility
+
+#[test]
+fn test_shadow_edges_hide_inlines_but_preserve_dependencies() {
+    // `Dog` has an anonymous object field, `metadata`.
+    // `Pet` is a tagged union with `Dog` as a variant, and
+    // `Owner` also references `Dog`. `inline_tagged_variants()`
+    // creates an inline copy of `Dog` for `Pet`, with
+    // shadow edges back to the original.
+    //
+    // Shadow edges must be invisible to `inlines()`, so that
+    // `Pet/Dog` doesn't claim `Dog`'s inline types, but visible to
+    // `dependencies()`, so that `Pet/Dog` still transitively depends on
+    // everything that `Dog` depends on.
+    let doc = Document::from_yaml(indoc::indoc! {"
+        openapi: 3.0.0
+        info:
+          title: Test
+          version: 1.0.0
+        paths: {}
+        components:
+          schemas:
+            Dog:
+              type: object
+              properties:
+                kind:
+                  type: string
+                metadata:
+                  type: object
+                  properties:
+                    origin:
+                      type: string
+              required: [kind, metadata]
+            Owner:
+              type: object
+              properties:
+                dog:
+                  $ref: '#/components/schemas/Dog'
+            Pet:
+              oneOf:
+                - $ref: '#/components/schemas/Dog'
+              discriminator:
+                propertyName: kind
+                mapping:
+                  dog: '#/components/schemas/Dog'
+    "})
+    .unwrap();
+
+    let arena = Arena::new();
+    let spec = Spec::from_doc(&arena, &doc).unwrap();
+    let mut raw = RawGraph::new(&arena, &spec);
+    raw.inline_tagged_variants();
+    let graph = raw.cook();
+
+    // The original `Dog` schema should own the inline `metadata` struct.
+    let dog = graph.schemas().find(|s| s.name() == "Dog").unwrap();
+    let dog_inline_paths = dog
+        .inlines()
+        .filter_map(|i| match i {
+            InlineTypeView::Struct(path, _) => Some(path),
+            _ => None,
+        })
+        .collect_vec();
+    assert_matches!(
+        &*dog_inline_paths,
+        [InlineTypePath {
+            root: InlineTypePathRoot::Type("Dog"),
+            segments: [InlineTypePathSegment::Field(StructFieldName::Name(
+                "metadata"
+            ))],
+        }],
+    );
+
+    // The inlined variant `Pet/Dog` should _not_ claim `Dog`'s inline types.
+    let pet = graph.schemas().find(|s| s.name() == "Pet").unwrap();
+    let SchemaTypeView::Tagged(_, pet_tagged) = pet else {
+        panic!("expected tagged `Pet`; got `{pet:?}`");
+    };
+    let variant = pet_tagged.variants().next().unwrap();
+    let TypeView::Inline(InlineTypeView::Struct(_, inlined_dog)) = variant.ty() else {
+        panic!("expected inline struct variant; got `{:?}`", variant.ty());
+    };
+    let claimed_inline_structs = inlined_dog
+        .inlines()
+        .filter_map(|i| match i {
+            InlineTypeView::Struct(path, _) => Some(path),
+            _ => None,
+        })
+        .collect_vec();
+    assert_matches!(&*claimed_inline_structs, []);
+
+    // But `dependencies()` should still reach `Dog` and its inlines.
+    let mut dep_names = inlined_dog
+        .dependencies()
+        .filter_map(|view| match view {
+            TypeView::Schema(view) => Some(view.name()),
+            _ => None,
+        })
+        .collect_vec();
+    dep_names.sort();
+    assert_matches!(&*dep_names, ["Dog", "Pet"]);
+}
+
+#[test]
+fn test_shadow_inherits_hides_ancestor_inlines() {
+    // `Dog` inherits from `Animal` via `allOf`. `Animal` has
+    // an anonymous object field, `tag`. `Pet` is a tagged union
+    // with `Dog` as a variant, and `Owner` also references `Dog`.
+    // `inline_tagged_variants()` creates an inline copy of `Dog`
+    // for `Pet`, with shadow edges back to the original.
+    //
+    // The inlined `Pet/Dog` has a shadow inheritance edge back to
+    // the original `Dog`, which in turn inherits from `Animal`.
+    // `inlines()` must not follow those shadow edges, so `Pet/Dog`
+    // doesn't claim `Animal`'s inline types.
+    let doc = Document::from_yaml(indoc::indoc! {"
+        openapi: 3.0.0
+        info:
+          title: Test
+          version: 1.0.0
+        paths: {}
+        components:
+          schemas:
+            Animal:
+              type: object
+              properties:
+                kind:
+                  type: string
+                tag:
+                  type: object
+                  properties:
+                    label:
+                      type: string
+              required: [kind, tag]
+            Dog:
+              allOf:
+                - $ref: '#/components/schemas/Animal'
+              properties:
+                bark:
+                  type: string
+              required: [bark]
+            Owner:
+              type: object
+              properties:
+                dog:
+                  $ref: '#/components/schemas/Dog'
+            Pet:
+              oneOf:
+                - $ref: '#/components/schemas/Dog'
+              discriminator:
+                propertyName: kind
+                mapping:
+                  dog: '#/components/schemas/Dog'
+    "})
+    .unwrap();
+
+    let arena = Arena::new();
+    let spec = Spec::from_doc(&arena, &doc).unwrap();
+    let mut raw = RawGraph::new(&arena, &spec);
+    raw.inline_tagged_variants();
+    let graph = raw.cook();
+
+    // `Animal` should own the inline `tag` struct.
+    let animal = graph.schemas().find(|s| s.name() == "Animal").unwrap();
+    let animal_inline_paths = animal
+        .inlines()
+        .filter_map(|i| match i {
+            InlineTypeView::Struct(path, _) => Some(path),
+            _ => None,
+        })
+        .collect_vec();
+    assert_matches!(
+        &*animal_inline_paths,
+        [InlineTypePath {
+            root: InlineTypePathRoot::Type("Animal"),
+            segments: [InlineTypePathSegment::Field(StructFieldName::Name("tag"))],
+        }],
+    );
+
+    // The inlined `Pet/Dog` should _not_ claim `Animal`'s inline types.
+    let pet = graph.schemas().find(|s| s.name() == "Pet").unwrap();
+    let SchemaTypeView::Tagged(_, pet_tagged) = pet else {
+        panic!("expected tagged `Pet`; got `{pet:?}`");
+    };
+    let variant = pet_tagged.variants().next().unwrap();
+    let TypeView::Inline(InlineTypeView::Struct(_, inlined_dog)) = variant.ty() else {
+        panic!("expected inline struct variant; got `{:?}`", variant.ty());
+    };
+    let claimed_inline_structs = inlined_dog
+        .inlines()
+        .filter_map(|i| match i {
+            InlineTypeView::Struct(path, _) => Some(path),
+            _ => None,
+        })
+        .collect_vec();
+    assert_matches!(&*claimed_inline_structs, []);
+
+    // But `dependencies()` should still reach `Animal` and its inlines.
+    let mut dep_names = inlined_dog
+        .dependencies()
+        .filter_map(|view| match view {
+            TypeView::Schema(view) => Some(view.name()),
+            _ => None,
+        })
+        .collect_vec();
+    dep_names.sort();
+    assert_matches!(&*dep_names, ["Animal", "Dog", "Pet"]);
 }
 
 // MARK: Tag field detection
@@ -3367,7 +4214,7 @@ fn test_inlined_when_tagged_unions_disagree_on_fields() {
     // must be inlined so that each inline copy inherits just its
     // parent union's fields.
     let doc = Document::from_yaml(indoc::indoc! {"
-        openapi: 3.0.0
+        openapi: 3.1.0
         info:
           title: Test
           version: 1.0.0
@@ -3670,6 +4517,80 @@ fn test_inlined_variant_inline_field_types_not_leaked() {
 }
 
 #[test]
+fn test_inlined_variant_parents_yields_tagged_union_and_original() {
+    // When `Dog` is inlined into `Pet`, the inlined variant struct
+    // should have two parents: the tagged union `Pet` (for its
+    // common fields) and the original `Dog` schema (for its ancestors).
+    let doc = Document::from_yaml(indoc::indoc! {"
+        openapi: 3.0.0
+        info:
+          title: Test
+          version: 1.0.0
+        components:
+          schemas:
+            Dog:
+              type: object
+              properties:
+                kind:
+                  type: string
+                bark:
+                  type: string
+            Pet:
+              oneOf:
+                - $ref: '#/components/schemas/Dog'
+              discriminator:
+                propertyName: kind
+                mapping:
+                  dog: '#/components/schemas/Dog'
+              properties:
+                kind:
+                  type: string
+                name:
+                  type: string
+            Owner:
+              type: object
+              properties:
+                dog:
+                  $ref: '#/components/schemas/Dog'
+    "})
+    .unwrap();
+
+    let arena = Arena::new();
+    let spec = Spec::from_doc(&arena, &doc).unwrap();
+    let mut raw = RawGraph::new(&arena, &spec);
+    raw.inline_tagged_variants();
+    let graph = raw.cook();
+
+    let pet = graph.schemas().find(|s| s.name() == "Pet").unwrap();
+    let SchemaTypeView::Tagged(_, pet_tagged) = pet else {
+        panic!("expected tagged `Pet`; got `{pet:?}`");
+    };
+    let variant = pet_tagged.variants().next().unwrap();
+    let TypeView::Inline(InlineTypeView::Struct(_, inline_struct)) = variant.ty() else {
+        panic!("expected inline struct variant; got `{:?}`", variant.ty());
+    };
+
+    // The inlined variant struct should have both the tagged union
+    // and the original variant struct as parents.
+    let parents = inline_struct.parents().collect_vec();
+    assert_matches!(
+        &*parents,
+        [
+            TypeView::Schema(SchemaTypeView::Tagged(..)),
+            TypeView::Schema(SchemaTypeView::Struct(..))
+        ]
+    );
+    let parent_names = parents
+        .iter()
+        .filter_map(|p| match p {
+            TypeView::Schema(s) => Some(s.name()),
+            _ => None,
+        })
+        .collect_vec();
+    assert_matches!(&*parent_names, ["Pet", "Dog"]);
+}
+
+#[test]
 fn test_tag_false_when_only_operation_prevents_inlining() {
     // `Dog` is referenced by the tagged union `Pet` (with tag `kind`) and by
     // an operation, but not by any other schema. The operation should cause
@@ -3824,5 +4745,128 @@ fn test_inlined_when_struct_field_references_tagged_variant() {
     assert!(
         kind_inline.tag(),
         "`kind` should be a tag on the inlined struct variant"
+    );
+}
+
+#[test]
+fn test_tag_false_for_common_field_target() {
+    // `Header` only has an incoming field edge from `Action`,
+    // not a variant edge. `Header.kind` collides with `Action`'s
+    // discriminator, but shouldn't be treated as a tag.
+    let doc = Document::from_yaml(indoc::indoc! {"
+        openapi: 3.0.0
+        info:
+          title: Test
+          version: 1.0.0
+        components:
+          schemas:
+            Action:
+              oneOf:
+                - $ref: '#/components/schemas/TextAction'
+                - $ref: '#/components/schemas/MetricAction'
+              discriminator:
+                propertyName: kind
+                mapping:
+                  text: '#/components/schemas/TextAction'
+                  metric: '#/components/schemas/MetricAction'
+              properties:
+                header:
+                  $ref: '#/components/schemas/Header'
+              required: [kind, header]
+            TextAction:
+              type: object
+              properties:
+                label:
+                  type: string
+              required: [label]
+            MetricAction:
+              type: object
+              properties:
+                value:
+                  type: number
+              required: [value]
+            Header:
+              type: object
+              properties:
+                kind:
+                  type: string
+                id:
+                  type: string
+              required: [kind, id]
+    "})
+    .unwrap();
+
+    let arena = Arena::new();
+    let spec = Spec::from_doc(&arena, &doc).unwrap();
+    let mut raw = RawGraph::new(&arena, &spec);
+    raw.inline_tagged_variants();
+    let graph = raw.cook();
+
+    let header = graph.schemas().find(|s| s.name() == "Header").unwrap();
+    let SchemaTypeView::Struct(_, header_struct) = header else {
+        panic!("expected struct `Header`; got `{header:?}`");
+    };
+    let kind_field = header_struct
+        .fields()
+        .find(|f| matches!(f.name(), StructFieldName::Name("kind")))
+        .unwrap();
+    assert!(!kind_field.tag());
+}
+
+#[test]
+fn test_all_of_closer_ancestor_overrides_field() {
+    // `C` inherits from both `A` and `B`, in order. Both `A` and `B`
+    // declare `foo`; `C` doesn't. `B` is later in `allOf`,
+    // so `B`'s `foo` should win.
+    let doc = Document::from_yaml(indoc::indoc! {"
+        openapi: 3.0.0
+        info:
+          title: Test
+          version: 1.0.0
+        components:
+          schemas:
+            A:
+              type: object
+              properties:
+                foo:
+                  type: string
+                bar:
+                  type: string
+            B:
+              type: object
+              properties:
+                foo:
+                  type: integer
+                baz:
+                  type: string
+            C:
+              allOf:
+                - $ref: '#/components/schemas/A'
+                - $ref: '#/components/schemas/B'
+              properties:
+                qux:
+                  type: string
+    "})
+    .unwrap();
+
+    let arena = Arena::new();
+    let spec = Spec::from_doc(&arena, &doc).unwrap();
+    let graph = RawGraph::new(&arena, &spec).cook();
+
+    let c = graph.schemas().find(|s| s.name() == "C").unwrap();
+    let SchemaTypeView::Struct(_, c_struct) = c else {
+        panic!("expected struct `C`; got `{c:?}`");
+    };
+    let field_names = c_struct.fields().map(|f| f.name()).collect_vec();
+    // `A`'s fields first (minus `foo`, overridden by `B`),
+    // then `B`'s fields, then `C`'s own.
+    assert_matches!(
+        &*field_names,
+        [
+            StructFieldName::Name("bar"),
+            StructFieldName::Name("foo"),
+            StructFieldName::Name("baz"),
+            StructFieldName::Name("qux"),
+        ]
     );
 }

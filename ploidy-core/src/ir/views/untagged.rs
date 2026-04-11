@@ -30,7 +30,7 @@ use petgraph::graph::NodeIndex;
 use crate::ir::{
     UntaggedVariantNameHint,
     graph::CookedGraph,
-    types::{GraphUntagged, GraphUntaggedVariant},
+    types::{GraphUntagged, VariantMeta},
 };
 
 use super::{ViewNode, ir::TypeView, struct_::FieldView};
@@ -63,19 +63,20 @@ impl<'a> UntaggedView<'a> {
     /// shared across all variants.
     #[inline]
     pub fn fields(&self) -> impl Iterator<Item = UntaggedFieldView<'_, 'a>> {
-        self.ty
-            .fields
-            .iter()
-            .map(move |field| UntaggedFieldView::new(self, field, false))
+        self.cooked
+            .fields(self.index)
+            .map(move |info| UntaggedFieldView::new(self, info.meta, info.target, false))
     }
 
     /// Returns an iterator over this untagged union's variants.
-    #[inline]
     pub fn variants(&self) -> impl Iterator<Item = UntaggedVariantView<'_, 'a>> {
-        self.ty.variants.iter().map(|variant| UntaggedVariantView {
-            parent: self,
-            variant,
-        })
+        self.cooked
+            .variants(self.index)
+            .map(move |info| UntaggedVariantView {
+                parent: self,
+                meta: info.meta,
+                index: info.target,
+            })
     }
 }
 
@@ -94,28 +95,31 @@ impl<'a> ViewNode<'a> for UntaggedView<'a> {
 /// A graph-aware view of a common untagged union field.
 pub type UntaggedFieldView<'view, 'a> = FieldView<'view, 'a, UntaggedView<'a>>;
 
-/// A graph-aware view of an [untagged union variant][GraphUntaggedVariant].
+/// A graph-aware view of an untagged union variant.
 #[derive(Debug)]
 pub struct UntaggedVariantView<'view, 'a> {
     parent: &'view UntaggedView<'a>,
-    variant: &'a GraphUntaggedVariant,
+    meta: VariantMeta<'a>,
+    /// The node index of this variant's type (from the `Variant` edge).
+    index: NodeIndex<usize>,
 }
 
 impl<'view, 'a> UntaggedVariantView<'view, 'a> {
-    /// Returns a view of this variant's type, if it's not `null`.
+    /// Returns a view of this variant's type, if it's not a unit
+    /// variant.
     #[inline]
     pub fn ty(&self) -> Option<SomeUntaggedVariant<'a>> {
-        match self.variant {
-            &GraphUntaggedVariant::Some(hint, index) => Some(SomeUntaggedVariant {
+        match self.meta {
+            VariantMeta::Untagged(hint) => Some(SomeUntaggedVariant {
                 hint,
-                view: TypeView::new(self.parent.cooked, index),
+                view: TypeView::new(self.parent.cooked, self.index),
             }),
-            GraphUntaggedVariant::Null => None,
+            _ => None,
         }
     }
 }
 
-/// A non-`null` variant of an untagged union, pairing a name hint
+/// A non-unit variant of an untagged union, pairing a name hint
 /// with the variant's type.
 #[derive(Debug)]
 pub struct SomeUntaggedVariant<'a> {
