@@ -363,7 +363,7 @@ fn test_circular_refs_simple_cycle() {
         .fields()
         .find(|f| matches!(f.name(), StructFieldName::Name("b")))
         .unwrap();
-    assert!(b_field.needs_indirection());
+    assert!(b_field.needs_box());
 }
 
 #[test]
@@ -397,7 +397,7 @@ fn test_circular_refs_self_reference() {
         .fields()
         .find(|f| matches!(f.name(), StructFieldName::Name("next")))
         .unwrap();
-    assert!(next_field.needs_indirection());
+    assert!(next_field.needs_box());
 }
 
 #[test]
@@ -441,7 +441,7 @@ fn test_circular_refs_complex_cycle() {
         .fields()
         .find(|f| matches!(f.name(), StructFieldName::Name("b")))
         .unwrap();
-    assert!(b_field.needs_indirection());
+    assert!(b_field.needs_box());
 }
 
 #[test]
@@ -483,7 +483,7 @@ fn test_circular_refs_no_cycles() {
         .fields()
         .find(|f| matches!(f.name(), StructFieldName::Name("branch")))
         .unwrap();
-    assert!(!branch_field.needs_indirection());
+    assert!(!branch_field.needs_box());
 }
 
 #[test]
@@ -533,7 +533,7 @@ fn test_circular_refs_multiple_sccs() {
         .fields()
         .find(|f| matches!(f.name(), StructFieldName::Name("b")))
         .unwrap();
-    assert!(a_b_field.needs_indirection());
+    assert!(a_b_field.needs_box());
 
     let c_schema = graph.schemas().find(|s| s.name() == "C").unwrap();
     let c_struct = match c_schema {
@@ -544,7 +544,7 @@ fn test_circular_refs_multiple_sccs() {
         .fields()
         .find(|f| matches!(f.name(), StructFieldName::Name("d")))
         .unwrap();
-    assert!(c_d_field.needs_indirection());
+    assert!(c_d_field.needs_box());
 }
 
 #[test]
@@ -577,7 +577,8 @@ fn test_circular_refs_through_containers() {
     let spec = Spec::from_doc(&arena, &doc).unwrap();
     let graph = RawGraph::new(&arena, &spec).cook();
 
-    // Cycles through containers should be detected.
+    // Heap-allocating containers (arrays and maps) break boxing
+    // cycles, so fields behind them don't need `Box`.
     let a_schema = graph.schemas().find(|s| s.name() == "A").unwrap();
     let a_struct = match a_schema {
         SchemaTypeView::Struct(_, struct_) => struct_,
@@ -587,7 +588,7 @@ fn test_circular_refs_through_containers() {
         .fields()
         .find(|f| matches!(f.name(), StructFieldName::Name("b_array")))
         .unwrap();
-    assert!(b_array_field.needs_indirection());
+    assert!(!b_array_field.needs_box());
 }
 
 #[test]
@@ -636,7 +637,7 @@ fn test_circular_refs_diamond_no_false_positive() {
         .find(|f| matches!(f.name(), StructFieldName::Name("left")))
         .unwrap();
 
-    assert!(!left_field.needs_indirection());
+    assert!(!left_field.needs_box());
 }
 
 #[test]
@@ -685,7 +686,7 @@ fn test_circular_refs_tarjan_correctness() {
         .fields()
         .find(|f| matches!(f.name(), StructFieldName::Name("b")))
         .unwrap();
-    assert!(a_b_field.needs_indirection());
+    assert!(a_b_field.needs_box());
 
     // C and D shouldn't be in a cycle.
     let c_schema = graph.schemas().find(|s| s.name() == "C").unwrap();
@@ -697,11 +698,11 @@ fn test_circular_refs_tarjan_correctness() {
         .fields()
         .find(|f| matches!(f.name(), StructFieldName::Name("d")))
         .unwrap();
-    assert!(!c_d_field.needs_indirection());
+    assert!(!c_d_field.needs_box());
 }
 
 #[test]
-fn test_needs_indirection_through_nullable() {
+fn test_needs_box_through_nullable() {
     let doc = Document::from_yaml(indoc::indoc! {"
         openapi: 3.0.0
         info:
@@ -737,11 +738,11 @@ fn test_needs_indirection_through_nullable() {
         .fields()
         .find(|f| matches!(f.name(), StructFieldName::Name("b")))
         .unwrap();
-    assert!(b_field.needs_indirection());
+    assert!(b_field.needs_box());
 }
 
 #[test]
-fn test_needs_indirection_through_array() {
+fn test_needs_box_through_array() {
     let doc = Document::from_yaml(indoc::indoc! {"
         openapi: 3.0.0
         info:
@@ -772,11 +773,11 @@ fn test_needs_indirection_through_array() {
         .fields()
         .find(|f| matches!(f.name(), StructFieldName::Name("children")))
         .unwrap();
-    assert!(children_field.needs_indirection());
+    assert!(!children_field.needs_box());
 }
 
 #[test]
-fn test_needs_indirection_through_map() {
+fn test_needs_box_through_map() {
     let doc = Document::from_yaml(indoc::indoc! {"
         openapi: 3.0.0
         info:
@@ -807,7 +808,7 @@ fn test_needs_indirection_through_map() {
         .fields()
         .find(|f| matches!(f.name(), StructFieldName::Name("children_map")))
         .unwrap();
-    assert!(children_map_field.needs_indirection());
+    assert!(!children_map_field.needs_box());
 }
 
 #[test]
@@ -855,8 +856,8 @@ fn test_indirect_and_direct_siblings() {
         .unwrap();
 
     // Only the cyclic field needs indirection.
-    assert!(!direct_field.needs_indirection());
-    assert!(indirect_field.needs_indirection());
+    assert!(!direct_field.needs_box());
+    assert!(indirect_field.needs_box());
 }
 
 // MARK: Operation metadata
@@ -1808,8 +1809,8 @@ fn test_circular_refs_excludes_inherits_edges() {
     //   Parent --[Reference]--> Child --[Inherits]--> Parent
     //
     // This is a cycle, but since the back edge is an inheritance edge,
-    // not a reference edge, `Parent.child` shouldn't need indirection.
-    // Only reference edges contribute to `needs_indirection()`.
+    // not a reference edge, `Parent.child` doesn't need `Box`.
+    // Inheritance edges are excluded from the boxing SCC.
     let doc = Document::from_yaml(indoc::indoc! {"
         openapi: 3.0.0
         info:
@@ -1847,7 +1848,7 @@ fn test_circular_refs_excludes_inherits_edges() {
         .own_fields()
         .find(|f| matches!(f.name(), StructFieldName::Name("child")))
         .unwrap();
-    assert!(!child_field.needs_indirection());
+    assert!(!child_field.needs_box());
 }
 
 #[test]
@@ -2192,10 +2193,10 @@ fn test_tagged_union_inlines_include_field_types() {
 }
 
 #[test]
-fn test_needs_indirection_through_inlined_tagged_variant() {
+fn test_needs_box_through_inlined_tagged_variant() {
     // When a tagged union has own fields, its variants are inlined.
     // The inlined variant must retain a reference edge to the original,
-    // so that SCC membership (and thus `needs_indirection()`) is preserved.
+    // so that SCC membership (and thus `needs_box()`) is preserved.
     let doc = Document::from_yaml(indoc::indoc! {"
         openapi: 3.0.0
         info:
@@ -2248,5 +2249,5 @@ fn test_needs_indirection_through_inlined_tagged_variant() {
         .own_fields()
         .find(|f| matches!(f.name(), StructFieldName::Name("parent")))
         .unwrap();
-    assert!(parent_field.needs_indirection());
+    assert!(parent_field.needs_box());
 }

@@ -109,35 +109,6 @@ impl<'view, 'a> CodegenField<'view, 'a> {
     fn new(field: &'a StructFieldView<'view, 'a>) -> Self {
         Self { field }
     }
-
-    fn needs_box(&self) -> bool {
-        // Peel away optional layers until we reach a non-optional type,
-        // because `Optional(T)` doesn't determine whether T needs to be boxed.
-        let ty = std::iter::successors(Some(self.field.ty()), |ty| match ty {
-            TypeView::Schema(SchemaTypeView::Container(_, ContainerView::Optional(inner))) => {
-                Some(inner.ty())
-            }
-            TypeView::Inline(InlineTypeView::Container(_, ContainerView::Optional(inner))) => {
-                Some(inner.ty())
-            }
-            _ => None,
-        })
-        .last() // Guaranteed to exist.
-        .unwrap();
-
-        match ty {
-            TypeView::Schema(SchemaTypeView::Container(_, container))
-            | TypeView::Inline(InlineTypeView::Container(_, container)) => {
-                // Arrays and maps are heap-allocated, providing their own indirection.
-                !matches!(container, ContainerView::Array(_) | ContainerView::Map(_))
-            }
-            // Leaf types don't contain references.
-            TypeView::Inline(InlineTypeView::Primitive(..) | InlineTypeView::Any(..))
-            | TypeView::Schema(SchemaTypeView::Primitive(..) | SchemaTypeView::Any(..)) => false,
-            // For other types, check if there's a cycle back to the struct.
-            _ => self.field.needs_indirection(),
-        }
-    }
 }
 
 impl ToTokens for CodegenField<'_, '_> {
@@ -159,7 +130,7 @@ impl ToTokens for CodegenField<'_, '_> {
             .unwrap();
 
         let inner_ref = CodegenRef::new(&ty);
-        let inner = if self.needs_box() {
+        let inner = if self.field.needs_box() {
             quote! { ::std::boxed::Box<#inner_ref> }
         } else {
             quote! { #inner_ref }
