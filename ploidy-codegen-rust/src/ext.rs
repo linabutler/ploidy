@@ -1,4 +1,7 @@
-use ploidy_core::ir::{ContainerView, EnumVariant, EnumView, ParameterView, QueryParameter};
+use ploidy_core::ir::{
+    ContainerView, EnumVariant, EnumView, ParameterView, QueryParameter, StructFieldView,
+    TaggedFieldView, TypeView, UntaggedFieldView,
+};
 
 /// Rust-specific extensions to [`EnumView`].
 pub(crate) trait EnumViewExt {
@@ -16,6 +19,43 @@ impl EnumViewExt for EnumView<'_> {
             EnumVariant::String(s) => s.chars().any(unicode_ident::is_xid_continue),
             _ => false,
         })
+    }
+}
+
+/// Rust-specific extensions to struct, tagged, and untagged union field views.
+pub(crate) trait FieldViewExt<'a> {
+    /// Returns the inner type after peeling all `Optional` layers
+    /// (e.g., `Optional(T)`, `Optional(Optional(T))` both return `T`).
+    fn inner(&self) -> TypeView<'a>;
+}
+
+impl<'view, 'a> FieldViewExt<'a> for StructFieldView<'view, 'a> {
+    fn inner(&self) -> TypeView<'a> {
+        let mut ty = self.ty();
+        while let Some(ContainerView::Optional(inner)) = ty.as_container() {
+            ty = inner.ty();
+        }
+        ty
+    }
+}
+
+impl<'view, 'a> FieldViewExt<'a> for TaggedFieldView<'view, 'a> {
+    fn inner(&self) -> TypeView<'a> {
+        let mut ty = self.ty();
+        while let Some(ContainerView::Optional(inner)) = ty.as_container() {
+            ty = inner.ty();
+        }
+        ty
+    }
+}
+
+impl<'view, 'a> FieldViewExt<'a> for UntaggedFieldView<'view, 'a> {
+    fn inner(&self) -> TypeView<'a> {
+        let mut ty = self.ty();
+        while let Some(ContainerView::Optional(inner)) = ty.as_container() {
+            ty = inner.ty();
+        }
+        ty
     }
 }
 

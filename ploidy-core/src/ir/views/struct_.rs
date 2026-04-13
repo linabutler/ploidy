@@ -59,7 +59,7 @@ use crate::ir::{
     types::{FieldMeta, GraphInlineType, GraphSchemaType, GraphStruct, GraphType, StructFieldName},
 };
 
-use super::{ViewNode, ir::TypeView};
+use super::{ViewNode, container::ContainerView, ir::TypeView};
 
 /// A graph-aware view of a [struct type][GraphStruct].
 #[derive(Debug)]
@@ -211,10 +211,15 @@ impl<'view, 'a, P: ViewNode<'a>> FieldView<'view, 'a, P> {
         TypeView::new(self.parent.cooked(), self.ty)
     }
 
-    /// Returns `true` if this field is listed in `required`.
+    /// Returns whether this field is required or optional.
     #[inline]
-    pub fn required(&self) -> bool {
-        self.meta.required
+    pub fn required(&self) -> Required {
+        if self.meta.required {
+            let nullable = matches!(self.ty().as_container(), Some(ContainerView::Optional(_)));
+            Required::Required { nullable }
+        } else {
+            Required::Optional
+        }
     }
 
     /// Returns the description, if present in the schema.
@@ -229,6 +234,22 @@ impl<'view, 'a, P: ViewNode<'a>> FieldView<'view, 'a, P> {
     pub fn flattened(&self) -> bool {
         self.meta.flattened
     }
+}
+
+/// Whether a field is required, nullable, or optional.
+///
+/// Required fields are always present, but may be nullable.
+/// Optional fields may be absent entirely. This distinction matters for
+/// generated Rust code, which represents the three cases as different types.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum Required {
+    /// The field must be present in the payload.
+    Required {
+        /// Whether the field can be `null` if present.
+        nullable: bool,
+    },
+    /// The field may be absent from the payload.
+    Optional,
 }
 
 impl<'view, 'a> FieldView<'view, 'a, StructView<'a>> {
