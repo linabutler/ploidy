@@ -265,14 +265,15 @@ impl<'view, 'a> FieldView<'view, 'a, StructView<'a>> {
             .any(|neighbor| neighbor.tag == name)
     }
 
-    /// Returns `true` if this field needs indirection to break a cycle.
+    /// Returns `true` if this field needs `Box<T>` to break a cycle.
     ///
-    /// A field needs indirection if its target type is in the same strongly
-    /// connected component as the type that contains it.
+    /// A field needs boxing if its target type is in the same strongly
+    /// connected component as the type that contains it, excluding
+    /// edges through heap-allocating containers (arrays and maps).
     #[inline]
-    pub fn needs_indirection(&self) -> bool {
+    pub fn needs_box(&self) -> bool {
         let graph = self.parent.cooked();
-        graph.metadata.scc_indices[self.parent.index().index()]
-            == graph.metadata.scc_indices[self.ty.index()]
+        graph.metadata.box_sccs[self.parent.index().index()]
+            == graph.metadata.box_sccs[self.ty.index()]
     }
 }

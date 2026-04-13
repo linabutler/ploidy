@@ -26,10 +26,10 @@ use crate::{arena::Arena, ir::SchemaTypeInfo, parse::Info};
 use super::{
     spec::{ResolvedSpecType, Spec},
     types::{
-        FieldMeta, GraphInlineType, GraphOperation, GraphSchemaType, GraphStruct, GraphTagged,
-        GraphType, InlineTypePath, InlineTypePathRoot, InlineTypePathSegment, PrimitiveType,
-        SpecInlineType, SpecSchemaType, SpecType, SpecUntaggedVariant, StructFieldName,
-        TaggedVariantMeta, VariantMeta,
+        FieldMeta, GraphContainer, GraphInlineType, GraphOperation, GraphSchemaType, GraphStruct,
+        GraphTagged, GraphType, InlineTypePath, InlineTypePathRoot, InlineTypePathSegment,
+        PrimitiveType, SpecInlineType, SpecSchemaType, SpecType, SpecUntaggedVariant,
+        StructFieldName, TaggedVariantMeta, VariantMeta,
         shape::{Operation, Parameter, ParameterInfo, Request, Response},
     },
     views::{operation::OperationView, primitive::PrimitiveView, schema::SchemaTypeView},
@@ -674,11 +674,11 @@ struct Node<'a, Ty> {
 
 /// Precomputed metadata for schema types and operations in the graph.
 pub(super) struct CookedGraphMetadata<'a> {
-    /// Maps each node index to its strongly connected component index.
-    /// Nodes in the same SCC form a cycle.
-    pub scc_indices: Vec<usize>,
     /// Transitive closure over the type graph.
     pub closure: Closure,
+    /// Maps each type to its SCC equivalence class for boxing decisions.
+    /// Two types in the same class form a cycle that requires `Box<T>`.
+    pub box_sccs: Vec<usize>,
     /// Whether each type can implement `Eq` and `Hash`.
     pub hashable: FixedBitSet,
     /// Whether each type can implement `Default`.
@@ -694,8 +694,8 @@ pub(super) struct CookedGraphMetadata<'a> {
 impl Debug for CookedGraphMetadata<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("CookedGraphMetadata")
-            .field("scc_indices", &self.scc_indices)
             .field("closure", &self.closure)
+            .field("box_sccs", &self.box_sccs)
             .field("hashable", &self.hashable)
             .field("defaultable", &self.defaultable)
             .field("used_by", &self.used_by)
@@ -737,15 +737,15 @@ impl<'graph, 'a> MetadataBuilder<'graph, 'a> {
     }
 
     fn build(self) -> CookedGraphMetadata<'a> {
-        let scc_indices = self.scc_indices().collect_vec();
         let operations = self.operations();
         let HashDefault {
             hashable,
             defaultable,
         } = self.hash_default();
+        let box_sccs = self.box_sccs();
         CookedGraphMetadata {
-            scc_indices,
             closure: self.closure,
+            box_sccs,
             hashable,
             defaultable,
             used_by: operations.used_by,
@@ -756,21 +756,6 @@ impl<'graph, 'a> MetadataBuilder<'graph, 'a> {
                 .take(self.graph.node_count())
                 .collect(),
         }
-    }
-
-    /// Computes SCC indices for all types in the graph.
-    fn scc_indices(&self) -> impl Iterator<Item = usize> {
-        // Precompute SCC indices, excluding inheritance edges.
-        let refs = EdgeFiltered::from_fn(&self.graph, |e| {
-            // Inheritance edges don't contribute to cycles;
-            // a type can't inherit from itself.
-            !matches!(e.weight(), GraphEdge::Inherits { .. })
-        });
-        let mut scc = TarjanScc::new();
-        scc.run(&refs, |_| ());
-        self.graph
-            .node_indices()
-            .map(move |node| scc.node_component_index(&refs, node))
     }
 
     fn operations(&self) -> Operations<'a> {
@@ -797,6 +782,30 @@ impl<'graph, 'a> MetadataBuilder<'graph, 'a> {
         }
 
         operations
+    }
+
+    fn box_sccs(&self) -> Vec<usize> {
+        let box_edges = EdgeFiltered::from_fn(self.graph, |e| match e.weight() {
+            // Inheritance edges don't contribute to cycles;
+            // a type can't inherit from itself.
+            GraphEdge::Inherits { .. } => false,
+            GraphEdge::Contains => match self.graph[e.source()] {
+                GraphType::Schema(GraphSchemaType::Container(_, c))
+                | GraphType::Inline(GraphInlineType::Container(_, c)) => {
+                    // Array and map containers are heap-allocated,
+                    // cycles through these edges don't need `Box`.
+                    !matches!(c, GraphContainer::Array { .. } | GraphContainer::Map { .. })
+                }
+                _ => true,
+            },
+            _ => true,
+        });
+        let mut scc = TarjanScc::new();
+        scc.run(&box_edges, |_| ());
+        self.graph
+            .node_indices()
+            .map(move |node| scc.node_component_index(&box_edges, node))
+            .collect()
     }
 
     fn hash_default(&self) -> HashDefault {
