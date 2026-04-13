@@ -7,8 +7,8 @@ use crate::{
     ir::{
         ContainerView, EnumVariant, ExtendableView, InlineTypePath, InlineTypePathRoot,
         InlineTypePathSegment, InlineTypeView, ParameterStyle, PrimitiveType, RawGraph,
-        RequestView, ResponseView, SchemaTypeInfo, SchemaTypeView, SomeUntaggedVariant, Spec,
-        StructFieldName, TypeView, View,
+        RequestView, Required, ResponseView, SchemaTypeInfo, SchemaTypeView, SomeUntaggedVariant,
+        Spec, StructFieldName, TypeView, View,
     },
     parse::{Document, Method, path::PathFragment},
     tests::assert_matches,
@@ -93,7 +93,7 @@ fn test_struct_field_view_accessors() {
         .find(|f| matches!(f.name(), StructFieldName::Name("id")))
         .unwrap();
     assert_matches!(id_field.name(), StructFieldName::Name("id"));
-    assert!(id_field.required());
+    assert_eq!(id_field.required(), Required::Required { nullable: false });
 }
 
 #[test]

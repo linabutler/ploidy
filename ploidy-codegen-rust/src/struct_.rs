@@ -3,10 +3,7 @@ use std::borrow::Cow;
 use itertools::Itertools;
 use ploidy_core::{
     codegen::UniqueNames,
-    ir::{
-        ContainerView, InlineTypeView, SchemaTypeView, StructFieldName, StructFieldNameHint,
-        StructFieldView, StructView, TypeView, View,
-    },
+    ir::{Required, StructFieldName, StructFieldNameHint, StructFieldView, StructView, View},
 };
 use proc_macro2::TokenStream;
 use quote::{ToTokens, TokenStreamExt, quote};
@@ -14,6 +11,7 @@ use quote::{ToTokens, TokenStreamExt, quote};
 use super::{
     derives::ExtraDerive,
     doc_attrs,
+    ext::FieldViewExt,
     naming::{CodegenIdentRef, CodegenIdentScope, CodegenIdentUsage, CodegenTypeName},
     ref_::CodegenRef,
 };
@@ -113,37 +111,18 @@ impl<'view, 'a> CodegenField<'view, 'a> {
 
 impl ToTokens for CodegenField<'_, '_> {
     fn to_tokens(&self, tokens: &mut TokenStream) {
-        // For `Optional` struct fields, we emit either `Option<T>` or `AbsentOr<T>`,
-        // depending on whether the field is required. We also peel away nested optionals
-        // until we reach a non-optional type, to avoid emitting types like `AbsentOr<Option<T>>`.
-        let (ty, nullable) =
-            std::iter::successors(Some((self.field.ty(), false)), |(ty, _)| match ty {
-                TypeView::Schema(SchemaTypeView::Container(_, ContainerView::Optional(inner))) => {
-                    Some((inner.ty(), true))
-                }
-                TypeView::Inline(InlineTypeView::Container(_, ContainerView::Optional(inner))) => {
-                    Some((inner.ty(), true))
-                }
-                _ => None,
-            })
-            .last() // Guaranteed to exist, since our initial item is `Some`.
-            .unwrap();
-
-        let inner_ref = CodegenRef::new(&ty);
-        let inner = if self.field.needs_box() {
-            quote! { ::std::boxed::Box<#inner_ref> }
+        let ty = self.field.inner();
+        let ref_ = CodegenRef::new(&ty);
+        let boxed = if self.field.needs_box() {
+            quote! { ::std::boxed::Box<#ref_> }
         } else {
-            quote! { #inner_ref }
+            quote! { #ref_ }
         };
 
-        tokens.append_all(match (nullable, self.field.required()) {
-            // Since `AbsentOr` can represent `null`,
-            // always emit it for optional fields.
-            (_, false) => quote! { ::ploidy_util::absent::AbsentOr<#inner> },
-            // For required fields, use `Option` if it's nullable,
-            // or the original type if not.
-            (true, true) => quote! { ::std::option::Option<#inner> },
-            (false, true) => inner,
+        tokens.append_all(match self.field.required() {
+            Required::Optional => quote! { ::ploidy_util::absent::AbsentOr<#boxed> },
+            Required::Required { nullable: true } => quote! { ::std::option::Option<#boxed> },
+            Required::Required { nullable: false } => boxed,
         });
     }
 }
@@ -179,8 +158,7 @@ impl ToTokens for StructFieldAttrs<'_, '_> {
                 }
             }
 
-            if !self.field.required() {
-                // `CodegenField` always emits `AbsentOr` for optional fields.
+            if matches!(self.field.required(), Required::Optional) {
                 meta.push(quote! { default });
                 meta.push(
                     quote! { skip_serializing_if = "::ploidy_util::absent::AbsentOr::is_absent" },
