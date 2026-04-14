@@ -1101,6 +1101,7 @@ dependencies = [
  "percent-encoding",
  "petgraph",
  "ploidy-pointer",
+ "pretty_assertions",
  "prettyplease",
  "proc-macro2",
  "quote",
