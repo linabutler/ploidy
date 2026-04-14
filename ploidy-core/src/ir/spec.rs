@@ -90,11 +90,15 @@ impl<'a> Spec<'a> {
                     .ok_or(IrError::NoOperationId)?;
 
                 let params = {
-                    // Merge path item and operation parameters. Operation
-                    // params override path item params with the same
-                    // `(name, location)` pair.
-                    let mut seen = FxHashSet::default();
-                    let all = item
+                    enum Source<'a> {
+                        Declared(&'a Parameter),
+                        Synthesized(&'a str),
+                    }
+
+                    // Merge path item and operation parameters.
+                    // Operation parameters override path item ones.
+                    let mut declared = IndexMap::new();
+                    for param in item
                         .params
                         .iter()
                         .chain(item.op.parameters.iter())
@@ -104,14 +108,46 @@ impl<'a> Spec<'a> {
                                 r.path.pointer().follow::<&Parameter>(doc).ok()
                             }
                         })
-                        .rev()
-                        .filter(|s| seen.insert((s.name.as_str(), s.location)))
-                        .collect_vec();
+                    {
+                        declared.insert((param.name.as_str(), param.location), param);
+                    }
 
-                    let mut params = all
-                        .into_iter()
-                        .rev()
-                        .filter_map(|param| {
+                    // Walk the path template to produce path parameters in
+                    // template order. Each template parameter name pulls its
+                    // declaration from the merged map; undeclared names get
+                    // a synthesized string parameter.
+                    let mut sources = {
+                        let mut seen = FxHashSet::default();
+                        item.path
+                            .iter()
+                            .flat_map(|segment| segment.fragments())
+                            .filter_map(|fragment| match fragment {
+                                &PathFragment::Param(name) => Some(name),
+                                _ => None,
+                            })
+                            .filter(|&name| seen.insert(name))
+                            .map(|name| {
+                                match declared.shift_remove(&(name, ParameterLocation::Path)) {
+                                    Some(param) => Source::Declared(param),
+                                    None => Source::Synthesized(name),
+                                }
+                            })
+                            .collect_vec()
+                    };
+
+                    // Append remaining parameters in declaration order.
+                    sources.extend(declared.into_iter().filter_map(|((_, location), param)| {
+                        match location {
+                            // Drop declared path parameters that are
+                            // absent from the template.
+                            ParameterLocation::Path => None,
+                            _ => Some(Source::Declared(param)),
+                        }
+                    }));
+
+                    // Lower all sources to spec parameters.
+                    let params = sources.into_iter().filter_map(|source| match source {
+                        Source::Declared(param) => {
                             let ty: &_ = match &param.schema {
                                 Some(RefOrSchema::Ref(r)) => arena.alloc(SpecType::Ref(&r.path)),
                                 Some(RefOrSchema::Other(schema)) => arena.alloc(transform(
@@ -169,45 +205,32 @@ impl<'a> Spec<'a> {
                                 ParameterLocation::Query => SpecParameter::Query(info),
                                 _ => return None,
                             })
-                        })
-                        .collect_vec();
+                        }
+                        Source::Synthesized(name) => {
+                            let ty: &_ = arena.alloc(
+                                SpecInlineType::Primitive(
+                                    InlineTypePath {
+                                        root: InlineTypePathRoot::Resource(resource),
+                                        segments: arena.alloc_slice_copy(&[
+                                            InlineTypePathSegment::Operation(id),
+                                            InlineTypePathSegment::Parameter(name),
+                                        ]),
+                                    },
+                                    PrimitiveType::String,
+                                )
+                                .into(),
+                            );
+                            Some(SpecParameter::Path(SpecParameterInfo {
+                                name,
+                                ty,
+                                required: true,
+                                description: None,
+                                style: None,
+                            }))
+                        }
+                    });
 
-                    // Synthesize missing path parameters. If a `{param}` in
-                    // the path template has no matching declaration, add a
-                    // string placeholder.
-                    params.extend(
-                        item.path
-                            .iter()
-                            .flat_map(|segment| segment.fragments())
-                            .filter_map(|fragment| match fragment {
-                                &PathFragment::Param(name) => Some(name),
-                                _ => None,
-                            })
-                            .filter(|name| seen.insert((name, ParameterLocation::Path)))
-                            .map(|name| {
-                                SpecParameter::Path(SpecParameterInfo {
-                                    name,
-                                    ty: arena.alloc(
-                                        SpecInlineType::Primitive(
-                                            InlineTypePath {
-                                                root: InlineTypePathRoot::Resource(resource),
-                                                segments: arena.alloc_slice_copy(&[
-                                                    InlineTypePathSegment::Operation(id),
-                                                    InlineTypePathSegment::Parameter(name),
-                                                ]),
-                                            },
-                                            PrimitiveType::String,
-                                        )
-                                        .into(),
-                                    ),
-                                    required: true,
-                                    description: None,
-                                    style: None,
-                                })
-                            }),
-                    );
-
-                    arena.alloc_slice_copy(&params)
+                    arena.alloc_slice(params)
                 };
 
                 let request = item

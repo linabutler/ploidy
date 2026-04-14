@@ -1932,6 +1932,58 @@ fn test_path_item_ignores_header_and_cookie_parameters() {
     assert_matches!(&*ir.operations, [SpecOperation { params: [], .. }]);
 }
 
+#[test]
+fn test_declared_path_parameter_not_in_template_is_dropped() {
+    // `phantom` is declared as `in: path` but absent from the template.
+    // It should be silently dropped.
+    let doc = Document::from_yaml(indoc::indoc! {"
+        openapi: 3.0.0
+        info:
+          title: Test API
+          version: 1.0
+        paths:
+          /users/{id}:
+            get:
+              operationId: getUser
+              parameters:
+                - name: id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+                - name: phantom
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+                - name: include
+                  in: query
+                  schema:
+                    type: string
+              responses:
+                '200':
+                  description: Success
+    "})
+    .unwrap();
+
+    let arena = Arena::new();
+    let ir = Spec::from_doc(&arena, &doc).unwrap();
+
+    assert_matches!(
+        &*ir.operations,
+        [SpecOperation {
+            params: [
+                SpecParameter::Path(SpecParameterInfo { name: "id", .. }),
+                SpecParameter::Query(SpecParameterInfo {
+                    name: "include",
+                    ..
+                }),
+            ],
+            ..
+        }],
+    );
+}
+
 // MARK: Synthesized path parameters
 
 #[test]
@@ -1968,8 +2020,12 @@ fn test_synthesizes_missing_path_parameter() {
     );
 }
 
+// MARK: Path parameter ordering
+
 #[test]
-fn test_synthesized_path_parameters_appear_after_declared() {
+fn test_path_parameters_sort_in_template_order() {
+    // Parameters are declared in reverse template order.
+    // The output should match the template, not the declaration.
     let doc = Document::from_yaml(indoc::indoc! {"
         openapi: 3.0.0
         info:
@@ -1980,7 +2036,30 @@ fn test_synthesized_path_parameters_appear_after_declared() {
             get:
               operationId: getOrgItem
               parameters:
+                - name: item_id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
                 - name: org_id
+                  in: path
+                  required: true
+                  schema:
+                    type: integer
+                    format: int64
+              responses:
+                '200':
+                  description: Success
+          /teams/{team_id}/projects/{project_id}/leads/{team_id}:
+            get:
+              operationId: getTeamProjectLead
+              parameters:
+                - name: project_id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+                - name: team_id
                   in: path
                   required: true
                   schema:
@@ -1997,19 +2076,178 @@ fn test_synthesized_path_parameters_appear_after_declared() {
 
     assert_matches!(
         &*ir.operations,
+        [
+            SpecOperation {
+                params: [
+                    SpecParameter::Path(SpecParameterInfo {
+                        name: "org_id",
+                        ty: SpecType::Inline(SpecInlineType::Primitive(_, PrimitiveType::I64)),
+                        ..
+                    }),
+                    SpecParameter::Path(SpecParameterInfo {
+                        name: "item_id",
+                        ty: SpecType::Inline(SpecInlineType::Primitive(_, PrimitiveType::String)),
+                        ..
+                    }),
+                ],
+                ..
+            },
+            // `team_id` appears at two template positions;
+            // the first occurrence determines its sort position.
+            SpecOperation {
+                params: [
+                    SpecParameter::Path(SpecParameterInfo {
+                        name: "team_id",
+                        ty: SpecType::Inline(SpecInlineType::Primitive(_, PrimitiveType::I64)),
+                        ..
+                    }),
+                    SpecParameter::Path(SpecParameterInfo {
+                        name: "project_id",
+                        ty: SpecType::Inline(SpecInlineType::Primitive(_, PrimitiveType::String)),
+                        ..
+                    }),
+                ],
+                ..
+            },
+        ],
+    );
+}
+
+#[test]
+fn test_synthesized_path_parameters_intersperse_in_template_order() {
+    let doc = Document::from_yaml(indoc::indoc! {"
+        openapi: 3.0.0
+        info:
+          title: Test API
+          version: 1.0
+        paths:
+          /orgs/{org_id}/users/{user_id}/items/{item_id}:
+            get:
+              operationId: getOrgUserItem
+              parameters:
+                - name: org_id
+                  in: path
+                  required: true
+                  schema:
+                    type: integer
+                    format: int64
+                - name: item_id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+              responses:
+                '200':
+                  description: Success
+          /teams/{team_id}/projects/{project_id}/leads/{team_id}:
+            get:
+              operationId: getTeamProjectLead
+              parameters:
+                - name: team_id
+                  in: path
+                  required: true
+                  schema:
+                    type: integer
+                    format: int64
+              responses:
+                '200':
+                  description: Success
+    "})
+    .unwrap();
+
+    let arena = Arena::new();
+    let ir = Spec::from_doc(&arena, &doc).unwrap();
+
+    assert_matches!(
+        &*ir.operations,
+        [
+            SpecOperation {
+                params: [
+                    SpecParameter::Path(SpecParameterInfo {
+                        name: "org_id",
+                        required: true,
+                        ty: SpecType::Inline(SpecInlineType::Primitive(_, PrimitiveType::I64)),
+                        ..
+                    }),
+                    SpecParameter::Path(SpecParameterInfo {
+                        name: "user_id",
+                        required: true,
+                        ty: SpecType::Inline(SpecInlineType::Primitive(_, PrimitiveType::String)),
+                        ..
+                    }),
+                    SpecParameter::Path(SpecParameterInfo {
+                        name: "item_id",
+                        required: true,
+                        ty: SpecType::Inline(SpecInlineType::Primitive(_, PrimitiveType::String)),
+                        ..
+                    }),
+                ],
+                ..
+            },
+            // `team_id` appears at two template positions; only `project_id` is
+            // synthesized. First `team_id` occurrence determines sort position.
+            SpecOperation {
+                params: [
+                    SpecParameter::Path(SpecParameterInfo {
+                        name: "team_id",
+                        required: true,
+                        ty: SpecType::Inline(SpecInlineType::Primitive(_, PrimitiveType::I64)),
+                        ..
+                    }),
+                    SpecParameter::Path(SpecParameterInfo {
+                        name: "project_id",
+                        required: true,
+                        ty: SpecType::Inline(SpecInlineType::Primitive(_, PrimitiveType::String)),
+                        ..
+                    }),
+                ],
+                ..
+            },
+        ],
+    );
+}
+
+#[test]
+fn test_path_parameters_precede_query_parameters() {
+    // The source spec declares query parameters before path, but
+    // the path parameters should appear first in the lowered spec.
+    let doc = Document::from_yaml(indoc::indoc! {"
+        openapi: 3.0.0
+        info:
+          title: Test API
+          version: 1.0
+        paths:
+          /items/{item_id}:
+            get:
+              operationId: getItem
+              parameters:
+                - name: limit
+                  in: query
+                  schema:
+                    type: integer
+                - name: item_id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+              responses:
+                '200':
+                  description: Success
+    "})
+    .unwrap();
+
+    let arena = Arena::new();
+    let ir = Spec::from_doc(&arena, &doc).unwrap();
+
+    assert_matches!(
+        &*ir.operations,
         [SpecOperation {
             params: [
                 SpecParameter::Path(SpecParameterInfo {
-                    name: "org_id",
-                    ty: SpecType::Inline(SpecInlineType::Primitive(_, PrimitiveType::I64)),
-                    ..
-                }),
-                SpecParameter::Path(SpecParameterInfo {
                     name: "item_id",
-                    required: true,
-                    ty: SpecType::Inline(SpecInlineType::Primitive(_, PrimitiveType::String)),
                     ..
                 }),
+                SpecParameter::Query(SpecParameterInfo { name: "limit", .. }),
             ],
             ..
         }],
