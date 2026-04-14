@@ -277,6 +277,60 @@ fn test_parses_multiple_path_parameters() {
     );
 }
 
+#[test]
+fn test_path_and_query_parameters_with_same_name_coexist() {
+    // A query and a path parameter both named `id` are distinct.
+    // Both should appear in the output.
+    let doc = Document::from_yaml(indoc::indoc! {"
+        openapi: 3.0.0
+        info:
+          title: Test API
+          version: 1.0
+        paths:
+          /items/{id}:
+            get:
+              operationId: getItem
+              parameters:
+                - name: id
+                  in: path
+                  required: true
+                  schema:
+                    type: integer
+                    format: int64
+                - name: id
+                  in: query
+                  required: false
+                  schema:
+                    type: string
+              responses:
+                '200':
+                  description: Success
+    "})
+    .unwrap();
+
+    let arena = Arena::new();
+    let ir = Spec::from_doc(&arena, &doc).unwrap();
+
+    assert_matches!(
+        &*ir.operations,
+        [SpecOperation {
+            params: [
+                SpecParameter::Path(SpecParameterInfo {
+                    name: "id",
+                    ty: SpecType::Inline(SpecInlineType::Primitive(_, PrimitiveType::I64)),
+                    ..
+                }),
+                SpecParameter::Query(SpecParameterInfo {
+                    name: "id",
+                    ty: SpecType::Inline(SpecInlineType::Primitive(_, PrimitiveType::String)),
+                    ..
+                }),
+            ],
+            ..
+        }],
+    );
+}
+
 // MARK: Query parameters
 
 #[test]
@@ -1547,5 +1601,333 @@ fn test_ignores_header_and_cookie_parameters() {
     let ir = Spec::from_doc(&arena, &doc).unwrap();
 
     // Header and cookie parameters are ignored for now.
+    assert_matches!(&*ir.operations, [SpecOperation { params: [], .. }]);
+}
+
+// MARK: Path item parameters
+
+#[test]
+fn test_path_item_parameter_inherited_by_operation() {
+    let doc = Document::from_yaml(indoc::indoc! {"
+        openapi: 3.0.0
+        info:
+          title: Test API
+          version: 1.0
+        paths:
+          /users/{id}:
+            parameters:
+              - name: id
+                in: path
+                required: true
+                schema:
+                  type: string
+            get:
+              operationId: getUser
+              responses:
+                '200':
+                  description: Success
+    "})
+    .unwrap();
+
+    let arena = Arena::new();
+    let ir = Spec::from_doc(&arena, &doc).unwrap();
+
+    assert_matches!(
+        &*ir.operations,
+        [SpecOperation {
+            id: "getUser",
+            params: [SpecParameter::Path(SpecParameterInfo {
+                name: "id",
+                required: true,
+                ..
+            })],
+            ..
+        }],
+    );
+}
+
+#[test]
+fn test_path_item_parameter_inherited_by_multiple_operations() {
+    let doc = Document::from_yaml(indoc::indoc! {"
+        openapi: 3.0.0
+        info:
+          title: Test API
+          version: 1.0
+        paths:
+          /users/{id}:
+            parameters:
+              - name: id
+                in: path
+                required: true
+                schema:
+                  type: string
+            get:
+              operationId: getUser
+              responses:
+                '200':
+                  description: Success
+            delete:
+              operationId: deleteUser
+              responses:
+                '204':
+                  description: Deleted
+    "})
+    .unwrap();
+
+    let arena = Arena::new();
+    let ir = Spec::from_doc(&arena, &doc).unwrap();
+
+    assert_matches!(
+        &*ir.operations,
+        [
+            SpecOperation {
+                id: "getUser",
+                params: [SpecParameter::Path(SpecParameterInfo { name: "id", .. })],
+                ..
+            },
+            SpecOperation {
+                id: "deleteUser",
+                params: [SpecParameter::Path(SpecParameterInfo { name: "id", .. })],
+                ..
+            },
+        ],
+    );
+}
+
+#[test]
+fn test_operation_parameter_overrides_path_item_parameter() {
+    let doc = Document::from_yaml(indoc::indoc! {"
+        openapi: 3.0.0
+        info:
+          title: Test API
+          version: 1.0
+        paths:
+          /users/{id}:
+            parameters:
+              - name: id
+                in: path
+                required: true
+                schema:
+                  type: string
+            get:
+              operationId: getUser
+              parameters:
+                - name: id
+                  in: path
+                  required: true
+                  description: The user ID (overridden)
+                  schema:
+                    type: integer
+                    format: int64
+              responses:
+                '200':
+                  description: Success
+    "})
+    .unwrap();
+
+    let arena = Arena::new();
+    let ir = Spec::from_doc(&arena, &doc).unwrap();
+
+    // The operation-level parameter should win, giving us
+    // an integer instead of the path item's string.
+    assert_matches!(
+        &*ir.operations,
+        [SpecOperation {
+            params: [SpecParameter::Path(SpecParameterInfo {
+                name: "id",
+                ty: SpecType::Inline(SpecInlineType::Primitive(_, PrimitiveType::I64)),
+                description: Some("The user ID (overridden)"),
+                ..
+            })],
+            ..
+        }],
+    );
+}
+
+#[test]
+fn test_path_item_parameter_coexists_with_operation_parameter() {
+    let doc = Document::from_yaml(indoc::indoc! {"
+        openapi: 3.0.0
+        info:
+          title: Test API
+          version: 1.0
+        paths:
+          /users/{id}:
+            parameters:
+              - name: id
+                in: path
+                required: true
+                schema:
+                  type: string
+            get:
+              operationId: getUser
+              parameters:
+                - name: include
+                  in: query
+                  schema:
+                    type: string
+              responses:
+                '200':
+                  description: Success
+    "})
+    .unwrap();
+
+    let arena = Arena::new();
+    let ir = Spec::from_doc(&arena, &doc).unwrap();
+
+    // The `id` path param from the path item, and the `include` query param
+    // from the operation, should both be present.
+    assert_matches!(
+        &*ir.operations,
+        [SpecOperation {
+            params: [
+                SpecParameter::Path(SpecParameterInfo { name: "id", .. }),
+                SpecParameter::Query(SpecParameterInfo {
+                    name: "include",
+                    ..
+                }),
+            ],
+            ..
+        }],
+    );
+}
+
+#[test]
+fn test_path_item_parameter_override_only_affects_matching_operation() {
+    // One operation overrides the path item param, the other inherits it.
+    let doc = Document::from_yaml(indoc::indoc! {"
+        openapi: 3.0.0
+        info:
+          title: Test API
+          version: 1.0
+        paths:
+          /users/{id}:
+            parameters:
+              - name: id
+                in: path
+                required: true
+                schema:
+                  type: string
+            get:
+              operationId: getUser
+              parameters:
+                - name: id
+                  in: path
+                  required: true
+                  description: overridden
+                  schema:
+                    type: integer
+              responses:
+                '200':
+                  description: Success
+            delete:
+              operationId: deleteUser
+              responses:
+                '204':
+                  description: Deleted
+    "})
+    .unwrap();
+
+    let arena = Arena::new();
+    let ir = Spec::from_doc(&arena, &doc).unwrap();
+
+    assert_matches!(
+        &*ir.operations,
+        [
+            SpecOperation {
+                id: "getUser",
+                params: [SpecParameter::Path(SpecParameterInfo {
+                    description: Some("overridden"),
+                    ..
+                })],
+                ..
+            },
+            SpecOperation {
+                id: "deleteUser",
+                params: [SpecParameter::Path(SpecParameterInfo {
+                    description: None,
+                    ..
+                })],
+                ..
+            },
+        ],
+    );
+}
+
+#[test]
+fn test_path_item_ref_parameter_inherited_by_operation() {
+    let doc = Document::from_yaml(indoc::indoc! {"
+        openapi: 3.0.0
+        info:
+          title: Test API
+          version: 1.0
+        paths:
+          /users/{id}:
+            parameters:
+              - $ref: '#/components/parameters/UserId'
+            get:
+              operationId: getUser
+              responses:
+                '200':
+                  description: Success
+        components:
+          parameters:
+            UserId:
+              name: id
+              in: path
+              required: true
+              schema:
+                type: integer
+                format: int64
+    "})
+    .unwrap();
+
+    let arena = Arena::new();
+    let ir = Spec::from_doc(&arena, &doc).unwrap();
+
+    assert_matches!(
+        &*ir.operations,
+        [SpecOperation {
+            params: [SpecParameter::Path(SpecParameterInfo {
+                name: "id",
+                ty: SpecType::Inline(SpecInlineType::Primitive(_, PrimitiveType::I64)),
+                ..
+            })],
+            ..
+        }],
+    );
+}
+
+#[test]
+fn test_path_item_ignores_header_and_cookie_parameters() {
+    let doc = Document::from_yaml(indoc::indoc! {"
+        openapi: 3.0.0
+        info:
+          title: Test API
+          version: 1.0
+        paths:
+          /users:
+            parameters:
+              - name: X-API-Key
+                in: header
+                required: true
+                schema:
+                  type: string
+              - name: sessionId
+                in: cookie
+                required: true
+                schema:
+                  type: string
+            get:
+              operationId: listUsers
+              responses:
+                '200':
+                  description: Success
+    "})
+    .unwrap();
+
+    let arena = Arena::new();
+    let ir = Spec::from_doc(&arena, &doc).unwrap();
+
     assert_matches!(&*ir.operations, [SpecOperation { params: [], .. }]);
 }

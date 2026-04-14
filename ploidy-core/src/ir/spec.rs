@@ -1,11 +1,13 @@
 use indexmap::IndexMap;
 use itertools::Itertools;
+use rustc_hash::FxHashSet;
 
 use crate::{
     arena::Arena,
     parse::{
-        self, Document, Info, Parameter, ParameterLocation, ParameterStyle as ParsedParameterStyle,
-        RefOrParameter, RefOrRequestBody, RefOrResponse, RefOrSchema, RequestBody, Response,
+        self, Document, Info, Method, Operation, Parameter, ParameterLocation,
+        ParameterStyle as ParsedParameterStyle, RefOrParameter, RefOrRequestBody, RefOrResponse,
+        RefOrSchema, RequestBody, Response, path::PathSegment,
     },
 };
 
@@ -68,81 +70,104 @@ impl<'a> Spec<'a> {
             .paths
             .iter()
             .map(|(path, item)| {
-                let segments = parse::path::parse(arena, path.as_str())?;
-                Ok(item
-                    .operations()
-                    .map(move |(method, op)| (method, segments.clone(), op)))
+                let segments: &_ =
+                    arena.alloc_slice_copy(&parse::path::parse(arena, path.as_str())?);
+                Ok(item.operations().map(move |(method, op)| PathOperation {
+                    path: segments,
+                    method,
+                    params: &item.parameters,
+                    op,
+                }))
             })
             .flatten_ok()
-            .map_ok(|(method, path, op)| -> Result<_, IrError> {
-                let resource = op.extension("x-resource-name");
-                let id = op.operation_id.as_deref().ok_or(IrError::NoOperationId)?;
-                let params = arena.alloc_slice(op.parameters.iter().filter_map(|param_or_ref| {
-                    let param = match param_or_ref {
-                        RefOrParameter::Other(p) => p,
-                        RefOrParameter::Ref(r) => {
-                            r.path.pointer().follow::<&Parameter>(doc).ok()?
-                        }
-                    };
-                    let ty: &_ = match &param.schema {
-                        Some(RefOrSchema::Ref(r)) => arena.alloc(SpecType::Ref(&r.path)),
-                        Some(RefOrSchema::Other(schema)) => arena.alloc(transform(
-                            arena,
-                            doc,
-                            InlineTypePath {
-                                root: InlineTypePathRoot::Resource(resource),
-                                segments: arena.alloc_slice_copy(&[
-                                    InlineTypePathSegment::Operation(id),
-                                    InlineTypePathSegment::Parameter(param.name.as_str()),
-                                ]),
-                            },
-                            schema,
-                        )),
-                        None => arena.alloc(
-                            SpecInlineType::Any(InlineTypePath {
-                                root: InlineTypePathRoot::Resource(resource),
-                                segments: arena.alloc_slice_copy(&[
-                                    InlineTypePathSegment::Operation(id),
-                                    InlineTypePathSegment::Parameter(param.name.as_str()),
-                                ]),
-                            })
-                            .into(),
-                        ),
-                    };
-                    let style = match (param.style, param.explode) {
-                        (Some(ParsedParameterStyle::DeepObject), Some(true) | None) => {
-                            Some(IrParameterStyle::DeepObject)
-                        }
-                        (Some(ParsedParameterStyle::SpaceDelimited), Some(false) | None) => {
-                            Some(IrParameterStyle::SpaceDelimited)
-                        }
-                        (Some(ParsedParameterStyle::PipeDelimited), Some(false) | None) => {
-                            Some(IrParameterStyle::PipeDelimited)
-                        }
-                        (None, None) => None,
-                        (Some(ParsedParameterStyle::Form) | None, Some(true) | None) => {
-                            Some(IrParameterStyle::Form { exploded: true })
-                        }
-                        (Some(ParsedParameterStyle::Form) | None, Some(false)) => {
-                            Some(IrParameterStyle::Form { exploded: false })
-                        }
-                        _ => None,
-                    };
-                    let info = SpecParameterInfo {
-                        name: param.name.as_str(),
-                        ty,
-                        required: param.required,
-                        description: param.description.as_deref(),
-                        style,
-                    };
-                    Some(match param.location {
-                        ParameterLocation::Path => SpecParameter::Path(info),
-                        ParameterLocation::Query => SpecParameter::Query(info),
-                        _ => return None,
-                    })
-                }));
+            .map_ok(|item| -> Result<_, IrError> {
+                let resource = item.op.extension("x-resource-name");
+                let id = item
+                    .op
+                    .operation_id
+                    .as_deref()
+                    .ok_or(IrError::NoOperationId)?;
 
-                let request = op
+                let params = {
+                    // Merge path item and operation parameters. Operation
+                    // params override path item params with the same
+                    // `(name, location)` pair.
+                    let mut seen = FxHashSet::default();
+                    let all = item
+                        .params
+                        .iter()
+                        .chain(item.op.parameters.iter())
+                        .filter_map(|p| match p {
+                            RefOrParameter::Other(p) => Some(p),
+                            RefOrParameter::Ref(r) => {
+                                r.path.pointer().follow::<&Parameter>(doc).ok()
+                            }
+                        })
+                        .rev()
+                        .filter(|s| seen.insert((s.name.as_str(), s.location)))
+                        .collect_vec();
+                    arena.alloc_slice(all.into_iter().rev().filter_map(|param| {
+                        let ty: &_ = match &param.schema {
+                            Some(RefOrSchema::Ref(r)) => arena.alloc(SpecType::Ref(&r.path)),
+                            Some(RefOrSchema::Other(schema)) => arena.alloc(transform(
+                                arena,
+                                doc,
+                                InlineTypePath {
+                                    root: InlineTypePathRoot::Resource(resource),
+                                    segments: arena.alloc_slice_copy(&[
+                                        InlineTypePathSegment::Operation(id),
+                                        InlineTypePathSegment::Parameter(param.name.as_str()),
+                                    ]),
+                                },
+                                schema,
+                            )),
+                            None => arena.alloc(
+                                SpecInlineType::Any(InlineTypePath {
+                                    root: InlineTypePathRoot::Resource(resource),
+                                    segments: arena.alloc_slice_copy(&[
+                                        InlineTypePathSegment::Operation(id),
+                                        InlineTypePathSegment::Parameter(param.name.as_str()),
+                                    ]),
+                                })
+                                .into(),
+                            ),
+                        };
+                        let style = match (param.style, param.explode) {
+                            (Some(ParsedParameterStyle::DeepObject), Some(true) | None) => {
+                                Some(IrParameterStyle::DeepObject)
+                            }
+                            (Some(ParsedParameterStyle::SpaceDelimited), Some(false) | None) => {
+                                Some(IrParameterStyle::SpaceDelimited)
+                            }
+                            (Some(ParsedParameterStyle::PipeDelimited), Some(false) | None) => {
+                                Some(IrParameterStyle::PipeDelimited)
+                            }
+                            (None, None) => None,
+                            (Some(ParsedParameterStyle::Form) | None, Some(true) | None) => {
+                                Some(IrParameterStyle::Form { exploded: true })
+                            }
+                            (Some(ParsedParameterStyle::Form) | None, Some(false)) => {
+                                Some(IrParameterStyle::Form { exploded: false })
+                            }
+                            _ => None,
+                        };
+                        let info = SpecParameterInfo {
+                            name: param.name.as_str(),
+                            ty,
+                            required: param.required,
+                            description: param.description.as_deref(),
+                            style,
+                        };
+                        Some(match param.location {
+                            ParameterLocation::Path => SpecParameter::Path(info),
+                            ParameterLocation::Query => SpecParameter::Query(info),
+                            _ => return None,
+                        })
+                    }))
+                };
+
+                let request = item
+                    .op
                     .request_body
                     .as_ref()
                     .and_then(|request_or_ref| {
@@ -201,7 +226,8 @@ impl<'a> Spec<'a> {
                     });
 
                 let response = {
-                    let mut statuses = op
+                    let mut statuses = item
+                        .op
                         .responses
                         .keys()
                         .filter_map(|status| Some((status.as_str(), status.parse::<u16>().ok()?)))
@@ -213,7 +239,8 @@ impl<'a> Spec<'a> {
                         .map(|&(key, _)| key)
                         .unwrap_or("default");
 
-                    op.responses
+                    item.op
+                        .responses
                         .get(key)
                         .and_then(|response_or_ref| {
                             let response = match response_or_ref {
@@ -273,9 +300,9 @@ impl<'a> Spec<'a> {
                 Ok(SpecOperation {
                     resource,
                     id,
-                    method,
-                    path: arena.alloc_slice_copy(&path),
-                    description: op.description.as_deref(),
+                    method: item.method,
+                    path: item.path,
+                    description: item.op.description.as_deref(),
                     params,
                     request,
                     response,
@@ -327,4 +354,12 @@ enum RequestContent<'a> {
 enum ResponseContent<'a> {
     Json(&'a RefOrSchema),
     Any,
+}
+
+#[derive(Clone, Copy, Debug)]
+struct PathOperation<'a> {
+    path: &'a [PathSegment<'a>],
+    method: Method,
+    params: &'a [RefOrParameter],
+    op: &'a Operation,
 }

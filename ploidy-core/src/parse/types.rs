@@ -38,6 +38,8 @@ pub struct Info {
 #[derive(Debug, Deserialize, JsonPointee, JsonPointerTarget)]
 pub struct PathItem {
     #[serde(default)]
+    pub parameters: Vec<RefOrParameter>,
+    #[serde(default)]
     pub get: Option<Operation>,
     #[serde(default)]
     pub post: Option<Operation>,
@@ -116,7 +118,7 @@ pub struct Parameter {
     pub explode: Option<bool>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, JsonPointee, JsonPointerTarget)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Deserialize, JsonPointee, JsonPointerTarget)]
 #[serde(rename_all = "lowercase")]
 #[ploidy(pointer(untagged, rename_all = "lowercase"))]
 pub enum ParameterLocation {
