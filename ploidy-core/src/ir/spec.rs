@@ -7,7 +7,8 @@ use crate::{
     parse::{
         self, Document, Info, Method, Operation, Parameter, ParameterLocation,
         ParameterStyle as ParsedParameterStyle, RefOrParameter, RefOrRequestBody, RefOrResponse,
-        RefOrSchema, RequestBody, Response, path::PathSegment,
+        RefOrSchema, RequestBody, Response,
+        path::{PathFragment, PathSegment},
     },
 };
 
@@ -16,9 +17,9 @@ use super::{
     transform::transform,
     types::{
         InlineTypePath, InlineTypePathRoot, InlineTypePathSegment,
-        ParameterStyle as IrParameterStyle, SchemaTypeInfo, SpecInlineType, SpecOperation,
-        SpecParameter, SpecParameterInfo, SpecRequest, SpecResponse, SpecSchemaType, SpecType,
-        TypeInfo,
+        ParameterStyle as IrParameterStyle, PrimitiveType, SchemaTypeInfo, SpecInlineType,
+        SpecOperation, SpecParameter, SpecParameterInfo, SpecRequest, SpecResponse, SpecSchemaType,
+        SpecType, TypeInfo,
     },
 };
 
@@ -106,64 +107,107 @@ impl<'a> Spec<'a> {
                         .rev()
                         .filter(|s| seen.insert((s.name.as_str(), s.location)))
                         .collect_vec();
-                    arena.alloc_slice(all.into_iter().rev().filter_map(|param| {
-                        let ty: &_ = match &param.schema {
-                            Some(RefOrSchema::Ref(r)) => arena.alloc(SpecType::Ref(&r.path)),
-                            Some(RefOrSchema::Other(schema)) => arena.alloc(transform(
-                                arena,
-                                doc,
-                                InlineTypePath {
-                                    root: InlineTypePathRoot::Resource(resource),
-                                    segments: arena.alloc_slice_copy(&[
-                                        InlineTypePathSegment::Operation(id),
-                                        InlineTypePathSegment::Parameter(param.name.as_str()),
-                                    ]),
-                                },
-                                schema,
-                            )),
-                            None => arena.alloc(
-                                SpecInlineType::Any(InlineTypePath {
-                                    root: InlineTypePathRoot::Resource(resource),
-                                    segments: arena.alloc_slice_copy(&[
-                                        InlineTypePathSegment::Operation(id),
-                                        InlineTypePathSegment::Parameter(param.name.as_str()),
-                                    ]),
-                                })
-                                .into(),
-                            ),
-                        };
-                        let style = match (param.style, param.explode) {
-                            (Some(ParsedParameterStyle::DeepObject), Some(true) | None) => {
-                                Some(IrParameterStyle::DeepObject)
-                            }
-                            (Some(ParsedParameterStyle::SpaceDelimited), Some(false) | None) => {
-                                Some(IrParameterStyle::SpaceDelimited)
-                            }
-                            (Some(ParsedParameterStyle::PipeDelimited), Some(false) | None) => {
-                                Some(IrParameterStyle::PipeDelimited)
-                            }
-                            (None, None) => None,
-                            (Some(ParsedParameterStyle::Form) | None, Some(true) | None) => {
-                                Some(IrParameterStyle::Form { exploded: true })
-                            }
-                            (Some(ParsedParameterStyle::Form) | None, Some(false)) => {
-                                Some(IrParameterStyle::Form { exploded: false })
-                            }
-                            _ => None,
-                        };
-                        let info = SpecParameterInfo {
-                            name: param.name.as_str(),
-                            ty,
-                            required: param.required,
-                            description: param.description.as_deref(),
-                            style,
-                        };
-                        Some(match param.location {
-                            ParameterLocation::Path => SpecParameter::Path(info),
-                            ParameterLocation::Query => SpecParameter::Query(info),
-                            _ => return None,
+
+                    let mut params = all
+                        .into_iter()
+                        .rev()
+                        .filter_map(|param| {
+                            let ty: &_ = match &param.schema {
+                                Some(RefOrSchema::Ref(r)) => arena.alloc(SpecType::Ref(&r.path)),
+                                Some(RefOrSchema::Other(schema)) => arena.alloc(transform(
+                                    arena,
+                                    doc,
+                                    InlineTypePath {
+                                        root: InlineTypePathRoot::Resource(resource),
+                                        segments: arena.alloc_slice_copy(&[
+                                            InlineTypePathSegment::Operation(id),
+                                            InlineTypePathSegment::Parameter(param.name.as_str()),
+                                        ]),
+                                    },
+                                    schema,
+                                )),
+                                None => arena.alloc(
+                                    SpecInlineType::Any(InlineTypePath {
+                                        root: InlineTypePathRoot::Resource(resource),
+                                        segments: arena.alloc_slice_copy(&[
+                                            InlineTypePathSegment::Operation(id),
+                                            InlineTypePathSegment::Parameter(param.name.as_str()),
+                                        ]),
+                                    })
+                                    .into(),
+                                ),
+                            };
+                            let style = match (param.style, param.explode) {
+                                (Some(ParsedParameterStyle::DeepObject), Some(true) | None) => {
+                                    Some(IrParameterStyle::DeepObject)
+                                }
+                                (
+                                    Some(ParsedParameterStyle::SpaceDelimited),
+                                    Some(false) | None,
+                                ) => Some(IrParameterStyle::SpaceDelimited),
+                                (Some(ParsedParameterStyle::PipeDelimited), Some(false) | None) => {
+                                    Some(IrParameterStyle::PipeDelimited)
+                                }
+                                (None, None) => None,
+                                (Some(ParsedParameterStyle::Form) | None, Some(true) | None) => {
+                                    Some(IrParameterStyle::Form { exploded: true })
+                                }
+                                (Some(ParsedParameterStyle::Form) | None, Some(false)) => {
+                                    Some(IrParameterStyle::Form { exploded: false })
+                                }
+                                _ => None,
+                            };
+                            let info = SpecParameterInfo {
+                                name: param.name.as_str(),
+                                ty,
+                                required: param.required,
+                                description: param.description.as_deref(),
+                                style,
+                            };
+                            Some(match param.location {
+                                ParameterLocation::Path => SpecParameter::Path(info),
+                                ParameterLocation::Query => SpecParameter::Query(info),
+                                _ => return None,
+                            })
                         })
-                    }))
+                        .collect_vec();
+
+                    // Synthesize missing path parameters. If a `{param}` in
+                    // the path template has no matching declaration, add a
+                    // string placeholder.
+                    params.extend(
+                        item.path
+                            .iter()
+                            .flat_map(|segment| segment.fragments())
+                            .filter_map(|fragment| match fragment {
+                                &PathFragment::Param(name) => Some(name),
+                                _ => None,
+                            })
+                            .filter(|name| seen.insert((name, ParameterLocation::Path)))
+                            .map(|name| {
+                                SpecParameter::Path(SpecParameterInfo {
+                                    name,
+                                    ty: arena.alloc(
+                                        SpecInlineType::Primitive(
+                                            InlineTypePath {
+                                                root: InlineTypePathRoot::Resource(resource),
+                                                segments: arena.alloc_slice_copy(&[
+                                                    InlineTypePathSegment::Operation(id),
+                                                    InlineTypePathSegment::Parameter(name),
+                                                ]),
+                                            },
+                                            PrimitiveType::String,
+                                        )
+                                        .into(),
+                                    ),
+                                    required: true,
+                                    description: None,
+                                    style: None,
+                                })
+                            }),
+                    );
+
+                    arena.alloc_slice_copy(&params)
                 };
 
                 let request = item

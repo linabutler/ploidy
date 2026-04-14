@@ -626,4 +626,61 @@ mod tests {
         };
         assert_eq!(actual, expected);
     }
+
+    // MARK: Synthesized path params
+
+    #[test]
+    fn test_operation_with_synthesized_path_param() {
+        let doc = Document::from_yaml(indoc::indoc! {"
+            openapi: 3.0.0
+            info:
+              title: Test API
+              version: 1.0.0
+            paths:
+              /items/{item_id}:
+                get:
+                  operationId: getItem
+                  responses:
+                    '200':
+                      description: OK
+        "})
+        .unwrap();
+
+        let arena = Arena::new();
+        let spec = Spec::from_doc(&arena, &doc).unwrap();
+        let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
+
+        let op = graph.operations().next().unwrap();
+        let codegen = CodegenOperation::new(&op);
+
+        let actual: syn::ImplItemFn = parse_quote!(#codegen);
+        let expected: syn::ImplItemFn = parse_quote! {
+            pub async fn get_item(
+                &self,
+                item_id: &str
+            ) -> Result<(), crate::error::Error> {
+                let url = {
+                    let mut url = self.base_url.clone();
+                    let _ = url
+                        .path_segments_mut()
+                        .map(|mut segments| {
+                            segments.pop_if_empty()
+                                .push("items")
+                                .push(item_id);
+                        });
+                    url
+                };
+                let response = self
+                    .client
+                    .get(url)
+                    .headers(self.headers.clone())
+                    .send()
+                    .await?
+                    .error_for_status()?;
+                let _ = response;
+                Ok(())
+            }
+        };
+        assert_eq!(actual, expected);
+    }
 }

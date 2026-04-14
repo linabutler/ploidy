@@ -1931,3 +1931,87 @@ fn test_path_item_ignores_header_and_cookie_parameters() {
 
     assert_matches!(&*ir.operations, [SpecOperation { params: [], .. }]);
 }
+
+// MARK: Synthesized path parameters
+
+#[test]
+fn test_synthesizes_missing_path_parameter() {
+    let doc = Document::from_yaml(indoc::indoc! {"
+        openapi: 3.0.0
+        info:
+          title: Test API
+          version: 1.0
+        paths:
+          /items/{item_id}:
+            get:
+              operationId: getItem
+              responses:
+                '200':
+                  description: Success
+    "})
+    .unwrap();
+
+    let arena = Arena::new();
+    let ir = Spec::from_doc(&arena, &doc).unwrap();
+
+    assert_matches!(
+        &*ir.operations,
+        [SpecOperation {
+            params: [SpecParameter::Path(SpecParameterInfo {
+                name: "item_id",
+                required: true,
+                ty: SpecType::Inline(SpecInlineType::Primitive(_, PrimitiveType::String)),
+                ..
+            })],
+            ..
+        }],
+    );
+}
+
+#[test]
+fn test_synthesized_path_parameters_appear_after_declared() {
+    let doc = Document::from_yaml(indoc::indoc! {"
+        openapi: 3.0.0
+        info:
+          title: Test API
+          version: 1.0
+        paths:
+          /orgs/{org_id}/items/{item_id}:
+            get:
+              operationId: getOrgItem
+              parameters:
+                - name: org_id
+                  in: path
+                  required: true
+                  schema:
+                    type: integer
+                    format: int64
+              responses:
+                '200':
+                  description: Success
+    "})
+    .unwrap();
+
+    let arena = Arena::new();
+    let ir = Spec::from_doc(&arena, &doc).unwrap();
+
+    assert_matches!(
+        &*ir.operations,
+        [SpecOperation {
+            params: [
+                SpecParameter::Path(SpecParameterInfo {
+                    name: "org_id",
+                    ty: SpecType::Inline(SpecInlineType::Primitive(_, PrimitiveType::I64)),
+                    ..
+                }),
+                SpecParameter::Path(SpecParameterInfo {
+                    name: "item_id",
+                    required: true,
+                    ty: SpecType::Inline(SpecInlineType::Primitive(_, PrimitiveType::String)),
+                    ..
+                }),
+            ],
+            ..
+        }],
+    );
+}
