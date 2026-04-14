@@ -1,6 +1,8 @@
 //! Shared test-only helpers.
 
-use std::fmt::{Arguments, Debug};
+use std::fmt::{Arguments, Debug, Display};
+
+use pretty_assertions::Comparison;
 
 /// Asserts that an expression matches the given pattern.
 ///
@@ -38,22 +40,33 @@ pub(crate) use assert_matches;
 
 #[track_caller]
 pub(crate) fn assert_matches_failed(left: impl Debug, right: &str, message: Option<Arguments<'_>>) {
+    struct Pattern<'a>(&'a str);
+    impl Debug for Pattern<'_> {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            // Force `panic!()` to use the right side's `Display`
+            // representation, not the default `Debug`.
+            Display::fmt(self.0, f)
+        }
+    }
+
     match message {
         Some(message) => panic!(
             "{}",
             indoc::formatdoc! {"
                 assertion `left matches right` failed: {message}
-                  left: {left:?}
-                 right: {right:?}
-            "},
+                {}
+                ",
+                Comparison::new(&left, &Pattern(right)),
+            },
         ),
         None => panic!(
             "{}",
             indoc::formatdoc! {"
                 assertion `left matches right` failed
-                  left: {left:?}
-                 right: {right:?}
-            "},
+                {}
+                ",
+                Comparison::new(&left, &Pattern(right)),
+            },
         ),
     }
 }
