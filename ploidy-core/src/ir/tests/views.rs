@@ -3052,6 +3052,91 @@ fn test_fields_linearizes_inline_all_of_parents() {
     assert!(!email_field.inherited());
 }
 
+#[test]
+fn test_fields_linearizes_diamond_inheritance() {
+    // Two parents sharing a common ancestor creates a diamond:
+    //
+    //       Base
+    //       /  \
+    //     P1    P2
+    //       \  /
+    //      Child
+    //
+    // `Base`'s fields must appear exactly once, then `P1`'s and `P2`'s
+    // own fields, then `Child`'s own fields; all in declaration order.
+    let doc = Document::from_yaml(indoc::indoc! {"
+        openapi: 3.0.0
+        info:
+          title: Test
+          version: 1.0.0
+        components:
+          schemas:
+            Base:
+              type: object
+              properties:
+                id:
+                  type: string
+                created_at:
+                  type: string
+            Parent1:
+              allOf:
+                - $ref: '#/components/schemas/Base'
+              properties:
+                p1_alpha:
+                  type: string
+                p1_beta:
+                  type: integer
+            Parent2:
+              allOf:
+                - $ref: '#/components/schemas/Base'
+              properties:
+                p2_alpha:
+                  type: string
+                p2_beta:
+                  type: integer
+            Child:
+              allOf:
+                - $ref: '#/components/schemas/Parent1'
+                - $ref: '#/components/schemas/Parent2'
+              properties:
+                own_first:
+                  type: string
+                own_second:
+                  type: boolean
+    "})
+    .unwrap();
+
+    let arena = Arena::new();
+    let spec = Spec::from_doc(&arena, &doc).unwrap();
+    let graph = RawGraph::new(&arena, &spec).cook();
+
+    let child = graph.schemas().find(|s| s.name() == "Child").unwrap();
+    let SchemaTypeView::Struct(_, child_struct) = child else {
+        panic!("expected struct `Child`; got `{child:?}`");
+    };
+
+    let field_names = child_struct
+        .fields()
+        .filter_map(|f| match f.name() {
+            StructFieldName::Name(n) => Some(n),
+            _ => None,
+        })
+        .collect_vec();
+    assert_matches!(
+        &*field_names,
+        [
+            "id",
+            "created_at",
+            "p1_alpha",
+            "p1_beta",
+            "p2_alpha",
+            "p2_beta",
+            "own_first",
+            "own_second",
+        ],
+    );
+}
+
 // MARK: Inline tagged union views
 
 #[test]
