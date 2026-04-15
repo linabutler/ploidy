@@ -29,33 +29,29 @@ pub(crate) trait FieldViewExt<'a> {
     fn inner(&self) -> TypeView<'a>;
 }
 
+/// Peels all [`ContainerView::Optional`] wrapper layers from a type.
+fn peel<'a>(mut ty: TypeView<'a>) -> TypeView<'a> {
+    while let Some(ContainerView::Optional(inner)) = ty.as_container() {
+        ty = inner.ty();
+    }
+    ty
+}
+
 impl<'view, 'a> FieldViewExt<'a> for StructFieldView<'view, 'a> {
     fn inner(&self) -> TypeView<'a> {
-        let mut ty = self.ty();
-        while let Some(ContainerView::Optional(inner)) = ty.as_container() {
-            ty = inner.ty();
-        }
-        ty
+        peel(self.ty())
     }
 }
 
 impl<'view, 'a> FieldViewExt<'a> for TaggedFieldView<'view, 'a> {
     fn inner(&self) -> TypeView<'a> {
-        let mut ty = self.ty();
-        while let Some(ContainerView::Optional(inner)) = ty.as_container() {
-            ty = inner.ty();
-        }
-        ty
+        peel(self.ty())
     }
 }
 
 impl<'view, 'a> FieldViewExt<'a> for UntaggedFieldView<'view, 'a> {
     fn inner(&self) -> TypeView<'a> {
-        let mut ty = self.ty();
-        while let Some(ContainerView::Optional(inner)) = ty.as_container() {
-            ty = inner.ty();
-        }
-        ty
+        peel(self.ty())
     }
 }
 
