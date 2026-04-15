@@ -17,9 +17,9 @@ use super::{
     transform::transform,
     types::{
         InlineTypePath, InlineTypePathRoot, InlineTypePathSegment,
-        ParameterStyle as IrParameterStyle, PrimitiveType, SchemaTypeInfo, SpecInlineType,
-        SpecOperation, SpecParameter, SpecParameterInfo, SpecRequest, SpecResponse, SpecSchemaType,
-        SpecType, TypeInfo,
+        ParameterStyle as IrParameterStyle, SchemaTypeInfo, SpecInlineType, SpecOperation,
+        SpecParameter, SpecParameterInfo, SpecRequest, SpecResponse, SpecSchemaType, SpecType,
+        TypeInfo,
     },
 };
 
@@ -208,16 +208,13 @@ impl<'a> Spec<'a> {
                         }
                         Source::Synthesized(name) => {
                             let ty: &_ = arena.alloc(
-                                SpecInlineType::Primitive(
-                                    InlineTypePath {
-                                        root: InlineTypePathRoot::Resource(resource),
-                                        segments: arena.alloc_slice_copy(&[
-                                            InlineTypePathSegment::Operation(id),
-                                            InlineTypePathSegment::Parameter(name),
-                                        ]),
-                                    },
-                                    PrimitiveType::String,
-                                )
+                                SpecInlineType::Any(InlineTypePath {
+                                    root: InlineTypePathRoot::Resource(resource),
+                                    segments: arena.alloc_slice_copy(&[
+                                        InlineTypePathSegment::Operation(id),
+                                        InlineTypePathSegment::Parameter(name),
+                                    ]),
+                                })
                                 .into(),
                             );
                             Some(SpecParameter::Path(SpecParameterInfo {

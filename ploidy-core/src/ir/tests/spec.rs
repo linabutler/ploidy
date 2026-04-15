@@ -2012,7 +2012,7 @@ fn test_synthesizes_missing_path_parameter() {
             params: [SpecParameter::Path(SpecParameterInfo {
                 name: "item_id",
                 required: true,
-                ty: SpecType::Inline(SpecInlineType::Primitive(_, PrimitiveType::String)),
+                ty: SpecType::Inline(SpecInlineType::Any(_)),
                 ..
             })],
             ..
@@ -2172,7 +2172,7 @@ fn test_synthesized_path_parameters_intersperse_in_template_order() {
                     SpecParameter::Path(SpecParameterInfo {
                         name: "user_id",
                         required: true,
-                        ty: SpecType::Inline(SpecInlineType::Primitive(_, PrimitiveType::String)),
+                        ty: SpecType::Inline(SpecInlineType::Any(_)),
                         ..
                     }),
                     SpecParameter::Path(SpecParameterInfo {
@@ -2197,7 +2197,7 @@ fn test_synthesized_path_parameters_intersperse_in_template_order() {
                     SpecParameter::Path(SpecParameterInfo {
                         name: "project_id",
                         required: true,
-                        ty: SpecType::Inline(SpecInlineType::Primitive(_, PrimitiveType::String)),
+                        ty: SpecType::Inline(SpecInlineType::Any(_)),
                         ..
                     }),
                 ],
