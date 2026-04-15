@@ -43,8 +43,6 @@
 //! [`ContainerView::Optional`]: super::container::ContainerView::Optional
 //! [tagged union]: super::tagged::TaggedView
 
-use std::collections::VecDeque;
-
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use petgraph::{
@@ -111,25 +109,43 @@ impl<'a> StructView<'a> {
     /// Returns an iterator over all fields inherited from
     /// this struct's ancestors.
     fn inherited_fields(&self) -> impl Iterator<Item = StructFieldView<'_, 'a>> {
-        // Walk inheritance edges in post-order, so that the most distant
-        // ancestors are yielded first. The LIFO stack explores ancestors in
-        // reverse declaration order (right-to-left); collecting them into a
-        // `VecDeque` lets us iterate over them in declaration order.
+        enum Step {
+            Enter(NodeIndex<usize>),
+            Exit(NodeIndex<usize>),
+        }
+
+        // This post-order DFS over inheritance edges yields ancestors in
+        // declaration order. We avoid Petgraph's `DfsPostOrder` because
+        // it would yield them in reverse declaration order.
         let inherits = EdgeFiltered::from_fn(&self.cooked.graph, |e| {
             matches!(e.weight(), GraphEdge::Inherits { .. })
         });
-        let mut stack = vec![self.index];
+        let mut stack = vec![Step::Enter(self.index)];
         let mut visited = FixedBitSet::with_capacity(self.cooked.graph.node_count());
-        let mut ancestors = VecDeque::new();
-        while let Some(node) = stack.pop() {
-            if visited.put(node.index()) {
-                continue;
-            }
-            if node != self.index {
-                ancestors.push_front(node);
-            }
-            for child in inherits.neighbors(node) {
-                stack.push(child);
+        let mut ancestors = vec![];
+        while let Some(step) = stack.pop() {
+            match step {
+                Step::Enter(node) => {
+                    if visited.put(node.index()) {
+                        continue;
+                    }
+                    // Add the node's parents in reverse, so that the loop
+                    // visits them in declaration order before yielding
+                    // the node itself.
+                    stack.push(Step::Exit(node));
+                    stack.extend(
+                        inherits
+                            .neighbors(node) // Not a `DoubleEndedIterator`.
+                            .collect_vec()
+                            .into_iter()
+                            .rev()
+                            .map(Step::Enter),
+                    );
+                }
+                Step::Exit(node) if node != self.index => {
+                    ancestors.push(node);
+                }
+                _ => {}
             }
         }
 
