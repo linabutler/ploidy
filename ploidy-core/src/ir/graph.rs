@@ -21,7 +21,11 @@ use petgraph::{
 };
 use rustc_hash::{FxBuildHasher, FxHashMap};
 
-use crate::{arena::Arena, ir::SchemaTypeInfo, parse::Info};
+use crate::{
+    arena::Arena,
+    ir::{SchemaTypeInfo, UntaggedVariantMeta},
+    parse::Info,
+};
 
 use super::{
     spec::{ResolvedSpecType, Spec},
@@ -950,7 +954,13 @@ impl<'a> Iterator for SpecTypeVisitor<'a> {
 
     fn next(&mut self) -> Option<Self::Item> {
         let (parent, top) = self.stack.pop()?;
-        if matches!(parent, Some((_, GraphEdge::Variant(VariantMeta::Unit)))) {
+        if matches!(
+            parent,
+            Some((
+                _,
+                GraphEdge::Variant(VariantMeta::Untagged(UntaggedVariantMeta::Null))
+            ))
+        ) {
             // Unit variants form self-edges; skip them
             // to avoid an infinite loop.
             return Some((parent, top));
@@ -998,12 +1008,13 @@ impl<'a> Iterator for SpecTypeVisitor<'a> {
                         )),
                         ty.variants.iter().map(|variant| match variant {
                             &SpecUntaggedVariant::Some(hint, ty) => {
-                                (GraphEdge::Variant(VariantMeta::Untagged(hint)), ty)
+                                let meta = UntaggedVariantMeta::Type { hint };
+                                (GraphEdge::Variant(meta.into()), ty)
                             }
                             // `null` variants have no target type;
                             // we represent these variants as self-edges.
                             SpecUntaggedVariant::Null => {
-                                (GraphEdge::Variant(VariantMeta::Unit), top)
+                                (GraphEdge::Variant(UntaggedVariantMeta::Null.into()), top)
                             }
                         }),
                     )

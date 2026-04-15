@@ -28,7 +28,7 @@
 use petgraph::graph::NodeIndex;
 
 use crate::ir::{
-    UntaggedVariantNameHint,
+    UntaggedVariantMeta, UntaggedVariantNameHint,
     graph::CookedGraph,
     types::{GraphUntagged, VariantMeta},
 };
@@ -110,10 +110,12 @@ impl<'view, 'a> UntaggedVariantView<'view, 'a> {
     #[inline]
     pub fn ty(&self) -> Option<SomeUntaggedVariant<'a>> {
         match self.meta {
-            VariantMeta::Untagged(hint) => Some(SomeUntaggedVariant {
-                hint,
-                view: TypeView::new(self.parent.cooked, self.index),
-            }),
+            VariantMeta::Untagged(UntaggedVariantMeta::Type { hint }) => {
+                Some(SomeUntaggedVariant {
+                    hint,
+                    view: TypeView::new(self.parent.cooked, self.index),
+                })
+            }
             _ => None,
         }
     }

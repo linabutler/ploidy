@@ -203,10 +203,8 @@ pub struct FieldMeta<'a> {
 pub enum VariantMeta<'a> {
     /// A tagged union variant with a discriminator.
     Tagged(TaggedVariantMeta<'a>),
-    /// An untagged union variant with a name hint.
-    Untagged(UntaggedVariantNameHint),
-    /// A variant without an associated type.
-    Unit,
+    /// An untagged union variant.
+    Untagged(UntaggedVariantMeta),
 }
 
 impl<'a> From<TaggedVariantMeta<'a>> for VariantMeta<'a> {
@@ -215,11 +213,24 @@ impl<'a> From<TaggedVariantMeta<'a>> for VariantMeta<'a> {
     }
 }
 
+impl From<UntaggedVariantMeta> for VariantMeta<'_> {
+    fn from(meta: UntaggedVariantMeta) -> Self {
+        Self::Untagged(meta)
+    }
+}
+
 /// Metadata for a tagged union variant.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub struct TaggedVariantMeta<'a> {
     pub name: &'a str,
     pub aliases: &'a [&'a str],
+}
+
+/// Metadata for an untagged union variant.
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub enum UntaggedVariantMeta {
+    Type { hint: UntaggedVariantNameHint },
+    Null,
 }
 
 /// An operation with graph node references.
