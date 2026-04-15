@@ -1004,6 +1004,215 @@ mod tests {
         assert_eq!(actual, expected);
     }
 
+    #[test]
+    fn test_struct_omits_hash_eq_when_inheriting_unhashable_field_through_cycle() {
+        // Struct `N` inherits from struct `A`, which declares field `t: T`.
+        // `T` has `val: f64` (unhashable) and `ns: Vec<N>` (closing the cycle).
+        // All three form one SCC:
+        //
+        //   N --Inherits--> A --Field--> T --Field--> [N] --Contains--> N
+        //                                 \--Field--> f64
+        let doc = Document::from_yaml(indoc::indoc! {"
+            openapi: 3.0.0
+            info:
+              title: Test API
+              version: 1.0.0
+            paths: {}
+            components:
+              schemas:
+                A:
+                  type: object
+                  properties:
+                    t:
+                      $ref: '#/components/schemas/T'
+                  required:
+                    - t
+                N:
+                  type: object
+                  allOf:
+                    - $ref: '#/components/schemas/A'
+                  properties:
+                    name:
+                      type: string
+                  required:
+                    - name
+                T:
+                  type: object
+                  properties:
+                    ns:
+                      type: array
+                      items:
+                        $ref: '#/components/schemas/N'
+                    val:
+                      type: number
+                      format: double
+                  required:
+                    - ns
+                    - val
+        "})
+        .unwrap();
+
+        let arena = Arena::new();
+        let spec = Spec::from_doc(&arena, &doc).unwrap();
+        let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
+
+        let schema = graph.schemas().find(|s| s.name() == "N");
+        let Some(schema @ SchemaTypeView::Struct(_, struct_view)) = &schema else {
+            panic!("expected struct `N`; got `{schema:?}`");
+        };
+
+        let name = CodegenTypeName::Schema(schema);
+        let codegen = CodegenStruct::new(name, struct_view);
+
+        let actual: syn::ItemStruct = parse_quote!(#codegen);
+        let expected: syn::ItemStruct = parse_quote! {
+            #[derive(Debug, Clone, PartialEq, Default, ::ploidy_util::serde::Serialize, ::ploidy_util::serde::Deserialize, ::ploidy_util::pointer::JsonPointee, ::ploidy_util::pointer::JsonPointerTarget)]
+            #[serde(crate = "::ploidy_util::serde")]
+            #[ploidy(pointer(crate = "::ploidy_util::pointer"))]
+            pub struct N {
+                pub t: crate::types::T,
+                pub name: ::std::string::String,
+            }
+        };
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn test_struct_omits_hash_eq_for_scc_sibling_of_inherited_unhashable() {
+        // `X` has field `y: Y`. `Y` inherits `P`, which has fields
+        // `v: f64`. Two SCCs: `{X, Y}` and `{P}`.
+        //
+        //   X --Field--> Y --Inherits--> P --Field--> f64
+        //   Y --Field--> X
+        let doc = Document::from_yaml(indoc::indoc! {"
+            openapi: 3.0.0
+            info:
+              title: Test API
+              version: 1.0.0
+            paths: {}
+            components:
+              schemas:
+                X:
+                  type: object
+                  properties:
+                    y:
+                      $ref: '#/components/schemas/Y'
+                  required:
+                    - y
+                Y:
+                  type: object
+                  allOf:
+                    - $ref: '#/components/schemas/P'
+                  properties:
+                    x:
+                      $ref: '#/components/schemas/X'
+                  required:
+                    - x
+                P:
+                  type: object
+                  properties:
+                    v:
+                      type: number
+                      format: double
+                  required:
+                    - v
+        "})
+        .unwrap();
+
+        let arena = Arena::new();
+        let spec = Spec::from_doc(&arena, &doc).unwrap();
+        let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
+
+        let schema = graph.schemas().find(|s| s.name() == "X");
+        let Some(schema @ SchemaTypeView::Struct(_, struct_view)) = &schema else {
+            panic!("expected struct `X`; got `{schema:?}`");
+        };
+
+        let name = CodegenTypeName::Schema(schema);
+        let codegen = CodegenStruct::new(name, struct_view);
+
+        let actual: syn::ItemStruct = parse_quote!(#codegen);
+        let expected: syn::ItemStruct = parse_quote! {
+            #[derive(Debug, Clone, PartialEq, Default, ::ploidy_util::serde::Serialize, ::ploidy_util::serde::Deserialize, ::ploidy_util::pointer::JsonPointee, ::ploidy_util::pointer::JsonPointerTarget)]
+            #[serde(crate = "::ploidy_util::serde")]
+            #[ploidy(pointer(crate = "::ploidy_util::pointer"))]
+            pub struct X {
+                pub y: ::std::boxed::Box<crate::types::Y>,
+            }
+        };
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn test_struct_omits_hash_eq_for_non_inheriting_scc_member() {
+        // `A` inherits `B`. `B` has field `d: D`. `D` inherits `E`
+        // with fields `f: f64` and `a: A`. One SCC: `{A, B, D}`.
+        //
+        //   A --Inherits--> B --Field--> D --Inherits--> E --Field--> f64
+        //                                D --Field--> A
+        let doc = Document::from_yaml(indoc::indoc! {"
+            openapi: 3.0.0
+            info:
+              title: Test API
+              version: 1.0.0
+            paths: {}
+            components:
+              schemas:
+                A:
+                  type: object
+                  allOf:
+                    - $ref: '#/components/schemas/B'
+                B:
+                  type: object
+                  properties:
+                    d:
+                      $ref: '#/components/schemas/D'
+                  required:
+                    - d
+                D:
+                  type: object
+                  allOf:
+                    - $ref: '#/components/schemas/E'
+                  properties:
+                    a:
+                      $ref: '#/components/schemas/A'
+                  required:
+                    - a
+                E:
+                  type: object
+                  properties:
+                    f:
+                      type: number
+                      format: double
+                  required:
+                    - f
+        "})
+        .unwrap();
+
+        let arena = Arena::new();
+        let spec = Spec::from_doc(&arena, &doc).unwrap();
+        let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
+
+        let schema = graph.schemas().find(|s| s.name() == "B");
+        let Some(schema @ SchemaTypeView::Struct(_, struct_view)) = &schema else {
+            panic!("expected struct `B`; got `{schema:?}`");
+        };
+
+        let name = CodegenTypeName::Schema(schema);
+        let codegen = CodegenStruct::new(name, struct_view);
+
+        let actual: syn::ItemStruct = parse_quote!(#codegen);
+        let expected: syn::ItemStruct = parse_quote! {
+            #[derive(Debug, Clone, PartialEq, Default, ::ploidy_util::serde::Serialize, ::ploidy_util::serde::Deserialize, ::ploidy_util::pointer::JsonPointee, ::ploidy_util::pointer::JsonPointerTarget)]
+            #[serde(crate = "::ploidy_util::serde")]
+            #[ploidy(pointer(crate = "::ploidy_util::pointer"))]
+            pub struct B {
+                pub d: crate::types::D,
+            }
+        };
+        assert_eq!(actual, expected);
+    }
+
     // MARK: `Default`
 
     #[test]

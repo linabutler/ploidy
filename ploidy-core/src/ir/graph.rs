@@ -825,23 +825,48 @@ impl<'graph, 'a> MetadataBuilder<'graph, 'a> {
             }
         }
 
-        // Propagate marked leaves backward through the non-inheritance edges
-        // that affect each trait. A reverse BFS from the leaves marks each type
-        // that transitively reaches an unhashable or undefaultable leaf.
+        // Compute the transitive closure over the inheritance subgraph,
+        // then invert it: `descendants[A]` lists every node that
+        // transitively inherits from `A`.
+        let ancestors = Closure::new(&EdgeFiltered::from_fn(self.graph, |e| {
+            matches!(e.weight(), GraphEdge::Inherits { .. })
+        }));
+        let mut descendants = vec![vec![]; n];
+        for node in self.graph.node_indices() {
+            for ancestor in ancestors.dependencies_of(node).filter(|&a| a != node) {
+                descendants[ancestor.index()].push(node);
+            }
+        }
+
+        // Propagate hashability and defaultability backward.
         {
             let mut queue: VecDeque<_> = unhashable.ones().map(NodeIndex::new).collect();
             while let Some(node) = queue.pop_front() {
                 for edge in self.graph.edges_directed(node, Direction::Incoming) {
-                    if !matches!(
-                        edge.weight(),
-                        GraphEdge::Field { .. } | GraphEdge::Contains | GraphEdge::Variant(_)
-                    ) {
-                        continue;
-                    }
                     let source = edge.source();
-                    if !unhashable[source.index()] {
-                        unhashable.insert(source.index());
-                        queue.push_back(source);
+                    match edge.weight() {
+                        GraphEdge::Contains | GraphEdge::Variant(_) => {
+                            if !unhashable.put(source.index()) {
+                                queue.push_back(source);
+                            }
+                        }
+                        GraphEdge::Field { .. } => {
+                            if !unhashable.put(source.index()) {
+                                queue.push_back(source);
+                            }
+                            // Descendants inherit their ancestors' fields;
+                            // if the ancestor is unhashable, so are all its
+                            // descendants.
+                            for &desc in &descendants[source.index()] {
+                                if !unhashable.put(desc.index()) {
+                                    queue.push_back(desc);
+                                }
+                            }
+                        }
+                        // Don't follow inheritance edges, to avoid
+                        // contaminating sibling variants: an unhashable variant
+                        // shouldn't make a union's other variants unhashable.
+                        GraphEdge::Inherits { .. } => {}
                     }
                 }
             }
@@ -858,73 +883,24 @@ impl<'graph, 'a> MetadataBuilder<'graph, 'a> {
                         continue;
                     }
                     let source = edge.source();
-                    if !undefaultable[source.index()] {
-                        undefaultable.insert(source.index());
+                    if !undefaultable.put(source.index()) {
                         queue.push_back(source);
                     }
-                }
-            }
-        }
-
-        // Compute the transitive closure over the inheritance subgraph.
-        // The BFS above doesn't follow inheritance edges, because it would
-        // propagate a parent's intrinsic undefaultability to its children:
-        // for example, a tagged union is never `Default`, but its variants
-        // can be. The closure resolves inherited fields separately.
-        let ancestors = Closure::new(&EdgeFiltered::from_fn(self.graph, |e| {
-            matches!(e.weight(), GraphEdge::Inherits { .. })
-        }));
-
-        // Visit nodes in reverse topological order so that each node
-        // has a complete view of the types it depends on.
-        let mut hashable = FixedBitSet::with_capacity(n);
-        let mut defaultable = FixedBitSet::with_capacity(n);
-        for node in self.closure.topo_nodes().rev() {
-            // Are we intrinsically hashable / defaultable?
-            let mut h = !unhashable[node.index()];
-            let mut d = !undefaultable[node.index()];
-
-            // Are all our inner types and inherited fields
-            // hashable / defaultable?
-            let contained = self
-                .graph
-                .edges_directed(node, Direction::Outgoing)
-                .filter(|e| !matches!(e.weight(), GraphEdge::Inherits { .. }));
-            let inherited = ancestors
-                .dependencies_of(node) // All transitive ancestors of the node.
-                .filter(|&ancestor| ancestor != node)
-                .flat_map(|ancestor| {
-                    self.graph
-                        .edges_directed(ancestor, Direction::Outgoing)
-                        .filter(|e| matches!(e.weight(), GraphEdge::Field { .. }))
-                });
-            let node_scc = self.closure.scc_index_of(node);
-            for edge in contained
-                .chain(inherited)
-                // Ignore types in our SCC; the BFS already marks them.
-                .filter(|e| self.closure.scc_index_of(e.target()) != node_scc)
-            {
-                match edge.weight() {
-                    GraphEdge::Field { meta, .. } => {
-                        h &= hashable[edge.target().index()];
-                        if meta.required {
-                            d &= defaultable[edge.target().index()];
+                    // Descendants inherit their ancestors' fields.
+                    for &desc in &descendants[source.index()] {
+                        if !undefaultable.put(desc.index()) {
+                            queue.push_back(desc);
                         }
                     }
-                    GraphEdge::Contains | GraphEdge::Variant(_) => {
-                        h &= hashable[edge.target().index()];
-                    }
-                    _ => {}
                 }
             }
-
-            if h {
-                hashable.insert(node.index());
-            }
-            if d {
-                defaultable.insert(node.index());
-            }
         }
+
+        // The remaining types that we didn't mark are hashable and defaultable.
+        let mut hashable = unhashable;
+        hashable.toggle_range(..);
+        let mut defaultable = undefaultable;
+        defaultable.toggle_range(..);
 
         HashDefault {
             hashable,
@@ -1208,19 +1184,6 @@ impl Closure {
             scc_deps,
             scc_rdeps,
         }
-    }
-
-    /// Iterates over all nodes in topological order.
-    ///
-    /// The order of nodes within an SCC is arbitrary, since all members
-    /// of an SCC share the same dependencies.
-    #[inline]
-    pub fn topo_nodes(&self) -> impl DoubleEndedIterator<Item = NodeIndex<usize>> + use<> {
-        let mut by_scc = vec![vec![]; self.scc_members.len()];
-        for (node, &scc) in self.scc_indices.iter().enumerate() {
-            by_scc[scc].push(NodeIndex::new(node));
-        }
-        by_scc.into_iter().flatten()
     }
 
     /// Returns the topological SCC index for the given node.
