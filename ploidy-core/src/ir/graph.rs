@@ -615,27 +615,10 @@ struct InlinableVariant<'a> {
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub enum GraphEdge<'a> {
     /// The source type inherits from the target type.
-    Inherits {
-        /// Marks a copied inheritance edge on an inlined variant struct.
-        ///
-        /// Shadow inheritance edges are excluded from a type's [inlines],
-        /// preventing the type from claiming the original's inline ancestors.
-        ///
-        /// [inlines]: crate::ir::views::View::inlines
-        shadow: bool,
-    },
+    Inherits { shadow: bool },
     /// The source struct, tagged union, or untagged union
     /// has the target type as a field.
-    Field {
-        /// Marks a copied field edge on an inlined variant struct.
-        ///
-        /// Shadow field edges are excluded from a type's [inlines],
-        /// preventing the type from claiming the original's inlines.
-        ///
-        /// [inlines]: crate::ir::views::View::inlines
-        shadow: bool,
-        meta: FieldMeta<'a>,
-    },
+    Field { shadow: bool, meta: FieldMeta<'a> },
     /// The source union has the target type as a variant.
     Variant(VariantMeta<'a>),
     /// The source type is an array, map, or optional that contains
@@ -644,10 +627,12 @@ pub enum GraphEdge<'a> {
 }
 
 impl GraphEdge<'_> {
-    /// Returns `true` if this is a shadow edge. [Transitive closures]
-    /// follow shadow edges; [inlines] don't.
+    /// Returns `true` if the target type should be excluded from
+    /// the source type's [inlines], but still considered a dependency.
     ///
-    /// [Transitive closures]: crate::ir::views::View::dependencies
+    /// Shadow edges prevent inlined variant structs from claiming
+    /// their originals' inlines.
+    ///
     /// [inlines]: crate::ir::views::View::inlines
     #[inline]
     pub fn shadow(&self) -> bool {
@@ -880,8 +865,8 @@ impl<'graph, 'a> MetadataBuilder<'graph, 'a> {
         // Compute the transitive closure over the inheritance subgraph.
         // The BFS above doesn't follow inheritance edges, because it would
         // propagate a parent's intrinsic undefaultability to its children:
-        // e.g., a tagged union is never `Default`, but all its variants can be.
-        // The closure lets us account for this.
+        // for example, a tagged union is never `Default`, but its variants
+        // can be. The closure resolves inherited fields separately.
         let ancestors = Closure::new(&EdgeFiltered::from_fn(self.graph, |e| {
             matches!(e.weight(), GraphEdge::Inherits { .. })
         }));
@@ -1256,8 +1241,8 @@ impl Closure {
             .map(NodeIndex::new)
     }
 
-    /// Returns whether `node` transitively depends on `other`.
-    /// Returns `false` when `node == other`.
+    /// Returns whether `node` transitively depends on `other`,
+    /// or `false` when `node == other`.
     #[inline]
     pub fn depends_on(&self, node: NodeIndex<usize>, other: NodeIndex<usize>) -> bool {
         if node == other {

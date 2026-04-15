@@ -18,9 +18,7 @@
 //! * [`View::dependents()`] iterates over all types that transitively depend on
 //!   this type. Useful for impact analysis or invalidation.
 //!
-//! These methods answer Rust-specific questions that require transitive
-//! graph traversal. Computing them here, where the type graph is available,
-//! is much simpler than replicating the traversal in codegen:
+//! These methods answer Rust-specific questions:
 //!
 //! * [`View::hashable()`] returns whether this type can implement `Eq` and `Hash`.
 //! * [`View::defaultable()`] returns whether this type can implement `Default`.
