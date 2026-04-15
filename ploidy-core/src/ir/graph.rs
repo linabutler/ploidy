@@ -888,7 +888,7 @@ impl<'graph, 'a> MetadataBuilder<'graph, 'a> {
                 .filter(|e| !matches!(e.weight(), GraphEdge::Inherits { .. }));
             let inherited = ancestors
                 .dependencies_of(node) // All transitive ancestors of the node.
-                .skip(1) // Skip the node itself.
+                .filter(|&ancestor| ancestor != node)
                 .flat_map(|ancestor| {
                     self.graph
                         .edges_directed(ancestor, Direction::Outgoing)
