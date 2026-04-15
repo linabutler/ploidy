@@ -92,8 +92,8 @@ impl<'a> StructView<'a> {
     #[inline]
     pub fn fields(&self) -> impl Iterator<Item = StructFieldView<'_, 'a>> {
         let all = self
-            .inherited_fields()
-            .chain(self.own_fields()) // Not a `DoubleEndedIterator`; can't be reversed directly.
+            .inherited_fields() // Not a `DoubleEndedIterator`; can't reverse directly.
+            .chain(self.own_fields())
             .collect_vec();
 
         // Deduplicate fields right-to-left, so that later (closer) fields
@@ -236,11 +236,10 @@ impl<'view, 'a, P: ViewNode<'a>> FieldView<'view, 'a, P> {
     }
 }
 
-/// Whether a field is required, nullable, or optional.
+/// Whether a field is required or optional.
 ///
-/// Required fields are always present, but may be nullable.
-/// Optional fields may be absent entirely. This distinction matters for
-/// generated Rust code, which represents the three cases as different types.
+/// Required fields are always present, but may be nullable; optional fields
+/// may be absent entirely.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Required {
     /// The field must be present in the payload.

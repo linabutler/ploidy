@@ -195,5 +195,5 @@ if f.discriminator() { continue; }
 - **Dependencies:** Prefer `[workspace.dependencies]`. Justify new deps.
 - **Breaking changes:** Make breaking changes; don't prioritize backward-compatibility.
 - **Design:** Push back or propose alternatives. Keep changes modular for partial reverts.
-- **Reverts**: Don't `git checkout --`. Manually restore to avoid data loss.
+- **Reverts:** Don't `git checkout --`. Manually restore to avoid data loss.
 - **Ask for help when:** requirements ambiguous, multiple valid approaches, tests fail for unclear reasons, scope larger than expected, new workspace crate needed, or approach seems wrong.
