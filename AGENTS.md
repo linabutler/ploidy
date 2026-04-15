@@ -183,7 +183,7 @@ if f.discriminator() { continue; }
 ## Crate-Specific Rules
 
 - **ploidy-core:** Language-agnostic IR, but Rust-flavored concepts are fine when they simplify codegen (e.g., `Required`, `needs_box()`). The boundary is: core must not depend on codegen types (`syn`, `quote`, token streams). Use view types for graph queries. Tests in `src/**/tests/*.rs`.
-- **ploidy-codegen-rust:** All types implement `ToTokens`. Use `quote!` for tokens, never string-format. Tests compare AST with `parse_quote!`, never strings.
+- **ploidy-codegen-rust:** All types implement `ToTokens`. Use `quote!` for tokens, never string-format. Tests must compare AST nodes using `parse_quote!`, never string matching (e.g., `tokens.contains("...")`).
 - **ploidy-pointer:** Follows RFC 6901. Tests in `src/lib.rs` and `tests/`. Simpler assertions OK.
 - **ploidy-pointer-derive:** Proc-macro constraints apply. Test via `ploidy-pointer/tests/`.
 - **ploidy-util:** Keep minimal. All data types must impl `Serialize`/`Deserialize`. Key types: `AbsentOr<T>`, `QuerySerializer`, `UnixSeconds`.
