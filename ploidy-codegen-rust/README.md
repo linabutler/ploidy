@@ -1,6 +1,6 @@
 # ploidy-codegen-rust
 
-This crate is part of the [Ploidy](https://crates.io/crates/ploidy) OpenAPI code generator. It transforms [**ploidy-core**](https://crates.io/crates/ploidy-core) types into Rust syntax trees, pretty-prints them, and saves the output to disk.
+This crate is part of the [Ploidy](https://crates.io/crates/ploidy) OpenAPI compiler. It transforms [**ploidy-core**](https://crates.io/crates/ploidy-core) types into Rust syntax trees, pretty-prints them, and saves the output to disk.
 
 ⚠️ The **ploidy-codegen-rust** API isn't stable yet.
 

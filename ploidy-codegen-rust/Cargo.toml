@@ -1,12 +1,12 @@
 [package]
 name = "ploidy-codegen-rust"
-description = "A Ploidy generator that emits Rust code"
+description = "Rust codegen for the Ploidy OpenAPI compiler"
 readme = "README.md"
+keywords = ["openapi", "rust", "codegen", "compiler"]
 version.workspace = true
 license.workspace = true
 edition.workspace = true
 repository.workspace = true
-keywords.workspace = true
 rust-version.workspace = true
 
 [dependencies]

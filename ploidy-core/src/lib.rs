@@ -1,9 +1,9 @@
 //! Language-agnostic intermediate representation and type graph
-//! for OpenAPI code generation.
+//! for the Ploidy OpenAPI compiler.
 //!
 //! **ploidy-core** transforms a parsed OpenAPI document into a
-//! typed dependency graph that **ploidy-codegen-\*** backends
-//! traverse to emit code.
+//! typed dependency graph that codegen backends traverse to emit
+//! code.
 //!
 //! # Pipeline
 //!

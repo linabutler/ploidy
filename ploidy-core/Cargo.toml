@@ -1,12 +1,12 @@
 [package]
 name = "ploidy-core"
-description = "An OpenAPI IR and type graph for Ploidy"
+description = "IR and type graph for the Ploidy OpenAPI compiler"
 readme = "README.md"
+keywords = ["openapi", "codegen", "compiler", "ir", "schema"]
 version.workspace = true
 license.workspace = true
 edition.workspace = true
 repository.workspace = true
-keywords.workspace = true
 rust-version.workspace = true
 
 [dependencies]

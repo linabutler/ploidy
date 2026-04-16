@@ -1,6 +1,6 @@
 # Ploidy
 
-**A compiler for polymorphic OpenAPI specs.**
+**A polymorphism-aware OpenAPI compiler.**
 
 [<img src="https://img.shields.io/crates/v/ploidy?style=for-the-badge&logo=rust" alt="crates.io" height="24">](https://crates.io/crates/ploidy)
 [<img src="https://img.shields.io/github/actions/workflow/status/linabutler/ploidy/test.yml?style=for-the-badge&logo=github" alt="Build status" height="24">](https://github.com/linabutler/ploidy/actions?query=branch%3Amain)
@@ -9,7 +9,7 @@
 [<img src="https://img.shields.io/docsrs/ploidy-pointer/latest?style=for-the-badge&label=pointer&logo=docs.rs" alt="ploidy-pointer Documentation" height="24">](https://docs.rs/ploidy-pointer)
 [<img src="https://img.shields.io/docsrs/ploidy-util/latest?style=for-the-badge&label=util&logo=docs.rs" alt="ploidy-util Documentation" height="24">](https://docs.rs/ploidy-util)
 
-Many OpenAPI specs use `allOf` to model inheritance, and `oneOf`, `anyOf`, and discriminators to model [polymorphic types](https://swagger.io/docs/specification/v3_0/data-models/inheritance-and-polymorphism/). These patterns are powerful, but can be tricky to support correctly, and most code generators struggle with them. Ploidy was built specifically with inheritance and polymorphism in mind, and aims to generate clean, type-safe, and idiomatic Rust that reads like what you'd write by hand.
+Ploidy compiles OpenAPI specs into clean, type-safe Rust that reads like it was written by hand. It's built around the thorns of real-world schemas—inheritance, polymorphism, inline schemas, and recursive types—that trip up most code generators.
 
 ## Table of Contents
 
@@ -275,7 +275,7 @@ Since `Vec<T>` is already heap-allocated, only the `parent` field needs boxing t
 
 OpenAPI specs can define schemas directly at their point of use—in operation parameters, in request and response bodies, or nested within other schemas—rather than in the `/components/schemas` section. These are called **inline schemas**.
 
-Many code generators treat inline schemas as untyped values (`Any` or `serde_json::Value`), but Ploidy generates the same strongly-typed models for inline schemas as it does for named schemas. Inline schemas are named based on where they occur in the spec, and are namespaced in submodules within the parent module.
+Ploidy generates the same strongly-typed models for inline schemas as it does for named schemas. Inline schemas are named based on where they occur in the spec, and are namespaced in submodules within the parent module.
 
 For example, given an operation with an inline response schema:
 

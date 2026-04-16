@@ -14,7 +14,7 @@ version = "0.11.0"
 license = "Apache-2.0"
 edition = "2024"
 repository = "https://github.com/linabutler/ploidy"
-keywords = ["codegen", "openapi", "swagger"]
+keywords = ["openapi", "codegen", "compiler"]
 rust-version = "1.89"
 
 [workspace.dependencies]

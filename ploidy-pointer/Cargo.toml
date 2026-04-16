@@ -2,7 +2,7 @@
 name = "ploidy-pointer"
 description = "JSON Pointers for strongly-typed data structures"
 readme = "README.md"
-keywords = ["6901", "json", "json-pointer", "rfc-6901"]
+keywords = ["json-pointer", "json-schema", "rfc6901", "json", "pointer"]
 rust-version = "1.86"
 version.workspace = true
 license.workspace = true
