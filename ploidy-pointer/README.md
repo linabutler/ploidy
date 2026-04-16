@@ -2,7 +2,7 @@
 
 This crate provides a way to traverse typed Rust data structures using JSON Pointers ([RFC 6901](https://datatracker.ietf.org/doc/html/rfc6901)). At its heart is the `JsonPointee` trait, which can be implemented on types to make them traversable.
 
-**ploidy-pointer** is part of the [Ploidy](https://crates.io/crates/ploidy) OpenAPI code generator, but can be used standalone.
+**ploidy-pointer** is part of the [Ploidy](https://crates.io/crates/ploidy) OpenAPI compiler, but can be used standalone.
 
 ## Features
 

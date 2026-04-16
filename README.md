@@ -1,6 +1,6 @@
 # Ploidy
 
-**A compiler for polymorphic OpenAPI specs.**
+**A polymorphism-aware OpenAPI compiler.**
 
 [<img src="https://img.shields.io/crates/v/ploidy?style=for-the-badge&logo=rust" alt="crates.io" height="24">](https://crates.io/crates/ploidy)
 [<img src="https://img.shields.io/github/actions/workflow/status/linabutler/ploidy/test.yml?style=for-the-badge&logo=github" alt="Build status" height="24">](https://github.com/linabutler/ploidy/actions?query=branch%3Amain)
@@ -9,7 +9,7 @@
 [<img src="https://img.shields.io/docsrs/ploidy-pointer/latest?style=for-the-badge&label=pointer&logo=docs.rs" alt="ploidy-pointer Documentation" height="24">](https://docs.rs/ploidy-pointer)
 [<img src="https://img.shields.io/docsrs/ploidy-util/latest?style=for-the-badge&label=util&logo=docs.rs" alt="ploidy-util Documentation" height="24">](https://docs.rs/ploidy-util)
 
-Many OpenAPI specs use `allOf` to model inheritance, and `oneOf`, `anyOf`, and discriminators to model [polymorphic types](https://swagger.io/docs/specification/v3_0/data-models/inheritance-and-polymorphism/). These patterns are powerful, but can be tricky to support correctly, and most code generators struggle with them. Ploidy was built specifically with inheritance and polymorphism in mind, and aims to generate clean, type-safe, and idiomatic Rust that reads like what you'd write by hand.
+Ploidy compiles OpenAPI specs into clean, type-safe Rust that reads like it was written by hand. It's built to handle the thornier features—like inheritance, polymorphism, inline schemas, and recursive types—that trip up most code generators.
 
 ## Table of Contents
 
@@ -29,7 +29,7 @@ Many OpenAPI specs use `allOf` to model inheritance, and `oneOf`, `anyOf`, and d
   - [Per-resource feature gates](#per-resource-feature-gates)
 * [Under the Hood](#under-the-hood)
   - [The generation pipeline](#the-generation-pipeline)
-  - [AST-based generation](#ast-based-generation)
+  - [AST-based codegen](#ast-based-codegen)
   - [Smart boxing](#smart-boxing)
   - [Inline schemas](#inline-schemas)
   - [Cargo features](#cargo-features)
@@ -79,10 +79,10 @@ This produces a ready-to-use crate that includes:
 
 | Flag | Description |
 |------|-------------|
-| `-o`, `--output` | The output directory for the generated crate |
+| `-o`, `--output` | Set the output directory for the generated crate |
 | `-c`, `--check` | Verify the generated crate compiles |
 | `--name <NAME>` | Set the crate name. If not passed, and a `Cargo.toml` already exists in the output directory, use its `package.name`; otherwise, use the output directory name |
-| `--version <bump-major, bump-minor, bump-patch>` | Increment the major, minor, or patch component of the existing `package.version`. If not passed, use the existing version, or 0.1.0 for new crates |
+| `--version <bump-major \| bump-minor \| bump-patch>` | Increment the major, minor, or patch component of the existing `package.version`. If not passed, use the existing version, or 0.1.0 for new crates |
 
 #### Advanced options
 
@@ -205,7 +205,7 @@ For example, given a spec with `Customer`, `Order`, and `BillingInfo` schemas, w
 default = ["billing-info", "customer", "order"]
 billing-info = []
 customer = ["billing-info"]
-order = ["billing-info", "customer"]
+order = ["customer"]
 ```
 
 All features are enabled by default, so the generated crate works out of the box. Consumers that only need a subset of the API can pick the specific features they need:
@@ -219,21 +219,26 @@ This compiles just the `Customer` type—and its dependency, `BillingInfo`—alo
 
 ## Under the Hood
 
-Ploidy takes a somewhat different approach to code generation. If you're curious about how it works, this section is for you!
+Ploidy takes a different approach to code generation. If you're curious about how it works, this section is for you!
 
 ### The generation pipeline
 
 Ploidy processes an OpenAPI spec in three stages:
 
-📝 **Parsing** a JSON or YAML OpenAPI spec into Rust data structures. The parser is intentionally forgiving; Ploidy doesn't rigorously enforce OpenAPI (or JSON Schema) semantics.
+📝 **Parsing** a JSON or YAML OpenAPI spec into Rust data structures. The parser is intentionally forgiving; Ploidy accepts malformed specs that stricter validators reject.
 
-🏗️ **Constructing an IR** (intermediate representation). Ploidy constructs a type graph from the spec, which lets it answer questions like "which types can derive `Eq`, `Hash`, and `Default`?" and "which fields need `Box<T>` to break cycles?"
+🏗️ **Constructing an IR** (intermediate representation). Ploidy builds a type graph from the spec, which lets it answer questions like "which types can derive `Eq`, `Hash`, and `Default`?" and "which fields need `Box<T>` to break cycles?"
 
-✍️ **Generating code** from the IR. During the final stage, Ploidy builds proper Rust syntax trees from the type graph, prettifies the code, and writes it to disk.
+✍️ **Generating code** from the IR. Ploidy creates Rust syntax trees from the type graph, prettifies the code, and writes it to disk.
 
-### AST-based generation
+### AST-based codegen
 
-Most code generators use string templates, but Ploidy uses Rust's `syn` and `quote` crates to generate **syntax trees**. This means the generated code is syntactically valid by construction.
+Ploidy builds Rust **syntax trees** directly with [`syn`](https://docs.rs/syn) and [`quote`](https://docs.rs/quote), rather than assembling code from string templates. This has two benefits:
+
+* **Generated code is syntactically valid by construction.** Nodes are typed `syn` values, built with `parse_quote!` and friends. Ploidy can't produce a crate with mismatched delimiters or malformed attributes.
+* **Complex types compose cleanly.** Trait bounds, attribute macros, and nested generics combine as tokens, not concatenated strings. The generator never juggles whitespace or escaping, so hard-to-generate constructs are as reliable as simple ones.
+
+Once the tree is built, [`prettyplease`](https://docs.rs/prettyplease) formats it into the final output.
 
 ### Smart boxing
 
@@ -275,7 +280,7 @@ Since `Vec<T>` is already heap-allocated, only the `parent` field needs boxing t
 
 OpenAPI specs can define schemas directly at their point of use—in operation parameters, in request and response bodies, or nested within other schemas—rather than in the `/components/schemas` section. These are called **inline schemas**.
 
-Many code generators treat inline schemas as untyped values (`Any` or `serde_json::Value`), but Ploidy generates the same strongly-typed models for inline schemas as it does for named schemas. Inline schemas are named based on where they occur in the spec, and are namespaced in submodules within the parent module.
+Ploidy generates the same strongly-typed models for inline schemas as it does for named schemas. Inline schemas are named based on where they occur in the spec, and are namespaced in submodules within the parent module.
 
 For example, given an operation with an inline response schema:
 
@@ -296,7 +301,7 @@ For example, given an operation with an inline response schema:
           application/json:
             schema:
               type: object
-              required: [id, email, name]
+              required: [id, email]
               properties:
                 id:
                   type: string
@@ -319,7 +324,8 @@ pub mod types {
     pub struct GetUserResponse {
         pub id: String,
         pub email: String,
-        pub name: String,
+        #[serde(default, skip_serializing_if = "AbsentOr::is_absent")]
+        pub name: AbsentOr<String>,
     }
 }
 ```
@@ -366,6 +372,6 @@ Ploidy is inspired by, learns from, and builds on the wonderful work of:
 
 * The OpenAPI ecosystem: **openapi-generator**, **Progenitor**, and other code generators.
 * The Rust ecosystem: Tokio, Reqwest, Serde, `quote`, `syn`, and `winnow`.
-* [**Petgraph**](https://crates.io/crates/petgraph), a Rust graph data structure library that's Ploidy's secret sauce.
+* [**Petgraph**](https://crates.io/crates/petgraph), a Rust graph data structure library that's the backbone of Ploidy's type graph.
 
-And yes, the name is a biology pun! [Ploidy](https://en.wikipedia.org/wiki/Ploidy) refers to the number of chromosome sets in a cell, and _polyploidy_ is when cells have many chromosome sets...and polymorphic types have many forms through inheritance.
+And yes, the name is a biology pun! [Ploidy](https://en.wikipedia.org/wiki/Ploidy) is the number of complete chromosome sets an organism carries—and the types Ploidy generates carry multiple sets of their own.

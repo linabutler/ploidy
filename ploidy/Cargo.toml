@@ -1,6 +1,6 @@
 [package]
 name = "ploidy"
-description = "A compiler for polymorphic OpenAPI specs"
+description = "A polymorphism-aware OpenAPI compiler"
 readme = "README.md"
 version.workspace = true
 license.workspace = true
