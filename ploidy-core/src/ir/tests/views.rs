@@ -3921,6 +3921,77 @@ fn test_struct_not_hashable_when_field_and_inheritance_cycle_reaches_float() {
     assert!(!b.hashable());
 }
 
+#[test]
+fn test_struct_defaultable_with_required_nullable_url() {
+    // A required field with `type: [string, 'null']` and `format: uri`
+    // becomes `Option<Url>`. `Option<T>` is always `Default`, so the
+    // struct should be defaultable despite `Url` itself not being
+    // `Default`.
+    let doc = Document::from_yaml(indoc::indoc! {"
+        openapi: 3.1.0
+        info:
+          title: Test API
+          version: 1.0.0
+        paths: {}
+        components:
+          schemas:
+            Resource:
+              type: object
+              required:
+                - link
+              properties:
+                link:
+                  type: [string, 'null']
+                  format: uri
+    "})
+    .unwrap();
+
+    let arena = Arena::new();
+    let spec = Spec::from_doc(&arena, &doc).unwrap();
+    let graph = RawGraph::new(&arena, &spec).cook();
+
+    let resource = graph.schemas().find(|s| s.name() == "Resource").unwrap();
+    assert!(resource.defaultable());
+}
+
+#[test]
+fn test_struct_not_defaultable_with_required_nullable_url_integer() {
+    // A required field with `type: [string, integer, 'null']` and
+    // `format: uri` becomes an inline untagged union with Url, I32,
+    // and Null variants. The Null variant means the type *could*
+    // default to null, but we currently mark all untagged unions as
+    // undefaultable, so the struct isn't defaultable either.
+    //
+    // TODO: this is a latent bug — an untagged union with a Null
+    // variant could derive `Default` via `#[default]` on the Null
+    // variant, making the containing struct defaultable too.
+    let doc = Document::from_yaml(indoc::indoc! {"
+        openapi: 3.1.0
+        info:
+          title: Test API
+          version: 1.0.0
+        paths: {}
+        components:
+          schemas:
+            Resource:
+              type: object
+              required:
+                - link
+              properties:
+                link:
+                  type: [string, integer, 'null']
+                  format: uri
+    "})
+    .unwrap();
+
+    let arena = Arena::new();
+    let spec = Spec::from_doc(&arena, &doc).unwrap();
+    let graph = RawGraph::new(&arena, &spec).cook();
+
+    let resource = graph.schemas().find(|s| s.name() == "Resource").unwrap();
+    assert!(!resource.defaultable());
+}
+
 // MARK: Shadow edge visibility
 
 #[test]
