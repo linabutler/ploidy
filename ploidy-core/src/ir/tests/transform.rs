@@ -892,6 +892,75 @@ fn test_struct_with_nullable_field_openapi_31_syntax() {
 }
 
 #[test]
+fn test_struct_with_both_nullable_and_null_in_type_array() {
+    // When a field sets both `nullable: true` (OpenAPI 3.0) and
+    // `type: [string, 'null']` (OpenAPI 3.1), they should collapse
+    // into a single `Optional`. Currently they double-wrap to
+    // `Optional(Optional(String))` — the type array produces one
+    // `Optional` in `other()`, and `nullable: true` adds another
+    // in `properties()`.
+    //
+    // TODO: collapse `nullable: true` and `'null'` in the type
+    // array so both paths produce a single `Optional`.
+    let doc = Document::from_yaml(indoc::indoc! {"
+        openapi: 3.1.0
+        info:
+          title: Test
+          version: 1.0.0
+    "})
+    .unwrap();
+    let schema: Schema = serde_yaml::from_str(indoc::indoc! {"
+        type: object
+        properties:
+          value:
+            type: [string, 'null']
+            nullable: true
+        required:
+          - value
+    "})
+    .unwrap();
+
+    let arena = Arena::new();
+    let result = transform(&arena, &doc, "Container", &schema);
+
+    // BUG: this should be a single `Optional(Primitive(String))`,
+    // not a nested `Optional(Optional(Primitive(String)))`.
+    assert_matches!(
+        result,
+        SpecType::Schema(SpecSchemaType::Struct(
+            SchemaTypeInfo {
+                name: "Container",
+                ..
+            },
+            SpecStruct {
+                fields: [SpecStructField {
+                    name: StructFieldName::Name("value"),
+                    ty: SpecType::Inline(SpecInlineType::Container(
+                        _,
+                        SpecContainer::Optional(SpecInner {
+                            ty: SpecType::Inline(SpecInlineType::Container(
+                                _,
+                                SpecContainer::Optional(SpecInner {
+                                    ty: SpecType::Inline(SpecInlineType::Primitive(
+                                        _,
+                                        PrimitiveType::String
+                                    )),
+                                    ..
+                                }),
+                            )),
+                            ..
+                        }),
+                    )),
+                    required: true,
+                    ..
+                }],
+                ..
+            },
+        )),
+    );
+}
+
+#[test]
 fn test_struct_ref_field_description() {
     let doc = Document::from_yaml(indoc::indoc! {"
         openapi: 3.0.0
