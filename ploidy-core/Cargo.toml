@@ -19,7 +19,7 @@ itertools = "0.14"
 miette = "7"
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["preserve_order"] }
-serde-saphyr = "0.0.23"
+serde-saphyr = "0.0.24"
 percent-encoding = "2.3"
 petgraph = "0.8"
 ploidy-pointer = { workspace = true, features = ["full"] }

@@ -21,15 +21,12 @@ pub struct Document {
 impl Document {
     /// Parse an OpenAPI document from a YAML or JSON string.
     pub fn from_yaml(yaml: &str) -> Result<Self, SerdeError> {
-        use serde_saphyr::{Budget, Options};
         let result = serde_saphyr::from_str_with_options(
             yaml,
-            Options {
-                budget: Some(Budget {
+            serde_saphyr::options! {
+                budget: serde_saphyr::budget! {
                     max_nodes: 500_000,
-                    ..Default::default()
-                }),
-                ..Default::default()
+                },
             },
         )?;
         Ok(result)
