@@ -98,23 +98,22 @@ impl<'context, 'a> IrTransformer<'context, 'a> {
             for schema in one_of {
                 match schema {
                     RefOrSchema::Ref(r) => {
-                        let name: &_ = self.arena().alloc_str(&r.path.name());
-                        let aliases =
-                            match inverted.get(&r.path).map(|s| s.as_slice()).unwrap_or(&[]) {
-                                // When a discriminator value doesn't have
-                                // an explicit `mapping`, use the schema name.
-                                [] => &[name],
-                                aliases => aliases,
-                            };
+                        let name: &_ = self.arena().alloc_str(&r.name());
+                        let aliases = match inverted.get(r).map(|s| s.as_slice()).unwrap_or(&[]) {
+                            // When a discriminator value doesn't have
+                            // an explicit `mapping`, use the schema name.
+                            [] => &[name],
+                            aliases => aliases,
+                        };
                         variants.push(SpecTaggedVariant {
                             name,
-                            ty: self.arena().alloc(SpecType::Ref(&r.path)),
+                            ty: self.arena().alloc(SpecType::Ref(r)),
                             aliases: self.arena().alloc_slice_copy(aliases),
                         });
                     }
                     // An inline schema variant can't have a discriminator mapping;
                     // fall through to `try_untagged`.
-                    RefOrSchema::Other(_) => return Err(self),
+                    RefOrSchema::Inline(_) => return Err(self),
                 }
             }
             variants
@@ -144,9 +143,9 @@ impl<'context, 'a> IrTransformer<'context, 'a> {
             .map(|(index, schema)| (index + 1, schema))
             .map(|(index, schema)| {
                 let ty = match schema {
-                    RefOrSchema::Ref(r) => Some(SpecType::Ref(&r.path)),
-                    RefOrSchema::Other(s) if matches!(&*s.ty, [Ty::Null]) => None,
-                    RefOrSchema::Other(schema) => {
+                    RefOrSchema::Ref(r) => Some(SpecType::Ref(r)),
+                    RefOrSchema::Inline(s) if matches!(&*s.ty, [Ty::Null]) => None,
+                    RefOrSchema::Inline(schema) => {
                         let segment = InlineTypePathSegment::Variant(index);
                         let path = match self.name {
                             TypeInfo::Schema(info) => InlineTypePath {
@@ -237,8 +236,8 @@ impl<'context, 'a> IrTransformer<'context, 'a> {
             // A single-variant `anyOf` should unwrap to the variant type. This
             // preserves type references that would otherwise become `Any`.
             return Ok(match schema {
-                RefOrSchema::Ref(r) => SpecType::Ref(&r.path),
-                RefOrSchema::Other(schema) => {
+                RefOrSchema::Ref(r) => SpecType::Ref(r),
+                RefOrSchema::Inline(schema) => {
                     let path = match self.name {
                         TypeInfo::Schema(info) => InlineTypePath {
                             root: InlineTypePathRoot::Type(info.name),
@@ -260,17 +259,16 @@ impl<'context, 'a> IrTransformer<'context, 'a> {
                         // For references, use the referenced type's name
                         // as the field name. For example, a pointer like
                         // `#/components/schemas/Address` becomes `address`.
-                        let name = StructFieldName::Name(self.arena().alloc_str(&r.path.name()));
-                        let ty: &_ = self.arena().alloc(SpecType::Ref(&r.path));
+                        let name = StructFieldName::Name(self.arena().alloc_str(&r.name()));
+                        let ty: &_ = self.arena().alloc(SpecType::Ref(r));
                         let desc = r
-                            .path
                             .pointer()
                             .follow::<&Schema>(self.context.doc)
                             .ok()
                             .and_then(|s| s.description.as_deref());
                         (name, ty, desc)
                     }
-                    RefOrSchema::Other(schema) => {
+                    RefOrSchema::Inline(schema) => {
                         // For inline schemas, we don't have a name that we can use,
                         // so use its index in `anyOf` as a naming hint.
                         let name = StructFieldName::Hint(StructFieldNameHint::Index(index + 1));
@@ -453,8 +451,8 @@ impl<'context, 'a> IrTransformer<'context, 'a> {
 
                 (Ty::Array, _) => {
                     let items = match &self.schema.items {
-                        Some(RefOrSchema::Ref(r)) => SpecType::Ref(&r.path),
-                        Some(RefOrSchema::Other(schema)) => {
+                        Some(RefOrSchema::Ref(r)) => SpecType::Ref(r),
+                        Some(RefOrSchema::Inline(schema)) => {
                             let segment = InlineTypePathSegment::ArrayItem;
                             let path = match self.name {
                                 TypeInfo::Schema(info) => InlineTypePath {
@@ -491,10 +489,10 @@ impl<'context, 'a> IrTransformer<'context, 'a> {
                         Some(AdditionalProperties::RefOrSchema(RefOrSchema::Ref(r))) => {
                             Some(SpecInner {
                                 description: self.schema.description.as_deref(),
-                                ty: self.arena().alloc(SpecType::Ref(&r.path)),
+                                ty: self.arena().alloc(SpecType::Ref(r)),
                             })
                         }
-                        Some(AdditionalProperties::RefOrSchema(RefOrSchema::Other(schema))) => {
+                        Some(AdditionalProperties::RefOrSchema(RefOrSchema::Inline(schema))) => {
                             let segment = InlineTypePathSegment::MapValue;
                             let path = match self.name {
                                 TypeInfo::Schema(info) => InlineTypePath {
@@ -617,8 +615,8 @@ impl<'context, 'a> IrTransformer<'context, 'a> {
             .enumerate()
             .map(|(index, parent)| (index + 1, parent))
             .map(move |(index, parent)| &*match parent {
-                RefOrSchema::Ref(r) => self.arena().alloc(SpecType::Ref(&r.path)),
-                RefOrSchema::Other(schema) => {
+                RefOrSchema::Ref(r) => self.arena().alloc(SpecType::Ref(r)),
+                RefOrSchema::Inline(schema) => {
                     let segment = InlineTypePathSegment::Parent(index);
                     let path = match self.name {
                         TypeInfo::Schema(info) => InlineTypePath {
@@ -644,8 +642,8 @@ impl<'context, 'a> IrTransformer<'context, 'a> {
                 let field_name = name.as_str();
                 let required = self.schema.required.contains(name);
                 let ty: &_ = match field_schema {
-                    RefOrSchema::Ref(r) => self.arena().alloc(SpecType::Ref(&r.path)),
-                    RefOrSchema::Other(schema) => {
+                    RefOrSchema::Ref(r) => self.arena().alloc(SpecType::Ref(r)),
+                    RefOrSchema::Inline(schema) => {
                         let segment =
                             InlineTypePathSegment::Field(StructFieldName::Name(field_name));
                         let path = match self.name {
@@ -660,18 +658,16 @@ impl<'context, 'a> IrTransformer<'context, 'a> {
                     }
                 };
                 let description = match field_schema {
-                    RefOrSchema::Other(schema) => schema.description.as_deref(),
+                    RefOrSchema::Inline(schema) => schema.description.as_deref(),
                     RefOrSchema::Ref(r) => r
-                        .path
                         .pointer()
                         .follow::<&Schema>(self.context.doc)
                         .ok()
                         .and_then(|schema| schema.description.as_deref()),
                 };
                 let nullable = match field_schema {
-                    RefOrSchema::Other(schema) if schema.nullable => true,
+                    RefOrSchema::Inline(schema) if schema.nullable => true,
                     RefOrSchema::Ref(r) => r
-                        .path
                         .pointer()
                         .follow::<&Schema>(self.context.doc)
                         .is_ok_and(|schema| schema.nullable),
@@ -725,9 +721,9 @@ impl<'context, 'a> IrTransformer<'context, 'a> {
         let inner = match &self.schema.additional_properties {
             Some(AdditionalProperties::RefOrSchema(RefOrSchema::Ref(r))) => SpecInner {
                 description: self.schema.description.as_deref(),
-                ty: self.arena().alloc(SpecType::Ref(&r.path)),
+                ty: self.arena().alloc(SpecType::Ref(r)),
             },
-            Some(AdditionalProperties::RefOrSchema(RefOrSchema::Other(schema))) => {
+            Some(AdditionalProperties::RefOrSchema(RefOrSchema::Inline(schema))) => {
                 let path = path.join(self.arena(), &[InlineTypePathSegment::MapValue]);
                 SpecInner {
                     description: self.schema.description.as_deref(),

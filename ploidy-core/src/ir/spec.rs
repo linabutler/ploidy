@@ -105,7 +105,7 @@ impl<'a> Spec<'a> {
                         .filter_map(|p| match p {
                             RefOrParameter::Other(p) => Some(p),
                             RefOrParameter::Ref(r) => {
-                                r.path.pointer().follow::<&Parameter>(doc).ok()
+                                r.ref_.pointer().follow::<&Parameter>(doc).ok()
                             }
                         })
                     {
@@ -149,8 +149,8 @@ impl<'a> Spec<'a> {
                     let params = sources.into_iter().filter_map(|source| match source {
                         Source::Declared(param) => {
                             let ty: &_ = match &param.schema {
-                                Some(RefOrSchema::Ref(r)) => arena.alloc(SpecType::Ref(&r.path)),
-                                Some(RefOrSchema::Other(schema)) => arena.alloc(transform(
+                                Some(RefOrSchema::Ref(r)) => arena.alloc(SpecType::Ref(r)),
+                                Some(RefOrSchema::Inline(schema)) => arena.alloc(transform(
                                     arena,
                                     doc,
                                     InlineTypePath {
@@ -238,7 +238,7 @@ impl<'a> Spec<'a> {
                         let request = match request_or_ref {
                             RefOrRequestBody::Other(rb) => rb,
                             RefOrRequestBody::Ref(r) => {
-                                r.path.pointer().follow::<&RequestBody>(doc).ok()?
+                                r.ref_.pointer().follow::<&RequestBody>(doc).ok()?
                             }
                         };
 
@@ -259,9 +259,9 @@ impl<'a> Spec<'a> {
                     .map(|content| match content {
                         RequestContent::Multipart => SpecRequest::Multipart,
                         RequestContent::Json(RefOrSchema::Ref(r)) => {
-                            SpecRequest::Json(arena.alloc(SpecType::Ref(&r.path)))
+                            SpecRequest::Json(arena.alloc(SpecType::Ref(r)))
                         }
-                        RequestContent::Json(RefOrSchema::Other(schema)) => {
+                        RequestContent::Json(RefOrSchema::Inline(schema)) => {
                             SpecRequest::Json(arena.alloc(transform(
                                 arena,
                                 doc,
@@ -310,7 +310,7 @@ impl<'a> Spec<'a> {
                             let response = match response_or_ref {
                                 RefOrResponse::Other(r) => r,
                                 RefOrResponse::Ref(r) => {
-                                    r.path.pointer().follow::<&Response>(doc).ok()?
+                                    r.ref_.pointer().follow::<&Response>(doc).ok()?
                                 }
                             };
                             response.content.as_ref()
@@ -330,9 +330,9 @@ impl<'a> Spec<'a> {
                         })
                         .map(|content| match content {
                             ResponseContent::Json(RefOrSchema::Ref(r)) => {
-                                SpecResponse::Json(arena.alloc(SpecType::Ref(&r.path)))
+                                SpecResponse::Json(arena.alloc(SpecType::Ref(r)))
                             }
-                            ResponseContent::Json(RefOrSchema::Other(schema)) => {
+                            ResponseContent::Json(RefOrSchema::Inline(schema)) => {
                                 SpecResponse::Json(arena.alloc(transform(
                                     arena,
                                     doc,
