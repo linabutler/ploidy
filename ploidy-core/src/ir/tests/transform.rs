@@ -24,7 +24,7 @@ fn test_enum_string_variants() {
           version: 1.0.0
     "})
     .unwrap();
-    let schema: Schema = serde_yaml::from_str(indoc::indoc! {"
+    let schema: Schema = serde_saphyr::from_str(indoc::indoc! {"
         type: string
         enum: [active, inactive, pending]
     "})
@@ -58,7 +58,7 @@ fn test_enum_number_variants() {
           version: 1.0.0
     "})
     .unwrap();
-    let schema: Schema = serde_yaml::from_str(indoc::indoc! {"
+    let schema: Schema = serde_saphyr::from_str(indoc::indoc! {"
         type: string
         enum: [1, 2, 3]
     "})
@@ -95,7 +95,7 @@ fn test_enum_bool_variants() {
           version: 1.0.0
     "})
     .unwrap();
-    let schema: Schema = serde_yaml::from_str(indoc::indoc! {"
+    let schema: Schema = serde_saphyr::from_str(indoc::indoc! {"
         type: string
         enum: [true, false]
     "})
@@ -125,7 +125,7 @@ fn test_enum_mixed_types() {
           version: 1.0.0
     "})
     .unwrap();
-    let schema: Schema = serde_yaml::from_str(indoc::indoc! {"
+    let schema: Schema = serde_saphyr::from_str(indoc::indoc! {"
         type: string
         enum: [text, 42, true]
     "})
@@ -164,7 +164,7 @@ fn test_primitive_string_formats() {
     let arena = Arena::new();
 
     // `string` with `date-time` format.
-    let schema: Schema = serde_yaml::from_str(indoc::indoc! {"
+    let schema: Schema = serde_saphyr::from_str(indoc::indoc! {"
         type: string
         format: date-time
     "})
@@ -176,7 +176,7 @@ fn test_primitive_string_formats() {
     );
 
     // `string` with `date` format.
-    let schema: Schema = serde_yaml::from_str(indoc::indoc! {"
+    let schema: Schema = serde_saphyr::from_str(indoc::indoc! {"
         type: string
         format: date
     "})
@@ -188,7 +188,7 @@ fn test_primitive_string_formats() {
     );
 
     // `string` with `uri` format.
-    let schema: Schema = serde_yaml::from_str(indoc::indoc! {"
+    let schema: Schema = serde_saphyr::from_str(indoc::indoc! {"
         type: string
         format: uri
     "})
@@ -200,7 +200,7 @@ fn test_primitive_string_formats() {
     );
 
     // `string` with `uuid` format.
-    let schema: Schema = serde_yaml::from_str(indoc::indoc! {"
+    let schema: Schema = serde_saphyr::from_str(indoc::indoc! {"
         type: string
         format: uuid
     "})
@@ -212,7 +212,7 @@ fn test_primitive_string_formats() {
     );
 
     // `string` with `byte` format.
-    let schema: Schema = serde_yaml::from_str(indoc::indoc! {"
+    let schema: Schema = serde_saphyr::from_str(indoc::indoc! {"
         type: string
         format: byte
     "})
@@ -224,7 +224,7 @@ fn test_primitive_string_formats() {
     );
 
     // `string` with `binary` format.
-    let schema: Schema = serde_yaml::from_str(indoc::indoc! {"
+    let schema: Schema = serde_saphyr::from_str(indoc::indoc! {"
         type: string
         format: binary
     "})
@@ -236,7 +236,7 @@ fn test_primitive_string_formats() {
     );
 
     // `string` without format.
-    let schema: Schema = serde_yaml::from_str(indoc::indoc! {"
+    let schema: Schema = serde_saphyr::from_str(indoc::indoc! {"
         type: string
     "})
     .unwrap();
@@ -259,7 +259,7 @@ fn test_primitive_integer_formats() {
     let arena = Arena::new();
 
     // `integer` with `int32` format.
-    let schema: Schema = serde_yaml::from_str(indoc::indoc! {"
+    let schema: Schema = serde_saphyr::from_str(indoc::indoc! {"
         type: integer
         format: int32
     "})
@@ -271,7 +271,7 @@ fn test_primitive_integer_formats() {
     );
 
     // `integer` with `int64` format.
-    let schema: Schema = serde_yaml::from_str(indoc::indoc! {"
+    let schema: Schema = serde_saphyr::from_str(indoc::indoc! {"
         type: integer
         format: int64
     "})
@@ -283,7 +283,7 @@ fn test_primitive_integer_formats() {
     );
 
     // `integer` with `unix-time` format.
-    let schema: Schema = serde_yaml::from_str(indoc::indoc! {"
+    let schema: Schema = serde_saphyr::from_str(indoc::indoc! {"
         type: integer
         format: unix-time
     "})
@@ -295,7 +295,7 @@ fn test_primitive_integer_formats() {
     );
 
     // `integer` without format defaults to `int32`.
-    let schema: Schema = serde_yaml::from_str(indoc::indoc! {"
+    let schema: Schema = serde_saphyr::from_str(indoc::indoc! {"
         type: integer
     "})
     .unwrap();
@@ -318,7 +318,7 @@ fn test_primitive_number_formats() {
     let arena = Arena::new();
 
     // `number` with `float` format.
-    let schema: Schema = serde_yaml::from_str(indoc::indoc! {"
+    let schema: Schema = serde_saphyr::from_str(indoc::indoc! {"
         type: number
         format: float
     "})
@@ -330,7 +330,7 @@ fn test_primitive_number_formats() {
     );
 
     // `number` with `double` format.
-    let schema: Schema = serde_yaml::from_str(indoc::indoc! {"
+    let schema: Schema = serde_saphyr::from_str(indoc::indoc! {"
         type: number
         format: double
     "})
@@ -342,7 +342,7 @@ fn test_primitive_number_formats() {
     );
 
     // `number` with `unix-time` format.
-    let schema: Schema = serde_yaml::from_str(indoc::indoc! {"
+    let schema: Schema = serde_saphyr::from_str(indoc::indoc! {"
         type: number
         format: unix-time
     "})
@@ -354,7 +354,7 @@ fn test_primitive_number_formats() {
     );
 
     // `number` without format defaults to `double`.
-    let schema: Schema = serde_yaml::from_str(indoc::indoc! {"
+    let schema: Schema = serde_saphyr::from_str(indoc::indoc! {"
         type: number
     "})
     .unwrap();
@@ -380,7 +380,7 @@ fn test_array_with_ref_items() {
               type: string
     "})
     .unwrap();
-    let schema: Schema = serde_yaml::from_str(indoc::indoc! {"
+    let schema: Schema = serde_saphyr::from_str(indoc::indoc! {"
         type: array
         items:
           $ref: '#/components/schemas/Item'
@@ -411,7 +411,7 @@ fn test_array_with_inline_items() {
           version: 1.0.0
     "})
     .unwrap();
-    let schema: Schema = serde_yaml::from_str(indoc::indoc! {"
+    let schema: Schema = serde_saphyr::from_str(indoc::indoc! {"
         type: array
         items:
           type: string
@@ -448,7 +448,7 @@ fn test_struct_with_own_properties() {
     "})
     .unwrap();
     let arena = Arena::new();
-    let schema: Schema = serde_yaml::from_str(indoc::indoc! {"
+    let schema: Schema = serde_saphyr::from_str(indoc::indoc! {"
         type: object
         required: [name, age]
         properties:
@@ -497,7 +497,7 @@ fn test_struct_with_additional_properties_ref() {
               type: string
     "})
     .unwrap();
-    let schema: Schema = serde_yaml::from_str(indoc::indoc! {"
+    let schema: Schema = serde_saphyr::from_str(indoc::indoc! {"
         type: object
         properties:
           name:
@@ -546,7 +546,7 @@ fn test_struct_with_additional_properties_inline() {
           version: 1.0.0
     "})
     .unwrap();
-    let schema: Schema = serde_yaml::from_str(indoc::indoc! {"
+    let schema: Schema = serde_saphyr::from_str(indoc::indoc! {"
         type: object
         properties:
           name:
@@ -620,7 +620,7 @@ fn test_struct_with_additional_properties_true() {
           version: 1.0.0
     "})
     .unwrap();
-    let schema: Schema = serde_yaml::from_str(indoc::indoc! {"
+    let schema: Schema = serde_saphyr::from_str(indoc::indoc! {"
         type: object
         properties: {}
         additionalProperties: true
@@ -670,7 +670,7 @@ fn test_struct_without_properties_falls_through() {
           version: 1.0.0
     "})
     .unwrap();
-    let schema: Schema = serde_yaml::from_str(indoc::indoc! {"
+    let schema: Schema = serde_saphyr::from_str(indoc::indoc! {"
         type: object
         additionalProperties:
           type: string
@@ -701,7 +701,7 @@ fn test_struct_with_required_fields() {
           version: 1.0.0
     "})
     .unwrap();
-    let schema: Schema = serde_yaml::from_str(indoc::indoc! {"
+    let schema: Schema = serde_saphyr::from_str(indoc::indoc! {"
         type: object
         properties:
           name:
@@ -753,7 +753,7 @@ fn test_struct_with_nullable_field_ref() {
               nullable: true
     "})
     .unwrap();
-    let schema: Schema = serde_yaml::from_str(indoc::indoc! {"
+    let schema: Schema = serde_saphyr::from_str(indoc::indoc! {"
         type: object
         properties:
           value:
@@ -798,7 +798,7 @@ fn test_struct_with_nullable_field_inline() {
           version: 1.0.0
     "})
     .unwrap();
-    let schema: Schema = serde_yaml::from_str(indoc::indoc! {"
+    let schema: Schema = serde_saphyr::from_str(indoc::indoc! {"
         type: object
         properties:
           value:
@@ -847,7 +847,7 @@ fn test_struct_with_nullable_field_openapi_31_syntax() {
           version: 1.0.0
     "})
     .unwrap();
-    let schema: Schema = serde_yaml::from_str(indoc::indoc! {"
+    let schema: Schema = serde_saphyr::from_str(indoc::indoc! {"
         type: object
         properties:
           value:
@@ -905,7 +905,7 @@ fn test_struct_ref_field_description() {
               description: An identifier
     "})
     .unwrap();
-    let schema: Schema = serde_yaml::from_str(indoc::indoc! {"
+    let schema: Schema = serde_saphyr::from_str(indoc::indoc! {"
         type: object
         properties:
           id:
@@ -941,7 +941,7 @@ fn test_struct_inline_field_description() {
           version: 1.0.0
     "})
     .unwrap();
-    let schema: Schema = serde_yaml::from_str(indoc::indoc! {"
+    let schema: Schema = serde_saphyr::from_str(indoc::indoc! {"
         type: object
         properties:
           name:
@@ -978,7 +978,7 @@ fn test_struct_inline_all_of_becomes_parent() {
           version: 1.0.0
     "})
     .unwrap();
-    let schema: Schema = serde_yaml::from_str(indoc::indoc! {"
+    let schema: Schema = serde_saphyr::from_str(indoc::indoc! {"
         allOf:
           - type: object
             properties:
@@ -1059,7 +1059,7 @@ fn test_struct_mixed_all_of_ref_and_inline() {
                   type: string
     "})
     .unwrap();
-    let schema: Schema = serde_yaml::from_str(indoc::indoc! {"
+    let schema: Schema = serde_saphyr::from_str(indoc::indoc! {"
         allOf:
           - $ref: '#/components/schemas/Base'
           - type: object
@@ -1125,7 +1125,7 @@ fn test_tagged_with_mapping() {
                   type: string
     "})
     .unwrap();
-    let schema: Schema = serde_yaml::from_str(indoc::indoc! {"
+    let schema: Schema = serde_saphyr::from_str(indoc::indoc! {"
         oneOf:
           - $ref: '#/components/schemas/Dog'
           - $ref: '#/components/schemas/Cat'
@@ -1181,7 +1181,7 @@ fn test_tagged_filters_non_refs() {
     "})
     .unwrap();
     // Include both a reference and an inline schema.
-    let schema: Schema = serde_yaml::from_str(indoc::indoc! {"
+    let schema: Schema = serde_saphyr::from_str(indoc::indoc! {"
         oneOf:
           - $ref: '#/components/schemas/Dog'
           - type: object
@@ -1234,7 +1234,7 @@ fn test_tagged_multiple_aliases() {
                   type: string
     "})
     .unwrap();
-    let schema: Schema = serde_yaml::from_str(indoc::indoc! {"
+    let schema: Schema = serde_saphyr::from_str(indoc::indoc! {"
         oneOf:
           - $ref: '#/components/schemas/Success'
         discriminator:
@@ -1281,7 +1281,7 @@ fn test_tagged_description() {
                   type: string
     "})
     .unwrap();
-    let schema: Schema = serde_yaml::from_str(indoc::indoc! {"
+    let schema: Schema = serde_saphyr::from_str(indoc::indoc! {"
         description: A tagged union of animals
         oneOf:
           - $ref: '#/components/schemas/Dog'
@@ -1336,7 +1336,7 @@ fn test_tagged_without_mapping() {
     .unwrap();
     // A discriminator without an explicit `mapping` should default to
     // the schema name.
-    let schema: Schema = serde_yaml::from_str(indoc::indoc! {"
+    let schema: Schema = serde_saphyr::from_str(indoc::indoc! {"
         oneOf:
           - $ref: '#/components/schemas/Dog'
           - $ref: '#/components/schemas/Cat'
@@ -1395,7 +1395,7 @@ fn test_tagged_with_partial_mapping() {
     .unwrap();
     // Only `Dog` has an explicit mapping; `Cat` should default to
     // its schema name.
-    let schema: Schema = serde_yaml::from_str(indoc::indoc! {"
+    let schema: Schema = serde_saphyr::from_str(indoc::indoc! {"
         oneOf:
           - $ref: '#/components/schemas/Dog'
           - $ref: '#/components/schemas/Cat'
@@ -1450,7 +1450,7 @@ fn test_untagged_basic() {
               type: integer
     "})
     .unwrap();
-    let schema: Schema = serde_yaml::from_str(indoc::indoc! {"
+    let schema: Schema = serde_saphyr::from_str(indoc::indoc! {"
         oneOf:
           - $ref: '#/components/schemas/String'
           - $ref: '#/components/schemas/Number'
@@ -1487,7 +1487,7 @@ fn test_untagged_empty_simplifies() {
           version: 1.0.0
     "})
     .unwrap();
-    let schema: Schema = serde_yaml::from_str(indoc::indoc! {"
+    let schema: Schema = serde_saphyr::from_str(indoc::indoc! {"
         oneOf: []
     "})
     .unwrap();
@@ -1507,7 +1507,7 @@ fn test_untagged_single_null_simplifies() {
           version: 1.0.0
     "})
     .unwrap();
-    let schema: Schema = serde_yaml::from_str(indoc::indoc! {"
+    let schema: Schema = serde_saphyr::from_str(indoc::indoc! {"
         oneOf:
           - type: 'null'
     "})
@@ -1532,7 +1532,7 @@ fn test_untagged_single_variant_unwraps() {
               type: string
     "})
     .unwrap();
-    let schema: Schema = serde_yaml::from_str(indoc::indoc! {"
+    let schema: Schema = serde_saphyr::from_str(indoc::indoc! {"
         oneOf:
           - $ref: '#/components/schemas/String'
     "})
@@ -1561,7 +1561,7 @@ fn test_untagged_variant_numbering() {
               type: string
     "})
     .unwrap();
-    let schema: Schema = serde_yaml::from_str(indoc::indoc! {"
+    let schema: Schema = serde_saphyr::from_str(indoc::indoc! {"
         oneOf:
           - $ref: '#/components/schemas/A'
           - $ref: '#/components/schemas/B'
@@ -1598,7 +1598,7 @@ fn test_untagged_null_detection() {
           version: 1.0.0
     "})
     .unwrap();
-    let schema: Schema = serde_yaml::from_str(indoc::indoc! {"
+    let schema: Schema = serde_saphyr::from_str(indoc::indoc! {"
         oneOf:
           - type: 'null'
           - type: string
@@ -1643,7 +1643,7 @@ fn test_any_of_fields_marked_flattened_not_required() {
                   type: string
     "})
     .unwrap();
-    let schema: Schema = serde_yaml::from_str(indoc::indoc! {"
+    let schema: Schema = serde_saphyr::from_str(indoc::indoc! {"
         anyOf:
           - $ref: '#/components/schemas/Address'
           - $ref: '#/components/schemas/Email'
@@ -1698,7 +1698,7 @@ fn test_any_of_ref_uses_type_name() {
                   type: string
     "})
     .unwrap();
-    let schema: Schema = serde_yaml::from_str(indoc::indoc! {"
+    let schema: Schema = serde_saphyr::from_str(indoc::indoc! {"
         anyOf:
           - $ref: '#/components/schemas/Address'
           - $ref: '#/components/schemas/Address'
@@ -1743,7 +1743,7 @@ fn test_any_of_inline_uses_index_hint() {
           version: 1.0.0
     "})
     .unwrap();
-    let schema: Schema = serde_yaml::from_str(indoc::indoc! {"
+    let schema: Schema = serde_saphyr::from_str(indoc::indoc! {"
         anyOf:
           - type: object
             properties:
@@ -1804,7 +1804,7 @@ fn test_any_of_with_properties() {
                   type: string
     "})
     .unwrap();
-    let schema: Schema = serde_yaml::from_str(indoc::indoc! {"
+    let schema: Schema = serde_saphyr::from_str(indoc::indoc! {"
         anyOf:
           - $ref: '#/components/schemas/Extra1'
           - $ref: '#/components/schemas/Extra3'
@@ -1867,7 +1867,7 @@ fn test_any_of_nullable_refs() {
               nullable: true
     "})
     .unwrap();
-    let schema: Schema = serde_yaml::from_str(indoc::indoc! {"
+    let schema: Schema = serde_saphyr::from_str(indoc::indoc! {"
         anyOf:
           - $ref: '#/components/schemas/NullableString1'
           - $ref: '#/components/schemas/NullableString2'
@@ -1930,7 +1930,7 @@ fn test_any_of_with_all_of() {
                   type: string
     "})
     .unwrap();
-    let schema: Schema = serde_yaml::from_str(indoc::indoc! {"
+    let schema: Schema = serde_saphyr::from_str(indoc::indoc! {"
         allOf:
           - $ref: '#/components/schemas/Base'
         anyOf:
@@ -1983,7 +1983,7 @@ fn test_boolean_primitive_transformation() {
           version: 1.0.0
     "})
     .unwrap();
-    let schema: Schema = serde_yaml::from_str(indoc::indoc! {"
+    let schema: Schema = serde_saphyr::from_str(indoc::indoc! {"
         type: boolean
     "})
     .unwrap();
@@ -2007,7 +2007,7 @@ fn test_unhandled_string_format_falls_back_to_string() {
     "})
     .unwrap();
     // Use a format that is not explicitly handled for strings.
-    let schema: Schema = serde_yaml::from_str(indoc::indoc! {"
+    let schema: Schema = serde_saphyr::from_str(indoc::indoc! {"
         type: string
         format: currency
     "})
@@ -2031,7 +2031,7 @@ fn test_empty_type_array_produces_any() {
           version: 1.0.0
     "})
     .unwrap();
-    let schema: Schema = serde_yaml::from_str(indoc::indoc! {"
+    let schema: Schema = serde_saphyr::from_str(indoc::indoc! {"
         type: []
     "})
     .unwrap();
@@ -2051,7 +2051,7 @@ fn test_array_without_items_produces_array_of_any() {
           version: 1.0.0
     "})
     .unwrap();
-    let schema: Schema = serde_yaml::from_str(indoc::indoc! {"
+    let schema: Schema = serde_saphyr::from_str(indoc::indoc! {"
         type: array
     "})
     .unwrap();
@@ -2083,7 +2083,7 @@ fn test_object_with_empty_properties_produces_struct() {
           version: 1.0.0
     "})
     .unwrap();
-    let schema: Schema = serde_yaml::from_str(indoc::indoc! {"
+    let schema: Schema = serde_saphyr::from_str(indoc::indoc! {"
         type: object
         properties: {}
     "})
@@ -2114,7 +2114,7 @@ fn test_schema_without_type_or_properties_produces_any() {
           version: 1.0.0
     "})
     .unwrap();
-    let schema: Schema = serde_yaml::from_str(indoc::indoc! {"
+    let schema: Schema = serde_saphyr::from_str(indoc::indoc! {"
         {}
     "})
     .unwrap();
@@ -2135,7 +2135,7 @@ fn test_type_and_null_in_type_array_creates_nullable() {
           version: 1.0.0
     "})
     .unwrap();
-    let schema: Schema = serde_yaml::from_str(indoc::indoc! {"
+    let schema: Schema = serde_saphyr::from_str(indoc::indoc! {"
         type: [string, 'null']
     "})
     .unwrap();
@@ -2169,7 +2169,7 @@ fn test_type_array_and_null_creates_nullable_array() {
           version: 1.0.0
     "})
     .unwrap();
-    let schema: Schema = serde_yaml::from_str(indoc::indoc! {"
+    let schema: Schema = serde_saphyr::from_str(indoc::indoc! {"
         type: [array, 'null']
         items:
           type: string
@@ -2209,7 +2209,7 @@ fn test_type_object_and_null_creates_nullable_map() {
           version: 1.0.0
     "})
     .unwrap();
-    let schema: Schema = serde_yaml::from_str(indoc::indoc! {"
+    let schema: Schema = serde_saphyr::from_str(indoc::indoc! {"
         type: [object, 'null']
         additionalProperties:
           type: integer
@@ -2249,7 +2249,7 @@ fn test_multiple_types_string_and_integer_untagged() {
           version: 1.0.0
     "})
     .unwrap();
-    let schema: Schema = serde_yaml::from_str(indoc::indoc! {"
+    let schema: Schema = serde_saphyr::from_str(indoc::indoc! {"
         type: [string, integer]
     "})
     .unwrap();
@@ -2290,7 +2290,7 @@ fn test_type_array_with_format_produces_inline_variants() {
           version: 1.0.0
     "})
     .unwrap();
-    let schema: Schema = serde_yaml::from_str(indoc::indoc! {"
+    let schema: Schema = serde_saphyr::from_str(indoc::indoc! {"
         type: [string, integer]
         format: date-time
     "})
@@ -2332,7 +2332,7 @@ fn test_deeply_nested_inline_types() {
           version: 1.0.0
     "})
     .unwrap();
-    let schema: Schema = serde_yaml::from_str(indoc::indoc! {"
+    let schema: Schema = serde_saphyr::from_str(indoc::indoc! {"
         type: object
         required: [items]
         properties:
@@ -2407,7 +2407,7 @@ fn test_enum_with_only_null_json_values_produces_empty_enum() {
           version: 1.0.0
     "})
     .unwrap();
-    let schema: Schema = serde_yaml::from_str(indoc::indoc! {"
+    let schema: Schema = serde_saphyr::from_str(indoc::indoc! {"
         type: 'null'
         enum: [null]
     "})
@@ -2439,7 +2439,7 @@ fn test_additional_properties_false_creates_struct() {
           version: 1.0.0
     "})
     .unwrap();
-    let schema: Schema = serde_yaml::from_str(indoc::indoc! {"
+    let schema: Schema = serde_saphyr::from_str(indoc::indoc! {"
         type: object
         required: [name]
         properties:
@@ -2482,7 +2482,7 @@ fn test_array_inline_path_construction() {
           version: 1.0.0
     "})
     .unwrap();
-    let schema: Schema = serde_yaml::from_str(indoc::indoc! {"
+    let schema: Schema = serde_saphyr::from_str(indoc::indoc! {"
         type: array
         items:
           type: object
@@ -2525,7 +2525,7 @@ fn test_map_inline_path_construction() {
           version: 1.0.0
     "})
     .unwrap();
-    let schema: Schema = serde_yaml::from_str(indoc::indoc! {"
+    let schema: Schema = serde_saphyr::from_str(indoc::indoc! {"
         type: object
         additionalProperties:
           type: object
@@ -2568,7 +2568,7 @@ fn test_struct_inline_path_construction() {
           version: 1.0.0
     "})
     .unwrap();
-    let schema: Schema = serde_yaml::from_str(indoc::indoc! {"
+    let schema: Schema = serde_saphyr::from_str(indoc::indoc! {"
         type: object
         required: [nested]
         properties:
@@ -2630,7 +2630,7 @@ fn test_inline_tagged_union_in_struct_field() {
                   type: string
     "})
     .unwrap();
-    let schema: Schema = serde_yaml::from_str(indoc::indoc! {"
+    let schema: Schema = serde_saphyr::from_str(indoc::indoc! {"
         type: object
         required: [animal]
         properties:
@@ -2873,7 +2873,7 @@ fn test_named_array_schema_produces_container() {
           version: 1.0.0
     "})
     .unwrap();
-    let schema: Schema = serde_yaml::from_str(indoc::indoc! {"
+    let schema: Schema = serde_saphyr::from_str(indoc::indoc! {"
         type: array
         items:
           type: string
@@ -2919,7 +2919,7 @@ fn test_named_array_with_inline_one_of_items_produces_container() {
                   type: string
     "})
     .unwrap();
-    let schema: Schema = serde_yaml::from_str(indoc::indoc! {"
+    let schema: Schema = serde_saphyr::from_str(indoc::indoc! {"
         type: array
         items:
           oneOf:
@@ -2958,7 +2958,7 @@ fn test_named_map_schema_produces_container() {
           version: 1.0.0
     "})
     .unwrap();
-    let schema: Schema = serde_yaml::from_str(indoc::indoc! {"
+    let schema: Schema = serde_saphyr::from_str(indoc::indoc! {"
         type: object
         additionalProperties:
           type: string
@@ -2989,7 +2989,7 @@ fn test_named_nullable_schema_produces_container() {
           version: 1.0.0
     "})
     .unwrap();
-    let schema: Schema = serde_yaml::from_str(indoc::indoc! {"
+    let schema: Schema = serde_saphyr::from_str(indoc::indoc! {"
         type: [string, 'null']
     "})
     .unwrap();
@@ -3021,7 +3021,7 @@ fn test_named_container_preserves_description() {
           version: 1.0.0
     "})
     .unwrap();
-    let schema: Schema = serde_yaml::from_str(indoc::indoc! {"
+    let schema: Schema = serde_saphyr::from_str(indoc::indoc! {"
         description: A list of identifiers
         type: array
         items:
@@ -3053,7 +3053,7 @@ fn test_named_primitive_does_not_produce_container() {
           version: 1.0.0
     "})
     .unwrap();
-    let schema: Schema = serde_yaml::from_str(indoc::indoc! {"
+    let schema: Schema = serde_saphyr::from_str(indoc::indoc! {"
         type: string
     "})
     .unwrap();
@@ -3085,7 +3085,7 @@ fn test_untagged_single_variant_one_of_ref_produces_container() {
                   type: string
     "})
     .unwrap();
-    let schema: Schema = serde_yaml::from_str(indoc::indoc! {"
+    let schema: Schema = serde_saphyr::from_str(indoc::indoc! {"
         oneOf:
           - type: 'null'
           - $ref: '#/components/schemas/Inner'
@@ -3123,7 +3123,7 @@ fn test_inline_array_produces_inline_container() {
           version: 1.0.0
     "})
     .unwrap();
-    let schema: Schema = serde_yaml::from_str(indoc::indoc! {"
+    let schema: Schema = serde_saphyr::from_str(indoc::indoc! {"
         type: object
         required: [items]
         properties:
@@ -3169,7 +3169,7 @@ fn test_optional_field_container_description_is_not_parent_schema() {
           version: 1.0.0
     "})
     .unwrap();
-    let schema: Schema = serde_yaml::from_str(indoc::indoc! {"
+    let schema: Schema = serde_saphyr::from_str(indoc::indoc! {"
         description: A parent struct
         type: object
         properties:
