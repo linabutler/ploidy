@@ -1545,6 +1545,80 @@ fn test_untagged_single_variant_unwraps() {
 }
 
 #[test]
+fn test_untagged_single_inline_object_variant_preserves_schema_identity() {
+    let doc = Document::from_yaml(indoc::indoc! {"
+        openapi: 3.0.0
+        info:
+          title: Test
+          version: 1.0.0
+    "})
+    .unwrap();
+    let schema: Schema = serde_saphyr::from_str(indoc::indoc! {"
+        oneOf:
+          - type: object
+            properties:
+              data:
+                type: string
+    "})
+    .unwrap();
+
+    let arena = Arena::new();
+    let result = transform(&arena, &doc, "ThreadStreamEvent", &schema);
+
+    // A single inline object variant should unwrap to a `Schema(Struct(...))`
+    // that preserves the original schema name, not an `Inline(Struct(...))`.
+    assert_matches!(
+        result,
+        SpecType::Schema(SpecSchemaType::Struct(
+            SchemaTypeInfo {
+                name: "ThreadStreamEvent",
+                ..
+            },
+            SpecStruct {
+                fields: [SpecStructField {
+                    name: StructFieldName::Name("data"),
+                    ty: SpecType::Inline(..),
+                    ..
+                }],
+                ..
+            },
+        )),
+    );
+}
+
+#[test]
+fn test_untagged_single_inline_primitive_variant_preserves_schema_identity() {
+    let doc = Document::from_yaml(indoc::indoc! {"
+        openapi: 3.0.0
+        info:
+          title: Test
+          version: 1.0.0
+    "})
+    .unwrap();
+    let schema: Schema = serde_saphyr::from_str(indoc::indoc! {"
+        oneOf:
+          - type: string
+    "})
+    .unwrap();
+
+    let arena = Arena::new();
+    let result = transform(&arena, &doc, "WrappedString", &schema);
+
+    // A single inline primitive variant should unwrap to a
+    // `Schema(Primitive(...))` that preserves the schema name.
+    assert_matches!(
+        result,
+        SpecType::Schema(SpecSchemaType::Primitive(
+            SchemaTypeInfo {
+                name: "WrappedString",
+                ..
+            },
+            PrimitiveType::String,
+        )),
+    );
+}
+
+#[test]
 fn test_untagged_variant_numbering() {
     let doc = Document::from_yaml(indoc::indoc! {"
         openapi: 3.0.0
@@ -1621,6 +1695,80 @@ fn test_untagged_null_detection() {
 }
 
 // MARK: `try_any_of()`
+
+#[test]
+fn test_any_of_single_inline_object_variant_preserves_schema_identity() {
+    let doc = Document::from_yaml(indoc::indoc! {"
+        openapi: 3.0.0
+        info:
+          title: Test
+          version: 1.0.0
+    "})
+    .unwrap();
+    let schema: Schema = serde_saphyr::from_str(indoc::indoc! {"
+        anyOf:
+          - type: object
+            properties:
+              data:
+                type: string
+    "})
+    .unwrap();
+
+    let arena = Arena::new();
+    let result = transform(&arena, &doc, "EventPayload", &schema);
+
+    // A single inline object variant should unwrap to a `Schema(Struct(...))`
+    // that preserves the original schema name, not an `Inline(Struct(...))`.
+    assert_matches!(
+        result,
+        SpecType::Schema(SpecSchemaType::Struct(
+            SchemaTypeInfo {
+                name: "EventPayload",
+                ..
+            },
+            SpecStruct {
+                fields: [SpecStructField {
+                    name: StructFieldName::Name("data"),
+                    ty: SpecType::Inline(..),
+                    ..
+                }],
+                ..
+            },
+        )),
+    );
+}
+
+#[test]
+fn test_any_of_single_inline_primitive_variant_preserves_schema_identity() {
+    let doc = Document::from_yaml(indoc::indoc! {"
+        openapi: 3.0.0
+        info:
+          title: Test
+          version: 1.0.0
+    "})
+    .unwrap();
+    let schema: Schema = serde_saphyr::from_str(indoc::indoc! {"
+        anyOf:
+          - type: string
+    "})
+    .unwrap();
+
+    let arena = Arena::new();
+    let result = transform(&arena, &doc, "WrappedString", &schema);
+
+    // A single inline primitive variant should unwrap to a
+    // `Schema(Primitive(...))` that preserves the schema name.
+    assert_matches!(
+        result,
+        SpecType::Schema(SpecSchemaType::Primitive(
+            SchemaTypeInfo {
+                name: "WrappedString",
+                ..
+            },
+            PrimitiveType::String,
+        )),
+    );
+}
 
 #[test]
 fn test_any_of_fields_marked_flattened_not_required() {

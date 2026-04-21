@@ -137,27 +137,47 @@ impl<'context, 'a> IrTransformer<'context, 'a> {
             return Err(self);
         };
 
-        let variants = one_of
-            .iter()
-            .enumerate()
-            .map(|(index, schema)| (index + 1, schema))
-            .map(|(index, schema)| {
-                let ty = match schema {
-                    RefOrSchema::Ref(r) => Some(SpecType::Ref(r)),
-                    RefOrSchema::Inline(s) if matches!(&*s.ty, [Ty::Null]) => None,
+        let variants = match &**one_of {
+            [] => {
+                return Ok(match self.name {
+                    TypeInfo::Schema(info) => SpecSchemaType::Any(info).into(),
+                    TypeInfo::Inline(path) => SpecInlineType::Any(path).into(),
+                });
+            }
+            [schema] => {
+                // Unwrap single-variant untagged unions.
+                return Ok(match schema {
+                    RefOrSchema::Ref(r) => SpecType::Ref(r),
+                    RefOrSchema::Inline(s) if matches!(&*s.ty, [Ty::Null]) => match self.name {
+                        TypeInfo::Schema(info) => SpecSchemaType::Any(info).into(),
+                        TypeInfo::Inline(path) => SpecInlineType::Any(path).into(),
+                    },
                     RefOrSchema::Inline(schema) => {
-                        let segment = InlineTypePathSegment::Variant(index);
-                        let path = match self.name {
-                            TypeInfo::Schema(info) => InlineTypePath {
-                                root: InlineTypePathRoot::Type(info.name),
-                                segments: self.arena().alloc_slice_copy(&[segment]),
-                            },
-                            TypeInfo::Inline(path) => path.join(self.arena(), &[segment]),
-                        };
-                        Some(transform_with_context(self.context, path, schema))
+                        transform_with_context(self.context, self.name, schema)
                     }
-                };
-                ty.map(|ty| {
+                });
+            }
+            variants => variants
+                .iter()
+                .enumerate()
+                .map(|(index, schema)| (index + 1, schema))
+                .map(|(index, schema)| {
+                    let ty = match schema {
+                        RefOrSchema::Ref(r) => Some(SpecType::Ref(r)),
+                        RefOrSchema::Inline(s) if matches!(&*s.ty, [Ty::Null]) => None,
+                        RefOrSchema::Inline(schema) => {
+                            let segment = InlineTypePathSegment::Variant(index);
+                            let path = match self.name {
+                                TypeInfo::Schema(info) => InlineTypePath {
+                                    root: InlineTypePathRoot::Type(info.name),
+                                    segments: self.arena().alloc_slice_copy(&[segment]),
+                                },
+                                TypeInfo::Inline(path) => path.join(self.arena(), &[segment]),
+                            };
+                            Some(transform_with_context(self.context, path, schema))
+                        }
+                    };
+                    ty.map(|ty| {
                         let hint = match ty {
                             SpecType::Schema(SpecSchemaType::Primitive(_, p))
                             | SpecType::Inline(SpecInlineType::Primitive(_, p)) => {
@@ -184,22 +204,11 @@ impl<'context, 'a> IrTransformer<'context, 'a> {
                         SpecUntaggedVariant::Some(hint, self.arena().alloc(ty))
                     })
                     .unwrap_or(SpecUntaggedVariant::Null)
-            })
-            .collect_vec();
+                })
+                .collect_vec(),
+        };
 
         Ok(match &*variants {
-            [] => match self.name {
-                TypeInfo::Schema(info) => SpecSchemaType::Any(info).into(),
-                TypeInfo::Inline(path) => SpecInlineType::Any(path).into(),
-            },
-
-            // Unwrap single-variant untagged unions.
-            [SpecUntaggedVariant::Null] => match self.name {
-                TypeInfo::Schema(info) => SpecSchemaType::Any(info).into(),
-                TypeInfo::Inline(path) => SpecInlineType::Any(path).into(),
-            },
-            [SpecUntaggedVariant::Some(_, ty)] => **ty,
-
             // Simplify two-variant untagged unions, where one is a type
             // and the other is `null`, into optionals.
             [SpecUntaggedVariant::Some(_, ty), SpecUntaggedVariant::Null]
@@ -238,14 +247,7 @@ impl<'context, 'a> IrTransformer<'context, 'a> {
             return Ok(match schema {
                 RefOrSchema::Ref(r) => SpecType::Ref(r),
                 RefOrSchema::Inline(schema) => {
-                    let path = match self.name {
-                        TypeInfo::Schema(info) => InlineTypePath {
-                            root: InlineTypePathRoot::Type(info.name),
-                            segments: &[],
-                        },
-                        TypeInfo::Inline(path) => path,
-                    };
-                    transform_with_context(self.context, path, schema)
+                    transform_with_context(self.context, self.name, schema)
                 }
             });
         }
