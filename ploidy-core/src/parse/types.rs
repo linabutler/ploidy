@@ -40,7 +40,8 @@ pub struct Info {
     pub title: String,
     #[serde(default)]
     pub description: Option<String>,
-    pub version: String,
+    #[serde(default)]
+    pub version: Option<String>,
 }
 
 /// Operation definitions for a single path.

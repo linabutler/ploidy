@@ -34,7 +34,10 @@ impl ToTokens for CodegenClientModule<'_> {
 
         let client_doc = {
             let info = self.graph.info();
-            format!("API client for {} (version {})", info.title, info.version)
+            match &info.version {
+                Some(v) => format!("API client for {} (version {v})", info.title),
+                None => format!("API client for {}", info.title),
+            }
         };
 
         tokens.append_all(quote! {
