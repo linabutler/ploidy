@@ -228,8 +228,8 @@ impl CodegenIdentRef {
     #[ref_cast_custom]
     fn new(s: &str) -> &Self;
 
-    /// Returns a suitable identifier for a struct field that
-    /// doesn't have an explicit name in the spec.
+    /// Returns a suitable identifier for a struct field,
+    /// before uniquification.
     pub fn from_field_name_hint(hint: StructFieldNameHint) -> Cow<'static, Self> {
         match hint {
             StructFieldNameHint::Index(index) => {
@@ -238,6 +238,36 @@ impl CodegenIdentRef {
             StructFieldNameHint::AdditionalProperties => {
                 Cow::Borrowed(Self::new("additional_properties"))
             }
+        }
+    }
+
+    /// Returns a suitable identifier for an untagged union variant,
+    /// before uniquification.
+    pub fn from_variant_name_hint(hint: UntaggedVariantNameHint) -> Cow<'static, Self> {
+        use {PrimitiveType::*, UntaggedVariantNameHint::*};
+        match hint {
+            Primitive(String) => Cow::Borrowed(Self::new("String")),
+            Primitive(I8) => Cow::Borrowed(Self::new("I8")),
+            Primitive(U8) => Cow::Borrowed(Self::new("U8")),
+            Primitive(I16) => Cow::Borrowed(Self::new("I16")),
+            Primitive(U16) => Cow::Borrowed(Self::new("U16")),
+            Primitive(I32) => Cow::Borrowed(Self::new("I32")),
+            Primitive(U32) => Cow::Borrowed(Self::new("U32")),
+            Primitive(I64) => Cow::Borrowed(Self::new("I64")),
+            Primitive(U64) => Cow::Borrowed(Self::new("U64")),
+            Primitive(F32) => Cow::Borrowed(Self::new("F32")),
+            Primitive(F64) => Cow::Borrowed(Self::new("F64")),
+            Primitive(Bool) => Cow::Borrowed(Self::new("Bool")),
+            Primitive(DateTime) => Cow::Borrowed(Self::new("DateTime")),
+            Primitive(UnixTime) => Cow::Borrowed(Self::new("UnixTime")),
+            Primitive(Date) => Cow::Borrowed(Self::new("Date")),
+            Primitive(Url) => Cow::Borrowed(Self::new("Url")),
+            Primitive(Uuid) => Cow::Borrowed(Self::new("Uuid")),
+            Primitive(Bytes) => Cow::Borrowed(Self::new("Bytes")),
+            Primitive(Binary) => Cow::Borrowed(Self::new("Binary")),
+            Array => Cow::Borrowed(Self::new("Array")),
+            Map => Cow::Borrowed(Self::new("Map")),
+            Index(index) => Cow::Owned(CodegenIdent(format!("V{index}"))),
         }
     }
 }
@@ -389,39 +419,10 @@ impl<'a> CodegenIdentScope<'a> {
     pub fn uniquify(&mut self, name: &str) -> CodegenIdent {
         CodegenIdent(self.0.uniquify(&clean(name)).into_owned())
     }
-}
 
-#[derive(Clone, Copy, Debug)]
-pub struct CodegenUntaggedVariantName(pub UntaggedVariantNameHint);
-
-impl ToTokens for CodegenUntaggedVariantName {
-    fn to_tokens(&self, tokens: &mut TokenStream) {
-        use UntaggedVariantNameHint::*;
-        let s = match self.0 {
-            Primitive(PrimitiveType::String) => "String".into(),
-            Primitive(PrimitiveType::I8) => "I8".into(),
-            Primitive(PrimitiveType::U8) => "U8".into(),
-            Primitive(PrimitiveType::I16) => "I16".into(),
-            Primitive(PrimitiveType::U16) => "U16".into(),
-            Primitive(PrimitiveType::I32) => "I32".into(),
-            Primitive(PrimitiveType::U32) => "U32".into(),
-            Primitive(PrimitiveType::I64) => "I64".into(),
-            Primitive(PrimitiveType::U64) => "U64".into(),
-            Primitive(PrimitiveType::F32) => "F32".into(),
-            Primitive(PrimitiveType::F64) => "F64".into(),
-            Primitive(PrimitiveType::Bool) => "Bool".into(),
-            Primitive(PrimitiveType::DateTime) => "DateTime".into(),
-            Primitive(PrimitiveType::UnixTime) => "UnixTime".into(),
-            Primitive(PrimitiveType::Date) => "Date".into(),
-            Primitive(PrimitiveType::Url) => "Url".into(),
-            Primitive(PrimitiveType::Uuid) => "Uuid".into(),
-            Primitive(PrimitiveType::Bytes) => "Bytes".into(),
-            Primitive(PrimitiveType::Binary) => "Binary".into(),
-            Array => "Array".into(),
-            Map => "Map".into(),
-            Index(index) => Cow::Owned(format!("V{index}")),
-        };
-        tokens.append(Ident::new(&s, Span::call_site()));
+    /// Uniquifies an identifier within this scope.
+    pub fn uniquify_ident(&mut self, ident: &CodegenIdentRef) -> CodegenIdent {
+        CodegenIdent(self.0.uniquify(&ident.0).into_owned())
     }
 }
 
@@ -621,131 +622,12 @@ mod tests {
     // MARK: Untagged variant names
 
     #[test]
-    fn test_untagged_variant_name_string() {
-        let variant_name =
-            CodegenUntaggedVariantName(UntaggedVariantNameHint::Primitive(PrimitiveType::String));
-        let actual: syn::Ident = parse_quote!(#variant_name);
-        let expected: syn::Ident = parse_quote!(String);
-        assert_eq!(actual, expected);
-    }
-
-    #[test]
-    fn test_untagged_variant_name_i32() {
-        let variant_name =
-            CodegenUntaggedVariantName(UntaggedVariantNameHint::Primitive(PrimitiveType::I32));
-        let actual: syn::Ident = parse_quote!(#variant_name);
-        let expected: syn::Ident = parse_quote!(I32);
-        assert_eq!(actual, expected);
-    }
-
-    #[test]
-    fn test_untagged_variant_name_i64() {
-        let variant_name =
-            CodegenUntaggedVariantName(UntaggedVariantNameHint::Primitive(PrimitiveType::I64));
-        let actual: syn::Ident = parse_quote!(#variant_name);
-        let expected: syn::Ident = parse_quote!(I64);
-        assert_eq!(actual, expected);
-    }
-
-    #[test]
-    fn test_untagged_variant_name_f32() {
-        let variant_name =
-            CodegenUntaggedVariantName(UntaggedVariantNameHint::Primitive(PrimitiveType::F32));
-        let actual: syn::Ident = parse_quote!(#variant_name);
-        let expected: syn::Ident = parse_quote!(F32);
-        assert_eq!(actual, expected);
-    }
-
-    #[test]
-    fn test_untagged_variant_name_f64() {
-        let variant_name =
-            CodegenUntaggedVariantName(UntaggedVariantNameHint::Primitive(PrimitiveType::F64));
-        let actual: syn::Ident = parse_quote!(#variant_name);
-        let expected: syn::Ident = parse_quote!(F64);
-        assert_eq!(actual, expected);
-    }
-
-    #[test]
-    fn test_untagged_variant_name_bool() {
-        let variant_name =
-            CodegenUntaggedVariantName(UntaggedVariantNameHint::Primitive(PrimitiveType::Bool));
-        let actual: syn::Ident = parse_quote!(#variant_name);
-        let expected: syn::Ident = parse_quote!(Bool);
-        assert_eq!(actual, expected);
-    }
-
-    #[test]
-    fn test_untagged_variant_name_datetime() {
-        let variant_name =
-            CodegenUntaggedVariantName(UntaggedVariantNameHint::Primitive(PrimitiveType::DateTime));
-        let actual: syn::Ident = parse_quote!(#variant_name);
-        let expected: syn::Ident = parse_quote!(DateTime);
-        assert_eq!(actual, expected);
-    }
-
-    #[test]
-    fn test_untagged_variant_name_date() {
-        let variant_name =
-            CodegenUntaggedVariantName(UntaggedVariantNameHint::Primitive(PrimitiveType::Date));
-        let actual: syn::Ident = parse_quote!(#variant_name);
-        let expected: syn::Ident = parse_quote!(Date);
-        assert_eq!(actual, expected);
-    }
-
-    #[test]
-    fn test_untagged_variant_name_url() {
-        let variant_name =
-            CodegenUntaggedVariantName(UntaggedVariantNameHint::Primitive(PrimitiveType::Url));
-        let actual: syn::Ident = parse_quote!(#variant_name);
-        let expected: syn::Ident = parse_quote!(Url);
-        assert_eq!(actual, expected);
-    }
-
-    #[test]
-    fn test_untagged_variant_name_uuid() {
-        let variant_name =
-            CodegenUntaggedVariantName(UntaggedVariantNameHint::Primitive(PrimitiveType::Uuid));
-        let actual: syn::Ident = parse_quote!(#variant_name);
-        let expected: syn::Ident = parse_quote!(Uuid);
-        assert_eq!(actual, expected);
-    }
-
-    #[test]
-    fn test_untagged_variant_name_bytes() {
-        let variant_name =
-            CodegenUntaggedVariantName(UntaggedVariantNameHint::Primitive(PrimitiveType::Bytes));
-        let actual: syn::Ident = parse_quote!(#variant_name);
-        let expected: syn::Ident = parse_quote!(Bytes);
-        assert_eq!(actual, expected);
-    }
-
-    #[test]
     fn test_untagged_variant_name_index() {
-        let variant_name = CodegenUntaggedVariantName(UntaggedVariantNameHint::Index(0));
-        let actual: syn::Ident = parse_quote!(#variant_name);
-        let expected: syn::Ident = parse_quote!(V0);
-        assert_eq!(actual, expected);
+        let name = CodegenIdentRef::from_variant_name_hint(UntaggedVariantNameHint::Index(0));
+        assert_eq!(&*name, CodegenIdentRef::new("V0"));
 
-        let variant_name = CodegenUntaggedVariantName(UntaggedVariantNameHint::Index(42));
-        let actual: syn::Ident = parse_quote!(#variant_name);
-        let expected: syn::Ident = parse_quote!(V42);
-        assert_eq!(actual, expected);
-    }
-
-    #[test]
-    fn test_untagged_variant_name_array() {
-        let variant_name = CodegenUntaggedVariantName(UntaggedVariantNameHint::Array);
-        let actual: syn::Ident = parse_quote!(#variant_name);
-        let expected: syn::Ident = parse_quote!(Array);
-        assert_eq!(actual, expected);
-    }
-
-    #[test]
-    fn test_untagged_variant_name_map() {
-        let variant_name = CodegenUntaggedVariantName(UntaggedVariantNameHint::Map);
-        let actual: syn::Ident = parse_quote!(#variant_name);
-        let expected: syn::Ident = parse_quote!(Map);
-        assert_eq!(actual, expected);
+        let name = CodegenIdentRef::from_variant_name_hint(UntaggedVariantNameHint::Index(42));
+        assert_eq!(&*name, CodegenIdentRef::new("V42"));
     }
 
     // MARK: Struct field names
