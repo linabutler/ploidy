@@ -230,14 +230,8 @@ pub struct Components {
 
 /// Either a reference to a component or an inline component definition.
 ///
-/// This generic type is used throughout the OpenAPI parse tree to represent
-/// locations where a component can either be defined inline, or referenced via
-/// `$ref`. The [`RefOr::Ref`] variant holds a JSON Pointer to a component definition
-/// in the `#/components/*` section; the [`RefOr::Other`] variant holds an
-/// inline definition.
-///
-/// The type uses `#[serde(untagged)]` to match the OpenAPI specification's
-/// untagged union semantics, and `#[ploidy(pointer(untagged))]` for JSON Pointer traversal.
+/// [`RefOr::Ref`] holds a JSON Pointer to a component definition in the
+/// `#/components/*` section; [`RefOr::Other`] holds an inline definition.
 #[derive(Clone, Debug, Deserialize, JsonPointee, JsonPointerTarget)]
 #[serde(untagged)]
 #[ploidy(pointer(untagged))]
@@ -249,8 +243,38 @@ pub enum RefOr<T> {
     Other(T),
 }
 
-/// Either a reference or a schema definition.
-pub type RefOrSchema = RefOr<Box<Schema>>;
+/// Either a reference or an inline schema definition.
+///
+/// [`RefOrSchema::deserialize`] desugars OpenAPI 3.1-style schemas like
+/// `{ "$ref": "...", "description": "..." }` into the semantically equivalent
+/// `{ "allOf": [{ "$ref": "..." }], "description": "..." }`.
+#[derive(Clone, Debug, JsonPointee, JsonPointerTarget)]
+#[ploidy(pointer(untagged))]
+pub enum RefOrSchema {
+    /// A reference to another schema.
+    #[ploidy(pointer(skip))]
+    Ref(ComponentRef),
+    /// An inline schema definition.
+    Inline(Box<Schema>),
+}
+
+impl<'de> Deserialize<'de> for RefOrSchema {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        match RefOr::deserialize(deserializer)? {
+            RefOr::Other(schema) => Ok(Self::Inline(schema)),
+            RefOr::Ref(r) if r.rest.is_empty() => Ok(Self::Ref(r.ref_)),
+            RefOr::Ref(r) => {
+                let mut schema: Schema =
+                    serde_json::from_value(r.rest.into()).map_err(serde::de::Error::custom)?;
+                schema
+                    .all_of
+                    .get_or_insert_default()
+                    .insert(0, Self::Ref(r.ref_));
+                Ok(Self::Inline(schema.into()))
+            }
+        }
+    }
+}
 
 /// Either a reference or a parameter definition.
 pub type RefOrParameter = RefOr<Parameter>;
@@ -261,11 +285,13 @@ pub type RefOrRequestBody = RefOr<RequestBody>;
 /// Either a reference or a response definition.
 pub type RefOrResponse = RefOr<Response>;
 
-/// A reference to another schema.
+/// A reference to another component.
 #[derive(Debug, Clone, Deserialize)]
 pub struct Ref {
     #[serde(rename = "$ref")]
-    pub path: ComponentRef,
+    pub ref_: ComponentRef,
+    #[serde(flatten)]
+    pub rest: serde_json::Map<String, serde_json::Value>,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, JsonPointee, JsonPointerTarget)]
@@ -478,6 +504,10 @@ impl<'a> FromExtension<'a> for &'a str {
 mod tests {
     use super::*;
 
+    use crate::tests::assert_matches;
+
+    // MARK: `ComponentRef`
+
     #[test]
     fn test_component_ref_name() {
         let r: ComponentRef = "#/components/schemas/Pet".parse().unwrap();
@@ -493,12 +523,69 @@ mod tests {
     #[test]
     fn test_component_ref_rejects_external_ref() {
         let err = "other.yaml#/components/schemas/Pet".parse::<ComponentRef>();
-        assert!(matches!(err, Err(BadComponentRef::NotSameDocument)));
+        assert_matches!(err, Err(BadComponentRef::NotSameDocument));
     }
 
     #[test]
     fn test_component_ref_rejects_empty() {
         let err = "#".parse::<ComponentRef>();
-        assert!(matches!(err, Err(BadComponentRef::Empty)));
+        assert_matches!(err, Err(BadComponentRef::Empty));
+    }
+
+    // MARK: `RefOrSchema`
+
+    #[test]
+    fn test_schema_ref_desugars_adjacent_keywords_into_all_of() {
+        let json = serde_json::json!({
+            "$ref": "#/components/schemas/Pet",
+            "description": "A very good pet",
+        });
+
+        let schema_ref: RefOrSchema = serde_json::from_value(json).unwrap();
+        let RefOrSchema::Inline(schema) = &schema_ref else {
+            panic!("expected `Inline` schema; got `{schema_ref:?}`");
+        };
+        assert_eq!(schema.description.as_deref(), Some("A very good pet"));
+
+        let all_of = schema.all_of.as_ref().unwrap();
+        let [RefOrSchema::Ref(r)] = &**all_of else {
+            panic!("expected one `allOf` schema; got {all_of:?}");
+        };
+        assert_eq!(r.name(), "Pet");
+    }
+
+    #[test]
+    fn test_schema_ref_desugars_adjacent_keywords_merges_existing_all_of() {
+        let json = serde_json::json!({
+            "$ref": "#/components/schemas/Pet",
+            "description": "A very good pet",
+            "allOf": [{ "$ref": "#/components/schemas/Named" }]
+        });
+
+        let schema_ref: RefOrSchema = serde_json::from_value(json).unwrap();
+        let RefOrSchema::Inline(schema) = &schema_ref else {
+            panic!("expected `Inline` schema; got `{schema_ref:?}`");
+        };
+        assert_eq!(schema.description.as_deref(), Some("A very good pet"));
+
+        let all_of = schema.all_of.as_ref().unwrap();
+        let [RefOrSchema::Ref(first), RefOrSchema::Ref(second)] = &**all_of else {
+            panic!("expected two `allOf` schemas; got {all_of:?}");
+        };
+        assert_eq!(first.name(), "Pet");
+        assert_eq!(second.name(), "Named");
+    }
+
+    #[test]
+    fn test_schema_ref_preserves_pure_ref() {
+        let json = serde_json::json!({
+            "$ref": "#/components/schemas/Pet"
+        });
+
+        let schema_ref: RefOrSchema = serde_json::from_value(json).unwrap();
+        let RefOrSchema::Ref(r) = &schema_ref else {
+            panic!("expected schema `Ref`; got `{schema_ref:?}`");
+        };
+        assert_eq!(r.name(), "Pet");
     }
 }
