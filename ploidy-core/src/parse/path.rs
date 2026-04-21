@@ -1,3 +1,5 @@
+use std::borrow::Cow;
+
 use miette::SourceSpan;
 use winnow::{
     Parser, Stateful,
@@ -13,18 +15,40 @@ type Input<'a> = Stateful<&'a str, &'a Arena>;
 /// Parses a path template, like `/v1/pets/{petId}/toy`.
 ///
 /// The grammar for path templating is adapted directly from
-/// [the OpenAPI spec][spec].
+/// [the OpenAPI spec][spec], and supports trailing literal
+/// query parameters as an extension for Anthropic's OpenAPI spec.
 ///
 /// [spec]: https://spec.openapis.org/oas/v3.2.0.html#x4-8-2-path-templating
-pub fn parse<'a>(arena: &'a Arena, input: &'a str) -> Result<Vec<PathSegment<'a>>, BadPath> {
+pub fn parse<'a>(arena: &'a Arena, input: &'a str) -> Result<ParsedPath<'a>, BadPath> {
     let stateful = Input {
         input,
         state: arena,
     };
-    (self::parser::template, eof)
-        .map(|(segments, _)| segments)
+    (self::parser::path, eof)
+        .map(|((segments, query), _)| ParsedPath {
+            segments: arena.alloc_slice_copy(&segments),
+            query: arena.alloc_slice_copy(&query),
+        })
         .parse(stateful)
         .map_err(BadPath::from_parse_error)
+}
+
+/// A parsed path template.
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub struct ParsedPath<'a> {
+    /// The slash-delimited path segments.
+    pub segments: &'a [PathSegment<'a>],
+    /// Literal query parameters that follow the path.
+    pub query: &'a [QueryParam<'a>],
+}
+
+/// A literal query parameter parsed from the path template.
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub struct QueryParam<'a> {
+    /// The parameter name.
+    pub name: &'a str,
+    /// The parameter value.
+    pub value: &'a str,
 }
 
 /// A slash-delimited path segment that contains zero or more
@@ -51,15 +75,39 @@ pub enum PathFragment<'input> {
 mod parser {
     use super::*;
 
-    use std::borrow::Cow;
-
     use winnow::{
         Parser,
-        combinator::{alt, delimited, repeat},
-        token::take_while,
+        combinator::{alt, delimited, opt, preceded, repeat},
+        token::{rest, take_while},
     };
 
-    pub fn template<'a>(input: &mut Input<'a>) -> winnow::Result<Vec<PathSegment<'a>>> {
+    /// Parses a path template followed by an optional `?query` string.
+    pub fn path<'a>(
+        input: &mut Input<'a>,
+    ) -> winnow::Result<(Vec<PathSegment<'a>>, Vec<QueryParam<'a>>)> {
+        let segments = template.parse_next(input)?;
+        let query = opt(preceded(
+            '?',
+            rest.map(|query: &str| {
+                form_urlencoded::parse(query.as_bytes())
+                    .map(|(name, value)| QueryParam {
+                        name: match name {
+                            Cow::Borrowed(name) => name,
+                            Cow::Owned(name) => input.state.alloc_str(&name),
+                        },
+                        value: match value {
+                            Cow::Borrowed(value) => value,
+                            Cow::Owned(value) => input.state.alloc_str(&value),
+                        },
+                    })
+                    .collect()
+            }),
+        ))
+        .parse_next(input)?;
+        Ok((segments, query.unwrap_or_default()))
+    }
+
+    fn template<'a>(input: &mut Input<'a>) -> winnow::Result<Vec<PathSegment<'a>>> {
         alt((
             ('/', segment, template)
                 .map(|(_, head, tail)| std::iter::once(head).chain(tail).collect()),
@@ -138,7 +186,8 @@ mod test {
         let arena = Arena::new();
         let result = parse(&arena, "/").unwrap();
 
-        assert_matches!(&*result, [PathSegment([])]);
+        assert_matches!(result.segments, [PathSegment([])]);
+        assert!(result.query.is_empty());
     }
 
     #[test]
@@ -146,7 +195,10 @@ mod test {
         let arena = Arena::new();
         let result = parse(&arena, "/users").unwrap();
 
-        assert_matches!(&*result, [PathSegment([PathFragment::Literal("users")])]);
+        assert_matches!(
+            result.segments,
+            [PathSegment([PathFragment::Literal("users")])],
+        );
     }
 
     #[test]
@@ -155,7 +207,7 @@ mod test {
         let result = parse(&arena, "/users/").unwrap();
 
         assert_matches!(
-            &*result,
+            result.segments,
             [
                 PathSegment([PathFragment::Literal("users")]),
                 PathSegment([]),
@@ -169,7 +221,7 @@ mod test {
         let result = parse(&arena, "/users/{userId}").unwrap();
 
         assert_matches!(
-            &*result,
+            result.segments,
             [
                 PathSegment([PathFragment::Literal("users")]),
                 PathSegment([PathFragment::Param("userId")]),
@@ -183,7 +235,7 @@ mod test {
         let result = parse(&arena, "/api/v1/resources/{resourceId}").unwrap();
 
         assert_matches!(
-            &*result,
+            result.segments,
             [
                 PathSegment([PathFragment::Literal("api")]),
                 PathSegment([PathFragment::Literal("v1")]),
@@ -199,7 +251,7 @@ mod test {
         let result = parse(&arena, "/users/{userId}/posts/{postId}").unwrap();
 
         assert_matches!(
-            &*result,
+            result.segments,
             [
                 PathSegment([PathFragment::Literal("users")]),
                 PathSegment([PathFragment::Param("userId")]),
@@ -219,7 +271,7 @@ mod test {
         .unwrap();
 
         assert_matches!(
-            &*result,
+            result.segments,
             [
                 PathSegment([PathFragment::Literal("v1")]),
                 PathSegment([PathFragment::Literal("storage")]),
@@ -245,7 +297,7 @@ mod test {
         .unwrap();
 
         assert_matches!(
-            &*result,
+            result.segments,
             [
                 PathSegment([PathFragment::Literal("v1")]),
                 PathSegment([PathFragment::Literal("storage")]),
@@ -275,5 +327,91 @@ mod test {
         // Parameter names can contain any character except for
         // `{` and `}`, per the `template-expression-param-name` terminal.
         assert!(parse(&arena, "/users/{user/{id}}").is_err());
+    }
+
+    // MARK: Query parameters
+
+    #[test]
+    fn test_path_with_single_query_param() {
+        let arena = Arena::new();
+        let result = parse(&arena, "/v1/messages?beta=true").unwrap();
+
+        assert_matches!(
+            result.segments,
+            [
+                PathSegment([PathFragment::Literal("v1")]),
+                PathSegment([PathFragment::Literal("messages")]),
+            ],
+        );
+        assert_matches!(
+            result.query,
+            [QueryParam {
+                name: "beta",
+                value: "true"
+            }],
+        );
+    }
+
+    #[test]
+    fn test_path_with_multiple_query_params() {
+        let arena = Arena::new();
+        let result = parse(&arena, "/v1/items?beta=true&version=2").unwrap();
+
+        assert_matches!(
+            result.segments,
+            [
+                PathSegment([PathFragment::Literal("v1")]),
+                PathSegment([PathFragment::Literal("items")]),
+            ],
+        );
+        assert_matches!(
+            result.query,
+            [
+                QueryParam {
+                    name: "beta",
+                    value: "true"
+                },
+                QueryParam {
+                    name: "version",
+                    value: "2"
+                },
+            ],
+        );
+    }
+
+    #[test]
+    fn test_path_with_template_and_query_param() {
+        let arena = Arena::new();
+        let result = parse(&arena, "/v1/models/{model_id}?beta=true").unwrap();
+
+        assert_matches!(
+            result.segments,
+            [
+                PathSegment([PathFragment::Literal("v1")]),
+                PathSegment([PathFragment::Literal("models")]),
+                PathSegment([PathFragment::Param("model_id")]),
+            ],
+        );
+        assert_matches!(
+            result.query,
+            [QueryParam {
+                name: "beta",
+                value: "true"
+            }],
+        );
+    }
+
+    #[test]
+    fn test_path_with_valueless_query_param() {
+        let arena = Arena::new();
+        let result = parse(&arena, "/v1/items?beta").unwrap();
+
+        assert_matches!(
+            result.query,
+            [QueryParam {
+                name: "beta",
+                value: ""
+            }],
+        );
     }
 }

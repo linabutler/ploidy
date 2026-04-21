@@ -69,7 +69,10 @@ use crate::{
             GraphType, ParameterStyle,
         },
     },
-    parse::{Method, path::PathSegment},
+    parse::{
+        Method,
+        path::{PathSegment, QueryParam},
+    },
 };
 
 use super::{View, inline::InlineTypeView, ir::TypeView};
@@ -223,7 +226,13 @@ impl<'view, 'a> OperationViewPath<'view, 'a> {
     /// Returns an iterator over this path's segments.
     #[inline]
     pub fn segments(self) -> std::slice::Iter<'view, PathSegment<'a>> {
-        self.0.op.path.iter()
+        self.0.op.path.segments.iter()
+    }
+
+    /// Returns the literal query parameters from the path key.
+    #[inline]
+    pub fn query_params(self) -> &'a [QueryParam<'a>] {
+        self.0.op.path.query
     }
 
     /// Returns an iterator over this operation's path parameters.

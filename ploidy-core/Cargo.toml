@@ -13,6 +13,7 @@ rust-version.workspace = true
 atomic_refcell = "0.1"
 bumpalo = { version = "3", features = ["collections"] }
 either = { workspace = true }
+form_urlencoded = "1"
 fixedbitset = "0.5"
 indexmap = { version = "2", features = ["serde"] }
 itertools = "0.14"

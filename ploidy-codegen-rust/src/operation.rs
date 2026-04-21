@@ -74,6 +74,21 @@ impl<'a> CodegenOperation<'a> {
                     quote! { &format!(#format, #(#args),*) }
                 }
             });
+        let query_pairs = self.op.path().query_params().iter().map(|param| {
+            let name = param.name;
+            let value = param.value;
+            quote! { .append_pair(#name, #value) }
+        });
+
+        let append_query = if self.op.path().query_params().is_empty() {
+            None
+        } else {
+            Some(quote! {
+                url.query_pairs_mut()
+                    #(#query_pairs)*;
+            })
+        };
+
         quote! {
             let url = {
                 let mut url = self.base_url.clone();
@@ -83,6 +98,7 @@ impl<'a> CodegenOperation<'a> {
                         segments.pop_if_empty()
                             #(.push(#segments))*;
                     });
+                #append_query
                 url
             };
         }
@@ -681,6 +697,85 @@ mod tests {
                     .error_for_status()?;
                 let _ = response;
                 Ok(())
+            }
+        };
+        assert_eq!(actual, expected);
+    }
+
+    // MARK: Fixed query params from path key
+
+    #[test]
+    fn test_operation_with_fixed_query_param() {
+        let doc = Document::from_yaml(indoc::indoc! {"
+            openapi: 3.0.0
+            info:
+              title: Test API
+              version: 1.0.0
+            paths:
+              /v1/messages?beta=true:
+                post:
+                  operationId: betaCreateMessage
+                  requestBody:
+                    content:
+                      application/json:
+                        schema:
+                          $ref: '#/components/schemas/Message'
+                  responses:
+                    '200':
+                      description: OK
+                      content:
+                        application/json:
+                          schema:
+                            $ref: '#/components/schemas/Message'
+            components:
+              schemas:
+                Message:
+                  type: object
+                  properties:
+                    content:
+                      type: string
+        "})
+        .unwrap();
+
+        let arena = Arena::new();
+        let spec = Spec::from_doc(&arena, &doc).unwrap();
+        let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
+
+        let op = graph.operations().next().unwrap();
+        let codegen = CodegenOperation::new(&graph, &op);
+
+        let actual: syn::ImplItemFn = parse_quote!(#codegen);
+        let expected: syn::ImplItemFn = parse_quote! {
+            pub async fn beta_create_message(
+                &self,
+                request: impl Into<crate::types::Message>
+            ) -> Result<crate::types::Message, crate::error::Error> {
+                let url = {
+                    let mut url = self.base_url.clone();
+                    let _ = url
+                        .path_segments_mut()
+                        .map(|mut segments| {
+                            segments.pop_if_empty()
+                                .push("v1")
+                                .push("messages");
+                        });
+                    url.query_pairs_mut()
+                        .append_pair("beta", "true");
+                    url
+                };
+                let response = self
+                    .client
+                    .post(url)
+                    .headers(self.headers.clone())
+                    .json(&request.into())
+                    .send()
+                    .await?
+                    .error_for_status()?;
+                let body = response.bytes().await?;
+                let deserializer = &mut ::ploidy_util::serde_json::Deserializer::from_slice(&body);
+                let result = ::ploidy_util::serde_path_to_error::deserialize(deserializer)
+                    .map_err(crate::error::JsonError::from)?;
+                Ok(result)
             }
         };
         assert_eq!(actual, expected);

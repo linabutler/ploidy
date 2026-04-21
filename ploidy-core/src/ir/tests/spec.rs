@@ -11,7 +11,7 @@ use crate::{
             SpecParameterInfo, SpecRequest, SpecResponse, SpecType,
         },
     },
-    parse::{Document, Method},
+    parse::{Document, Method, path::ParsedPath},
     tests::assert_matches,
 };
 
@@ -149,7 +149,16 @@ fn test_parses_path_with_parameter_segments() {
     let arena = Arena::new();
     let ir = Spec::from_doc(&arena, &doc).unwrap();
 
-    assert_matches!(&*ir.operations, [SpecOperation { path: [_, _], .. }]);
+    assert_matches!(
+        &*ir.operations,
+        [SpecOperation {
+            path: ParsedPath {
+                segments: [_, _],
+                ..
+            },
+            ..
+        }],
+    );
 }
 
 // MARK: Path parameters
