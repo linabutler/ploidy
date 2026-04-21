@@ -24,12 +24,15 @@ impl ToTokens for CodegenTypesModule<'_> {
     fn to_tokens(&self, tokens: &mut TokenStream) {
         let mut tys = self.graph.schemas().collect_vec();
         tys.sort_by(|a, b| {
-            CodegenTypeNameSortKey::for_schema(a).cmp(&CodegenTypeNameSortKey::for_schema(b))
+            CodegenTypeNameSortKey::for_schema(self.graph.schema_ident(a.name())).cmp(
+                &CodegenTypeNameSortKey::for_schema(self.graph.schema_ident(b.name())),
+            )
         });
 
         let mods = tys.iter().map(|ty| {
             let cfg = CfgFeature::for_schema_type(ty);
-            let mod_name = CodegenTypeName::Schema(ty).into_module_name();
+            let mod_name =
+                CodegenTypeName::Schema(self.graph.schema_ident(ty.name())).into_module_name();
             quote! {
                 #cfg
                 pub mod #mod_name;
@@ -37,7 +40,7 @@ impl ToTokens for CodegenTypesModule<'_> {
         });
         let uses = tys.iter().map(|ty| {
             let cfg = CfgFeature::for_schema_type(ty);
-            let ty_name = CodegenTypeName::Schema(ty);
+            let ty_name = CodegenTypeName::Schema(self.graph.schema_ident(ty.name()));
             let mod_name = ty_name.into_module_name();
             quote! {
                 #cfg

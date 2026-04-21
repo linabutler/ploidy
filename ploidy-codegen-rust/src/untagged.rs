@@ -8,19 +8,25 @@ use quote::{ToTokens, TokenStreamExt, quote};
 use super::{
     derives::ExtraDerive,
     doc_attrs,
+    graph::CodegenGraph,
     naming::{CodegenIdentScope, CodegenIdentUsage, CodegenTypeName, CodegenUntaggedVariantName},
     ref_::CodegenRef,
 };
 
 #[derive(Clone, Debug)]
 pub struct CodegenUntagged<'a> {
+    graph: &'a CodegenGraph<'a>,
     name: CodegenTypeName<'a>,
     ty: &'a UntaggedView<'a>,
 }
 
 impl<'a> CodegenUntagged<'a> {
-    pub fn new(name: CodegenTypeName<'a>, ty: &'a UntaggedView<'a>) -> Self {
-        Self { name, ty }
+    pub fn new(
+        graph: &'a CodegenGraph<'a>,
+        name: CodegenTypeName<'a>,
+        ty: &'a UntaggedView<'a>,
+    ) -> Self {
+        Self { graph, name, ty }
     }
 }
 
@@ -36,7 +42,7 @@ impl ToTokens for CodegenUntagged<'_> {
                     let base = CodegenUntaggedVariantName(variant.hint).base_name();
                     let ident = scope.uniquify(&base);
                     let variant_name = CodegenIdentUsage::Variant(&ident);
-                    let rust_type = CodegenRef::new(&variant.view);
+                    let rust_type = CodegenRef::new(self.graph, &variant.view);
                     variants.push(quote! { #variant_name(#rust_type) });
                 }
                 None => {
@@ -111,8 +117,8 @@ mod tests {
             panic!("expected untagged union `StringOrInt`; got `{schema:?}`");
         };
 
-        let name = CodegenTypeName::Schema(schema);
-        let untagged = CodegenUntagged::new(name, untagged_view);
+        let name = CodegenTypeName::Schema(graph.schema_ident(schema.name()));
+        let untagged = CodegenUntagged::new(&graph, name, untagged_view);
 
         let actual: syn::ItemEnum = parse_quote!(#untagged);
         let expected: syn::ItemEnum = parse_quote! {
@@ -152,8 +158,8 @@ mod tests {
             panic!("expected untagged union `DateOrUnix`; got `{schema:?}`");
         };
 
-        let name = CodegenTypeName::Schema(schema);
-        let untagged = CodegenUntagged::new(name, untagged_view);
+        let name = CodegenTypeName::Schema(graph.schema_ident(schema.name()));
+        let untagged = CodegenUntagged::new(&graph, name, untagged_view);
 
         let actual: syn::ItemEnum = parse_quote!(#untagged);
         let expected: syn::ItemEnum = parse_quote! {
@@ -204,8 +210,8 @@ mod tests {
             panic!("expected untagged union `Animal`; got `{schema:?}`");
         };
 
-        let name = CodegenTypeName::Schema(schema);
-        let untagged = CodegenUntagged::new(name, untagged_view);
+        let name = CodegenTypeName::Schema(graph.schema_ident(schema.name()));
+        let untagged = CodegenUntagged::new(&graph, name, untagged_view);
 
         let actual: syn::ItemEnum = parse_quote!(#untagged);
         let expected: syn::ItemEnum = parse_quote! {
@@ -248,8 +254,8 @@ mod tests {
             panic!("expected untagged union `StringOrInt`; got `{schema:?}`");
         };
 
-        let name = CodegenTypeName::Schema(schema);
-        let untagged = CodegenUntagged::new(name, untagged_view);
+        let name = CodegenTypeName::Schema(graph.schema_ident(schema.name()));
+        let untagged = CodegenUntagged::new(&graph, name, untagged_view);
 
         let actual: syn::ItemEnum = parse_quote!(#untagged);
         let expected: syn::ItemEnum = parse_quote! {
@@ -292,8 +298,8 @@ mod tests {
             panic!("expected untagged union `StringOrFloat`; got `{schema:?}`");
         };
 
-        let name = CodegenTypeName::Schema(schema);
-        let untagged = CodegenUntagged::new(name, untagged_view);
+        let name = CodegenTypeName::Schema(graph.schema_ident(schema.name()));
+        let untagged = CodegenUntagged::new(&graph, name, untagged_view);
 
         let actual: syn::ItemEnum = parse_quote!(#untagged);
         let expected: syn::ItemEnum = parse_quote! {
@@ -335,8 +341,8 @@ mod tests {
             panic!("expected untagged union `StringOrDouble`; got `{schema:?}`");
         };
 
-        let name = CodegenTypeName::Schema(schema);
-        let untagged = CodegenUntagged::new(name, untagged_view);
+        let name = CodegenTypeName::Schema(graph.schema_ident(schema.name()));
+        let untagged = CodegenUntagged::new(&graph, name, untagged_view);
 
         let actual: syn::ItemEnum = parse_quote!(#untagged);
         let expected: syn::ItemEnum = parse_quote! {
@@ -387,8 +393,8 @@ mod tests {
             panic!("expected untagged union `Input`; got `{schema:?}`");
         };
 
-        let name = CodegenTypeName::Schema(schema);
-        let untagged = CodegenUntagged::new(name, untagged_view);
+        let name = CodegenTypeName::Schema(graph.schema_ident(schema.name()));
+        let untagged = CodegenUntagged::new(&graph, name, untagged_view);
 
         let actual: syn::ItemEnum = parse_quote!(#untagged);
         let expected: syn::ItemEnum = parse_quote! {

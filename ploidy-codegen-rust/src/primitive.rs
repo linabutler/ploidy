@@ -1,17 +1,18 @@
-use ploidy_core::ir::{ExtendableView, PrimitiveType, PrimitiveView};
+use ploidy_core::ir::{PrimitiveType, PrimitiveView};
 use proc_macro2::TokenStream;
 use quote::{ToTokens, TokenStreamExt, quote};
 
-use super::config::DateTimeFormat;
+use super::{config::DateTimeFormat, graph::CodegenGraph};
 
 #[derive(Clone, Copy, Debug)]
 pub struct CodegenPrimitive<'a> {
+    graph: &'a CodegenGraph<'a>,
     ty: &'a PrimitiveView<'a>,
 }
 
 impl<'a> CodegenPrimitive<'a> {
-    pub fn new(ty: &'a PrimitiveView<'a>) -> Self {
-        Self { ty }
+    pub fn new(graph: &'a CodegenGraph<'a>, ty: &'a PrimitiveView<'a>) -> Self {
+        Self { graph, ty }
     }
 }
 
@@ -31,13 +32,7 @@ impl<'a> ToTokens for CodegenPrimitive<'a> {
             PrimitiveType::F64 => quote! { f64 },
             PrimitiveType::Bool => quote! { bool },
             PrimitiveType::DateTime => {
-                let format = self
-                    .ty
-                    .extensions()
-                    .get::<DateTimeFormat>()
-                    .as_deref()
-                    .copied()
-                    .unwrap_or_default();
+                let format = self.graph.date_time_format();
                 match format {
                     DateTimeFormat::Rfc3339 => {
                         quote! { ::ploidy_util::chrono::DateTime<::ploidy_util::chrono::Utc> }
@@ -102,7 +97,7 @@ mod tests {
         let [ty] = &*primitives else {
             panic!("expected string; got `{primitives:?}`");
         };
-        let p = CodegenPrimitive::new(ty);
+        let p = CodegenPrimitive::new(&graph, ty);
         let actual: syn::Type = parse_quote!(#p);
         let expected: syn::Type = parse_quote!(::std::string::String);
         assert_eq!(actual, expected);
@@ -134,7 +129,7 @@ mod tests {
         let [ty] = &*primitives else {
             panic!("expected i8; got `{primitives:?}`");
         };
-        let p = CodegenPrimitive::new(ty);
+        let p = CodegenPrimitive::new(&graph, ty);
         let actual: syn::Type = parse_quote!(#p);
         let expected: syn::Type = parse_quote!(i8);
         assert_eq!(actual, expected);
@@ -166,7 +161,7 @@ mod tests {
         let [ty] = &*primitives else {
             panic!("expected u8; got `{primitives:?}`");
         };
-        let p = CodegenPrimitive::new(ty);
+        let p = CodegenPrimitive::new(&graph, ty);
         let actual: syn::Type = parse_quote!(#p);
         let expected: syn::Type = parse_quote!(u8);
         assert_eq!(actual, expected);
@@ -198,7 +193,7 @@ mod tests {
         let [ty] = &*primitives else {
             panic!("expected i16; got `{primitives:?}`");
         };
-        let p = CodegenPrimitive::new(ty);
+        let p = CodegenPrimitive::new(&graph, ty);
         let actual: syn::Type = parse_quote!(#p);
         let expected: syn::Type = parse_quote!(i16);
         assert_eq!(actual, expected);
@@ -230,7 +225,7 @@ mod tests {
         let [ty] = &*primitives else {
             panic!("expected u16; got `{primitives:?}`");
         };
-        let p = CodegenPrimitive::new(ty);
+        let p = CodegenPrimitive::new(&graph, ty);
         let actual: syn::Type = parse_quote!(#p);
         let expected: syn::Type = parse_quote!(u16);
         assert_eq!(actual, expected);
@@ -262,7 +257,7 @@ mod tests {
         let [ty] = &*primitives else {
             panic!("expected string; got `{primitives:?}`");
         };
-        let p = CodegenPrimitive::new(ty);
+        let p = CodegenPrimitive::new(&graph, ty);
         let actual: syn::Type = parse_quote!(#p);
         let expected: syn::Type = parse_quote!(i32);
         assert_eq!(actual, expected);
@@ -294,7 +289,7 @@ mod tests {
         let [ty] = &*primitives else {
             panic!("expected u32; got `{primitives:?}`");
         };
-        let p = CodegenPrimitive::new(ty);
+        let p = CodegenPrimitive::new(&graph, ty);
         let actual: syn::Type = parse_quote!(#p);
         let expected: syn::Type = parse_quote!(u32);
         assert_eq!(actual, expected);
@@ -326,7 +321,7 @@ mod tests {
         let [ty] = &*primitives else {
             panic!("expected i64; got `{primitives:?}`");
         };
-        let p = CodegenPrimitive::new(ty);
+        let p = CodegenPrimitive::new(&graph, ty);
         let actual: syn::Type = parse_quote!(#p);
         let expected: syn::Type = parse_quote!(i64);
         assert_eq!(actual, expected);
@@ -358,7 +353,7 @@ mod tests {
         let [ty] = &*primitives else {
             panic!("expected u64; got `{primitives:?}`");
         };
-        let p = CodegenPrimitive::new(ty);
+        let p = CodegenPrimitive::new(&graph, ty);
         let actual: syn::Type = parse_quote!(#p);
         let expected: syn::Type = parse_quote!(u64);
         assert_eq!(actual, expected);
@@ -390,7 +385,7 @@ mod tests {
         let [ty] = &*primitives else {
             panic!("expected f32; got `{primitives:?}`");
         };
-        let p = CodegenPrimitive::new(ty);
+        let p = CodegenPrimitive::new(&graph, ty);
         let actual: syn::Type = parse_quote!(#p);
         let expected: syn::Type = parse_quote!(f32);
         assert_eq!(actual, expected);
@@ -422,7 +417,7 @@ mod tests {
         let [ty] = &*primitives else {
             panic!("expected f64; got `{primitives:?}`");
         };
-        let p = CodegenPrimitive::new(ty);
+        let p = CodegenPrimitive::new(&graph, ty);
         let actual: syn::Type = parse_quote!(#p);
         let expected: syn::Type = parse_quote!(f64);
         assert_eq!(actual, expected);
@@ -453,7 +448,7 @@ mod tests {
         let [ty] = &*primitives else {
             panic!("expected bool; got `{primitives:?}`");
         };
-        let p = CodegenPrimitive::new(ty);
+        let p = CodegenPrimitive::new(&graph, ty);
         let actual: syn::Type = parse_quote!(#p);
         let expected: syn::Type = parse_quote!(bool);
         assert_eq!(actual, expected);
@@ -486,7 +481,7 @@ mod tests {
         let [ty] = &*primitives else {
             panic!("expected datetime; got `{primitives:?}`");
         };
-        let p = CodegenPrimitive::new(ty);
+        let p = CodegenPrimitive::new(&graph, ty);
         let actual: syn::Type = parse_quote!(#p);
         let expected: syn::Type =
             parse_quote!(::ploidy_util::chrono::DateTime<::ploidy_util::chrono::Utc>);
@@ -524,7 +519,7 @@ mod tests {
         let [ty] = &*primitives else {
             panic!("expected datetime; got `{primitives:?}`");
         };
-        let p = CodegenPrimitive::new(ty);
+        let p = CodegenPrimitive::new(&graph, ty);
         let actual: syn::Type = parse_quote!(#p);
         let expected: syn::Type = parse_quote!(::ploidy_util::date_time::UnixMilliseconds);
         assert_eq!(actual, expected);
@@ -561,7 +556,7 @@ mod tests {
         let [ty] = &*primitives else {
             panic!("expected datetime; got `{primitives:?}`");
         };
-        let p = CodegenPrimitive::new(ty);
+        let p = CodegenPrimitive::new(&graph, ty);
         let actual: syn::Type = parse_quote!(#p);
         let expected: syn::Type = parse_quote!(::ploidy_util::date_time::UnixSeconds);
         assert_eq!(actual, expected);
@@ -598,7 +593,7 @@ mod tests {
         let [ty] = &*primitives else {
             panic!("expected datetime; got `{primitives:?}`");
         };
-        let p = CodegenPrimitive::new(ty);
+        let p = CodegenPrimitive::new(&graph, ty);
         let actual: syn::Type = parse_quote!(#p);
         let expected: syn::Type = parse_quote!(::ploidy_util::date_time::UnixMicroseconds);
         assert_eq!(actual, expected);
@@ -635,7 +630,7 @@ mod tests {
         let [ty] = &*primitives else {
             panic!("expected datetime; got `{primitives:?}`");
         };
-        let p = CodegenPrimitive::new(ty);
+        let p = CodegenPrimitive::new(&graph, ty);
         let actual: syn::Type = parse_quote!(#p);
         let expected: syn::Type = parse_quote!(::ploidy_util::date_time::UnixNanoseconds);
         assert_eq!(actual, expected);
@@ -667,7 +662,7 @@ mod tests {
         let [ty] = &*primitives else {
             panic!("expected date; got `{primitives:?}`");
         };
-        let p = CodegenPrimitive::new(ty);
+        let p = CodegenPrimitive::new(&graph, ty);
         let actual: syn::Type = parse_quote!(#p);
         let expected: syn::Type = parse_quote!(::ploidy_util::chrono::NaiveDate);
         assert_eq!(actual, expected);
@@ -699,7 +694,7 @@ mod tests {
         let [ty] = &*primitives else {
             panic!("expected url; got `{primitives:?}`");
         };
-        let p = CodegenPrimitive::new(ty);
+        let p = CodegenPrimitive::new(&graph, ty);
         let actual: syn::Type = parse_quote!(#p);
         let expected: syn::Type = parse_quote!(::ploidy_util::url::Url);
         assert_eq!(actual, expected);
@@ -731,7 +726,7 @@ mod tests {
         let [ty] = &*primitives else {
             panic!("expected uuid; got `{primitives:?}`");
         };
-        let p = CodegenPrimitive::new(ty);
+        let p = CodegenPrimitive::new(&graph, ty);
         let actual: syn::Type = parse_quote!(#p);
         let expected: syn::Type = parse_quote!(::ploidy_util::uuid::Uuid);
         assert_eq!(actual, expected);
@@ -763,7 +758,7 @@ mod tests {
         let [ty] = &*primitives else {
             panic!("expected bytes; got `{primitives:?}`");
         };
-        let p = CodegenPrimitive::new(ty);
+        let p = CodegenPrimitive::new(&graph, ty);
         let actual: syn::Type = parse_quote!(#p);
         let expected: syn::Type = parse_quote!(::ploidy_util::binary::Base64);
         assert_eq!(actual, expected);
@@ -795,7 +790,7 @@ mod tests {
         let [ty] = &*primitives else {
             panic!("expected binary; got `{primitives:?}`");
         };
-        let p = CodegenPrimitive::new(ty);
+        let p = CodegenPrimitive::new(&graph, ty);
         let actual: syn::Type = parse_quote!(#p);
         let expected: syn::Type = parse_quote!(::ploidy_util::serde_bytes::ByteBuf);
         assert_eq!(actual, expected);

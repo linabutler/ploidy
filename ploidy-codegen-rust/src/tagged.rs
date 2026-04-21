@@ -8,19 +8,27 @@ use quote::{ToTokens, TokenStreamExt, quote};
 
 use crate::{CodegenIdentScope, CodegenTypeName};
 
-use super::{derives::ExtraDerive, doc_attrs, naming::CodegenIdentUsage, ref_::CodegenRef};
+use super::{
+    derives::ExtraDerive, doc_attrs, graph::CodegenGraph, naming::CodegenIdentUsage,
+    ref_::CodegenRef,
+};
 
 /// Generates a tagged union as a Rust enum, with `#[serde(tag = ...)]`
 /// and associated data for each variant.
 #[derive(Clone, Debug)]
 pub struct CodegenTagged<'a> {
+    graph: &'a CodegenGraph<'a>,
     name: CodegenTypeName<'a>,
     ty: &'a TaggedView<'a>,
 }
 
 impl<'a> CodegenTagged<'a> {
-    pub fn new(name: CodegenTypeName<'a>, ty: &'a TaggedView<'a>) -> Self {
-        Self { name, ty }
+    pub fn new(
+        graph: &'a CodegenGraph<'a>,
+        name: CodegenTypeName<'a>,
+        ty: &'a TaggedView<'a>,
+    ) -> Self {
+        Self { graph, name, ty }
     }
 }
 
@@ -67,7 +75,7 @@ impl ToTokens for CodegenTagged<'_> {
                     quote! { #[ploidy(pointer(rename = #primary))] }
                 });
 
-                let rust_type_name = CodegenRef::new(&view);
+                let rust_type_name = CodegenRef::new(self.graph, &view);
                 let v = quote! {
                     #serde_attr
                     #pointer_attr
@@ -164,8 +172,8 @@ mod tests {
             panic!("expected tagged union `Pet`; got `{schema:?}`");
         };
 
-        let name = CodegenTypeName::Schema(schema);
-        let codegen = CodegenTagged::new(name, tagged);
+        let name = CodegenTypeName::Schema(graph.schema_ident(schema.name()));
+        let codegen = CodegenTagged::new(&graph, name, tagged);
 
         let actual: syn::File = parse_quote!(#codegen);
         let expected: syn::File = parse_quote! {
@@ -234,8 +242,8 @@ mod tests {
             panic!("expected tagged union `Pet`; got `{schema:?}`");
         };
 
-        let name = CodegenTypeName::Schema(schema);
-        let codegen = CodegenTagged::new(name, tagged);
+        let name = CodegenTypeName::Schema(graph.schema_ident(schema.name()));
+        let codegen = CodegenTagged::new(&graph, name, tagged);
 
         let actual: syn::File = parse_quote!(#codegen);
         let expected: syn::File = parse_quote! {
@@ -299,8 +307,8 @@ mod tests {
             panic!("expected tagged union `Pet`; got `{schema:?}`");
         };
 
-        let name = CodegenTypeName::Schema(schema);
-        let codegen = CodegenTagged::new(name, tagged);
+        let name = CodegenTypeName::Schema(graph.schema_ident(schema.name()));
+        let codegen = CodegenTagged::new(&graph, name, tagged);
 
         let actual: syn::File = parse_quote!(#codegen);
         let expected: syn::File = parse_quote! {
@@ -362,8 +370,8 @@ mod tests {
             panic!("expected tagged union `Pet`; got `{schema:?}`");
         };
 
-        let name = CodegenTypeName::Schema(schema);
-        let codegen = CodegenTagged::new(name, tagged);
+        let name = CodegenTypeName::Schema(graph.schema_ident(schema.name()));
+        let codegen = CodegenTagged::new(&graph, name, tagged);
 
         let actual: syn::File = parse_quote!(#codegen);
         let expected: syn::File = parse_quote! {
@@ -430,8 +438,8 @@ mod tests {
             panic!("expected tagged union `Pet`; got `{schema:?}`");
         };
 
-        let name = CodegenTypeName::Schema(schema);
-        let codegen = CodegenTagged::new(name, tagged);
+        let name = CodegenTypeName::Schema(graph.schema_ident(schema.name()));
+        let codegen = CodegenTagged::new(&graph, name, tagged);
 
         let actual: syn::File = parse_quote!(#codegen);
         let expected: syn::File = parse_quote! {
@@ -510,8 +518,8 @@ mod tests {
             panic!("expected tagged union `Pet`; got `{schema:?}`");
         };
 
-        let name = CodegenTypeName::Schema(schema);
-        let codegen = CodegenTagged::new(name, tagged);
+        let name = CodegenTypeName::Schema(graph.schema_ident(schema.name()));
+        let codegen = CodegenTagged::new(&graph, name, tagged);
 
         let actual: syn::File = parse_quote!(#codegen);
         let expected: syn::File = parse_quote! {
@@ -567,8 +575,8 @@ mod tests {
             panic!("expected tagged union `Pet`; got `{schema:?}`");
         };
 
-        let name = CodegenTypeName::Schema(schema);
-        let codegen = CodegenTagged::new(name, tagged);
+        let name = CodegenTypeName::Schema(graph.schema_ident(schema.name()));
+        let codegen = CodegenTagged::new(&graph, name, tagged);
 
         let actual: syn::File = parse_quote!(#codegen);
         let expected: syn::File = parse_quote! {
@@ -642,8 +650,8 @@ mod tests {
             panic!("expected tagged union `Pet`; got `{schema:?}`");
         };
 
-        let name = CodegenTypeName::Schema(schema);
-        let codegen = CodegenTagged::new(name, tagged);
+        let name = CodegenTypeName::Schema(graph.schema_ident(schema.name()));
+        let codegen = CodegenTagged::new(&graph, name, tagged);
 
         let actual: syn::File = parse_quote!(#codegen);
         // `Dog` is inlined, so `Pet::Dog` holds the inline type.

@@ -9,6 +9,7 @@ use quote::{ToTokens, TokenStreamExt, format_ident, quote};
 use super::{
     derives::ExtraDerive,
     ext::ParameterViewExt,
+    graph::CodegenGraph,
     naming::{CodegenIdent, CodegenIdentScope, CodegenIdentUsage},
     ref_::CodegenRef,
 };
@@ -21,14 +22,15 @@ use super::{
 /// with per-parameter serialization style overrides.
 #[derive(Debug)]
 pub struct CodegenQueryParameters<'a> {
+    graph: &'a CodegenGraph<'a>,
     op: &'a OperationView<'a>,
 }
 
 impl<'a> CodegenQueryParameters<'a> {
     /// Creates a new query parameter struct for the given operation.
     #[inline]
-    pub fn new(op: &'a OperationView<'a>) -> Self {
-        Self { op }
+    pub fn new(graph: &'a CodegenGraph<'a>, op: &'a OperationView<'a>) -> Self {
+        Self { graph, op }
     }
 }
 
@@ -72,11 +74,11 @@ impl ToTokens for CodegenQueryParameters<'_> {
 
             let ty = if param.optional() {
                 let view = param.ty();
-                let path = CodegenRef::new(&view);
+                let path = CodegenRef::new(self.graph, &view);
                 quote! { ::std::option::Option<#path> }
             } else {
                 let view = param.ty();
-                let path = CodegenRef::new(&view);
+                let path = CodegenRef::new(self.graph, &view);
                 quote!(#path)
             };
 
@@ -212,7 +214,7 @@ mod tests {
         let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
         let op = graph.operations().next().unwrap();
-        let codegen = CodegenQueryParameters::new(&op);
+        let codegen = CodegenQueryParameters::new(&graph, &op);
 
         let actual: syn::File = parse_quote!(#codegen);
         let expected: syn::File = parse_quote! {
@@ -271,7 +273,7 @@ mod tests {
         let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
         let op = graph.operations().next().unwrap();
-        let codegen = CodegenQueryParameters::new(&op);
+        let codegen = CodegenQueryParameters::new(&graph, &op);
 
         let actual: syn::File = parse_quote!(#codegen);
         let expected: syn::File = parse_quote! {
@@ -320,7 +322,7 @@ mod tests {
         let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
         let op = graph.operations().next().unwrap();
-        let codegen = CodegenQueryParameters::new(&op);
+        let codegen = CodegenQueryParameters::new(&graph, &op);
 
         let actual: syn::File = parse_quote!(#codegen);
         let expected: syn::File = parse_quote! {
@@ -367,7 +369,7 @@ mod tests {
         let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
         let op = graph.operations().next().unwrap();
-        let codegen = CodegenQueryParameters::new(&op);
+        let codegen = CodegenQueryParameters::new(&graph, &op);
 
         let actual: syn::File = parse_quote!(#codegen);
         let expected: syn::File = parse_quote! {
@@ -438,7 +440,7 @@ mod tests {
         let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
         let op = graph.operations().next().unwrap();
-        let codegen = CodegenQueryParameters::new(&op);
+        let codegen = CodegenQueryParameters::new(&graph, &op);
 
         let actual: syn::File = parse_quote!(#codegen);
         let expected: syn::File = parse_quote! {
@@ -501,7 +503,7 @@ mod tests {
         let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
         let op = graph.operations().next().unwrap();
-        let codegen = CodegenQueryParameters::new(&op);
+        let codegen = CodegenQueryParameters::new(&graph, &op);
 
         let actual: syn::File = parse_quote!(#codegen);
         let expected: syn::File = parse_quote! {

@@ -27,7 +27,7 @@ prettyplease = { version = "0.2", optional = true }
 proc-macro2 = { version = "1", default-features = false, optional = true }
 quote = { version = "1", default-features = false, optional = true }
 ref-cast = { workspace = true }
-rustc-hash = "2"
+rustc-hash = { workspace = true }
 syn = { version = "2", default-features = false, optional = true }
 thiserror = "2"
 unicase = "2"

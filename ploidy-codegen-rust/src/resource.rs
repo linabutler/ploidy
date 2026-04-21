@@ -4,6 +4,7 @@ use quote::{ToTokens, TokenStreamExt, format_ident, quote};
 
 use super::{
     cfg::CfgFeature,
+    graph::CodegenGraph,
     inlines::CodegenInlines,
     naming::{CargoFeature, CodegenIdent, CodegenIdentUsage},
     operation::CodegenOperation,
@@ -13,13 +14,22 @@ use super::{
 /// Generates an `impl Client` block for a feature-gated resource,
 /// with all its operations and inline types.
 pub struct CodegenResource<'a> {
+    graph: &'a CodegenGraph<'a>,
     feature: &'a CargoFeature,
     ops: &'a [OperationView<'a>],
 }
 
 impl<'a> CodegenResource<'a> {
-    pub fn new(feature: &'a CargoFeature, ops: &'a [OperationView<'a>]) -> Self {
-        Self { feature, ops }
+    pub fn new(
+        graph: &'a CodegenGraph<'a>,
+        feature: &'a CargoFeature,
+        ops: &'a [OperationView<'a>],
+    ) -> Self {
+        Self {
+            graph,
+            feature,
+            ops,
+        }
     }
 }
 
@@ -32,13 +42,13 @@ impl ToTokens for CodegenResource<'_> {
         // Each method gets its own `#[cfg(...)]` attribute.
         let methods = self.ops.iter().map(|view| {
             let cfg = CfgFeature::for_operation(view);
-            let method = CodegenOperation::new(view).into_token_stream();
+            let method = CodegenOperation::new(self.graph, view).into_token_stream();
             quote! {
                 #cfg
                 #method
             }
         });
-        let inlines = CodegenInlines::Resource(self.ops);
+        let inlines = CodegenInlines::Resource(self.graph, self.ops);
 
         let params = self
             .ops
@@ -48,7 +58,7 @@ impl ToTokens for CodegenResource<'_> {
                 // that have at least one query parameter.
                 op.query().next().is_some().then(|| {
                     let cfg = CfgFeature::for_operation(op);
-                    let query = CodegenQueryParameters::new(op);
+                    let query = CodegenQueryParameters::new(self.graph, op);
                     let op_ident = CodegenIdent::new(op.id());
                     let mod_name = format_ident!("{}_query", CodegenIdentUsage::Module(&op_ident));
                     quote! {
@@ -153,7 +163,7 @@ mod tests {
 
         let ops = graph.operations().collect_vec();
         let feature = CargoFeature::from_name("customer");
-        let resource = CodegenResource::new(&feature, &ops);
+        let resource = CodegenResource::new(&graph, &feature, &ops);
 
         // No `#[cfg(...)]` on the method because none of its
         // dependencies have an `x-resourceId`.
@@ -234,7 +244,7 @@ mod tests {
 
         let ops = graph.operations().collect_vec();
         let feature = CargoFeature::from_name("orders");
-        let resource = CodegenResource::new(&feature, &ops);
+        let resource = CodegenResource::new(&graph, &feature, &ops);
 
         // `#[cfg(feature = "customer")]` because `Order` depends on
         // `Customer`, which has `x-resourceId: customer`.
@@ -305,7 +315,7 @@ mod tests {
 
         let ops = graph.operations().collect_vec();
         let feature = CargoFeature::from_name("customer");
-        let resource = CodegenResource::new(&feature, &ops);
+        let resource = CodegenResource::new(&graph, &feature, &ops);
 
         let actual: syn::File = parse_quote!(#resource);
         let expected: syn::File = parse_quote! {
@@ -403,7 +413,7 @@ mod tests {
 
         let ops = graph.operations().collect_vec();
         let feature = CargoFeature::from_name("customer");
-        let resource = CodegenResource::new(&feature, &ops);
+        let resource = CodegenResource::new(&graph, &feature, &ops);
 
         let actual: syn::File = parse_quote!(#resource);
         let expected: syn::File = parse_quote! {
@@ -525,7 +535,7 @@ mod tests {
 
         let ops = graph.operations().collect_vec();
         let feature = CargoFeature::from_name("customer");
-        let resource = CodegenResource::new(&feature, &ops);
+        let resource = CodegenResource::new(&graph, &feature, &ops);
 
         let actual: syn::File = parse_quote!(#resource);
         let expected: syn::File = parse_quote! {

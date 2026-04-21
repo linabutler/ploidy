@@ -181,7 +181,7 @@ mod tests {
             panic!("expected enum `Status`; got `{schema:?}`");
         };
 
-        let name = CodegenTypeName::Schema(schema);
+        let name = CodegenTypeName::Schema(graph.schema_ident(schema.name()));
         let codegen = CodegenEnum::new(name, enum_view);
 
         let actual: syn::File = parse_quote!(#codegen);
@@ -290,7 +290,7 @@ mod tests {
             panic!("expected enum `Priority`; got `{schema:?}`");
         };
 
-        let name = CodegenTypeName::Schema(schema);
+        let name = CodegenTypeName::Schema(graph.schema_ident(schema.name()));
         let codegen = CodegenEnum::new(name, view);
 
         let actual: syn::Item = parse_quote!(#codegen);

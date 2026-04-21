@@ -48,7 +48,7 @@ pub use types::*;
 
 pub fn write_types_to_disk(output: &Path, graph: &CodegenGraph<'_>) -> miette::Result<()> {
     for view in graph.schemas() {
-        let code = CodegenSchemaType::new(&view).into_code();
+        let code = CodegenSchemaType::new(graph, &view).into_code();
         write_to_disk(output, code)?;
     }
 
@@ -73,7 +73,7 @@ pub fn write_client_to_disk(output: &Path, graph: &CodegenGraph<'_>) -> miette::
 
     // Write all operations for each feature into separate modules.
     for (feature, ops) in &ops_by_feature {
-        let code = CodegenResource::new(feature, ops);
+        let code = CodegenResource::new(graph, feature, ops);
         write_to_disk(output, code)?;
     }
 

@@ -6,6 +6,7 @@ use quote::{ToTokens, TokenStreamExt, quote};
 use super::{
     cfg::CfgFeature,
     enum_::CodegenEnum,
+    graph::CodegenGraph,
     naming::{CodegenTypeName, CodegenTypeNameSortKey},
     struct_::CodegenStruct,
     tagged::CodegenTagged,
@@ -19,19 +20,20 @@ use super::{
 /// emitted by [`CodegenSchemaType`](crate::CodegenSchemaType) instead.
 #[derive(Clone, Copy, Debug)]
 pub enum CodegenInlines<'a> {
-    Resource(&'a [OperationView<'a>]),
-    Schema(&'a SchemaTypeView<'a>),
+    Resource(&'a CodegenGraph<'a>, &'a [OperationView<'a>]),
+    Schema(&'a CodegenGraph<'a>, &'a SchemaTypeView<'a>),
 }
 
 impl ToTokens for CodegenInlines<'_> {
     fn to_tokens(&self, tokens: &mut TokenStream) {
         match self {
-            Self::Resource(ops) => {
-                let items = CodegenInlineItems(IncludeCfgFeatures::Include, ops);
+            Self::Resource(graph, ops) => {
+                let items = CodegenInlineItems(IncludeCfgFeatures::Include, graph, ops);
                 items.to_tokens(tokens);
             }
-            &Self::Schema(ty) => {
-                let items = CodegenInlineItems(IncludeCfgFeatures::Omit, std::slice::from_ref(ty));
+            &Self::Schema(graph, ty) => {
+                let items =
+                    CodegenInlineItems(IncludeCfgFeatures::Omit, graph, std::slice::from_ref(ty));
                 items.to_tokens(tokens);
             }
         }
@@ -39,14 +41,15 @@ impl ToTokens for CodegenInlines<'_> {
 }
 
 #[derive(Debug)]
-struct CodegenInlineItems<'a, V>(IncludeCfgFeatures, &'a [V]);
+struct CodegenInlineItems<'a, V>(IncludeCfgFeatures, &'a CodegenGraph<'a>, &'a [V]);
 
 impl<'a, V> ToTokens for CodegenInlineItems<'a, V>
 where
     V: View<'a>,
 {
     fn to_tokens(&self, tokens: &mut TokenStream) {
-        let mut inlines = self.1.iter().flat_map(|op| op.inlines()).collect_vec();
+        let graph = self.1;
+        let mut inlines = self.2.iter().flat_map(|op| op.inlines()).collect_vec();
         inlines.sort_by(|a, b| {
             CodegenTypeNameSortKey::for_inline(a).cmp(&CodegenTypeNameSortKey::for_inline(b))
         });
@@ -56,13 +59,13 @@ where
             let ty = match &view {
                 InlineTypeView::Enum(_, view) => CodegenEnum::new(name, view).into_token_stream(),
                 InlineTypeView::Struct(_, view) => {
-                    CodegenStruct::new(name, view).into_token_stream()
+                    CodegenStruct::new(graph, name, view).into_token_stream()
                 }
                 InlineTypeView::Tagged(_, view) => {
-                    CodegenTagged::new(name, view).into_token_stream()
+                    CodegenTagged::new(graph, name, view).into_token_stream()
                 }
                 InlineTypeView::Untagged(_, view) => {
-                    CodegenUntagged::new(name, view).into_token_stream()
+                    CodegenUntagged::new(graph, name, view).into_token_stream()
                 }
                 InlineTypeView::Container(..)
                 | InlineTypeView::Primitive(..)
@@ -153,7 +156,7 @@ mod tests {
         let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
         let ops = graph.operations().collect_vec();
-        let inlines = CodegenInlines::Resource(&ops);
+        let inlines = CodegenInlines::Resource(&graph, &ops);
 
         let actual: syn::File = parse_quote!(#inlines);
         let expected: syn::File = parse_quote! {
@@ -212,7 +215,7 @@ mod tests {
         let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
         let ops = graph.operations().collect_vec();
-        let inlines = CodegenInlines::Resource(&ops);
+        let inlines = CodegenInlines::Resource(&graph, &ops);
 
         // No inline types should be emitted, since the only inline (`Details`)
         // belongs to the referenced schema.
@@ -266,7 +269,7 @@ mod tests {
         let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
         let ops = graph.operations().collect_vec();
-        let inlines = CodegenInlines::Resource(&ops);
+        let inlines = CodegenInlines::Resource(&graph, &ops);
 
         let actual: syn::File = parse_quote!(#inlines);
         // Types should be sorted: Apple, Mango, Zebra.
@@ -334,7 +337,7 @@ mod tests {
         let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
         let ops = graph.operations().collect_vec();
-        let inlines = CodegenInlines::Resource(&ops);
+        let inlines = CodegenInlines::Resource(&graph, &ops);
 
         let actual: syn::File = parse_quote!(#inlines);
         let expected: syn::File = parse_quote! {};
@@ -372,7 +375,7 @@ mod tests {
         let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
         let ops = graph.operations().collect_vec();
-        let inlines = CodegenInlines::Resource(&ops);
+        let inlines = CodegenInlines::Resource(&graph, &ops);
 
         let actual: syn::File = parse_quote!(#inlines);
         let expected: syn::File = parse_quote! {
@@ -424,7 +427,7 @@ mod tests {
         let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
         let ops = graph.operations().collect_vec();
-        let inlines = CodegenInlines::Resource(&ops);
+        let inlines = CodegenInlines::Resource(&graph, &ops);
 
         let actual: syn::File = parse_quote!(#inlines);
         let expected: syn::File = parse_quote! {
@@ -476,7 +479,7 @@ mod tests {
         let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
         let ops = graph.operations().collect_vec();
-        let inlines = CodegenInlines::Resource(&ops);
+        let inlines = CodegenInlines::Resource(&graph, &ops);
 
         let actual: syn::File = parse_quote!(#inlines);
         let expected: syn::File = parse_quote! {

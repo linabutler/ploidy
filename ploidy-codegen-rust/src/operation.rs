@@ -10,18 +10,20 @@ use syn::Ident;
 
 use super::{
     doc_attrs,
+    graph::CodegenGraph,
     naming::{CodegenIdent, CodegenIdentScope, CodegenIdentUsage},
     ref_::CodegenRef,
 };
 
 /// Generates a single client method for an API operation.
 pub struct CodegenOperation<'a> {
+    graph: &'a CodegenGraph<'a>,
     op: &'a OperationView<'a>,
 }
 
 impl<'a> CodegenOperation<'a> {
-    pub fn new(op: &'a OperationView<'a>) -> Self {
-        Self { op }
+    pub fn new(graph: &'a CodegenGraph<'a>, op: &'a OperationView<'a>) -> Self {
+        Self { graph, op }
     }
 
     /// Generates code to build and interpolate path parameters into
@@ -140,7 +142,7 @@ impl ToTokens for CodegenOperation<'_> {
         if let Some(request) = self.op.request() {
             match request {
                 RequestView::Json(view) => {
-                    let param_type = CodegenRef::new(&view);
+                    let param_type = CodegenRef::new(self.graph, &view);
                     params.push(quote! { request: impl Into<#param_type> });
                 }
                 RequestView::Multipart => {
@@ -151,7 +153,7 @@ impl ToTokens for CodegenOperation<'_> {
 
         let return_type = match self.op.response() {
             Some(response) => match response {
-                ResponseView::Json(view) => CodegenRef::new(&view).into_token_stream(),
+                ResponseView::Json(view) => CodegenRef::new(self.graph, &view).into_token_stream(),
             },
             None => quote! { () },
         };
@@ -286,7 +288,7 @@ mod tests {
         let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
         let op = graph.operations().next().unwrap();
-        let codegen = CodegenOperation::new(&op);
+        let codegen = CodegenOperation::new(&graph, &op);
 
         let actual: syn::ImplItemFn = parse_quote!(#codegen);
         let expected: syn::ImplItemFn = parse_quote! {
@@ -355,7 +357,7 @@ mod tests {
         let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
         let op = graph.operations().next().unwrap();
-        let codegen = CodegenOperation::new(&op);
+        let codegen = CodegenOperation::new(&graph, &op);
 
         let actual: syn::ImplItemFn = parse_quote!(#codegen);
         let expected: syn::ImplItemFn = parse_quote! {
@@ -427,7 +429,7 @@ mod tests {
         let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
         let op = graph.operations().next().unwrap();
-        let codegen = CodegenOperation::new(&op);
+        let codegen = CodegenOperation::new(&graph, &op);
 
         let actual: syn::ImplItemFn = parse_quote!(#codegen);
         let expected: syn::ImplItemFn = parse_quote! {
@@ -518,7 +520,7 @@ mod tests {
         let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
         let op = graph.operations().next().unwrap();
-        let codegen = CodegenOperation::new(&op);
+        let codegen = CodegenOperation::new(&graph, &op);
 
         let actual: syn::ImplItemFn = parse_quote!(#codegen);
         let expected: syn::ImplItemFn = parse_quote! {
@@ -594,7 +596,7 @@ mod tests {
         let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
         let op = graph.operations().next().unwrap();
-        let codegen = CodegenOperation::new(&op);
+        let codegen = CodegenOperation::new(&graph, &op);
 
         let actual: syn::ImplItemFn = parse_quote!(#codegen);
         let expected: syn::ImplItemFn = parse_quote! {
@@ -651,7 +653,7 @@ mod tests {
         let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
         let op = graph.operations().next().unwrap();
-        let codegen = CodegenOperation::new(&op);
+        let codegen = CodegenOperation::new(&graph, &op);
 
         let actual: syn::ImplItemFn = parse_quote!(#codegen);
         let expected: syn::ImplItemFn = parse_quote! {

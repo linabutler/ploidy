@@ -13,10 +13,12 @@ use ploidy_core::{
         unique::{UniqueNamesScope, WordSegments},
     },
     ir::{
-        ExtendableView, InlineTypePathSegment, InlineTypeView, PrimitiveType, SchemaTypeView,
-        StructFieldName, StructFieldNameHint, UntaggedVariantNameHint,
+        InlineTypePathSegment, InlineTypeView, PrimitiveType, StructFieldName, StructFieldNameHint,
+        UntaggedVariantNameHint,
     },
 };
+
+use super::graph::SchemaIdent;
 use proc_macro2::{Ident, Span, TokenStream};
 use quote::{IdentFragment, ToTokens, TokenStreamExt};
 use ref_cast::{RefCastCustom, ref_cast_custom};
@@ -36,7 +38,7 @@ const KEYWORDS: &[&str] = &["crate", "self", "super", "Self"];
 /// and [`into_sort_key`](Self::into_sort_key) for deterministic sorting.
 #[derive(Clone, Copy, Debug)]
 pub enum CodegenTypeName<'a> {
-    Schema(&'a SchemaTypeView<'a>),
+    Schema(&'a SchemaIdent),
     Inline(&'a InlineTypeView<'a>),
 }
 
@@ -55,10 +57,7 @@ impl<'a> CodegenTypeName<'a> {
 impl ToTokens for CodegenTypeName<'_> {
     fn to_tokens(&self, tokens: &mut TokenStream) {
         match self {
-            Self::Schema(view) => {
-                let ident = view.extensions().get::<CodegenIdent>().unwrap();
-                CodegenIdentUsage::Type(&ident).to_tokens(tokens);
-            }
+            Self::Schema(ident) => ident.as_type().to_tokens(tokens),
             Self::Inline(view) => {
                 let ident = CodegenIdent::from_segments(view.path().segments);
                 CodegenIdentUsage::Type(&ident).to_tokens(tokens);
@@ -91,9 +90,8 @@ impl<'a> CodegenModuleName<'a> {
         impl Display for DisplayModuleName<'_> {
             fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
                 match self.0 {
-                    CodegenTypeName::Schema(view) => {
-                        let ident = view.extensions().get::<CodegenIdent>().unwrap();
-                        write!(f, "{}", CodegenIdentUsage::Module(&ident).display())
+                    CodegenTypeName::Schema(ident) => {
+                        write!(f, "{}", ident.as_module().display())
                     }
                     CodegenTypeName::Inline(view) => {
                         let ident = CodegenIdent::from_segments(view.path().segments);
@@ -109,10 +107,7 @@ impl<'a> CodegenModuleName<'a> {
 impl ToTokens for CodegenModuleName<'_> {
     fn to_tokens(&self, tokens: &mut TokenStream) {
         match self.0 {
-            CodegenTypeName::Schema(view) => {
-                let ident = view.extensions().get::<CodegenIdent>().unwrap();
-                CodegenIdentUsage::Module(&ident).to_tokens(tokens);
-            }
+            CodegenTypeName::Schema(ident) => ident.as_module().to_tokens(tokens),
             CodegenTypeName::Inline(view) => {
                 let ident = CodegenIdent::from_segments(view.path().segments);
                 CodegenIdentUsage::Module(&ident).to_tokens(tokens);
@@ -131,8 +126,8 @@ pub struct CodegenTypeNameSortKey<'a>(CodegenTypeName<'a>);
 
 impl<'a> CodegenTypeNameSortKey<'a> {
     #[inline]
-    pub fn for_schema(view: &'a SchemaTypeView<'a>) -> Self {
-        Self(CodegenTypeName::Schema(view))
+    pub fn for_schema(ident: &'a SchemaIdent) -> Self {
+        Self(CodegenTypeName::Schema(ident))
     }
 
     #[inline]
@@ -151,7 +146,7 @@ impl Eq for CodegenTypeNameSortKey<'_> {}
 impl Ord for CodegenTypeNameSortKey<'_> {
     fn cmp(&self, other: &Self) -> Ordering {
         match (&self.0, &other.0) {
-            (CodegenTypeName::Schema(a), CodegenTypeName::Schema(b)) => a.name().cmp(b.name()),
+            (CodegenTypeName::Schema(a), CodegenTypeName::Schema(b)) => a.cmp(b),
             (CodegenTypeName::Inline(a), CodegenTypeName::Inline(b)) => a.path().cmp(&b.path()),
             (CodegenTypeName::Schema(_), CodegenTypeName::Inline(_)) => Ordering::Less,
             (CodegenTypeName::Inline(_), CodegenTypeName::Schema(_)) => Ordering::Greater,
