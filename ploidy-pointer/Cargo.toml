@@ -13,6 +13,7 @@ repository.workspace = true
 indexmap = { version = "2", optional = true }
 ploidy-pointer-derive = { workspace = true, optional = true }
 ref-cast = { workspace = true }
+serde_bytes = { version = "0.11", optional = true }
 serde_json = { version = "1", optional = true }
 strsim = { version = "0.11", optional = true }
 thiserror = "2"
@@ -31,10 +32,19 @@ optional = true
 
 [features]
 default = ["derive"]
-full = ["chrono", "derive", "did-you-mean", "indexmap", "serde_json", "url"]
+full = [
+    "chrono",
+    "derive",
+    "did-you-mean",
+    "indexmap",
+    "serde_bytes",
+    "serde_json",
+    "url",
+]
 chrono = ["dep:chrono"]
 derive = ["dep:ploidy-pointer-derive"]
 did-you-mean = ["dep:strsim", "ploidy-pointer-derive/did-you-mean"]
 indexmap = ["dep:indexmap"]
+serde_bytes = ["dep:serde_bytes"]
 serde_json = ["dep:serde_json"]
 url = ["dep:url"]

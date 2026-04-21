@@ -324,6 +324,7 @@ impl_pointee_for!(
     #[cfg(feature = "chrono")] chrono::DateTime<chrono::Utc>,
     #[cfg(feature = "chrono")] chrono::NaiveDate,
     #[cfg(feature = "url")] url::Url,
+    #[cfg(feature = "serde_bytes")] serde_bytes::ByteBuf,
 );
 
 macro_rules! impl_copied_pointer_target_for {
@@ -353,6 +354,19 @@ impl_copied_pointer_target_for!(
     #[cfg(feature = "chrono")] chrono::DateTime<chrono::Utc>,
     #[cfg(feature = "chrono")] chrono::NaiveDate,
 );
+
+#[cfg(feature = "serde_bytes")]
+impl<'a> JsonPointerTarget<'a> for &'a serde_bytes::ByteBuf {
+    #[inline]
+    fn from_pointee(pointee: &'a dyn JsonPointee) -> Result<Self, JsonPointerTargetError> {
+        let any: &dyn Any = pointee;
+        any.downcast_ref::<serde_bytes::ByteBuf>()
+            .ok_or_else(|| JsonPointerTargetError {
+                expected: ::std::any::type_name::<serde_bytes::ByteBuf>(),
+                actual: pointee.name(),
+            })
+    }
+}
 
 impl<'a> JsonPointerTarget<'a> for &'a str {
     #[inline]
