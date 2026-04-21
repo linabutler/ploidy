@@ -137,6 +137,31 @@ impl<'context, 'a> IrTransformer<'context, 'a> {
             return Err(self);
         };
 
+        // Unwrap single-variant untagged unions before collecting,
+        // so that the schema identity is preserved through the
+        // inner transform.
+        match &**one_of {
+            [] => {
+                return Ok(match self.name {
+                    TypeInfo::Schema(info) => SpecSchemaType::Any(info).into(),
+                    TypeInfo::Inline(path) => SpecInlineType::Any(path).into(),
+                });
+            }
+            [schema] => {
+                return Ok(match schema {
+                    RefOrSchema::Ref(r) => SpecType::Ref(r),
+                    RefOrSchema::Inline(s) if matches!(&*s.ty, [Ty::Null]) => match self.name {
+                        TypeInfo::Schema(info) => SpecSchemaType::Any(info).into(),
+                        TypeInfo::Inline(path) => SpecInlineType::Any(path).into(),
+                    },
+                    RefOrSchema::Inline(schema) => {
+                        transform_with_context(self.context, self.name, schema)
+                    }
+                });
+            }
+            _ => {}
+        }
+
         let variants = one_of
             .iter()
             .enumerate()
@@ -188,18 +213,6 @@ impl<'context, 'a> IrTransformer<'context, 'a> {
             .collect_vec();
 
         Ok(match &*variants {
-            [] => match self.name {
-                TypeInfo::Schema(info) => SpecSchemaType::Any(info).into(),
-                TypeInfo::Inline(path) => SpecInlineType::Any(path).into(),
-            },
-
-            // Unwrap single-variant untagged unions.
-            [SpecUntaggedVariant::Null] => match self.name {
-                TypeInfo::Schema(info) => SpecSchemaType::Any(info).into(),
-                TypeInfo::Inline(path) => SpecInlineType::Any(path).into(),
-            },
-            [SpecUntaggedVariant::Some(_, ty)] => **ty,
-
             // Simplify two-variant untagged unions, where one is a type
             // and the other is `null`, into optionals.
             [SpecUntaggedVariant::Some(_, ty), SpecUntaggedVariant::Null]
@@ -238,14 +251,7 @@ impl<'context, 'a> IrTransformer<'context, 'a> {
             return Ok(match schema {
                 RefOrSchema::Ref(r) => SpecType::Ref(r),
                 RefOrSchema::Inline(schema) => {
-                    let path = match self.name {
-                        TypeInfo::Schema(info) => InlineTypePath {
-                            root: InlineTypePathRoot::Type(info.name),
-                            segments: &[],
-                        },
-                        TypeInfo::Inline(path) => path,
-                    };
-                    transform_with_context(self.context, path, schema)
+                    transform_with_context(self.context, self.name, schema)
                 }
             });
         }
