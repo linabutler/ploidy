@@ -394,10 +394,12 @@ impl<'a> CodegenIdentScope<'a> {
 #[derive(Clone, Copy, Debug)]
 pub struct CodegenUntaggedVariantName(pub UntaggedVariantNameHint);
 
-impl ToTokens for CodegenUntaggedVariantName {
-    fn to_tokens(&self, tokens: &mut TokenStream) {
+impl CodegenUntaggedVariantName {
+    /// Returns the base name for this variant hint, before
+    /// uniquification.
+    pub fn base_name(&self) -> Cow<'static, str> {
         use UntaggedVariantNameHint::*;
-        let s = match self.0 {
+        match self.0 {
             Primitive(PrimitiveType::String) => "String".into(),
             Primitive(PrimitiveType::I8) => "I8".into(),
             Primitive(PrimitiveType::U8) => "U8".into(),
@@ -420,8 +422,13 @@ impl ToTokens for CodegenUntaggedVariantName {
             Array => "Array".into(),
             Map => "Map".into(),
             Index(index) => Cow::Owned(format!("V{index}")),
-        };
-        tokens.append(Ident::new(&s, Span::call_site()));
+        }
+    }
+}
+
+impl ToTokens for CodegenUntaggedVariantName {
+    fn to_tokens(&self, tokens: &mut TokenStream) {
+        tokens.append(Ident::new(&self.base_name(), Span::call_site()));
     }
 }
 

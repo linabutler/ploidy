@@ -1,11 +1,14 @@
-use ploidy_core::ir::{UntaggedView, View};
+use ploidy_core::{
+    codegen::UniqueNames,
+    ir::{UntaggedView, View},
+};
 use proc_macro2::TokenStream;
 use quote::{ToTokens, TokenStreamExt, quote};
 
 use super::{
     derives::ExtraDerive,
     doc_attrs,
-    naming::{CodegenTypeName, CodegenUntaggedVariantName},
+    naming::{CodegenIdentScope, CodegenIdentUsage, CodegenTypeName, CodegenUntaggedVariantName},
     ref_::CodegenRef,
 };
 
@@ -23,16 +26,24 @@ impl<'a> CodegenUntagged<'a> {
 
 impl ToTokens for CodegenUntagged<'_> {
     fn to_tokens(&self, tokens: &mut TokenStream) {
+        let unique = UniqueNames::new();
+        let mut scope = CodegenIdentScope::new(&unique);
         let mut variants = Vec::new();
 
         for variant in self.ty.variants() {
             match variant.ty() {
                 Some(variant) => {
-                    let variant_name = CodegenUntaggedVariantName(variant.hint);
+                    let base = CodegenUntaggedVariantName(variant.hint).base_name();
+                    let ident = scope.uniquify(&base);
+                    let variant_name = CodegenIdentUsage::Variant(&ident);
                     let rust_type = CodegenRef::new(&variant.view);
                     variants.push(quote! { #variant_name(#rust_type) });
                 }
-                None => variants.push(quote! { None }),
+                None => {
+                    let ident = scope.uniquify("None");
+                    let variant_name = CodegenIdentUsage::Variant(&ident);
+                    variants.push(quote! { #variant_name });
+                }
             }
         }
 
@@ -335,6 +346,59 @@ mod tests {
             pub enum StringOrDouble {
                 String(::std::string::String),
                 F64(f64)
+            }
+        };
+        assert_eq!(actual, expected);
+    }
+
+    // MARK: Deduplication
+
+    #[test]
+    fn test_untagged_union_deduplicates_array_variants() {
+        let doc = Document::from_yaml(indoc::indoc! {"
+            openapi: 3.0.0
+            info:
+              title: Test API
+              version: 1.0.0
+            paths: {}
+            components:
+              schemas:
+                Input:
+                  oneOf:
+                    - type: string
+                    - type: array
+                      items:
+                        type: string
+                    - type: array
+                      items:
+                        type: object
+                        properties:
+                          kind:
+                            type: string
+        "})
+        .unwrap();
+
+        let arena = Arena::new();
+        let spec = Spec::from_doc(&arena, &doc).unwrap();
+        let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
+
+        let schema = graph.schemas().find(|s| s.name() == "Input");
+        let Some(schema @ SchemaTypeView::Untagged(_, untagged_view)) = &schema else {
+            panic!("expected untagged union `Input`; got `{schema:?}`");
+        };
+
+        let name = CodegenTypeName::Schema(schema);
+        let untagged = CodegenUntagged::new(name, untagged_view);
+
+        let actual: syn::ItemEnum = parse_quote!(#untagged);
+        let expected: syn::ItemEnum = parse_quote! {
+            #[derive(Debug, Clone, PartialEq, Eq, Hash, ::ploidy_util::serde::Serialize, ::ploidy_util::serde::Deserialize, ::ploidy_util::pointer::JsonPointee, ::ploidy_util::pointer::JsonPointerTarget)]
+            #[serde(crate = "::ploidy_util::serde", untagged)]
+            #[ploidy(pointer(crate = "::ploidy_util::pointer", untagged))]
+            pub enum Input {
+                String(::std::string::String),
+                Array(::std::vec::Vec<::std::string::String>),
+                Array2(::std::vec::Vec<crate::types::input::types::V3Item>)
             }
         };
         assert_eq!(actual, expected);
