@@ -1187,6 +1187,7 @@ dependencies = [
  "indexmap",
  "ploidy-pointer-derive",
  "ref-cast",
+ "serde",
  "serde_bytes",
  "serde_json",
  "strsim",

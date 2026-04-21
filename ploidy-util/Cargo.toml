@@ -18,6 +18,7 @@ percent-encoding = "2.3"
 ploidy-pointer = { workspace = true, features = [
     "chrono",
     "derive",
+    "serde",
     "serde_bytes",
     "serde_json",
     "url",

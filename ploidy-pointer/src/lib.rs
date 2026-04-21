@@ -456,6 +456,17 @@ impl<'a, T: JsonPointee, H: BuildHasher + 'static> JsonPointerTarget<'a>
     }
 }
 
+#[cfg(feature = "serde")]
+impl<'a> JsonPointerTarget<'a> for &'a serde::de::IgnoredAny {
+    #[inline]
+    fn from_pointee(pointee: &'a dyn JsonPointee) -> Result<Self, JsonPointerTargetError> {
+        Err(JsonPointerTargetError {
+            expected: ::std::any::type_name::<serde::de::IgnoredAny>(),
+            actual: pointee.name(),
+        })
+    }
+}
+
 #[cfg(feature = "serde_json")]
 impl<'a> JsonPointerTarget<'a> for &'a serde_json::Value {
     #[inline]
@@ -602,6 +613,19 @@ where
                 err
             })?
         }
+    }
+}
+
+#[cfg(feature = "serde")]
+impl JsonPointee for serde::de::IgnoredAny {
+    fn resolve(&self, pointer: &JsonPointer) -> Result<&dyn JsonPointee, JsonPointeeError> {
+        Err({
+            #[cfg(feature = "did-you-mean")]
+            let err = JsonPointerTypeError::with_ty(pointer, JsonPointeeType::name_of(self));
+            #[cfg(not(feature = "did-you-mean"))]
+            let err = JsonPointerTypeError::new(pointer);
+            err
+        })?
     }
 }
 
