@@ -1,9 +1,7 @@
-use std::borrow::Cow;
-
 use itertools::Itertools;
 use ploidy_core::{
     codegen::UniqueNames,
-    ir::{Required, StructFieldName, StructFieldNameHint, StructFieldView, StructView, View},
+    ir::{Required, StructFieldName, StructFieldView, StructView, View},
 };
 use proc_macro2::TokenStream;
 use quote::{ToTokens, TokenStreamExt, quote};
@@ -31,20 +29,7 @@ impl<'a> CodegenStruct<'a> {
 impl ToTokens for CodegenStruct<'_> {
     fn to_tokens(&self, tokens: &mut TokenStream) {
         let unique = UniqueNames::new();
-        let mut scope = {
-            if self.ty.fields().any(|f| {
-                matches!(
-                    f.name(),
-                    StructFieldName::Hint(StructFieldNameHint::AdditionalProperties)
-                )
-            }) {
-                // Make sure the `additional_properties` field that we emit
-                // doesn't conflict with a schema property of the same name.
-                CodegenIdentScope::with_reserved(&unique, &["additional_properties"])
-            } else {
-                CodegenIdentScope::new(&unique)
-            }
-        };
+        let mut scope = CodegenIdentScope::new(&unique);
         let fields = self
             .ty
             .fields()
@@ -53,8 +38,10 @@ impl ToTokens for CodegenStruct<'_> {
                 let doc_attrs = field.description().map(doc_attrs);
 
                 let name = match field.name() {
-                    StructFieldName::Name(n) => Cow::Owned(scope.uniquify(n)),
-                    StructFieldName::Hint(hint) => CodegenIdentRef::from_field_name_hint(hint),
+                    StructFieldName::Name(n) => scope.uniquify(n),
+                    StructFieldName::Hint(hint) => {
+                        scope.uniquify_ident(&CodegenIdentRef::from_field_name_hint(hint))
+                    }
                 };
                 let field_name = CodegenIdentUsage::Field(&name);
                 let field_attrs = StructFieldAttrs::new(field_name, &field);
@@ -2826,6 +2813,60 @@ mod tests {
             pub struct Pet {
                 pub name: ::std::string::String,
                 pub status: ::std::option::Option<crate::types::Status>,
+            }
+        };
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn test_struct_deduplicates_additional_properties_collision() {
+        // When a struct has both an own property named `additionalProperties`
+        // _and_ an `additionalProperties` schema, the hint field should be
+        // uniquified to avoid collision. The named property claims the
+        // unsuffixed name, since own properties take precedence over
+        // additional properties in the IR.
+        let doc = Document::from_yaml(indoc::indoc! {"
+            openapi: 3.0.0
+            info:
+              title: Test API
+              version: 1.0.0
+            paths: {}
+            components:
+              schemas:
+                Config:
+                  type: object
+                  additionalProperties:
+                    type: string
+                  properties:
+                    additionalProperties:
+                      type: boolean
+        "})
+        .unwrap();
+
+        let arena = Arena::new();
+        let spec = Spec::from_doc(&arena, &doc).unwrap();
+        let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
+
+        let schema = graph.schemas().find(|s| s.name() == "Config");
+        let Some(schema @ SchemaTypeView::Struct(_, struct_view)) = &schema else {
+            panic!("expected struct `Config`; got `{schema:?}`");
+        };
+
+        let name = CodegenTypeName::Schema(schema);
+        let codegen = CodegenStruct::new(name, struct_view);
+
+        let actual: syn::ItemStruct = parse_quote!(#codegen);
+        let expected: syn::ItemStruct = parse_quote! {
+            #[derive(Debug, Clone, PartialEq, Eq, Hash, Default, ::ploidy_util::serde::Serialize, ::ploidy_util::serde::Deserialize, ::ploidy_util::pointer::JsonPointee, ::ploidy_util::pointer::JsonPointerTarget)]
+            #[serde(crate = "::ploidy_util::serde")]
+            #[ploidy(pointer(crate = "::ploidy_util::pointer"))]
+            pub struct Config {
+                #[serde(rename = "additionalProperties", default, skip_serializing_if = "::ploidy_util::absent::AbsentOr::is_absent")]
+                #[ploidy(pointer(rename = "additionalProperties"))]
+                pub additional_properties: ::ploidy_util::absent::AbsentOr<bool>,
+                #[serde(flatten)]
+                #[ploidy(pointer(flatten))]
+                pub additional_properties2: ::std::collections::BTreeMap<::std::string::String, ::std::string::String>,
             }
         };
         assert_eq!(actual, expected);
