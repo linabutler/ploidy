@@ -17,6 +17,10 @@ pub enum Error {
     #[error("Invalid query parameter")]
     QueryParam(#[from] crate::QueryParamError),
 
+    /// Invalid request path.
+    #[error("Invalid request path")]
+    InvalidPath(#[from] crate::http::uri::InvalidUri),
+
     /// Invalid HTTP header name.
     #[error("Invalid header name")]
     BadHeaderName(#[source] http::Error),

@@ -50,7 +50,7 @@ impl ToTokens for CodegenClientModule<'_> {
             }
 
             impl Client {
-                /// Create a new client.
+                /// Creates a new client.
                 pub fn new(base_url: impl AsRef<str>) -> Result<Self, crate::error::Error> {
                     Ok(Self::with_reqwest_client(
                         ::ploidy_util::reqwest::Client::new(),
@@ -130,24 +130,38 @@ impl ToTokens for CodegenClientModule<'_> {
 
                 /// Returns a raw [`RequestBuilder`].
                 ///
-                /// The builder sets the base URL and default headers. Use this for
-                /// requests that the typed client methods don't support.
+                /// Constructs the request URL by appending `path_and_query`
+                /// to the base URL's path and query, respectively. For example,
+                /// given a base URL of `https://api.example.com/v1` and a
+                /// `path_and_query` of `/pets/list?limit=10`, the request URL is
+                /// `https://api.example.com/v1/pets/list?limit=10`.
+                ///
+                /// The request includes the client's default headers.
+                ///
+                /// Use this for requests that the typed client methods
+                /// don't support.
                 ///
                 /// [`RequestBuilder`]: crate::util::reqwest::RequestBuilder
                 pub fn request(
                     &self,
                     method: crate::util::reqwest::Method,
-                    path: &str,
-                ) -> crate::util::reqwest::RequestBuilder {
+                    path_and_query: &str,
+                ) -> Result<crate::util::reqwest::RequestBuilder, crate::error::Error> {
+                    let parts: ::ploidy_util::http::uri::PathAndQuery = path_and_query.parse()?;
                     let mut url = self.base_url.clone();
                     let _ = url
                         .path_segments_mut()
                         .map(|mut segments| {
-                            segments.pop_if_empty().extend(path.split('/'));
+                            segments.pop_if_empty()
+                                .extend(parts.path().split('/'));
                         });
-                    self.client
+                    if let Some(query) = parts.query() {
+                        url.query_pairs_mut()
+                            .extend_pairs(::ploidy_util::url::form_urlencoded::parse(query.as_bytes()));
+                    }
+                    Ok(self.client
                         .request(method, url)
-                        .headers(self.headers.clone())
+                        .headers(self.headers.clone()))
                 }
             }
 
