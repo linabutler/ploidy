@@ -72,6 +72,23 @@ impl<'a> CodegenOperation<'a> {
                     quote! { &format!(#format, #(#args),*) }
                 }
             });
+        let query = self
+            .op
+            .path()
+            .query()
+            .map(|param| {
+                let name = param.name;
+                let value = param.value;
+                quote! { .append_pair(#name, #value) }
+            })
+            .reduce(|a, b| quote!(#a #b))
+            .map(|pairs| {
+                quote! {
+                    url.query_pairs_mut()
+                        #pairs;
+                }
+            });
+
         quote! {
             let url = {
                 let mut url = self.base_url.clone();
@@ -81,6 +98,7 @@ impl<'a> CodegenOperation<'a> {
                         segments.pop_if_empty()
                             #(.push(#segments))*;
                     });
+                #query
                 url
             };
         }
@@ -679,6 +697,267 @@ mod tests {
                     .error_for_status()?;
                 let _ = response;
                 Ok(())
+            }
+        };
+        assert_eq!(actual, expected);
+    }
+
+    // MARK: Literal query params in path
+
+    #[test]
+    fn test_operation_with_literal_query_params() {
+        let doc = Document::from_yaml(indoc::indoc! {"
+            openapi: 3.0.0
+            info:
+              title: Test API
+              version: 1.0.0
+            paths:
+              /v1/messages?beta=true&expand:
+                post:
+                  operationId: betaCreateMessage
+                  requestBody:
+                    content:
+                      application/json:
+                        schema:
+                          $ref: '#/components/schemas/Message'
+                  responses:
+                    '200':
+                      description: OK
+                      content:
+                        application/json:
+                          schema:
+                            $ref: '#/components/schemas/Message'
+            components:
+              schemas:
+                Message:
+                  type: object
+                  properties:
+                    content:
+                      type: string
+        "})
+        .unwrap();
+
+        let arena = Arena::new();
+        let spec = Spec::from_doc(&arena, &doc).unwrap();
+        let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
+
+        let op = graph.operations().next().unwrap();
+        let codegen = CodegenOperation::new(&op);
+
+        let actual: syn::ImplItemFn = parse_quote!(#codegen);
+        let expected: syn::ImplItemFn = parse_quote! {
+            pub async fn beta_create_message(
+                &self,
+                request: impl Into<crate::types::Message>
+            ) -> Result<crate::types::Message, crate::error::Error> {
+                let url = {
+                    let mut url = self.base_url.clone();
+                    let _ = url
+                        .path_segments_mut()
+                        .map(|mut segments| {
+                            segments.pop_if_empty()
+                                .push("v1")
+                                .push("messages");
+                        });
+                    url.query_pairs_mut()
+                        .append_pair("beta", "true")
+                        .append_pair("expand", "");
+                    url
+                };
+                let response = self
+                    .client
+                    .post(url)
+                    .headers(self.headers.clone())
+                    .json(&request.into())
+                    .send()
+                    .await?
+                    .error_for_status()?;
+                let body = response.bytes().await?;
+                let deserializer = &mut ::ploidy_util::serde_json::Deserializer::from_slice(&body);
+                let result = ::ploidy_util::serde_path_to_error::deserialize(deserializer)
+                    .map_err(crate::error::JsonError::from)?;
+                Ok(result)
+            }
+        };
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn test_operation_with_literal_and_declared_query_params() {
+        let doc = Document::from_yaml(indoc::indoc! {"
+            openapi: 3.0.0
+            info:
+              title: Test API
+              version: 1.0.0
+            paths:
+              /v1/messages?beta=true:
+                post:
+                  operationId: betaCreateMessage
+                  parameters:
+                    - name: limit
+                      in: query
+                      schema:
+                        type: integer
+                        format: int32
+                  requestBody:
+                    content:
+                      application/json:
+                        schema:
+                          $ref: '#/components/schemas/Message'
+                  responses:
+                    '200':
+                      description: OK
+                      content:
+                        application/json:
+                          schema:
+                            $ref: '#/components/schemas/Message'
+            components:
+              schemas:
+                Message:
+                  type: object
+                  properties:
+                    content:
+                      type: string
+        "})
+        .unwrap();
+
+        let arena = Arena::new();
+        let spec = Spec::from_doc(&arena, &doc).unwrap();
+        let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
+
+        let op = graph.operations().next().unwrap();
+        let codegen = CodegenOperation::new(&op);
+
+        let actual: syn::ImplItemFn = parse_quote!(#codegen);
+        let expected: syn::ImplItemFn = parse_quote! {
+            pub async fn beta_create_message(
+                &self,
+                query: &parameters::BetaCreateMessageQuery,
+                request: impl Into<crate::types::Message>
+            ) -> Result<crate::types::Message, crate::error::Error> {
+                let url = {
+                    let mut url = self.base_url.clone();
+                    let _ = url
+                        .path_segments_mut()
+                        .map(|mut segments| {
+                            segments.pop_if_empty()
+                                .push("v1")
+                                .push("messages");
+                        });
+                    url.query_pairs_mut()
+                        .append_pair("beta", "true");
+                    url
+                };
+                let url = ::ploidy_util::serde::Serialize::serialize(
+                    query,
+                    ::ploidy_util::QuerySerializer::new(
+                        url,
+                        parameters::BetaCreateMessageQuery::STYLES,
+                    ),
+                )?;
+                let response = self
+                    .client
+                    .post(url)
+                    .headers(self.headers.clone())
+                    .json(&request.into())
+                    .send()
+                    .await?
+                    .error_for_status()?;
+                let body = response.bytes().await?;
+                let deserializer = &mut ::ploidy_util::serde_json::Deserializer::from_slice(&body);
+                let result = ::ploidy_util::serde_path_to_error::deserialize(deserializer)
+                    .map_err(crate::error::JsonError::from)?;
+                Ok(result)
+            }
+        };
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn test_operation_with_path_params_and_literal_and_declared_query_params() {
+        let doc = Document::from_yaml(indoc::indoc! {"
+            openapi: 3.0.0
+            info:
+              title: Test API
+              version: 1.0.0
+            paths:
+              /v1/models/{model_id}?beta=true:
+                get:
+                  operationId: betaGetModel
+                  parameters:
+                    - name: model_id
+                      in: path
+                      required: true
+                      schema:
+                        type: string
+                    - name: expand
+                      in: query
+                      schema:
+                        type: boolean
+                  responses:
+                    '200':
+                      description: OK
+                      content:
+                        application/json:
+                          schema:
+                            $ref: '#/components/schemas/Model'
+            components:
+              schemas:
+                Model:
+                  type: object
+                  properties:
+                    id:
+                      type: string
+        "})
+        .unwrap();
+
+        let arena = Arena::new();
+        let spec = Spec::from_doc(&arena, &doc).unwrap();
+        let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
+
+        let op = graph.operations().next().unwrap();
+        let codegen = CodegenOperation::new(&op);
+
+        let actual: syn::ImplItemFn = parse_quote!(#codegen);
+        let expected: syn::ImplItemFn = parse_quote! {
+            pub async fn beta_get_model(
+                &self,
+                model_id: &str,
+                query: &parameters::BetaGetModelQuery
+            ) -> Result<crate::types::Model, crate::error::Error> {
+                let url = {
+                    let mut url = self.base_url.clone();
+                    let _ = url
+                        .path_segments_mut()
+                        .map(|mut segments| {
+                            segments.pop_if_empty()
+                                .push("v1")
+                                .push("models")
+                                .push(model_id);
+                        });
+                    url.query_pairs_mut()
+                        .append_pair("beta", "true");
+                    url
+                };
+                let url = ::ploidy_util::serde::Serialize::serialize(
+                    query,
+                    ::ploidy_util::QuerySerializer::new(
+                        url,
+                        parameters::BetaGetModelQuery::STYLES,
+                    ),
+                )?;
+                let response = self
+                    .client
+                    .get(url)
+                    .headers(self.headers.clone())
+                    .send()
+                    .await?
+                    .error_for_status()?;
+                let body = response.bytes().await?;
+                let deserializer = &mut ::ploidy_util::serde_json::Deserializer::from_slice(&body);
+                let result = ::ploidy_util::serde_path_to_error::deserialize(deserializer)
+                    .map_err(crate::error::JsonError::from)?;
+                Ok(result)
             }
         };
         assert_eq!(actual, expected);

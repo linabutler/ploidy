@@ -14,6 +14,7 @@ atomic_refcell = "0.1"
 bumpalo = { version = "3", features = ["collections"] }
 either = { workspace = true }
 fixedbitset = "0.5"
+form_urlencoded = "1"
 indexmap = { version = "2", features = ["serde"] }
 itertools = "0.14"
 miette = "7"
