@@ -8,7 +8,7 @@ use crate::{
         self, Document, Info, Method, Operation, Parameter, ParameterLocation,
         ParameterStyle as ParsedParameterStyle, RefOrParameter, RefOrRequestBody, RefOrResponse,
         RefOrSchema, RequestBody, Response,
-        path::{PathFragment, PathSegment},
+        path::{ParsedPath, PathFragment},
     },
 };
 
@@ -71,10 +71,9 @@ impl<'a> Spec<'a> {
             .paths
             .iter()
             .map(|(path, item)| {
-                let segments: &_ =
-                    arena.alloc_slice_copy(&parse::path::parse(arena, path.as_str())?);
+                let path = parse::path::parse(arena, path.as_str())?;
                 Ok(item.operations().map(move |(method, op)| PathOperation {
-                    path: segments,
+                    path,
                     method,
                     params: &item.parameters,
                     op,
@@ -119,6 +118,7 @@ impl<'a> Spec<'a> {
                     let mut sources = {
                         let mut seen = FxHashSet::default();
                         item.path
+                            .segments
                             .iter()
                             .flat_map(|segment| segment.fragments())
                             .filter_map(|fragment| match fragment {
@@ -422,7 +422,7 @@ enum ResponseContent<'a> {
 
 #[derive(Clone, Copy, Debug)]
 struct PathOperation<'a> {
-    path: &'a [PathSegment<'a>],
+    path: ParsedPath<'a>,
     method: Method,
     params: &'a [RefOrParameter],
     op: &'a Operation,

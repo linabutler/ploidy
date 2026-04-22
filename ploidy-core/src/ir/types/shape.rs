@@ -1,7 +1,7 @@
 //! Generic operation types, parameterized over the type reference
 //! representation. Used by both spec and graph layers.
 
-use crate::parse::{Method, path::PathSegment};
+use crate::parse::{Method, path::ParsedPath};
 
 use super::ParameterStyle;
 
@@ -9,7 +9,7 @@ use super::ParameterStyle;
 pub struct Operation<'a, Ty> {
     pub id: &'a str,
     pub method: Method,
-    pub path: &'a [PathSegment<'a>],
+    pub path: ParsedPath<'a>,
     pub resource: Option<&'a str>,
     pub description: Option<&'a str>,
     pub params: &'a [Parameter<'a, Ty>],
