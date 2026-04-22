@@ -149,12 +149,17 @@ impl ToTokens for CodegenClientModule<'_> {
                 ) -> Result<crate::util::reqwest::RequestBuilder, crate::error::Error> {
                     let parts: ::ploidy_util::http::uri::PathAndQuery = path_and_query.parse()?;
                     let mut url = self.base_url.clone();
-                    let _ = url
-                        .path_segments_mut()
-                        .map(|mut segments| {
-                            segments.pop_if_empty()
-                                .extend(parts.path().split('/'));
-                        });
+                    let _ = url.path_segments_mut().map(|mut segments| {
+                        let path = parts.path();
+                        if path != "/" {
+                            let path = path
+                                .strip_prefix('/') // Drop leading `/` from new path.
+                                .unwrap_or(path);
+                            segments
+                                .pop_if_empty() // Drop trailing `/` from the base path.
+                                .extend(path.split('/'));
+                        }
+                    });
                     if let Some(query) = parts.query() {
                         url.query_pairs_mut()
                             .extend_pairs(::ploidy_util::url::form_urlencoded::parse(query.as_bytes()));
