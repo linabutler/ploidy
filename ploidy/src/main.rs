@@ -33,7 +33,12 @@ fn main() -> Result<()> {
                 .into_diagnostic()
                 .context("Failed to parse OpenAPI document")?;
 
-            println!("OpenAPI: {} (version {})", doc.info.title, doc.info.version);
+            if let Some(label) = doc.info.label() {
+                match label.version {
+                    Some(version) => println!("OpenAPI: {} (version {version})", label.title),
+                    None => println!("OpenAPI: {}", label.title),
+                }
+            }
 
             let arena = Arena::new();
             let spec = Spec::from_doc(&arena, &doc).into_diagnostic()?;

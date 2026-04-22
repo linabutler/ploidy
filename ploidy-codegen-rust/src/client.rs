@@ -32,13 +32,16 @@ impl ToTokens for CodegenClientModule<'_> {
             }
         });
 
-        let client_doc = {
-            let info = self.graph.info();
-            format!("API client for {} (version {})", info.title, info.version)
-        };
+        let client_doc = self.graph.info().label().map(|label| {
+            let doc = match label.version {
+                Some(version) => format!("API client for {} (version {version})", label.title),
+                None => format!("API client for {}", label.title),
+            };
+            quote! { #[doc = #doc] }
+        });
 
         tokens.append_all(quote! {
-            #[doc = #client_doc]
+            #client_doc
             #[derive(Clone, Debug)]
             pub struct Client {
                 client: ::ploidy_util::reqwest::Client,

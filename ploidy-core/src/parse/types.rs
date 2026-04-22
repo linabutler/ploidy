@@ -10,6 +10,7 @@ use crate::error::SerdeError;
 #[derive(Debug, Deserialize, JsonPointee, JsonPointerTarget)]
 pub struct Document {
     pub openapi: String,
+    #[serde(default)]
     pub info: Info,
     #[serde(default)]
     pub paths: IndexMap<String, PathItem>,
@@ -35,12 +36,33 @@ impl Document {
     }
 }
 
-#[derive(Clone, Debug, Deserialize, JsonPointee, JsonPointerTarget)]
+#[derive(Clone, Debug, Default, Deserialize, JsonPointee, JsonPointerTarget)]
 pub struct Info {
-    pub title: String,
+    #[serde(default)]
+    pub title: Option<String>,
     #[serde(default)]
     pub description: Option<String>,
-    pub version: String,
+    #[serde(default)]
+    pub version: Option<String>,
+}
+
+impl Info {
+    /// Returns the document label.
+    #[inline]
+    pub fn label(&self) -> Option<Label<'_>> {
+        let title = self.title.as_deref().filter(|s| !s.is_empty())?;
+        Some(Label {
+            title,
+            version: self.version.as_deref().filter(|s| !s.is_empty()),
+        })
+    }
+}
+
+/// The title and optional version from an [`Info`] section.
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub struct Label<'a> {
+    pub title: &'a str,
+    pub version: Option<&'a str>,
 }
 
 /// Operation definitions for a single path.
