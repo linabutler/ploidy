@@ -25,7 +25,7 @@ Today's stored paths are not intrinsic guarantees either — they're just whiche
 | Segment vocabulary | Thin structural step in core views | Core defines `InlineStep`; codegen maps to names |
 | Step source identity | `TypeInfo` (Schema name or InlineTypeId) | Public, meaningful to codegen; no `NodeIndex` leakage |
 | Optional segment | None visible | `InlineStep::Optional` exists for trace continuity but contributes no name segment; `InlineTypeId` disambiguates |
-| Uniquification | Pre-pass on `CodegenGraph::new` | Single pass builds (A) `(TypeInfo, StructFieldName) → &UniqueIdent` and (B) `InlineTypeId → InlineTrace`; both consulted by struct codegen, `CodegenRef`, and `CodegenInlines` |
+| Uniquification | Extend the existing `CodegenGraph::idents` side table | `idents` already maps `IdentMapping` → `&UniqueIdent` for schemas, operations, and resources; add `StructField(TypeInfo, StructFieldName)` for uniquified field names. A sister `inline_traces` map holds `InlineTypeId → &InlineTrace`. Both populated in `CodegenGraph::with_config` alongside today's scopes |
 | `TypeInfo::Inline` equality | Key by `InlineTypeId` only | Two nodes with the same lexical path but distinct IDs must compare unequal during dual-rep period; required for `metadata.uses` to behave correctly |
 | `InlineTypeId` visibility | Visible to codegen, not to end-users | Internal to ploidy workspace; not in generated output |
 
@@ -144,37 +144,50 @@ Edge-to-step mapping (used by the Phase 4 pre-pass):
 
 ### Phase 4: Migrate codegen to traces (the pre-pass)
 
-This is the load-bearing phase. `CodegenGraph::new` runs a pre-pass that builds two side tables consulted by all downstream codegen.
+This is the load-bearing phase. `CodegenGraph::with_config` already builds three uniquification scopes (schemas, operations, resources) into `idents: FxHashMap<IdentMapping, &UniqueIdent>` (`graph.rs:29-49`). Extend it with two more passes alongside.
 
-**Pre-pass step A — uniquification**:
-Walk every `GraphSchemaType::Struct` and `GraphInlineType::Struct`. For each, run `UniqueIdents::new()` over its declared field names (the same logic that lives in `CodegenStruct::to_tokens` today, hoisted up). Store results in side table A: `(TypeInfo, StructFieldName) → &UniqueIdent`.
+**Pre-pass step A — struct field uniquification**:
+Walk every `GraphSchemaType::Struct` and `GraphInlineType::Struct`. For each, run `UniqueIdents::new()` over its declared field names (the same logic currently inside `CodegenStruct::to_tokens`, hoisted up). Insert each result into `idents` under a new variant:
+```rust
+enum IdentMapping<'a> {
+    Schema(&'a str),
+    Operation(&'a str),
+    Resource(&'a str),
+    StructField(TypeInfo<'a>, StructFieldName<'a>),  // new
+}
+```
 
 **Pre-pass step B — canonical traces**:
+Add a sister field on `CodegenGraph`:
+```rust
+inline_traces: FxHashMap<InlineTypeId, &'a InlineTrace<'a>>,
+```
 Walk every reachable inline type (BFS from each schema and each operation seed, identical to today's `View::inlines` reachability). For each inline node:
 1. Pick its canonical inbound edge: the first non-shadow incoming edge in insertion order. (Petgraph's edge iteration order is reverse-insertion; reverse it before picking.)
 2. Recurse to the source's canonical trace, then append one `InlineStep` derived from the chosen edge using the mapping in Phase 3.
 3. The trace's `TraceRoot` is whatever the recursion bottoms out at — a schema name, or an operation seed's `(id, resource, role)`.
-4. For `Field` steps, look up the uniquified field name in side table A.
-5. Cache the result in side table B: `InlineTypeId → InlineTrace`.
+4. For `Field` steps, look up the uniquified field name from `idents` via `IdentMapping::StructField(...)`.
+5. Allocate the `InlineTrace` into `cooked.arena()` and insert into `inline_traces`.
 
 Operation seeds are computed by walking each operation's params/request/response and tagging each top-level `NodeIndex` with its `TraceRoot::Operation { … }`.
 
 **Files**:
 - `ploidy-codegen-rust/src/graph.rs`:
-  - `CodegenGraph::new` runs the pre-pass and stores tables A and B.
-  - Expose `field_ident(TypeInfo, StructFieldName) -> &UniqueIdent` and `inline_trace(InlineTypeId) -> &InlineTrace` accessors.
+  - Add `IdentMapping::StructField` variant and the field-uniquification pass.
+  - Add `inline_traces` field and the canonical-trace pass.
+  - Expose `field_ident(TypeInfo, StructFieldName) -> &UniqueIdent` (just an `idents` lookup) and `inline_trace(InlineTypeId) -> &InlineTrace` accessors.
 - `ploidy-codegen-rust/src/naming.rs`:
   - Remove `CodegenTypePathSegment` and its `join`/`display` methods.
   - Replace `CodegenTypeIdent::Inline(InlineTypePath)` with `CodegenTypeIdent::Inline(InlineTypeId)`.
-  - Add `fn inline_type_name(graph: &CodegenGraph, id: InlineTypeId) -> String` that fetches the cached trace and formats it. Variant/container steps format as today (`V{n}`, `Item`, `Value`, etc.); `Optional` produces no segment; `Field` consults side table A.
+  - Add `fn inline_type_name(graph: &CodegenGraph, id: InlineTypeId) -> String` that fetches the cached trace and formats it. Variant/container steps format as today (`V{n}`, `Item`, `Value`, etc.); `Optional` produces no segment; `Field` consults `field_ident()`.
   - Update `CodegenModuleIdent` to use the same name source.
 - `ploidy-codegen-rust/src/ref_.rs`:
-  - Replace `InlineTypePathRoot` matching with `TraceRoot`-based derivation. `Schema(name)` → `crate::types::<schema>::types`; `Operation { resource, … }` → `crate::client::<resource>::types`.
+  - Replace `InlineTypePathRoot` matching with `TraceRoot`-based derivation from `inline_trace(id).root`. `Schema(name)` → `crate::types::<schema>::types`; `Operation { resource, … }` → `crate::client::<resource>::types`.
 - `ploidy-codegen-rust/src/inlines.rs`:
   - Sort by computed name (string), not `InlineTypeId` — `test_sorts_inline_types_alphabetically` requires alphabetical order; ID order is allocation order.
   - Name generation goes through `inline_type_name()`.
 - `ploidy-codegen-rust/src/struct_.rs`:
-  - Replace `let mut scope = UniqueIdents::new(...)` with lookups into table A. Removes the per-`to_tokens` scope and the ordering hazard with `CodegenRef::new` at the inner field type.
+  - Replace `let mut scope = UniqueIdents::new(...)` with `field_ident()` lookups. Removes the per-`to_tokens` scope and the ordering hazard with `CodegenRef::new` at the inner field type.
 
 **Verification**: `cargo test --workspace` — all codegen tests updated to use new naming
 
@@ -221,7 +234,7 @@ cargo +nightly fmt --all
 
 1. **Arena for traces**: `CookedGraph::arena()` already exists (`graph.rs:535`). The pre-pass allocates traces into it directly.
 
-2. **Side table ownership**: Both tables live on `CodegenGraph`, populated during `CodegenGraph::new` and consulted by all downstream codegen.
+2. **Side table ownership**: Reuse `CodegenGraph::idents` (`graph.rs:17`) for the field-name table by adding a `StructField(TypeInfo, StructFieldName)` variant to `IdentMapping`. Add a sister `inline_traces: FxHashMap<InlineTypeId, &InlineTrace>` for the canonical-trace cache. Both populated during `CodegenGraph::with_config` alongside today's three uniquification scopes.
 
 3. **Canonical-edge selection**: Today's stored paths are not intrinsic — they reflect whichever lexical site allocated the node first. The new design centralizes the choice in one rule (first non-shadow incoming edge in insertion order), applied uniformly during the pre-pass. There is no claim of canonicality beyond determinism-by-build, which matches today's behavior.
 
