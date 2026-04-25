@@ -1,0 +1,190 @@
+# Refactor: Inline Type Path Materialization
+
+## Context
+
+`InlineTypePath` embeds a semantic path into every inline type graph node at parse time. This causes three problems:
+
+1. **Uniquification mismatch**: When codegen-rust uniquifies sibling struct fields (e.g., `fooBar` and `foo_bar` both becoming `foo_bar` in Rust), the inline types nested under those fields still carry the *original* field names in their paths, producing duplicate or conflicting generated type names.
+
+2. **Optional inconsistency**: `Optional` containers produce no path segment, so multiple nodes (the Optional wrapper and its inner type) share the same path.
+
+3. **Redundancy**: Inline type paths duplicate information already encoded in graph edges (`GraphEdge::Field`, `GraphEdge::Contains`, `GraphEdge::Variant`). The path system predates the semantic edge system and was never revisited.
+
+**Goal**: Replace stored paths with on-demand materialization. Inline types get opaque IDs for identity; the BFS in `View::inlines()` builds a trace of structural steps from graph edges. Codegen maps traces to names using its own uniquification state.
+
+## Design Decisions
+
+| Decision | Choice | Rationale |
+|----------|--------|-----------|
+| Contains disambiguation | Inspect source node | No edge changes needed; BFS peeks at source `GraphContainer` variant |
+| Operation segments | BFS seeds carry prefix | `(NodeIndex, OperationRole)` pairs; not graph edges |
+| Parent index | Derive from edge order | `Inherits` edges added in `allOf` order; BFS counts position |
+| Segment vocabulary | Thin structural step in core views | Core defines `InlineStep`; codegen maps to names |
+| Step source identity | `TypeInfo` (Schema name or InlineTypeId) | Public, meaningful to codegen; no `NodeIndex` leakage |
+| Optional segment | None | Optional is naming-invisible; `InlineTypeId` distinguishes nodes |
+| Uniquification | Codegen side table | `(TypeInfo, StructFieldName) -> &UniqueIdent`; same source for field names and inline type names |
+| `InlineTypeId` visibility | Visible to codegen, not to end-users | Internal to ploidy workspace; not in generated output |
+
+## New Types
+
+### Core: `InlineTypeId` (`types/mod.rs`)
+```rust
+/// Opaque identity for an inline type node.
+#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub struct InlineTypeId(u32);
+```
+
+### Core: `InlineStep` (`views/inline.rs` or new `views/step.rs`)
+```rust
+/// A structural step from a parent type to a child inline type,
+/// derived from graph edges during BFS traversal.
+#[derive(Clone, Copy, Debug)]
+pub enum InlineStep<'a> {
+    /// A struct field edge.
+    Field(TypeInfo<'a>, StructFieldName<'a>),
+    /// A tagged union variant edge.
+    TaggedVariant(&'a str),
+    /// An untagged union variant edge.
+    UntaggedVariant(usize),
+    /// Array contains its item type.
+    ArrayItem,
+    /// Map contains its value type.
+    MapValue,
+    /// Optional contains its inner type (naming-invisible).
+    Optional,
+    /// Inherits from an `allOf` parent.
+    Inherits,
+}
+```
+
+### Core: `InlineTrace` (alongside `InlineStep`)
+```rust
+/// The sequence of structural steps from a BFS root to an inline type.
+pub struct InlineTrace<'a> {
+    steps: &'a [InlineStep<'a>],  // arena-allocated
+}
+```
+
+### Core: `OperationRole` (`views/operation.rs`)
+```rust
+/// The role of an inline type root within an operation.
+pub enum OperationRole<'a> {
+    Parameter(&'a str),
+    Request,
+    Response,
+}
+```
+
+## Phased Changes
+
+### Phase 1: Add new types alongside old ones
+
+**Files**: `ploidy-core/src/ir/types/mod.rs`
+
+- Add `InlineTypeId(u32)` newtype with derives.
+- Add `InlineTypeId` to `TypeInfo::Inline` as a *second* field (keep `InlineTypePath` temporarily for dual representation during migration).
+- Add `InlineStep`, `InlineTrace`, `OperationRole` to the views layer.
+
+**Verification**: `cargo check --workspace`
+
+### Phase 2: Assign IDs during graph construction
+
+**Files**:
+- `ploidy-core/src/ir/transform.rs` — thread an ID counter through `IrTransformer`
+- `ploidy-core/src/ir/spec.rs` — thread the counter when building operation types
+- `ploidy-core/src/ir/graph.rs` — `inline_tagged_variants()` allocates new IDs for inlined variants
+- `ploidy-core/src/ir/types/graph.rs` — `GraphInlineType` variants gain `InlineTypeId`
+- `ploidy-core/src/ir/types/spec.rs` — `SpecInlineType` variants gain `InlineTypeId`
+
+At this point, every inline type node has both an `InlineTypePath` (old) and an `InlineTypeId` (new). Both are carried through.
+
+**Verification**: `cargo check --workspace && cargo test --workspace`
+
+### Phase 3: BFS produces traces
+
+**Files**:
+- `ploidy-core/src/ir/views/mod.rs` — modify `View::inlines()` BFS to:
+  1. Maintain a `HashMap<NodeIndex, &[InlineStep]>` of traces during traversal.
+  2. For each discovered node, inspect the edge + source node to derive an `InlineStep`.
+  3. Allocate the trace via `CookedGraph::arena()`.
+  4. Yield `InlineTypeView` with the trace attached.
+- `ploidy-core/src/ir/views/operation.rs` — modify `OperationView::inlines()` to:
+  1. Build seed prefixes: `(NodeIndex, OperationRole)` for each param/request/response.
+  2. Track which seed each node came from.
+  3. Produce traces with the operation context available.
+- `ploidy-core/src/ir/views/inline.rs` — `InlineTypeView` gains `trace()` method alongside existing `path()`.
+
+Edge-to-step mapping during BFS:
+- `GraphEdge::Field { meta, .. }` (non-shadow) → `InlineStep::Field(source_type_info, meta.name)`
+- `GraphEdge::Contains` + source `GraphContainer::Array` → `InlineStep::ArrayItem`
+- `GraphEdge::Contains` + source `GraphContainer::Map` → `InlineStep::MapValue`
+- `GraphEdge::Contains` + source `GraphContainer::Optional` → `InlineStep::Optional`
+- `GraphEdge::Variant(VariantMeta::Tagged(m))` → `InlineStep::TaggedVariant(m.name)`
+- `GraphEdge::Variant(VariantMeta::Untagged(m))` → `InlineStep::UntaggedVariant(index)` (index from `m.hint` or edge position)
+- `GraphEdge::Inherits` (non-shadow) → `InlineStep::Inherits` (position from edge count)
+
+**Verification**: `cargo test --workspace` — existing tests pass (old `path()` still works)
+
+### Phase 4: Migrate codegen to traces
+
+**Files**:
+- `ploidy-codegen-rust/src/naming.rs`:
+  - Remove `CodegenTypePathSegment` and its `join`/`display` methods.
+  - Replace `CodegenTypeIdent::Inline(InlineTypePath)` with `CodegenTypeIdent::Inline(InlineTypeId)` (or a computed name).
+  - Add `fn inline_type_name(trace: &InlineTrace, root_context: ..., side_table: ...) -> String` that walks the trace, looking up uniquified field names from the side table and formatting variant/container steps.
+  - Update `CodegenModuleIdent` accordingly.
+- `ploidy-codegen-rust/src/ref_.rs`:
+  - Replace `InlineTypePathRoot` matching with root-context-based module path derivation. The root context (schema name or operation resource + role) determines whether the type lives in `crate::types::<schema>::types` or `crate::client::<resource>::types`.
+- `ploidy-codegen-rust/src/inlines.rs`:
+  - Sorting: use computed name or `InlineTypeId` for deterministic ordering.
+  - Name generation uses new `inline_type_name()`.
+- `ploidy-codegen-rust/src/struct_.rs` (or wherever field uniquification happens):
+  - When uniquifying field names, populate a side table: `HashMap<(TypeInfo, StructFieldName), &UniqueIdent>`.
+  - This side table is shared with inline type naming.
+
+**Verification**: `cargo test --workspace` — all codegen tests updated to use new naming
+
+### Phase 5: Remove old path types
+
+**Files**:
+- `ploidy-core/src/ir/types/mod.rs` — remove `InlineTypePath`, `InlineTypePathRoot`, `InlineTypePathSegment`, `InlineTypePath::join()`
+- `ploidy-core/src/ir/types/graph.rs` — `GraphInlineType` variants: remove `InlineTypePath`, keep only `InlineTypeId`
+- `ploidy-core/src/ir/types/spec.rs` — `SpecInlineType` variants: same
+- `ploidy-core/src/ir/transform.rs` — remove all path construction (the `InlineTypePath { root, segments }` blocks, `path.join()` calls)
+- `ploidy-core/src/ir/spec.rs` — same
+- `ploidy-core/src/ir/views/inline.rs` — remove `path()` method; `trace()` is the only API
+- `ploidy-core/src/ir/types/mod.rs` — `TypeInfo::Inline` carries only `InlineTypeId`
+
+**Verification**: Full verification checklist from CLAUDE.md:
+```bash
+cargo check --workspace
+cargo test --workspace --no-fail-fast --all-features
+cargo doc --workspace --no-deps
+cargo clippy --workspace --all-targets --fix --allow-dirty --allow-staged --no-deps
+cargo +nightly fmt --all
+```
+
+## Key Files
+
+| File | Role |
+|------|------|
+| `ploidy-core/src/ir/types/mod.rs` | `InlineTypePath`, `InlineTypePathSegment`, `TypeInfo` — types to change |
+| `ploidy-core/src/ir/types/graph.rs` | `GraphInlineType` — carries path → ID |
+| `ploidy-core/src/ir/types/spec.rs` | `SpecInlineType` — carries path → ID |
+| `ploidy-core/src/ir/transform.rs` | Path construction during parsing → ID allocation |
+| `ploidy-core/src/ir/spec.rs` | Path construction for operations → ID allocation |
+| `ploidy-core/src/ir/graph.rs` | `inline_tagged_variants()`, `GraphEdge`, `RawGraph::new()` |
+| `ploidy-core/src/ir/views/mod.rs` | `View::inlines()` BFS — needs edge tracking |
+| `ploidy-core/src/ir/views/inline.rs` | `InlineTypeView` — path → trace |
+| `ploidy-core/src/ir/views/operation.rs` | `OperationView::inlines()` — seed prefixes |
+| `ploidy-codegen-rust/src/naming.rs` | `CodegenTypeIdent`, `CodegenTypePathSegment` — naming pipeline |
+| `ploidy-codegen-rust/src/ref_.rs` | Module path from `InlineTypePathRoot` → root context |
+| `ploidy-codegen-rust/src/inlines.rs` | `CodegenInlines` — sorting, name generation |
+
+## Resolved Questions
+
+1. **Arena for traces**: `CookedGraph::arena()` already exists (`graph.rs:535`). BFS allocates traces into it directly.
+
+2. **Side table ownership**: Lives on `CodegenGraph`, which already wraps `CookedGraph` with codegen-specific state.
+
+3. **`OperationRole` threading**: Before starting BFS, `OperationView::inlines()` builds a seed-to-role map from the operation's params/request/response. Each BFS-discovered node inherits the role of its seed ancestor.
