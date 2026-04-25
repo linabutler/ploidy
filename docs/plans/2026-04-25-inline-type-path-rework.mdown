@@ -10,19 +10,23 @@
 
 3. **Redundancy**: Inline type paths duplicate information already encoded in graph edges (`GraphEdge::Field`, `GraphEdge::Contains`, `GraphEdge::Variant`). The path system predates the semantic edge system and was never revisited.
 
-**Goal**: Replace stored paths with on-demand materialization. Inline types get opaque IDs for identity; the BFS in `View::inlines()` builds a trace of structural steps from graph edges. Codegen maps traces to names using its own uniquification state.
+**Goal**: Replace stored paths with materialized traces. Inline types get opaque IDs for identity; a pre-pass on `CodegenGraph::new` walks the graph once and stores a canonical trace per `InlineTypeId`. Codegen maps traces to names using its own uniquification state, populated by the same pre-pass.
+
+Today's stored paths are not intrinsic guarantees either — they're just whichever lexical site happened to allocate the inline first. The new design preserves that "deterministic-by-build" property, but centralizes the choice in one explicit edge-selection rule instead of scattering it across `transform.rs` allocation order.
 
 ## Design Decisions
 
 | Decision | Choice | Rationale |
 |----------|--------|-----------|
-| Contains disambiguation | Inspect source node | No edge changes needed; BFS peeks at source `GraphContainer` variant |
-| Operation segments | BFS seeds carry prefix | `(NodeIndex, OperationRole)` pairs; not graph edges |
-| Parent index | Derive from edge order | `Inherits` edges added in `allOf` order; BFS counts position |
+| Contains disambiguation | Inspect source node | No edge changes needed; pre-pass peeks at source `GraphContainer` variant |
+| Trace root context | `TraceRoot` carries `op_id` + `resource` + role | Codegen needs both for the type-name prefix (`GetItems…`, `CreatePet…`) and the module path (`crate::client::<resource>::types`) |
+| Parent index | `InlineStep::Inherits(usize)` carries it | Derived from `Inherits` edge position in pre-pass; matches today's `InlineTypePathSegment::Parent(usize)` |
+| Canonical-edge rule | First non-shadow incoming edge in insertion order | Matches today's "first lexical site wins" behavior; deterministic across cooks |
 | Segment vocabulary | Thin structural step in core views | Core defines `InlineStep`; codegen maps to names |
 | Step source identity | `TypeInfo` (Schema name or InlineTypeId) | Public, meaningful to codegen; no `NodeIndex` leakage |
-| Optional segment | None | Optional is naming-invisible; `InlineTypeId` distinguishes nodes |
-| Uniquification | Codegen side table | `(TypeInfo, StructFieldName) -> &UniqueIdent`; same source for field names and inline type names |
+| Optional segment | None visible | `InlineStep::Optional` exists for trace continuity but contributes no name segment; `InlineTypeId` disambiguates |
+| Uniquification | Pre-pass on `CodegenGraph::new` | Single pass builds (A) `(TypeInfo, StructFieldName) → &UniqueIdent` and (B) `InlineTypeId → InlineTrace`; both consulted by struct codegen, `CodegenRef`, and `CodegenInlines` |
+| `TypeInfo::Inline` equality | Key by `InlineTypeId` only | Two nodes with the same lexical path but distinct IDs must compare unequal during dual-rep period; required for `metadata.uses` to behave correctly |
 | `InlineTypeId` visibility | Visible to codegen, not to end-users | Internal to ploidy workspace; not in generated output |
 
 ## New Types
@@ -37,36 +41,53 @@ pub struct InlineTypeId(u32);
 ### Core: `InlineStep` (`views/inline.rs` or new `views/step.rs`)
 ```rust
 /// A structural step from a parent type to a child inline type,
-/// derived from graph edges during BFS traversal.
+/// derived from a single graph edge during the canonical-trace pre-pass.
 #[derive(Clone, Copy, Debug)]
 pub enum InlineStep<'a> {
-    /// A struct field edge.
+    /// A struct field edge. Source `TypeInfo` lets codegen look up the
+    /// uniquified field name in side table A.
     Field(TypeInfo<'a>, StructFieldName<'a>),
     /// A tagged union variant edge.
     TaggedVariant(&'a str),
-    /// An untagged union variant edge.
+    /// An untagged union variant edge; index from edge position.
     UntaggedVariant(usize),
     /// Array contains its item type.
     ArrayItem,
     /// Map contains its value type.
     MapValue,
-    /// Optional contains its inner type (naming-invisible).
+    /// Optional contains its inner type. Naming-invisible — produces no
+    /// name segment, but preserves trace continuity so `InlineTypeId`
+    /// disambiguates the wrapper from its inner node.
     Optional,
-    /// Inherits from an `allOf` parent.
-    Inherits,
+    /// Inherits from the n-th `allOf` parent (1-indexed, matching today's
+    /// `InlineTypePathSegment::Parent`).
+    Inherits(usize),
 }
 ```
 
-### Core: `InlineTrace` (alongside `InlineStep`)
+### Core: `InlineTrace` and `TraceRoot` (alongside `InlineStep`)
 ```rust
-/// The sequence of structural steps from a BFS root to an inline type.
+/// The canonical trace from a root context to an inline type.
 pub struct InlineTrace<'a> {
-    steps: &'a [InlineStep<'a>],  // arena-allocated
+    pub root: TraceRoot<'a>,
+    pub steps: &'a [InlineStep<'a>],  // arena-allocated
 }
-```
 
-### Core: `OperationRole` (`views/operation.rs`)
-```rust
+/// The root context for an inline trace. Determines both the module
+/// path (`crate::types::<schema>::types` vs `crate::client::<resource>::types`)
+/// and the type-name prefix.
+pub enum TraceRoot<'a> {
+    /// Inline rooted under a named schema.
+    Schema(&'a str),
+    /// Inline rooted under an operation. `id` drives the type-name prefix
+    /// (`createPet` → `CreatePet…`); `resource` drives the module path.
+    Operation {
+        id: &'a str,
+        resource: Option<&'a str>,
+        role: OperationRole<'a>,
+    },
+}
+
 /// The role of an inline type root within an operation.
 pub enum OperationRole<'a> {
     Parameter(&'a str),
@@ -79,11 +100,13 @@ pub enum OperationRole<'a> {
 
 ### Phase 1: Add new types alongside old ones
 
-**Files**: `ploidy-core/src/ir/types/mod.rs`
+**Files**: `ploidy-core/src/ir/types/mod.rs`, `ploidy-core/src/ir/views/`
 
 - Add `InlineTypeId(u32)` newtype with derives.
 - Add `InlineTypeId` to `TypeInfo::Inline` as a *second* field (keep `InlineTypePath` temporarily for dual representation during migration).
-- Add `InlineStep`, `InlineTrace`, `OperationRole` to the views layer.
+- Implement `Hash`/`PartialEq`/`Eq` on `TypeInfo::Inline` manually so equality keys on `InlineTypeId` only. Two nodes with the same lexical path but distinct IDs must compare unequal; otherwise `metadata.uses` and any other `TypeInfo`-keyed structure miscount.
+- Add `InlineStep`, `InlineTrace`, `TraceRoot`, `OperationRole` to the views layer.
+- Re-export the new types from `ploidy_core::ir`'s public surface so codegen can import them.
 
 **Verification**: `cargo check --workspace`
 
@@ -100,47 +123,58 @@ At this point, every inline type node has both an `InlineTypePath` (old) and an 
 
 **Verification**: `cargo check --workspace && cargo test --workspace`
 
-### Phase 3: BFS produces traces
+### Phase 3: Expose trace API on views
 
 **Files**:
-- `ploidy-core/src/ir/views/mod.rs` — modify `View::inlines()` BFS to:
-  1. Maintain a `HashMap<NodeIndex, &[InlineStep]>` of traces during traversal.
-  2. For each discovered node, inspect the edge + source node to derive an `InlineStep`.
-  3. Allocate the trace via `CookedGraph::arena()`.
-  4. Yield `InlineTypeView` with the trace attached.
-- `ploidy-core/src/ir/views/operation.rs` — modify `OperationView::inlines()` to:
-  1. Build seed prefixes: `(NodeIndex, OperationRole)` for each param/request/response.
-  2. Track which seed each node came from.
-  3. Produce traces with the operation context available.
-- `ploidy-core/src/ir/views/inline.rs` — `InlineTypeView` gains `trace()` method alongside existing `path()`.
+- `ploidy-core/src/ir/views/inline.rs` — `InlineTypeView` gains a `trace()` method that returns the canonical trace. The trace itself is computed and cached by codegen's pre-pass (Phase 4); core just defines the data type and the accessor seam. The accessor can take a `&CodegenGraph`-equivalent context, or — simpler — codegen can hold the lookup table directly and consult it without going through `InlineTypeView`.
+- Keep existing `path()` working for the duration of the migration so old callers don't break.
 
-Edge-to-step mapping during BFS:
+The pre-pass logic itself lives in codegen (Phase 4), since it depends on the codegen-side uniquification scope. Core stays codegen-agnostic.
+
+Edge-to-step mapping (used by the Phase 4 pre-pass):
 - `GraphEdge::Field { meta, .. }` (non-shadow) → `InlineStep::Field(source_type_info, meta.name)`
 - `GraphEdge::Contains` + source `GraphContainer::Array` → `InlineStep::ArrayItem`
 - `GraphEdge::Contains` + source `GraphContainer::Map` → `InlineStep::MapValue`
 - `GraphEdge::Contains` + source `GraphContainer::Optional` → `InlineStep::Optional`
 - `GraphEdge::Variant(VariantMeta::Tagged(m))` → `InlineStep::TaggedVariant(m.name)`
-- `GraphEdge::Variant(VariantMeta::Untagged(m))` → `InlineStep::UntaggedVariant(index)` (index from `m.hint` or edge position)
-- `GraphEdge::Inherits` (non-shadow) → `InlineStep::Inherits` (position from edge count)
+- `GraphEdge::Variant(VariantMeta::Untagged(_))` → `InlineStep::UntaggedVariant(position)` (position from edge order among `Variant` edges on the source)
+- `GraphEdge::Inherits { shadow: false }` → `InlineStep::Inherits(position)` (1-indexed, from edge order among `Inherits` edges on the source — matches today's `Parent(usize)`)
 
 **Verification**: `cargo test --workspace` — existing tests pass (old `path()` still works)
 
-### Phase 4: Migrate codegen to traces
+### Phase 4: Migrate codegen to traces (the pre-pass)
+
+This is the load-bearing phase. `CodegenGraph::new` runs a pre-pass that builds two side tables consulted by all downstream codegen.
+
+**Pre-pass step A — uniquification**:
+Walk every `GraphSchemaType::Struct` and `GraphInlineType::Struct`. For each, run `UniqueIdents::new()` over its declared field names (the same logic that lives in `CodegenStruct::to_tokens` today, hoisted up). Store results in side table A: `(TypeInfo, StructFieldName) → &UniqueIdent`.
+
+**Pre-pass step B — canonical traces**:
+Walk every reachable inline type (BFS from each schema and each operation seed, identical to today's `View::inlines` reachability). For each inline node:
+1. Pick its canonical inbound edge: the first non-shadow incoming edge in insertion order. (Petgraph's edge iteration order is reverse-insertion; reverse it before picking.)
+2. Recurse to the source's canonical trace, then append one `InlineStep` derived from the chosen edge using the mapping in Phase 3.
+3. The trace's `TraceRoot` is whatever the recursion bottoms out at — a schema name, or an operation seed's `(id, resource, role)`.
+4. For `Field` steps, look up the uniquified field name in side table A.
+5. Cache the result in side table B: `InlineTypeId → InlineTrace`.
+
+Operation seeds are computed by walking each operation's params/request/response and tagging each top-level `NodeIndex` with its `TraceRoot::Operation { … }`.
 
 **Files**:
+- `ploidy-codegen-rust/src/graph.rs`:
+  - `CodegenGraph::new` runs the pre-pass and stores tables A and B.
+  - Expose `field_ident(TypeInfo, StructFieldName) -> &UniqueIdent` and `inline_trace(InlineTypeId) -> &InlineTrace` accessors.
 - `ploidy-codegen-rust/src/naming.rs`:
   - Remove `CodegenTypePathSegment` and its `join`/`display` methods.
-  - Replace `CodegenTypeIdent::Inline(InlineTypePath)` with `CodegenTypeIdent::Inline(InlineTypeId)` (or a computed name).
-  - Add `fn inline_type_name(trace: &InlineTrace, root_context: ..., side_table: ...) -> String` that walks the trace, looking up uniquified field names from the side table and formatting variant/container steps.
-  - Update `CodegenModuleIdent` accordingly.
+  - Replace `CodegenTypeIdent::Inline(InlineTypePath)` with `CodegenTypeIdent::Inline(InlineTypeId)`.
+  - Add `fn inline_type_name(graph: &CodegenGraph, id: InlineTypeId) -> String` that fetches the cached trace and formats it. Variant/container steps format as today (`V{n}`, `Item`, `Value`, etc.); `Optional` produces no segment; `Field` consults side table A.
+  - Update `CodegenModuleIdent` to use the same name source.
 - `ploidy-codegen-rust/src/ref_.rs`:
-  - Replace `InlineTypePathRoot` matching with root-context-based module path derivation. The root context (schema name or operation resource + role) determines whether the type lives in `crate::types::<schema>::types` or `crate::client::<resource>::types`.
+  - Replace `InlineTypePathRoot` matching with `TraceRoot`-based derivation. `Schema(name)` → `crate::types::<schema>::types`; `Operation { resource, … }` → `crate::client::<resource>::types`.
 - `ploidy-codegen-rust/src/inlines.rs`:
-  - Sorting: use computed name or `InlineTypeId` for deterministic ordering.
-  - Name generation uses new `inline_type_name()`.
-- `ploidy-codegen-rust/src/struct_.rs` (or wherever field uniquification happens):
-  - When uniquifying field names, populate a side table: `HashMap<(TypeInfo, StructFieldName), &UniqueIdent>`.
-  - This side table is shared with inline type naming.
+  - Sort by computed name (string), not `InlineTypeId` — `test_sorts_inline_types_alphabetically` requires alphabetical order; ID order is allocation order.
+  - Name generation goes through `inline_type_name()`.
+- `ploidy-codegen-rust/src/struct_.rs`:
+  - Replace `let mut scope = UniqueIdents::new(...)` with lookups into table A. Removes the per-`to_tokens` scope and the ordering hazard with `CodegenRef::new` at the inner field type.
 
 **Verification**: `cargo test --workspace` — all codegen tests updated to use new naming
 
@@ -154,6 +188,8 @@ Edge-to-step mapping during BFS:
 - `ploidy-core/src/ir/spec.rs` — same
 - `ploidy-core/src/ir/views/inline.rs` — remove `path()` method; `trace()` is the only API
 - `ploidy-core/src/ir/types/mod.rs` — `TypeInfo::Inline` carries only `InlineTypeId`
+
+Also rewrite path-literal assertions in `ploidy-core/src/ir/tests/transform.rs` (e.g., `segments: [InlineTypePathSegment::Parent(1)]` at lines 1016, 1029, 1088) to assert via the new view APIs or `InlineTypeId`-keyed lookups.
 
 **Verification**: Full verification checklist from CLAUDE.md:
 ```bash
@@ -183,8 +219,12 @@ cargo +nightly fmt --all
 
 ## Resolved Questions
 
-1. **Arena for traces**: `CookedGraph::arena()` already exists (`graph.rs:535`). BFS allocates traces into it directly.
+1. **Arena for traces**: `CookedGraph::arena()` already exists (`graph.rs:535`). The pre-pass allocates traces into it directly.
 
-2. **Side table ownership**: Lives on `CodegenGraph`, which already wraps `CookedGraph` with codegen-specific state.
+2. **Side table ownership**: Both tables live on `CodegenGraph`, populated during `CodegenGraph::new` and consulted by all downstream codegen.
 
-3. **`OperationRole` threading**: Before starting BFS, `OperationView::inlines()` builds a seed-to-role map from the operation's params/request/response. Each BFS-discovered node inherits the role of its seed ancestor.
+3. **Canonical-edge selection**: Today's stored paths are not intrinsic — they reflect whichever lexical site allocated the node first. The new design centralizes the choice in one rule (first non-shadow incoming edge in insertion order), applied uniformly during the pre-pass. There is no claim of canonicality beyond determinism-by-build, which matches today's behavior.
+
+4. **`TraceRoot` derivation**: For schema-rooted inlines, the root is `Schema(name)` from the source's `SchemaTypeInfo`. For operation-rooted inlines, the pre-pass walks each operation's params/request/response once to seed the trace lookup with `Operation { id, resource, role }` per top-level `NodeIndex`.
+
+5. **Cross-references via `CodegenRef`**: `ref_.rs` looks up the cached trace in side table B by `InlineTypeId`. Names produced at use sites and at definition sites match by construction, since both pull from the same cache.
