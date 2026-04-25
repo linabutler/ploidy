@@ -1,15 +1,13 @@
 use itertools::Itertools;
-use ploidy_core::{
-    codegen::UniqueNames,
-    ir::{OperationView, ParameterStyle, ParameterView, QueryParameter, View},
-};
+use ploidy_core::ir::{ParameterStyle, ParameterView, QueryParameter, View};
 use proc_macro2::TokenStream;
 use quote::{ToTokens, TokenStreamExt, format_ident, quote};
 
 use super::{
     derives::ExtraDerive,
     ext::ParameterViewExt,
-    naming::{CodegenIdent, CodegenIdentScope, CodegenIdentUsage},
+    graph::{CodegenGraph, CodegenOperationView},
+    naming::{CodegenIdentUsage, UniqueIdents},
     ref_::CodegenRef,
 };
 
@@ -21,21 +19,21 @@ use super::{
 /// with per-parameter serialization style overrides.
 #[derive(Debug)]
 pub struct CodegenQueryParameters<'a> {
-    op: &'a OperationView<'a>,
+    graph: &'a CodegenGraph<'a>,
+    op: &'a CodegenOperationView<'a, 'a>,
 }
 
 impl<'a> CodegenQueryParameters<'a> {
     /// Creates a new query parameter struct for the given operation.
     #[inline]
-    pub fn new(op: &'a OperationView<'a>) -> Self {
-        Self { op }
+    pub fn new(graph: &'a CodegenGraph<'a>, op: &'a CodegenOperationView<'a, 'a>) -> Self {
+        Self { graph, op }
     }
 }
 
 impl ToTokens for CodegenQueryParameters<'_> {
     fn to_tokens(&self, tokens: &mut TokenStream) {
-        let op_ident = CodegenIdent::new(self.op.id());
-        let query_name = format_ident!("{}Query", CodegenIdentUsage::Type(&op_ident));
+        let query_name = format_ident!("{}Query", CodegenIdentUsage::Type(&self.op.ident()));
 
         let mut extra_derives = vec![];
 
@@ -57,13 +55,11 @@ impl ToTokens for CodegenQueryParameters<'_> {
             extra_derives.push(ExtraDerive::Default);
         }
 
-        let unique = UniqueNames::new();
-        let mut scope = CodegenIdentScope::new(&unique);
-
+        let mut scope = UniqueIdents::new(self.graph.arena());
         let params = self
             .op
             .query()
-            .map(|param| (scope.uniquify(param.name()), param))
+            .map(|param| (scope.name(param.name()), param))
             .collect_vec();
 
         let fields = params.iter().map(|(ident, param)| {
@@ -72,14 +68,15 @@ impl ToTokens for CodegenQueryParameters<'_> {
 
             let ty = if param.optional() {
                 let view = param.ty();
-                let path = CodegenRef::new(&view);
+                let path = CodegenRef::new(self.graph, &view);
                 quote! { ::std::option::Option<#path> }
             } else {
                 let view = param.ty();
-                let path = CodegenRef::new(&view);
+                let path = CodegenRef::new(self.graph, &view);
                 quote!(#path)
             };
 
+            let field_name = CodegenIdentUsage::Field(ident);
             quote! {
                 #serde_attr
                 pub #field_name: #ty,
@@ -125,13 +122,13 @@ impl ToTokens for CodegenQueryParameters<'_> {
 #[derive(Debug)]
 struct SerdeQueryFieldAttr<'param, 'a> {
     field_name: CodegenIdentUsage<'param>,
-    param: &'param ParameterView<'param, 'a, QueryParameter>,
+    param: &'param ParameterView<'param, 'a, 'a, QueryParameter>,
 }
 
 impl<'param, 'a> SerdeQueryFieldAttr<'param, 'a> {
     fn new(
         field_name: CodegenIdentUsage<'param>,
-        param: &'param ParameterView<'param, 'a, QueryParameter>,
+        param: &'param ParameterView<'param, 'a, 'a, QueryParameter>,
     ) -> Self {
         Self { field_name, param }
     }
@@ -212,7 +209,7 @@ mod tests {
         let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
         let op = graph.operations().next().unwrap();
-        let codegen = CodegenQueryParameters::new(&op);
+        let codegen = CodegenQueryParameters::new(&graph, &op);
 
         let actual: syn::File = parse_quote!(#codegen);
         let expected: syn::File = parse_quote! {
@@ -271,7 +268,7 @@ mod tests {
         let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
         let op = graph.operations().next().unwrap();
-        let codegen = CodegenQueryParameters::new(&op);
+        let codegen = CodegenQueryParameters::new(&graph, &op);
 
         let actual: syn::File = parse_quote!(#codegen);
         let expected: syn::File = parse_quote! {
@@ -320,7 +317,7 @@ mod tests {
         let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
         let op = graph.operations().next().unwrap();
-        let codegen = CodegenQueryParameters::new(&op);
+        let codegen = CodegenQueryParameters::new(&graph, &op);
 
         let actual: syn::File = parse_quote!(#codegen);
         let expected: syn::File = parse_quote! {
@@ -367,7 +364,7 @@ mod tests {
         let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
         let op = graph.operations().next().unwrap();
-        let codegen = CodegenQueryParameters::new(&op);
+        let codegen = CodegenQueryParameters::new(&graph, &op);
 
         let actual: syn::File = parse_quote!(#codegen);
         let expected: syn::File = parse_quote! {
@@ -438,7 +435,7 @@ mod tests {
         let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
         let op = graph.operations().next().unwrap();
-        let codegen = CodegenQueryParameters::new(&op);
+        let codegen = CodegenQueryParameters::new(&graph, &op);
 
         let actual: syn::File = parse_quote!(#codegen);
         let expected: syn::File = parse_quote! {
@@ -501,7 +498,7 @@ mod tests {
         let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
         let op = graph.operations().next().unwrap();
-        let codegen = CodegenQueryParameters::new(&op);
+        let codegen = CodegenQueryParameters::new(&graph, &op);
 
         let actual: syn::File = parse_quote!(#codegen);
         let expected: syn::File = parse_quote! {

@@ -51,7 +51,7 @@ pub enum CfgFeature {
 impl CfgFeature {
     /// Builds a `#[cfg(...)]` attribute for a schema type, based on
     /// its own resource, and the resources of the operations that use it.
-    pub fn for_schema_type(view: &SchemaTypeView<'_>) -> Option<Self> {
+    pub fn for_schema_type(view: &SchemaTypeView<'_, '_>) -> Option<Self> {
         // If this type has any transitive ungated root dependents,
         // it can't have a feature gate. An "ungated root" type
         // has no `x-resourceId`, _and_ isn't used by any operation with
@@ -88,7 +88,7 @@ impl CfgFeature {
     }
 
     /// Builds a `#[cfg(...)]` attribute for an inline type.
-    pub fn for_inline_type(view: &InlineTypeView<'_>) -> Option<Self> {
+    pub fn for_inline_type(view: &InlineTypeView<'_, '_>) -> Option<Self> {
         // Inline types depended on by ungated root types can't be gated, either.
         // See `for_schema_type` for the definition of an "ungated root".
         let has_ungated_root_dependent = view
@@ -122,7 +122,7 @@ impl CfgFeature {
     }
 
     /// Builds a `#[cfg(...)]` attribute for a client method.
-    pub fn for_operation(view: &OperationView<'_>) -> Option<Self> {
+    pub fn for_operation(view: &OperationView<'_, '_>) -> Option<Self> {
         // Collect all features from transitive dependencies, then
         // reduce redundant features.
         let pairs = view
@@ -238,7 +238,7 @@ impl ToTokens for CfgFeature {
 /// depends on feature B's type, then enabling A in `Cargo.toml` already
 /// enables B, so B is redundant.
 fn reduce_transitive_features(
-    pairs: &[(CargoFeature, SchemaTypeView<'_>)],
+    pairs: &[(CargoFeature, SchemaTypeView<'_, '_>)],
 ) -> BTreeSet<CargoFeature> {
     pairs
         .iter()
@@ -457,7 +457,7 @@ mod tests {
         let spec = Spec::from_doc(&arena, &doc).unwrap();
         let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
-        let customer = graph.schemas().find(|s| s.name() == "Customer").unwrap();
+        let customer = graph.schema("Customer").unwrap();
 
         // Shouldn't generate any feature gates for graph without named resources.
         let cfg = CfgFeature::for_schema_type(&customer);
@@ -488,7 +488,7 @@ mod tests {
         let spec = Spec::from_doc(&arena, &doc).unwrap();
         let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
-        let customer = graph.schemas().find(|s| s.name() == "Customer").unwrap();
+        let customer = graph.schema("Customer").unwrap();
         let cfg = CfgFeature::for_schema_type(&customer);
 
         let actual: syn::Attribute = parse_quote!(#cfg);
@@ -526,14 +526,14 @@ mod tests {
         let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
         // `Customer` should be gated.
-        let customer = graph.schemas().find(|s| s.name() == "Customer").unwrap();
+        let customer = graph.schema("Customer").unwrap();
         let cfg = CfgFeature::for_schema_type(&customer);
         let actual: syn::Attribute = parse_quote!(#cfg);
         let expected: syn::Attribute = parse_quote!(#[cfg(feature = "customer")]);
         assert_eq!(actual, expected);
 
         // `Address` should be ungated.
-        let address = graph.schemas().find(|s| s.name() == "Address").unwrap();
+        let address = graph.schema("Address").unwrap();
         let cfg = CfgFeature::for_schema_type(&address);
         assert_eq!(cfg, None);
     }
@@ -575,7 +575,7 @@ mod tests {
         let spec = Spec::from_doc(&arena, &doc).unwrap();
         let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
-        let customer = graph.schemas().find(|s| s.name() == "Customer").unwrap();
+        let customer = graph.schema("Customer").unwrap();
         let cfg = CfgFeature::for_schema_type(&customer);
 
         let actual: syn::Attribute = parse_quote!(#cfg);
@@ -631,7 +631,7 @@ mod tests {
         let spec = Spec::from_doc(&arena, &doc).unwrap();
         let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
-        let address = graph.schemas().find(|s| s.name() == "Address").unwrap();
+        let address = graph.schema("Address").unwrap();
         let cfg = CfgFeature::for_schema_type(&address);
 
         let actual: syn::Attribute = parse_quote!(#cfg);
@@ -676,7 +676,7 @@ mod tests {
         let spec = Spec::from_doc(&arena, &doc).unwrap();
         let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
-        let customer = graph.schemas().find(|s| s.name() == "Customer").unwrap();
+        let customer = graph.schema("Customer").unwrap();
         let cfg = CfgFeature::for_schema_type(&customer);
 
         let actual: syn::Attribute = parse_quote!(#cfg);
@@ -730,7 +730,7 @@ mod tests {
         let spec = Spec::from_doc(&arena, &doc).unwrap();
         let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
-        let customer = graph.schemas().find(|s| s.name() == "Customer").unwrap();
+        let customer = graph.schema("Customer").unwrap();
         let cfg = CfgFeature::for_schema_type(&customer);
 
         let actual: syn::Attribute = parse_quote!(#cfg);
@@ -783,7 +783,7 @@ mod tests {
         let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
         // `Customer` keeps its compound feature gate (own + used by).
-        let customer = graph.schemas().find(|s| s.name() == "Customer").unwrap();
+        let customer = graph.schema("Customer").unwrap();
         let cfg = CfgFeature::for_schema_type(&customer);
         let actual: syn::Attribute = parse_quote!(#cfg);
         let expected: syn::Attribute =
@@ -792,7 +792,7 @@ mod tests {
 
         // `Address` has no `x-resourceId`, but is used by the operation transitively,
         // so it inherits the operation's feature gate.
-        let address = graph.schemas().find(|s| s.name() == "Address").unwrap();
+        let address = graph.schema("Address").unwrap();
         let cfg = CfgFeature::for_schema_type(&address);
         let actual: syn::Attribute = parse_quote!(#cfg);
         let expected: syn::Attribute = parse_quote!(#[cfg(feature = "billing")]);
@@ -830,7 +830,7 @@ mod tests {
         let spec = Spec::from_doc(&arena, &doc).unwrap();
         let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
-        let simple = graph.schemas().find(|s| s.name() == "Simple").unwrap();
+        let simple = graph.schema("Simple").unwrap();
         let cfg = CfgFeature::for_schema_type(&simple);
 
         // Types without a resource, and without operations that use them,
@@ -878,15 +878,15 @@ mod tests {
 
         // In a cycle involving B, all types become ungated, because
         // B depends on C, which depends on A, which depends on B.
-        let a = graph.schemas().find(|s| s.name() == "A").unwrap();
+        let a = graph.schema("A").unwrap();
         let cfg = CfgFeature::for_schema_type(&a);
         assert_eq!(cfg, None);
 
-        let b = graph.schemas().find(|s| s.name() == "B").unwrap();
+        let b = graph.schema("B").unwrap();
         let cfg = CfgFeature::for_schema_type(&b);
         assert_eq!(cfg, None);
 
-        let c = graph.schemas().find(|s| s.name() == "C").unwrap();
+        let c = graph.schema("C").unwrap();
         let cfg = CfgFeature::for_schema_type(&c);
         assert_eq!(cfg, None);
     }
@@ -930,19 +930,19 @@ mod tests {
 
         // Each type uses just its own feature; Cargo feature dependencies
         // handle the transitive requirements.
-        let a = graph.schemas().find(|s| s.name() == "A").unwrap();
+        let a = graph.schema("A").unwrap();
         let cfg = CfgFeature::for_schema_type(&a);
         let actual: syn::Attribute = parse_quote!(#cfg);
         let expected: syn::Attribute = parse_quote!(#[cfg(feature = "a")]);
         assert_eq!(actual, expected);
 
-        let b = graph.schemas().find(|s| s.name() == "B").unwrap();
+        let b = graph.schema("B").unwrap();
         let cfg = CfgFeature::for_schema_type(&b);
         let actual: syn::Attribute = parse_quote!(#cfg);
         let expected: syn::Attribute = parse_quote!(#[cfg(feature = "b")]);
         assert_eq!(actual, expected);
 
-        let c = graph.schemas().find(|s| s.name() == "C").unwrap();
+        let c = graph.schema("C").unwrap();
         let cfg = CfgFeature::for_schema_type(&c);
         let actual: syn::Attribute = parse_quote!(#cfg);
         let expected: syn::Attribute = parse_quote!(#[cfg(feature = "c")]);

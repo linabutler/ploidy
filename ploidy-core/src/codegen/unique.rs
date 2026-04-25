@@ -1,4 +1,4 @@
-use std::{borrow::Cow, collections::hash_map::Entry, iter::Peekable, str::CharIndices};
+use std::{collections::hash_map::Entry, iter::Peekable, str::CharIndices};
 
 use rustc_hash::FxHashMap;
 use unicase::UniCase;
@@ -6,71 +6,21 @@ use unicase::UniCase;
 use crate::arena::Arena;
 
 /// Deduplicates names across case conventions.
-#[derive(Debug, Default)]
-pub struct UniqueNames(Arena);
-
-impl UniqueNames {
-    /// Creates a new arena for deduplicating names.
-    #[inline]
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    /// Creates a new, empty scope that's backed by this arena.
-    ///
-    /// A scope produces names that will never collide with other names
-    /// within the same scope, even when converted to a different case.
-    ///
-    /// This is useful for disambiguating type and property names that are
-    /// distinct in the source spec, but collide when transformed
-    /// to a different case. For example, `HTTP_Response` and `HTTPResponse`
-    /// are distinct, but both become `http_response` in snake case.
-    #[inline]
-    pub fn scope(&self) -> UniqueNamesScope<'_> {
-        UniqueNamesScope::new(&self.0)
-    }
-
-    /// Creates a new scope that's backed by this arena, and that
-    /// reserves the given names.
-    ///
-    /// This is useful for reserving variable names in generated code, or
-    /// reserving placeholder names that would be invalid identifiers
-    /// on their own.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// # use ploidy_core::codegen::UniqueNames;
-    /// let unique = UniqueNames::new();
-    /// let mut scope = unique.scope_with_reserved(["_"]);
-    /// assert_eq!(scope.uniquify("_"), "_2");
-    /// assert_eq!(scope.uniquify("_"), "_3");
-    /// ```
-    #[inline]
-    pub fn scope_with_reserved<S: AsRef<str>>(
-        &self,
-        reserved: impl IntoIterator<Item = S>,
-    ) -> UniqueNamesScope<'_> {
-        UniqueNamesScope::with_reserved(&self.0, reserved)
-    }
-}
-
-/// A scope for unique names.
 #[derive(Debug)]
-pub struct UniqueNamesScope<'a> {
+pub struct UniqueNames<'a> {
     arena: &'a Arena,
     space: FxHashMap<&'a [UniCase<&'a str>], usize>,
 }
 
-impl<'a> UniqueNamesScope<'a> {
-    fn new(arena: &'a Arena) -> Self {
+impl<'a> UniqueNames<'a> {
+    pub fn new(arena: &'a Arena) -> Self {
         Self {
             arena,
             space: FxHashMap::default(),
         }
     }
 
-    fn with_reserved<S: AsRef<str>>(
+    pub fn with_reserved<S: AsRef<str>>(
         arena: &'a Arena,
         reserved: impl IntoIterator<Item = S>,
     ) -> Self {
@@ -90,28 +40,31 @@ impl<'a> UniqueNamesScope<'a> {
     /// yet, returns the name as-is; otherwise, returns the name with a
     /// unique numeric suffix.
     ///
+    /// The returned string is allocated in this scope's arena and lives
+    /// for `'a`.
+    ///
     /// # Examples
     ///
     /// ```
-    /// # use ploidy_core::codegen::UniqueNames;
-    /// let unique = UniqueNames::new();
-    /// let mut scope = unique.scope();
-    /// assert_eq!(scope.uniquify("HTTPResponse"), "HTTPResponse");
-    /// assert_eq!(scope.uniquify("HTTP_Response"), "HTTP_Response2");
-    /// assert_eq!(scope.uniquify("httpResponse"), "httpResponse3");
+    /// # use ploidy_core::{arena::Arena, codegen::UniqueNames};
+    /// let arena = Arena::new();
+    /// let mut names = UniqueNames::new(&arena);
+    /// assert_eq!(names.uniquify("HTTPResponse"), "HTTPResponse");
+    /// assert_eq!(names.uniquify("HTTP_Response"), "HTTP_Response2");
+    /// assert_eq!(names.uniquify("httpResponse"), "httpResponse3");
     /// ```
-    pub fn uniquify<'b>(&mut self, name: &'b str) -> Cow<'b, str> {
+    pub fn uniquify(&mut self, name: &str) -> &'a str {
         match self.space.entry(self.arena.alloc_slice(
             WordSegments::new(name).map(|name| UniCase::new(&*self.arena.alloc_str(name))),
         )) {
             Entry::Occupied(mut entry) => {
                 let count = entry.get_mut();
                 *count += 1;
-                format!("{name}{count}").into()
+                self.arena.alloc_str(&format!("{name}{count}"))
             }
             Entry::Vacant(entry) => {
                 entry.insert(1);
-                name.into()
+                self.arena.alloc_str(name)
             }
         }
     }
@@ -382,91 +335,91 @@ mod tests {
 
     #[test]
     fn test_deduplication_http_response_collision() {
-        let unique = UniqueNames::new();
-        let mut scope = unique.scope();
+        let arena = Arena::new();
+        let mut names = UniqueNames::new(&arena);
 
-        assert_eq!(scope.uniquify("HTTPResponse"), "HTTPResponse");
-        assert_eq!(scope.uniquify("HTTP_Response"), "HTTP_Response2");
-        assert_eq!(scope.uniquify("httpResponse"), "httpResponse3");
-        assert_eq!(scope.uniquify("http_response"), "http_response4");
+        assert_eq!(names.uniquify("HTTPResponse"), "HTTPResponse");
+        assert_eq!(names.uniquify("HTTP_Response"), "HTTP_Response2");
+        assert_eq!(names.uniquify("httpResponse"), "httpResponse3");
+        assert_eq!(names.uniquify("http_response"), "http_response4");
         // `HTTPRESPONSE` isn't a collision; it's a single word.
-        assert_eq!(scope.uniquify("HTTPRESPONSE"), "HTTPRESPONSE");
+        assert_eq!(names.uniquify("HTTPRESPONSE"), "HTTPRESPONSE");
     }
 
     #[test]
     fn test_deduplication_xml_http_request() {
-        let unique = UniqueNames::new();
-        let mut scope = unique.scope();
+        let arena = Arena::new();
+        let mut names = UniqueNames::new(&arena);
 
-        assert_eq!(scope.uniquify("XMLHttpRequest"), "XMLHttpRequest");
-        assert_eq!(scope.uniquify("xml_http_request"), "xml_http_request2");
-        assert_eq!(scope.uniquify("XmlHttpRequest"), "XmlHttpRequest3");
+        assert_eq!(names.uniquify("XMLHttpRequest"), "XMLHttpRequest");
+        assert_eq!(names.uniquify("xml_http_request"), "xml_http_request2");
+        assert_eq!(names.uniquify("XmlHttpRequest"), "XmlHttpRequest3");
     }
 
     #[test]
     fn test_deduplication_preserves_original_casing() {
-        let unique = UniqueNames::new();
-        let mut scope = unique.scope();
+        let arena = Arena::new();
+        let mut names = UniqueNames::new(&arena);
 
-        assert_eq!(scope.uniquify("HTTP_Response"), "HTTP_Response");
-        assert_eq!(scope.uniquify("httpResponse"), "httpResponse2");
+        assert_eq!(names.uniquify("HTTP_Response"), "HTTP_Response");
+        assert_eq!(names.uniquify("httpResponse"), "httpResponse2");
     }
 
     #[test]
     fn test_deduplication_same_prefix() {
-        let unique = UniqueNames::new();
-        let mut scope = unique.scope();
+        let arena = Arena::new();
+        let mut names = UniqueNames::new(&arena);
 
-        assert_eq!(scope.uniquify("HttpRequest"), "HttpRequest");
-        assert_eq!(scope.uniquify("HttpResponse"), "HttpResponse");
-        assert_eq!(scope.uniquify("HttpError"), "HttpError");
+        assert_eq!(names.uniquify("HttpRequest"), "HttpRequest");
+        assert_eq!(names.uniquify("HttpResponse"), "HttpResponse");
+        assert_eq!(names.uniquify("HttpError"), "HttpError");
     }
 
     #[test]
     fn test_deduplication_with_numbers() {
-        let unique = UniqueNames::new();
-        let mut scope = unique.scope();
+        let arena = Arena::new();
+        let mut names = UniqueNames::new(&arena);
 
-        assert_eq!(scope.uniquify("Response2"), "Response2");
-        assert_eq!(scope.uniquify("response_2"), "response_2");
+        assert_eq!(names.uniquify("Response2"), "Response2");
+        assert_eq!(names.uniquify("response_2"), "response_2");
 
         // Digit-to-uppercase collisions.
-        assert_eq!(scope.uniquify("1099KStatus"), "1099KStatus");
-        assert_eq!(scope.uniquify("1099K_Status"), "1099K_Status2");
-        assert_eq!(scope.uniquify("1099KStatus"), "1099KStatus3");
-        assert_eq!(scope.uniquify("1099_K_Status"), "1099_K_Status4");
+        assert_eq!(names.uniquify("1099KStatus"), "1099KStatus");
+        assert_eq!(names.uniquify("1099K_Status"), "1099K_Status2");
+        assert_eq!(names.uniquify("1099KStatus"), "1099KStatus3");
+        assert_eq!(names.uniquify("1099_K_Status"), "1099_K_Status4");
 
         // Digit-to-lowercase collisions.
-        assert_eq!(scope.uniquify("123abc"), "123abc");
-        assert_eq!(scope.uniquify("123_abc"), "123_abc2");
+        assert_eq!(names.uniquify("123abc"), "123abc");
+        assert_eq!(names.uniquify("123_abc"), "123_abc2");
     }
 
     #[test]
     fn test_with_reserved_underscore() {
-        let unique = UniqueNames::new();
-        let mut scope = unique.scope_with_reserved(["_"]);
+        let arena = Arena::new();
+        let mut names = UniqueNames::with_reserved(&arena, ["_"]);
 
         // `_` is reserved, so the first use gets a suffix.
-        assert_eq!(scope.uniquify("_"), "_2");
-        assert_eq!(scope.uniquify("_"), "_3");
+        assert_eq!(names.uniquify("_"), "_2");
+        assert_eq!(names.uniquify("_"), "_3");
     }
 
     #[test]
     fn test_with_reserved_multiple() {
-        let unique = UniqueNames::new();
-        let mut scope = unique.scope_with_reserved(["_", "reserved"]);
+        let arena = Arena::new();
+        let mut names = UniqueNames::with_reserved(&arena, ["_", "reserved"]);
 
-        assert_eq!(scope.uniquify("_"), "_2");
-        assert_eq!(scope.uniquify("reserved"), "reserved2");
-        assert_eq!(scope.uniquify("other"), "other");
+        assert_eq!(names.uniquify("_"), "_2");
+        assert_eq!(names.uniquify("reserved"), "reserved2");
+        assert_eq!(names.uniquify("other"), "other");
     }
 
     #[test]
     fn test_with_reserved_empty() {
-        let unique = UniqueNames::new();
-        let mut scope = unique.scope_with_reserved([""]);
+        let arena = Arena::new();
+        let mut names = UniqueNames::with_reserved(&arena, [""]);
 
-        assert_eq!(scope.uniquify(""), "2");
-        assert_eq!(scope.uniquify(""), "3");
+        assert_eq!(names.uniquify(""), "2");
+        assert_eq!(names.uniquify(""), "3");
     }
 }

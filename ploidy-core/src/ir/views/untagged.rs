@@ -37,16 +37,16 @@ use super::{ViewNode, ir::TypeView, struct_::FieldView};
 
 /// A graph-aware view of an [untagged union type][GraphUntagged].
 #[derive(Debug)]
-pub struct UntaggedView<'a> {
-    cooked: &'a CookedGraph<'a>,
+pub struct UntaggedView<'graph, 'a> {
+    cooked: &'graph CookedGraph<'a>,
     index: NodeIndex<usize>,
     ty: GraphUntagged<'a>,
 }
 
-impl<'a> UntaggedView<'a> {
+impl<'graph, 'a> UntaggedView<'graph, 'a> {
     #[inline]
     pub(in crate::ir) fn new(
-        cooked: &'a CookedGraph<'a>,
+        cooked: &'graph CookedGraph<'a>,
         index: NodeIndex<usize>,
         ty: GraphUntagged<'a>,
     ) -> Self {
@@ -62,14 +62,14 @@ impl<'a> UntaggedView<'a> {
     /// Returns the common fields declared alongside `oneOf`,
     /// shared across all variants.
     #[inline]
-    pub fn fields(&self) -> impl Iterator<Item = UntaggedFieldView<'_, 'a>> {
+    pub fn fields(&self) -> impl Iterator<Item = UntaggedFieldView<'_, 'graph, 'a>> {
         self.cooked
             .fields(self.index)
             .map(move |info| UntaggedFieldView::new(self, info.meta, info.target, false))
     }
 
     /// Returns an iterator over this untagged union's variants.
-    pub fn variants(&self) -> impl Iterator<Item = UntaggedVariantView<'_, 'a>> {
+    pub fn variants(&self) -> impl Iterator<Item = UntaggedVariantView<'_, 'graph, 'a>> {
         self.cooked
             .variants(self.index)
             .map(move |info| UntaggedVariantView {
@@ -80,9 +80,9 @@ impl<'a> UntaggedView<'a> {
     }
 }
 
-impl<'a> ViewNode<'a> for UntaggedView<'a> {
+impl<'graph, 'a> ViewNode<'graph, 'a> for UntaggedView<'graph, 'a> {
     #[inline]
-    fn cooked(&self) -> &'a CookedGraph<'a> {
+    fn cooked(&self) -> &'graph CookedGraph<'a> {
         self.cooked
     }
 
@@ -93,22 +93,22 @@ impl<'a> ViewNode<'a> for UntaggedView<'a> {
 }
 
 /// A graph-aware view of a common untagged union field.
-pub type UntaggedFieldView<'view, 'a> = FieldView<'view, 'a, UntaggedView<'a>>;
+pub type UntaggedFieldView<'view, 'graph, 'a> = FieldView<'view, 'a, UntaggedView<'graph, 'a>>;
 
 /// A graph-aware view of an untagged union variant.
 #[derive(Debug)]
-pub struct UntaggedVariantView<'view, 'a> {
-    parent: &'view UntaggedView<'a>,
+pub struct UntaggedVariantView<'view, 'graph, 'a> {
+    parent: &'view UntaggedView<'graph, 'a>,
     meta: VariantMeta<'a>,
     /// The node index of this variant's type (from the `Variant` edge).
     index: NodeIndex<usize>,
 }
 
-impl<'view, 'a> UntaggedVariantView<'view, 'a> {
+impl<'view, 'graph, 'a> UntaggedVariantView<'view, 'graph, 'a> {
     /// Returns a view of this variant's type, if it's not a unit
     /// variant.
     #[inline]
-    pub fn ty(&self) -> Option<SomeUntaggedVariant<'a>> {
+    pub fn ty(&self) -> Option<SomeUntaggedVariant<'graph, 'a>> {
         match self.meta {
             VariantMeta::Untagged(UntaggedVariantMeta::Type { hint }) => {
                 Some(SomeUntaggedVariant {
@@ -124,9 +124,9 @@ impl<'view, 'a> UntaggedVariantView<'view, 'a> {
 /// A non-unit variant of an untagged union, pairing a name hint
 /// with the variant's type.
 #[derive(Debug)]
-pub struct SomeUntaggedVariant<'a> {
+pub struct SomeUntaggedVariant<'graph, 'a> {
     /// A hint for generating a readable variant name.
     pub hint: UntaggedVariantNameHint,
     /// A view of this variant's type.
-    pub view: TypeView<'a>,
+    pub view: TypeView<'graph, 'a>,
 }

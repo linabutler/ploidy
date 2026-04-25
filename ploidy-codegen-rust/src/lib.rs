@@ -36,7 +36,6 @@ pub use cfg::*;
 pub use client::*;
 pub use config::*;
 pub use graph::*;
-pub use inlines::*;
 pub use naming::*;
 pub use operation::*;
 pub use primitive::*;
@@ -47,8 +46,8 @@ pub use statics::*;
 pub use types::*;
 
 pub fn write_types_to_disk(output: &Path, graph: &CodegenGraph<'_>) -> miette::Result<()> {
-    for view in graph.schemas() {
-        let code = CodegenSchemaType::new(&view).into_code();
+    for schema in graph.schemas() {
+        let code = CodegenSchemaType::new(graph, &schema).into_code();
         write_to_disk(output, code)?;
     }
 
@@ -58,28 +57,34 @@ pub fn write_types_to_disk(output: &Path, graph: &CodegenGraph<'_>) -> miette::R
 }
 
 pub fn write_client_to_disk(output: &Path, graph: &CodegenGraph<'_>) -> miette::Result<()> {
-    // Group operations by feature. All operations belong to a feature,
-    // or `default` for operations without a named resource.
-    let ops_by_feature = graph
+    // Group operations by resource name. Operations without
+    // `x-resource-name` go into the `None` group.
+    let ops_by_resource = graph
         .operations()
-        .fold(BTreeMap::<_, Vec<_>>::new(), |mut map, view| {
-            let feature = view
-                .resource()
-                .map(CargoFeature::from_name)
-                .unwrap_or_default();
-            map.entry(feature).or_default().push(view);
+        .fold(BTreeMap::<_, Vec<_>>::new(), |mut map, op| {
+            map.entry(op.resource()).or_default().push(op);
             map
         });
 
-    // Write all operations for each feature into separate modules.
-    for (feature, ops) in &ops_by_feature {
-        let code = CodegenResource::new(feature, ops);
-        write_to_disk(output, code)?;
+    // Derive a `CargoFeature` and module identifier for each resource.
+    let resource_meta: BTreeMap<_, _> = ops_by_resource
+        .keys()
+        .map(|&resource| {
+            let feature = resource.map(CargoFeature::from_name).unwrap_or_default();
+            let module_ident = resource.and_then(|r| graph.resource(r)).unwrap_or_default();
+            (resource, (feature, module_ident))
+        })
+        .collect();
+
+    // Write each resource's operations into a separate module.
+    for (&resource, ops) in &ops_by_resource {
+        let (_, module_ident) = &resource_meta[&resource];
+        write_to_disk(output, CodegenResource::new(graph, *module_ident, ops))?;
     }
 
     // Write the top-level client module.
-    let features = ops_by_feature.keys().collect_vec();
-    let mod_code = CodegenClientModule::new(graph, &features);
+    let resources = resource_meta.values().map(|(f, m)| (f, *m)).collect_vec();
+    let mod_code = CodegenClientModule::new(graph, &resources);
     write_to_disk(output, mod_code)?;
 
     Ok(())

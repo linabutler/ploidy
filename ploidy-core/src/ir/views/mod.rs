@@ -57,27 +57,27 @@ pub mod untagged;
 use self::{inline::InlineTypeView, ir::TypeView, operation::OperationView};
 
 /// A view of a type in the graph.
-pub trait View<'a> {
+pub trait View<'graph, 'a: 'graph> {
     /// Returns an iterator over all the inline types that are
     /// contained within this type.
-    fn inlines(&self) -> impl Iterator<Item = InlineTypeView<'a>> + use<'a, Self>;
+    fn inlines(&self) -> impl Iterator<Item = InlineTypeView<'graph, 'a>> + use<'graph, 'a, Self>;
 
     /// Returns an iterator over the operations that use this type.
     ///
     /// This is backward propagation: each operation depends on this type.
-    fn used_by(&self) -> impl Iterator<Item = OperationView<'a>> + use<'a, Self>;
+    fn used_by(&self) -> impl Iterator<Item = OperationView<'graph, 'a>> + use<'graph, 'a, Self>;
 
     /// Returns an iterator over all the types that this type transitively depends on.
     /// This is forward propagation: this type depends on each reachable type.
     ///
     /// Complexity: O(n), where `n` is the number of dependency types.
-    fn dependencies(&self) -> impl Iterator<Item = TypeView<'a>> + use<'a, Self>;
+    fn dependencies(&self) -> impl Iterator<Item = TypeView<'graph, 'a>> + use<'graph, 'a, Self>;
 
     /// Returns an iterator over all the types that transitively depend on this type.
     /// This is backward propagation: each returned type depends on this type.
     ///
     /// Complexity: O(n), where `n` is the number of dependent types.
-    fn dependents(&self) -> impl Iterator<Item = TypeView<'a>> + use<'a, Self>;
+    fn dependents(&self) -> impl Iterator<Item = TypeView<'graph, 'a>> + use<'graph, 'a, Self>;
 
     /// Returns `true` if this type can implement `Eq` and `Hash`.
     fn hashable(&self) -> bool;
@@ -91,7 +91,7 @@ pub trait View<'a> {
 /// Codegen backends use extended data to decorate types with extra information.
 /// For example, Rust codegen stores a unique identifier on each schema type,
 /// so that names never collide after case conversion.
-pub trait ExtendableView<'a>: View<'a> {
+pub trait ExtendableView<'graph, 'a: 'graph>: View<'graph, 'a> {
     /// Returns a reference to this type's extended data.
     fn extensions(&self) -> &ViewExtensions<Self>
     where
@@ -103,12 +103,12 @@ pub trait ExtendableView<'a>: View<'a> {
         Self: Sized;
 }
 
-impl<'a, T> View<'a> for T
+impl<'graph, 'a: 'graph, T> View<'graph, 'a> for T
 where
-    T: ViewNode<'a>,
+    T: ViewNode<'graph, 'a>,
 {
     #[inline]
-    fn inlines(&self) -> impl Iterator<Item = InlineTypeView<'a>> + use<'a, T> {
+    fn inlines(&self) -> impl Iterator<Item = InlineTypeView<'graph, 'a>> + use<'graph, 'a, T> {
         let cooked = self.cooked();
         // Follow edges to inline schemas, skipping shadow edges.
         // See `GraphEdge::shadow()` for an explanation.
@@ -125,7 +125,7 @@ where
     }
 
     #[inline]
-    fn used_by(&self) -> impl Iterator<Item = OperationView<'a>> + use<'a, T> {
+    fn used_by(&self) -> impl Iterator<Item = OperationView<'graph, 'a>> + use<'graph, 'a, T> {
         let cooked = self.cooked();
         cooked.metadata.used_by[self.index().index()]
             .iter()
@@ -133,7 +133,7 @@ where
     }
 
     #[inline]
-    fn dependencies(&self) -> impl Iterator<Item = TypeView<'a>> + use<'a, T> {
+    fn dependencies(&self) -> impl Iterator<Item = TypeView<'graph, 'a>> + use<'graph, 'a, T> {
         let cooked = self.cooked();
         let start = self.index();
         cooked
@@ -145,7 +145,7 @@ where
     }
 
     #[inline]
-    fn dependents(&self) -> impl Iterator<Item = TypeView<'a>> + use<'a, T> {
+    fn dependents(&self) -> impl Iterator<Item = TypeView<'graph, 'a>> + use<'graph, 'a, T> {
         let cooked = self.cooked();
         let start = self.index();
         cooked
@@ -167,9 +167,9 @@ where
     }
 }
 
-impl<'a, T> ExtendableView<'a> for T
+impl<'graph, 'a: 'graph, T> ExtendableView<'graph, 'a> for T
 where
-    T: ViewNode<'a>,
+    T: ViewNode<'graph, 'a>,
 {
     #[inline]
     fn extensions(&self) -> &ViewExtensions<Self> {
@@ -182,14 +182,14 @@ where
     }
 }
 
-pub(crate) trait ViewNode<'a> {
-    fn cooked(&self) -> &'a CookedGraph<'a>;
+pub(crate) trait ViewNode<'graph, 'a: 'graph> {
+    fn cooked(&self) -> &'graph CookedGraph<'a>;
     fn index(&self) -> NodeIndex<usize>;
 }
 
-impl<'graph, T> internal::Extendable<'graph> for T
+impl<'graph, 'a: 'graph, T> internal::Extendable<'graph> for T
 where
-    T: ViewNode<'graph>,
+    T: ViewNode<'graph, 'a>,
 {
     #[inline]
     fn ext<'view>(&'view self) -> AtomicRef<'view, ExtensionMap>

@@ -354,7 +354,7 @@ fn test_circular_refs_simple_cycle() {
     let graph = RawGraph::new(&arena, &spec).cook();
 
     // The field pointing to B should need indirection due to the cycle.
-    let a_schema = graph.schemas().find(|s| s.name() == "A").unwrap();
+    let a_schema = graph.schema("A").unwrap();
     let a_struct = match a_schema {
         SchemaTypeView::Struct(_, struct_) => struct_,
         other => panic!("expected struct `A`; got {other:?}"),
@@ -388,7 +388,7 @@ fn test_circular_refs_self_reference() {
     let graph = RawGraph::new(&arena, &spec).cook();
 
     // Self-references should be detected as cycles.
-    let node_schema = graph.schemas().find(|s| s.name() == "Node").unwrap();
+    let node_schema = graph.schema("Node").unwrap();
     let node_struct = match node_schema {
         SchemaTypeView::Struct(_, struct_) => struct_,
         other => panic!("expected struct `Node`; got {other:?}"),
@@ -432,7 +432,7 @@ fn test_circular_refs_complex_cycle() {
     let graph = RawGraph::new(&arena, &spec).cook();
 
     // At least one edge in the cycle should need indirection.
-    let a_schema = graph.schemas().find(|s| s.name() == "A").unwrap();
+    let a_schema = graph.schema("A").unwrap();
     let a_struct = match a_schema {
         SchemaTypeView::Struct(_, struct_) => struct_,
         other => panic!("expected struct `A`; got {other:?}"),
@@ -474,7 +474,7 @@ fn test_circular_refs_no_cycles() {
 
     // Tree structure without direct or indirect self-references
     // shouldn't have any circular dependencies.
-    let root_schema = graph.schemas().find(|s| s.name() == "Root").unwrap();
+    let root_schema = graph.schema("Root").unwrap();
     let root_struct = match root_schema {
         SchemaTypeView::Struct(_, struct_) => struct_,
         other => panic!("expected struct `Root`; got {other:?}"),
@@ -524,7 +524,7 @@ fn test_circular_refs_multiple_sccs() {
     let graph = RawGraph::new(&arena, &spec).cook();
 
     // Both cycles should be detected.
-    let a_schema = graph.schemas().find(|s| s.name() == "A").unwrap();
+    let a_schema = graph.schema("A").unwrap();
     let a_struct = match a_schema {
         SchemaTypeView::Struct(_, struct_) => struct_,
         other => panic!("expected struct `A`; got {other:?}"),
@@ -535,7 +535,7 @@ fn test_circular_refs_multiple_sccs() {
         .unwrap();
     assert!(a_b_field.needs_box());
 
-    let c_schema = graph.schemas().find(|s| s.name() == "C").unwrap();
+    let c_schema = graph.schema("C").unwrap();
     let c_struct = match c_schema {
         SchemaTypeView::Struct(_, struct_) => struct_,
         other => panic!("expected struct `C`; got {other:?}"),
@@ -579,7 +579,7 @@ fn test_circular_refs_through_containers() {
 
     // Heap-allocating containers (arrays and maps) break boxing
     // cycles, so fields behind them don't need `Box`.
-    let a_schema = graph.schemas().find(|s| s.name() == "A").unwrap();
+    let a_schema = graph.schema("A").unwrap();
     let a_struct = match a_schema {
         SchemaTypeView::Struct(_, struct_) => struct_,
         other => panic!("expected struct `A`; got {other:?}"),
@@ -627,7 +627,7 @@ fn test_circular_refs_diamond_no_false_positive() {
     let graph = RawGraph::new(&arena, &spec).cook();
 
     // Diamond inheritance shouldn't be marked as circular.
-    let top_schema = graph.schemas().find(|s| s.name() == "Top").unwrap();
+    let top_schema = graph.schema("Top").unwrap();
     let top_struct = match top_schema {
         SchemaTypeView::Struct(_, struct_) => struct_,
         other => panic!("expected struct `Top`; got {other:?}"),
@@ -677,7 +677,7 @@ fn test_circular_refs_tarjan_correctness() {
     let graph = RawGraph::new(&arena, &spec).cook();
 
     // A and B should be in a cycle.
-    let a_schema = graph.schemas().find(|s| s.name() == "A").unwrap();
+    let a_schema = graph.schema("A").unwrap();
     let a_struct = match a_schema {
         SchemaTypeView::Struct(_, struct_) => struct_,
         other => panic!("expected struct `A`; got {other:?}"),
@@ -689,7 +689,7 @@ fn test_circular_refs_tarjan_correctness() {
     assert!(a_b_field.needs_box());
 
     // C and D shouldn't be in a cycle.
-    let c_schema = graph.schemas().find(|s| s.name() == "C").unwrap();
+    let c_schema = graph.schema("C").unwrap();
     let c_struct = match c_schema {
         SchemaTypeView::Struct(_, struct_) => struct_,
         other => panic!("expected struct `C`; got {other:?}"),
@@ -729,7 +729,7 @@ fn test_needs_box_through_nullable() {
     let spec = Spec::from_doc(&arena, &doc).unwrap();
     let graph = RawGraph::new(&arena, &spec).cook();
 
-    let a_schema = graph.schemas().find(|s| s.name() == "A").unwrap();
+    let a_schema = graph.schema("A").unwrap();
     let a_struct = match a_schema {
         SchemaTypeView::Struct(_, struct_) => struct_,
         other => panic!("expected struct `A`; got {other:?}"),
@@ -764,7 +764,7 @@ fn test_needs_box_through_array() {
     let spec = Spec::from_doc(&arena, &doc).unwrap();
     let graph = RawGraph::new(&arena, &spec).cook();
 
-    let node_schema = graph.schemas().find(|s| s.name() == "Node").unwrap();
+    let node_schema = graph.schema("Node").unwrap();
     let node_struct = match node_schema {
         SchemaTypeView::Struct(_, struct_) => struct_,
         other => panic!("expected struct `Node`; got {other:?}"),
@@ -799,7 +799,7 @@ fn test_needs_box_through_map() {
     let spec = Spec::from_doc(&arena, &doc).unwrap();
     let graph = RawGraph::new(&arena, &spec).cook();
 
-    let node_schema = graph.schemas().find(|s| s.name() == "Node").unwrap();
+    let node_schema = graph.schema("Node").unwrap();
     let node_struct = match node_schema {
         SchemaTypeView::Struct(_, struct_) => struct_,
         other => panic!("expected struct `Node`; got {other:?}"),
@@ -839,7 +839,7 @@ fn test_indirect_and_direct_siblings() {
     let spec = Spec::from_doc(&arena, &doc).unwrap();
     let graph = RawGraph::new(&arena, &spec).cook();
 
-    let container_schema = graph.schemas().find(|s| s.name() == "Container").unwrap();
+    let container_schema = graph.schema("Container").unwrap();
     let container_struct = match container_schema {
         SchemaTypeView::Struct(_, view) => view,
         other => panic!("expected struct `Container`; got {other:?}"),
@@ -904,8 +904,8 @@ fn test_operations_transitive() {
     // Both `UserList` and `User` have no `x-resourceId`, and
     // the operation has no `x-resource-name`. The operation should
     // contribute `None` to `used_by`.
-    let user_list = graph.schemas().find(|s| s.name() == "UserList").unwrap();
-    let user = graph.schemas().find(|s| s.name() == "User").unwrap();
+    let user_list = graph.schema("UserList").unwrap();
+    let user = graph.schema("User").unwrap();
 
     assert_eq!(user_list.resource(), None);
     let user_list_used_by = user_list.used_by().map(|op| op.resource()).collect_vec();
@@ -963,7 +963,7 @@ fn test_operations_multiple() {
 
     // `User` has no `x-resourceId`, and neither operation has `x-resource-name`.
     // Each operation without a resource contributes `None` to `used_by`.
-    let user = graph.schemas().find(|s| s.name() == "User").unwrap();
+    let user = graph.schema("User").unwrap();
     assert_eq!(user.resource(), None);
     // Two operations, so two `None` entries.
     let user_used_by = user.used_by().map(|op| op.resource()).collect_vec();
@@ -1065,10 +1065,10 @@ fn test_dependencies_propagation() {
 
     // `x-resourceId` is a per-schema property; it doesn't propagate to
     // containing schemas.
-    let user = graph.schemas().find(|s| s.name() == "User").unwrap();
+    let user = graph.schema("User").unwrap();
     assert_eq!(user.resource(), Some("users"));
 
-    let response = graph.schemas().find(|s| s.name() == "Response").unwrap();
+    let response = graph.schema("Response").unwrap();
     assert_eq!(response.resource(), None);
 
     // Each schema knows which operations use it. `User` is used by both
@@ -1079,7 +1079,7 @@ fn test_dependencies_propagation() {
 
     let mut other_used_by = graph
         .schemas()
-        .filter(|s| ["Response", "Item", "Meta"].contains(&s.name()))
+        .filter(|schema| ["Response", "Item", "Meta"].contains(&schema.name()))
         .flat_map(|schema| schema.used_by())
         .map(|op| op.id())
         .collect_vec();
@@ -1168,8 +1168,8 @@ fn test_used_by_propagation() {
     // Propagation through cycles: `Cat` and `Pet` are in a cycle.
     // The operation directly uses `Cat`, but `Pet` should also be
     // marked as used by the operation.
-    let cat = graph.schemas().find(|s| s.name() == "Cat").unwrap();
-    let pet = graph.schemas().find(|s| s.name() == "Pet").unwrap();
+    let cat = graph.schema("Cat").unwrap();
+    let pet = graph.schema("Pet").unwrap();
 
     let cat_used_by = cat.used_by().map(|op| op.resource()).collect_vec();
     assert_matches!(&*cat_used_by, [Some("cats")]);
@@ -1179,7 +1179,7 @@ fn test_used_by_propagation() {
 
     // Propagation through nested references: `Child` is nested under `Parent`.
     // The operation uses `Parent`, so `Child` should also be used.
-    let child = graph.schemas().find(|s| s.name() == "Child").unwrap();
+    let child = graph.schema("Child").unwrap();
     assert_eq!(child.resource(), Some("children"));
 
     let child_used_by = child.used_by().map(|op| op.resource()).collect_vec();
@@ -1187,10 +1187,7 @@ fn test_used_by_propagation() {
 
     // A schema can be used by multiple operations with different resources:
     // `CreateOptions` is a parameter for both `getCat` and `createItem`.
-    let options = graph
-        .schemas()
-        .find(|s| s.name() == "CreateOptions")
-        .unwrap();
+    let options = graph.schema("CreateOptions").unwrap();
     assert_eq!(options.resource(), Some("options"));
 
     let mut options_used_by = options.used_by().map(|op| op.resource()).collect_vec();
@@ -1242,9 +1239,9 @@ fn test_depends_on_simple_chain() {
     let spec = Spec::from_doc(&arena, &doc).unwrap();
     let graph = RawGraph::new(&arena, &spec).cook();
 
-    let a = graph.schemas().find(|s| s.name() == "A").unwrap();
-    let b = graph.schemas().find(|s| s.name() == "B").unwrap();
-    let c = graph.schemas().find(|s| s.name() == "C").unwrap();
+    let a = graph.schema("A").unwrap();
+    let b = graph.schema("B").unwrap();
+    let c = graph.schema("C").unwrap();
 
     assert!(a.depends_on(&b));
     assert!(a.depends_on(&c));
@@ -1286,9 +1283,9 @@ fn test_depends_on_cycle() {
     let spec = Spec::from_doc(&arena, &doc).unwrap();
     let graph = RawGraph::new(&arena, &spec).cook();
 
-    let a = graph.schemas().find(|s| s.name() == "A").unwrap();
-    let b = graph.schemas().find(|s| s.name() == "B").unwrap();
-    let c = graph.schemas().find(|s| s.name() == "C").unwrap();
+    let a = graph.schema("A").unwrap();
+    let b = graph.schema("B").unwrap();
+    let c = graph.schema("C").unwrap();
 
     // All nodes in a cycle depend on each other.
     assert!(a.depends_on(&b));
@@ -1326,8 +1323,8 @@ fn test_depends_on_independent() {
     let spec = Spec::from_doc(&arena, &doc).unwrap();
     let graph = RawGraph::new(&arena, &spec).cook();
 
-    let a = graph.schemas().find(|s| s.name() == "A").unwrap();
-    let b = graph.schemas().find(|s| s.name() == "B").unwrap();
+    let a = graph.schema("A").unwrap();
+    let b = graph.schema("B").unwrap();
 
     assert!(!a.depends_on(&b));
     assert!(!b.depends_on(&a));
@@ -1368,7 +1365,7 @@ fn test_dependents_simple_chain() {
     let spec = Spec::from_doc(&arena, &doc).unwrap();
     let graph = RawGraph::new(&arena, &spec).cook();
 
-    let c = graph.schemas().find(|s| s.name() == "C").unwrap();
+    let c = graph.schema("C").unwrap();
     let mut c_dependents = c
         .dependents()
         .filter_map(|v| v.into_schema().ok())
@@ -1379,7 +1376,7 @@ fn test_dependents_simple_chain() {
     assert_matches!(&*c_dependents, ["A", "B"]);
 
     // B's dependents should include A only.
-    let b = graph.schemas().find(|s| s.name() == "B").unwrap();
+    let b = graph.schema("B").unwrap();
     let mut b_dependents = b
         .dependents()
         .filter_map(|v| v.into_schema().ok())
@@ -1389,7 +1386,7 @@ fn test_dependents_simple_chain() {
     assert_matches!(&*b_dependents, ["A"]);
 
     // A has no dependents.
-    let a = graph.schemas().find(|s| s.name() == "A").unwrap();
+    let a = graph.schema("A").unwrap();
     let a_dependents = a
         .dependents()
         .filter_map(|v| v.into_schema().ok())
@@ -1430,7 +1427,7 @@ fn test_dependents_multiple_dependents() {
     let spec = Spec::from_doc(&arena, &doc).unwrap();
     let graph = RawGraph::new(&arena, &spec).cook();
 
-    let c = graph.schemas().find(|s| s.name() == "C").unwrap();
+    let c = graph.schema("C").unwrap();
     let mut c_dependents = c
         .dependents()
         .filter_map(|v| v.into_schema().ok())
@@ -1475,7 +1472,7 @@ fn test_dependents_cycle() {
 
     // In a cycle, all nodes transitively depend on each other,
     // but a type's dependents shouldn't include itself.
-    let a = graph.schemas().find(|s| s.name() == "A").unwrap();
+    let a = graph.schema("A").unwrap();
     let mut a_dependents = a
         .dependents()
         .filter_map(|v| v.into_schema().ok())
@@ -1484,7 +1481,7 @@ fn test_dependents_cycle() {
     a_dependents.sort();
     assert_matches!(&*a_dependents, ["B", "C"]);
 
-    let b = graph.schemas().find(|s| s.name() == "B").unwrap();
+    let b = graph.schema("B").unwrap();
     let mut b_dependents = b
         .dependents()
         .filter_map(|v| v.into_schema().ok())
@@ -1493,7 +1490,7 @@ fn test_dependents_cycle() {
     b_dependents.sort();
     assert_matches!(&*b_dependents, ["A", "C"]);
 
-    let c = graph.schemas().find(|s| s.name() == "C").unwrap();
+    let c = graph.schema("C").unwrap();
     let mut c_dependents = c
         .dependents()
         .filter_map(|v| v.into_schema().ok())
@@ -1530,8 +1527,8 @@ fn test_dependents_is_inverse_of_dependencies() {
     let spec = Spec::from_doc(&arena, &doc).unwrap();
     let graph = RawGraph::new(&arena, &spec).cook();
 
-    let container = graph.schemas().find(|s| s.name() == "Container").unwrap();
-    let item = graph.schemas().find(|s| s.name() == "Item").unwrap();
+    let container = graph.schema("Container").unwrap();
+    let item = graph.schema("Item").unwrap();
 
     // `Container` depends on `Item`.
     let container_deps = container
@@ -1590,10 +1587,10 @@ fn test_dependencies_diamond() {
     let spec = Spec::from_doc(&arena, &doc).unwrap();
     let graph = RawGraph::new(&arena, &spec).cook();
 
-    let a = graph.schemas().find(|s| s.name() == "A").unwrap();
-    let b = graph.schemas().find(|s| s.name() == "B").unwrap();
-    let c = graph.schemas().find(|s| s.name() == "C").unwrap();
-    let d = graph.schemas().find(|s| s.name() == "D").unwrap();
+    let a = graph.schema("A").unwrap();
+    let b = graph.schema("B").unwrap();
+    let c = graph.schema("C").unwrap();
+    let d = graph.schema("D").unwrap();
 
     // A depends directly on B, C; transitively on D through B and C.
     let mut a_deps = a
@@ -1703,7 +1700,7 @@ fn test_parents_returns_immediate_parents() {
     let spec = Spec::from_doc(&arena, &doc).unwrap();
     let graph = RawGraph::new(&arena, &spec).cook();
 
-    let user = graph.schemas().find(|s| s.name() == "User").unwrap();
+    let user = graph.schema("User").unwrap();
     let user_struct = match user {
         SchemaTypeView::Struct(_, view) => view,
         other => panic!("expected struct `User`; got {other:?}"),
@@ -1755,7 +1752,7 @@ fn test_all_of_inheritance_with_fields() {
     let spec = Spec::from_doc(&arena, &doc).unwrap();
     let graph = RawGraph::new(&arena, &spec).cook();
 
-    let child = graph.schemas().find(|s| s.name() == "Child").unwrap();
+    let child = graph.schema("Child").unwrap();
     let child_struct = match child {
         SchemaTypeView::Struct(_, view) => view,
         other => panic!("expected struct `Child`; got {other:?}"),
@@ -1836,7 +1833,7 @@ fn test_circular_refs_excludes_inherits_edges() {
     let spec = Spec::from_doc(&arena, &doc).unwrap();
     let graph = RawGraph::new(&arena, &spec).cook();
 
-    let parent = graph.schemas().find(|s| s.name() == "Parent").unwrap();
+    let parent = graph.schema("Parent").unwrap();
     let parent_struct = match parent {
         SchemaTypeView::Struct(_, view) => view,
         other => panic!("expected struct `Parent`; got {other:?}"),
@@ -1889,7 +1886,7 @@ fn test_multiple_parents() {
     let spec = Spec::from_doc(&arena, &doc).unwrap();
     let graph = RawGraph::new(&arena, &spec).cook();
 
-    let combined = graph.schemas().find(|s| s.name() == "Combined").unwrap();
+    let combined = graph.schema("Combined").unwrap();
     let combined_struct = match combined {
         SchemaTypeView::Struct(_, view) => view,
         other => panic!("expected struct `Combined`; got {other:?}"),
@@ -1963,7 +1960,7 @@ fn test_circular_all_of_terminates() {
     let spec = Spec::from_doc(&arena, &doc).unwrap();
     let graph = RawGraph::new(&arena, &spec).cook();
 
-    let a = graph.schemas().find(|s| s.name() == "A").unwrap();
+    let a = graph.schema("A").unwrap();
     let a_struct = match a {
         SchemaTypeView::Struct(_, view) => view,
         other => panic!("expected struct `A`; got {other:?}"),
@@ -2051,7 +2048,7 @@ fn test_all_of_parent_with_one_of_and_properties() {
 
     // `VariantA` inherits from `Base`, which has properties
     // `schema` and `kind` alongside its discriminator field.
-    let variant_a = graph.schemas().find(|s| s.name() == "VariantA").unwrap();
+    let variant_a = graph.schema("VariantA").unwrap();
     let variant_a_struct = match variant_a {
         SchemaTypeView::Struct(_, view) => view,
         other => panic!("expected struct `VariantA`; got {other:?}"),
@@ -2112,7 +2109,7 @@ fn test_untagged_union_with_properties() {
     let graph = RawGraph::new(&arena, &spec).cook();
 
     // `Base` has no `discriminator`, so it must be `Untagged`.
-    let base = graph.schemas().find(|s| s.name() == "Base").unwrap();
+    let base = graph.schema("Base").unwrap();
     let base_untagged = match base {
         SchemaTypeView::Untagged(_, view) => view,
         other => panic!("expected untagged `Base`; got `{other:?}`"),
@@ -2130,7 +2127,7 @@ fn test_untagged_union_with_properties() {
 
     // `VariantA` inherits from `Base` via `allOf`, so should receive
     // `Base`'s fields alongside its own `a_field`.
-    let variant_a = graph.schemas().find(|s| s.name() == "VariantA").unwrap();
+    let variant_a = graph.schema("VariantA").unwrap();
     let variant_a_struct = match variant_a {
         SchemaTypeView::Struct(_, view) => view,
         other => panic!("expected struct `VariantA`; got `{other:?}`"),
@@ -2187,7 +2184,7 @@ fn test_tagged_union_inlines_include_field_types() {
     let spec = Spec::from_doc(&arena, &doc).unwrap();
     let graph = RawGraph::new(&arena, &spec).cook();
 
-    let pet = graph.schemas().find(|s| s.name() == "Pet").unwrap();
+    let pet = graph.schema("Pet").unwrap();
     let has_inline_enum = pet.inlines().any(|i| matches!(i, InlineTypeView::Enum(..)));
     assert!(has_inline_enum);
 }
@@ -2235,7 +2232,7 @@ fn test_needs_box_through_inlined_tagged_variant() {
 
     // The inlined variant `Pet/Dog` should have `parent` marked as
     // needing indirection, since it points back to `Pet`.
-    let pet = graph.schemas().find(|s| s.name() == "Pet").unwrap();
+    let pet = graph.schema("Pet").unwrap();
     let tagged = match pet {
         SchemaTypeView::Tagged(_, view) => view,
         other => panic!("expected tagged `Pet`; got {other:?}"),

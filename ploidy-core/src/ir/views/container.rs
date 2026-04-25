@@ -43,23 +43,23 @@ use super::{TypeView, ViewNode};
 
 /// A graph-aware view of a [container type][GraphContainer].
 #[derive(Debug)]
-pub enum ContainerView<'a> {
-    Array(InnerView<'a>),
-    Map(InnerView<'a>),
-    Optional(InnerView<'a>),
+pub enum ContainerView<'graph, 'a> {
+    Array(InnerView<'graph, 'a>),
+    Map(InnerView<'graph, 'a>),
+    Optional(InnerView<'graph, 'a>),
 }
 
-impl<'a> ContainerView<'a> {
+impl<'graph, 'a> ContainerView<'graph, 'a> {
     /// Returns a type view of this container type.
     #[inline]
-    pub fn ty(&self) -> TypeView<'a> {
+    pub fn ty(&self) -> TypeView<'graph, 'a> {
         TypeView::new(self.cooked(), self.index())
     }
 }
 
-impl<'a> ViewNode<'a> for ContainerView<'a> {
+impl<'graph, 'a> ViewNode<'graph, 'a> for ContainerView<'graph, 'a> {
     #[inline]
-    fn cooked(&self) -> &'a CookedGraph<'a> {
+    fn cooked(&self) -> &'graph CookedGraph<'a> {
         let (Self::Array(c) | Self::Map(c) | Self::Optional(c)) = self;
         c.cooked
     }
@@ -73,16 +73,16 @@ impl<'a> ViewNode<'a> for ContainerView<'a> {
 
 /// A graph-aware view of the inner type of a [container][ContainerView].
 #[derive(Debug)]
-pub struct InnerView<'a> {
-    cooked: &'a CookedGraph<'a>,
+pub struct InnerView<'graph, 'a> {
+    cooked: &'graph CookedGraph<'a>,
     container: NodeIndex<usize>,
     inner: NodeIndex<usize>,
 }
 
-impl<'a> InnerView<'a> {
+impl<'graph, 'a> InnerView<'graph, 'a> {
     /// Returns a view of the contained type.
     #[inline]
-    pub fn ty(&self) -> TypeView<'a> {
+    pub fn ty(&self) -> TypeView<'graph, 'a> {
         TypeView::new(self.cooked, self.inner)
     }
 
@@ -107,10 +107,10 @@ impl<'a> InnerView<'a> {
     }
 }
 
-impl<'a> ContainerView<'a> {
+impl<'graph, 'a> ContainerView<'graph, 'a> {
     #[inline]
     pub(in crate::ir) fn new(
-        cooked: &'a CookedGraph<'a>,
+        cooked: &'graph CookedGraph<'a>,
         index: NodeIndex<usize>,
         container: GraphContainer<'a>,
     ) -> Self {

@@ -2,6 +2,8 @@ use ploidy_core::codegen::IntoCode;
 use proc_macro2::TokenStream;
 use quote::{ToTokens, TokenStreamExt, quote};
 
+use crate::CodegenResourceIdent;
+
 use super::{
     cfg::CfgFeature,
     graph::CodegenGraph,
@@ -9,23 +11,26 @@ use super::{
 };
 
 /// Generates the `client/mod.rs` source file.
-#[derive(Clone, Copy, Debug)]
+#[derive(Debug)]
 pub struct CodegenClientModule<'a> {
     graph: &'a CodegenGraph<'a>,
-    features: &'a [&'a CargoFeature],
+    resources: &'a [(&'a CargoFeature, CodegenResourceIdent<'a>)],
 }
 
 impl<'a> CodegenClientModule<'a> {
-    pub fn new(graph: &'a CodegenGraph<'a>, features: &'a [&'a CargoFeature]) -> Self {
-        Self { graph, features }
+    pub fn new(
+        graph: &'a CodegenGraph<'a>,
+        resources: &'a [(&'a CargoFeature, CodegenResourceIdent<'a>)],
+    ) -> Self {
+        Self { graph, resources }
     }
 }
 
 impl ToTokens for CodegenClientModule<'_> {
     fn to_tokens(&self, tokens: &mut TokenStream) {
-        let mods = self.features.iter().map(|feature| {
+        let mods = self.resources.iter().map(|(feature, module_ident)| {
             let cfg = CfgFeature::for_resource_module(feature);
-            let mod_name = CodegenIdentUsage::Module(feature.as_ident());
+            let mod_name = CodegenIdentUsage::Module(module_ident);
             quote! {
                 #cfg
                 pub mod #mod_name;

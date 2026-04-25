@@ -6,18 +6,24 @@ use syn::{Ident, parse_quote};
 use super::{
     doc_attrs,
     ext::EnumViewExt,
-    naming::{CodegenIdent, CodegenIdentUsage, CodegenTypeName},
+    graph::CodegenGraph,
+    naming::{CodegenIdentUsage, CodegenTypeIdent, UniqueIdents},
 };
 
 #[derive(Clone, Debug)]
 pub struct CodegenEnum<'a> {
-    name: CodegenTypeName<'a>,
-    ty: &'a EnumView<'a>,
+    graph: &'a CodegenGraph<'a>,
+    ident: CodegenTypeIdent<'a>,
+    ty: &'a EnumView<'a, 'a>,
 }
 
 impl<'a> CodegenEnum<'a> {
-    pub fn new(name: CodegenTypeName<'a>, ty: &'a EnumView<'a>) -> Self {
-        Self { name, ty }
+    pub fn new(
+        graph: &'a CodegenGraph<'a>,
+        ident: CodegenTypeIdent<'a>,
+        ty: &'a EnumView<'a, 'a>,
+    ) -> Self {
+        Self { graph, ident, ty }
     }
 }
 
@@ -27,7 +33,7 @@ impl ToTokens for CodegenEnum<'_> {
             // If any variant can't be represented as a Rust enum variant,
             // emit a type alias for the enum instead.
             let type_name: Ident = {
-                let name = &self.name;
+                let name = &self.ident;
                 parse_quote!(#name)
             };
             let doc_attrs = self.ty.description().map(doc_attrs);
@@ -37,6 +43,7 @@ impl ToTokens for CodegenEnum<'_> {
             });
         } else {
             // Otherwise, emit a Rust enum.
+            let mut scope = UniqueIdents::new(self.graph.arena());
             let mut variants = vec![];
             let mut display_arms = vec![];
             let mut from_str_arms = vec![];
@@ -44,8 +51,8 @@ impl ToTokens for CodegenEnum<'_> {
             for variant in self.ty.variants() {
                 match variant {
                     EnumVariant::String(name) => {
-                        let name_ident = CodegenIdent::new(name);
-                        let variant_name = CodegenIdentUsage::Variant(&name_ident);
+                        let ident = scope.name(name);
+                        let variant_name = CodegenIdentUsage::Variant(ident);
                         variants.push(quote! { #variant_name });
                         display_arms.push(quote! { Self::#variant_name => #name });
                         from_str_arms.push(quote! { #name => Self::#variant_name });
@@ -56,7 +63,7 @@ impl ToTokens for CodegenEnum<'_> {
 
             // The catch-all `Other` variant comes last.
             let type_name: Ident = {
-                let name = &self.name;
+                let name = &self.ident;
                 parse_quote!(#name)
             };
             let other_name = format_ident!("Other{}", type_name);
@@ -176,13 +183,12 @@ mod tests {
         let spec = Spec::from_doc(&arena, &doc).unwrap();
         let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
-        let schema = graph.schemas().find(|s| s.name() == "Status");
-        let Some(schema @ SchemaTypeView::Enum(_, enum_view)) = &schema else {
+        let schema = graph.schema("Status").unwrap();
+        let SchemaTypeView::Enum(_, enum_view) = &*schema else {
             panic!("expected enum `Status`; got `{schema:?}`");
         };
 
-        let name = CodegenTypeName::Schema(schema);
-        let codegen = CodegenEnum::new(name, enum_view);
+        let codegen = CodegenEnum::new(&graph, schema.ident(), enum_view);
 
         let actual: syn::File = parse_quote!(#codegen);
         let expected: syn::File = parse_quote! {
@@ -285,13 +291,12 @@ mod tests {
         let spec = Spec::from_doc(&arena, &doc).unwrap();
         let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
-        let schema = graph.schemas().find(|s| s.name() == "Priority");
-        let Some(schema @ SchemaTypeView::Enum(_, view)) = &schema else {
+        let schema = graph.schema("Priority").unwrap();
+        let SchemaTypeView::Enum(_, view) = &*schema else {
             panic!("expected enum `Priority`; got `{schema:?}`");
         };
 
-        let name = CodegenTypeName::Schema(schema);
-        let codegen = CodegenEnum::new(name, view);
+        let codegen = CodegenEnum::new(&graph, schema.ident(), view);
 
         let actual: syn::Item = parse_quote!(#codegen);
         let expected: syn::Item = parse_quote! {

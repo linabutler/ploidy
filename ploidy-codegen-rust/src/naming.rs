@@ -1,20 +1,16 @@
 use std::{
-    borrow::{Borrow, Cow},
-    cmp::Ordering,
-    fmt::Display,
+    fmt::{Display, Write},
     ops::Deref,
 };
 
 use heck::{AsKebabCase, AsPascalCase, AsSnekCase};
 use itertools::Itertools;
 use ploidy_core::{
-    codegen::{
-        UniqueNames,
-        unique::{UniqueNamesScope, WordSegments},
-    },
+    arena::Arena,
+    codegen::{UniqueNames, unique::WordSegments},
     ir::{
-        ExtendableView, InlineTypePathSegment, InlineTypeView, PrimitiveType, SchemaTypeView,
-        StructFieldName, StructFieldNameHint, UntaggedVariantNameHint,
+        InlineTypePath, InlineTypePathSegment, PrimitiveType, StructFieldName, StructFieldNameHint,
+        UntaggedVariantNameHint,
     },
 };
 use proc_macro2::{Ident, Span, TokenStream};
@@ -24,80 +20,105 @@ use ref_cast::{RefCastCustom, ref_cast_custom};
 // Keywords that can't be used as identifiers, even with `r#`.
 const KEYWORDS: &[&str] = &["crate", "self", "super", "Self"];
 
-/// A name for a schema or an inline type, used in generated Rust code.
+/// A name for a schema or inline type in generated Rust code.
 ///
-/// [`CodegenTypeName`] is the high-level representation of a type name.
-/// For emitting arbitrary identifiers, like fields, parameters, and methods,
-/// use [`CodegenIdent`] and [`CodegenIdentUsage`] instead.
-///
-/// [`CodegenTypeName`] implements [`ToTokens`] to produce PascalCase identifiers
+/// Implements [`ToTokens`] to produce PascalCase identifiers
 /// (e.g., `Pet`, `GetItemsFilter`) in [`quote`] macros.
-/// Use [`into_module_name`](Self::into_module_name) for the corresponding module name,
-/// and [`into_sort_key`](Self::into_sort_key) for deterministic sorting.
-#[derive(Clone, Copy, Debug)]
-pub enum CodegenTypeName<'a> {
-    Schema(&'a SchemaTypeView<'a>),
-    Inline(&'a InlineTypeView<'a>),
+/// Use [`into_module`](Self::into_module) for the corresponding
+/// module name.
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
+pub enum CodegenTypeIdent<'a> {
+    Schema(&'a UniqueIdent),
+    Inline(InlineTypePath<'a>),
 }
 
-impl<'a> CodegenTypeName<'a> {
+impl<'a> CodegenTypeIdent<'a> {
     #[inline]
-    pub fn into_module_name(self) -> CodegenModuleName<'a> {
-        CodegenModuleName(self)
-    }
-
-    #[inline]
-    pub fn into_sort_key(self) -> CodegenTypeNameSortKey<'a> {
-        CodegenTypeNameSortKey(self)
+    pub fn into_module(self) -> CodegenModuleIdent<'a> {
+        CodegenModuleIdent(self)
     }
 }
 
-impl ToTokens for CodegenTypeName<'_> {
+impl ToTokens for CodegenTypeIdent<'_> {
+    #[inline]
     fn to_tokens(&self, tokens: &mut TokenStream) {
-        match self {
-            Self::Schema(view) => {
-                let ident = view.extensions().get::<CodegenIdent>().unwrap();
-                CodegenIdentUsage::Type(&ident).to_tokens(tokens);
+        match *self {
+            Self::Schema(ident) => {
+                CodegenIdentUsage::Type(ident).to_tokens(tokens);
             }
-            Self::Inline(view) => {
-                let ident = CodegenIdent::from_segments(view.path().segments);
-                CodegenIdentUsage::Type(&ident).to_tokens(tokens);
+            Self::Inline(path) => {
+                let name = CodegenTypePathSegment::join(path.segments);
+                CodegenIdentUsage::Type(CodegenIdent::new(&name)).to_tokens(tokens);
             }
         }
     }
 }
 
-/// A module name derived from a [`CodegenTypeName`].
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
+pub struct CodegenResourceIdent<'a>(pub &'a UniqueIdent);
+
+impl Default for CodegenResourceIdent<'_> {
+    fn default() -> Self {
+        Self(UniqueIdent::new("default"))
+    }
+}
+
+impl Deref for CodegenResourceIdent<'_> {
+    type Target = UniqueIdent;
+
+    #[inline]
+    fn deref(&self) -> &Self::Target {
+        self.0
+    }
+}
+
+/// A name for an operation in generated Rust code.
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
+pub struct CodegenOperationIdent<'a>(pub &'a UniqueIdent);
+
+impl Deref for CodegenOperationIdent<'_> {
+    type Target = UniqueIdent;
+
+    #[inline]
+    fn deref(&self) -> &Self::Target {
+        self.0
+    }
+}
+
+/// A module name derived from a [`CodegenTypeIdent`].
 ///
 /// Implements [`ToTokens`] to produce a snake_case identifier. For
 /// string interpolation (e.g., file paths), use [`display`](Self::display),
 /// which returns an `impl Display` that can be used with `format!`.
 #[derive(Clone, Copy, Debug)]
-pub struct CodegenModuleName<'a>(CodegenTypeName<'a>);
+pub struct CodegenModuleIdent<'a>(CodegenTypeIdent<'a>);
 
-impl<'a> CodegenModuleName<'a> {
+impl<'a> CodegenModuleIdent<'a> {
     #[inline]
-    pub fn into_type_name(self) -> CodegenTypeName<'a> {
+    pub fn into_type(self) -> CodegenTypeIdent<'a> {
         self.0
     }
 
     /// Returns a formattable representation of this module name.
     ///
-    /// [`CodegenModuleName`] doesn't implement [`Display`] directly, to help catch
+    /// [`CodegenModuleIdent`] doesn't implement [`Display`] directly, to help catch
     /// context mismatches: using `.display()` in a [`quote`] macro, or
     /// `.to_token_stream()` in a [`format`] string, stands out during review.
     pub fn display(&self) -> impl Display {
-        struct DisplayModuleName<'a>(CodegenTypeName<'a>);
+        struct DisplayModuleName<'a>(CodegenTypeIdent<'a>);
         impl Display for DisplayModuleName<'_> {
             fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
                 match self.0 {
-                    CodegenTypeName::Schema(view) => {
-                        let ident = view.extensions().get::<CodegenIdent>().unwrap();
-                        write!(f, "{}", CodegenIdentUsage::Module(&ident).display())
+                    CodegenTypeIdent::Schema(ident) => {
+                        write!(f, "{}", CodegenIdentUsage::Module(ident).display())
                     }
-                    CodegenTypeName::Inline(view) => {
-                        let ident = CodegenIdent::from_segments(view.path().segments);
-                        write!(f, "{}", CodegenIdentUsage::Module(&ident).display())
+                    CodegenTypeIdent::Inline(path) => {
+                        let name = CodegenTypePathSegment::join(path.segments);
+                        write!(
+                            f,
+                            "{}",
+                            CodegenIdentUsage::Module(CodegenIdent::new(&name)).display()
+                        )
                     }
                 }
             }
@@ -106,177 +127,56 @@ impl<'a> CodegenModuleName<'a> {
     }
 }
 
-impl ToTokens for CodegenModuleName<'_> {
+impl ToTokens for CodegenModuleIdent<'_> {
+    #[inline]
     fn to_tokens(&self, tokens: &mut TokenStream) {
         match self.0 {
-            CodegenTypeName::Schema(view) => {
-                let ident = view.extensions().get::<CodegenIdent>().unwrap();
-                CodegenIdentUsage::Module(&ident).to_tokens(tokens);
+            CodegenTypeIdent::Schema(ident) => {
+                CodegenIdentUsage::Module(ident).to_tokens(tokens);
             }
-            CodegenTypeName::Inline(view) => {
-                let ident = CodegenIdent::from_segments(view.path().segments);
-                CodegenIdentUsage::Module(&ident).to_tokens(tokens);
+            CodegenTypeIdent::Inline(path) => {
+                let name = CodegenTypePathSegment::join(path.segments);
+                CodegenIdentUsage::Module(CodegenIdent::new(&name)).to_tokens(tokens);
             }
         }
     }
 }
 
-/// A sort key for deterministic ordering of [`CodegenTypeName`]s.
+/// A cleaned string that's valid for use as a Rust identifier.
 ///
-/// Sorts schema types before inline types, then lexicographically by name.
-/// This ensures that code generation produces stable output regardless of
-/// declaration order.
-#[derive(Clone, Copy, Debug)]
-pub struct CodegenTypeNameSortKey<'a>(CodegenTypeName<'a>);
-
-impl<'a> CodegenTypeNameSortKey<'a> {
-    #[inline]
-    pub fn for_schema(view: &'a SchemaTypeView<'a>) -> Self {
-        Self(CodegenTypeName::Schema(view))
-    }
-
-    #[inline]
-    pub fn for_inline(view: &'a InlineTypeView<'a>) -> Self {
-        Self(CodegenTypeName::Inline(view))
-    }
-
-    #[inline]
-    pub fn into_name(self) -> CodegenTypeName<'a> {
-        self.0
-    }
-}
-
-impl Eq for CodegenTypeNameSortKey<'_> {}
-
-impl Ord for CodegenTypeNameSortKey<'_> {
-    fn cmp(&self, other: &Self) -> Ordering {
-        match (&self.0, &other.0) {
-            (CodegenTypeName::Schema(a), CodegenTypeName::Schema(b)) => a.name().cmp(b.name()),
-            (CodegenTypeName::Inline(a), CodegenTypeName::Inline(b)) => a.path().cmp(&b.path()),
-            (CodegenTypeName::Schema(_), CodegenTypeName::Inline(_)) => Ordering::Less,
-            (CodegenTypeName::Inline(_), CodegenTypeName::Schema(_)) => Ordering::Greater,
-        }
-    }
-}
-
-impl PartialEq for CodegenTypeNameSortKey<'_> {
-    fn eq(&self, other: &Self) -> bool {
-        self.cmp(other).is_eq()
-    }
-}
-
-impl PartialOrd for CodegenTypeNameSortKey<'_> {
-    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        Some(self.cmp(other))
-    }
-}
-
-/// A string that's statically guaranteed to be valid for any
-/// [`CodegenIdentUsage`].
-#[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
-pub struct CodegenIdent(String);
+/// Use [`CodegenIdentUsage`] to transform the identifier into
+/// the correct idiomatic case.
+#[derive(Debug, Eq, Hash, Ord, PartialEq, PartialOrd, RefCastCustom)]
+#[repr(transparent)]
+pub struct CodegenIdent(str);
 
 impl CodegenIdent {
-    /// Creates an identifier for any usage.
-    pub fn new(s: &str) -> Self {
-        let s = clean(s);
-        if KEYWORDS.contains(&s.as_str()) {
-            Self(format!("_{s}"))
-        } else {
-            Self(s)
-        }
-    }
-
-    /// Creates an identifier from an inline type path.
-    pub fn from_segments(segments: &[InlineTypePathSegment<'_>]) -> Self {
-        Self(format!(
-            "{}",
-            segments
-                .iter()
-                .map(CodegenTypePathSegment)
-                .format_with("", |segment, f| f(&segment.display()))
-        ))
-    }
-}
-
-impl AsRef<CodegenIdentRef> for CodegenIdent {
-    fn as_ref(&self) -> &CodegenIdentRef {
-        self
-    }
-}
-
-impl Borrow<CodegenIdentRef> for CodegenIdent {
-    fn borrow(&self) -> &CodegenIdentRef {
-        self
-    }
-}
-
-impl Deref for CodegenIdent {
-    type Target = CodegenIdentRef;
-
-    fn deref(&self) -> &Self::Target {
-        CodegenIdentRef::new(&self.0)
-    }
-}
-
-/// A string slice that's guaranteed to be valid for any [`CodegenIdentUsage`].
-#[derive(Debug, Eq, Ord, PartialEq, PartialOrd, RefCastCustom)]
-#[repr(transparent)]
-pub struct CodegenIdentRef(str);
-
-impl CodegenIdentRef {
     #[ref_cast_custom]
     fn new(s: &str) -> &Self;
-
-    /// Returns a suitable identifier for a struct field,
-    /// before uniquification.
-    pub fn from_field_name_hint(hint: StructFieldNameHint) -> Cow<'static, Self> {
-        match hint {
-            StructFieldNameHint::Index(index) => {
-                Cow::Owned(CodegenIdent(format!("variant_{index}")))
-            }
-            StructFieldNameHint::AdditionalProperties => {
-                Cow::Borrowed(Self::new("additional_properties"))
-            }
-        }
-    }
-
-    /// Returns a suitable identifier for an untagged union variant,
-    /// before uniquification.
-    pub fn from_variant_name_hint(hint: UntaggedVariantNameHint) -> Cow<'static, Self> {
-        use {PrimitiveType::*, UntaggedVariantNameHint::*};
-        match hint {
-            Primitive(String) => Cow::Borrowed(Self::new("String")),
-            Primitive(I8) => Cow::Borrowed(Self::new("I8")),
-            Primitive(U8) => Cow::Borrowed(Self::new("U8")),
-            Primitive(I16) => Cow::Borrowed(Self::new("I16")),
-            Primitive(U16) => Cow::Borrowed(Self::new("U16")),
-            Primitive(I32) => Cow::Borrowed(Self::new("I32")),
-            Primitive(U32) => Cow::Borrowed(Self::new("U32")),
-            Primitive(I64) => Cow::Borrowed(Self::new("I64")),
-            Primitive(U64) => Cow::Borrowed(Self::new("U64")),
-            Primitive(F32) => Cow::Borrowed(Self::new("F32")),
-            Primitive(F64) => Cow::Borrowed(Self::new("F64")),
-            Primitive(Bool) => Cow::Borrowed(Self::new("Bool")),
-            Primitive(DateTime) => Cow::Borrowed(Self::new("DateTime")),
-            Primitive(UnixTime) => Cow::Borrowed(Self::new("UnixTime")),
-            Primitive(Date) => Cow::Borrowed(Self::new("Date")),
-            Primitive(Url) => Cow::Borrowed(Self::new("Url")),
-            Primitive(Uuid) => Cow::Borrowed(Self::new("Uuid")),
-            Primitive(Bytes) => Cow::Borrowed(Self::new("Bytes")),
-            Primitive(Binary) => Cow::Borrowed(Self::new("Binary")),
-            Array => Cow::Borrowed(Self::new("Array")),
-            Map => Cow::Borrowed(Self::new("Map")),
-            Index(index) => Cow::Owned(CodegenIdent(format!("V{index}"))),
-        }
-    }
 }
 
-impl ToOwned for CodegenIdentRef {
-    type Owned = CodegenIdent;
+/// An identifier that has been uniquified within a
+/// [`UniqueIdents`] scope.
+///
+/// Only a scope can construct these, ensuring that identifiers
+/// used as fields, variants, and parameters are collision-free.
+/// Pass to [`CodegenIdentUsage`] variants to select the
+/// appropriate case transformation.
+#[derive(Debug, Eq, Hash, Ord, PartialEq, PartialOrd, RefCastCustom)]
+#[repr(transparent)]
+pub struct UniqueIdent(str);
 
-    fn to_owned(&self) -> Self::Owned {
-        CodegenIdent(self.0.to_owned())
+impl UniqueIdent {
+    #[ref_cast_custom]
+    fn new(s: &str) -> &Self;
+}
+
+impl Deref for UniqueIdent {
+    type Target = CodegenIdent;
+
+    #[inline]
+    fn deref(&self) -> &Self::Target {
+        CodegenIdent::new(&self.0)
     }
 }
 
@@ -289,7 +189,7 @@ impl ToOwned for CodegenIdentRef {
 pub enum CargoFeature {
     #[default]
     Default,
-    Named(CodegenIdent),
+    Named(String),
 }
 
 impl CargoFeature {
@@ -298,35 +198,20 @@ impl CargoFeature {
         match name {
             // `default` can't be used as a literal feature name; ignore it.
             "default" => Self::Default,
-
-            // Cargo and crates.io limit which characters can appear in feature names;
-            // further, we use feature names as module names for operations, so
-            // the feature name needs to be usable as a Rust identifier.
-            name => Self::Named(CodegenIdent::new(name)),
-        }
-    }
-
-    #[inline]
-    pub fn as_ident(&self) -> &CodegenIdentRef {
-        match self {
-            Self::Named(name) => name,
-            Self::Default => CodegenIdentRef::new("default"),
+            name => Self::Named(clean(name)),
         }
     }
 
     #[inline]
     pub fn display(&self) -> impl Display {
         match self {
-            Self::Named(name) => AsKebabCase(name.0.as_str()),
+            Self::Named(name) => AsKebabCase(name.as_str()),
             Self::Default => AsKebabCase("default"),
         }
     }
 }
 
-/// A context-aware wrapper for emitting a [`CodegenIdentRef`] as a Rust identifier.
-///
-/// [`CodegenIdentUsage`] is a lower-level building block for generating
-/// identifiers. For schema and inline types, prefer [`CodegenTypeName`] instead.
+/// Emits a [`CodegenIdent`] as an idiomatic Rust identifier.
 ///
 /// Each [`CodegenIdentUsage`] variant determines the case transformation
 /// applied to the identifier: module, field, parameter, and method names
@@ -336,15 +221,15 @@ impl CargoFeature {
 /// use [`display`](Self::display).
 #[derive(Clone, Copy, Debug)]
 pub enum CodegenIdentUsage<'a> {
-    Module(&'a CodegenIdentRef),
-    Type(&'a CodegenIdentRef),
-    Field(&'a CodegenIdentRef),
-    Variant(&'a CodegenIdentRef),
-    Param(&'a CodegenIdentRef),
-    Method(&'a CodegenIdentRef),
+    Module(&'a CodegenIdent),
+    Type(&'a CodegenIdent),
+    Field(&'a UniqueIdent),
+    Variant(&'a UniqueIdent),
+    Param(&'a UniqueIdent),
+    Method(&'a UniqueIdent),
 }
 
-impl CodegenIdentUsage<'_> {
+impl<'a> CodegenIdentUsage<'a> {
     /// Returns a formattable representation of this identifier.
     ///
     /// [`CodegenIdentUsage`] doesn't implement [`Display`] directly, to help catch
@@ -354,39 +239,46 @@ impl CodegenIdentUsage<'_> {
         struct DisplayUsage<'a>(CodegenIdentUsage<'a>);
         impl Display for DisplayUsage<'_> {
             fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-                use CodegenIdentUsage::*;
+                let s = self.0.as_str();
+                if !s.starts_with(unicode_ident::is_xid_start) {
+                    f.write_char('_')?;
+                }
                 match self.0 {
-                    Module(name) | Field(name) | Param(name) | Method(name) => {
-                        if name.0.starts_with(unicode_ident::is_xid_start) {
-                            write!(f, "{}", AsSnekCase(&name.0))
-                        } else {
-                            // `name` doesn't start with `XID_Start` (e.g., "1099KStatus"),
-                            // so prefix it with `_`; everything after is known to be
-                            // `XID_Continue`.
-                            write!(f, "_{}", AsSnekCase(&name.0))
-                        }
+                    CodegenIdentUsage::Type(_) | CodegenIdentUsage::Variant(_) => {
+                        write!(f, "{}", AsPascalCase(s))
                     }
-                    Type(name) | Variant(name) => {
-                        if name.0.starts_with(unicode_ident::is_xid_start) {
-                            write!(f, "{}", AsPascalCase(&name.0))
-                        } else {
-                            write!(f, "_{}", AsPascalCase(&name.0))
-                        }
-                    }
+                    CodegenIdentUsage::Module(_)
+                    | CodegenIdentUsage::Field(_)
+                    | CodegenIdentUsage::Param(_)
+                    | CodegenIdentUsage::Method(_) => write!(f, "{}", AsSnekCase(s)),
                 }
             }
         }
         DisplayUsage(self)
     }
+
+    #[inline]
+    fn as_str(&self) -> &str {
+        match self {
+            CodegenIdentUsage::Type(s) => &s.0,
+            CodegenIdentUsage::Variant(s) => &s.0,
+            CodegenIdentUsage::Module(s) => &s.0,
+            CodegenIdentUsage::Field(s) => &s.0,
+            CodegenIdentUsage::Param(s) => &s.0,
+            CodegenIdentUsage::Method(s) => &s.0,
+        }
+    }
 }
 
 impl IdentFragment for CodegenIdentUsage<'_> {
+    #[inline]
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         write!(f, "{}", self.display())
     }
 }
 
 impl ToTokens for CodegenIdentUsage<'_> {
+    #[inline]
     fn to_tokens(&self, tokens: &mut TokenStream) {
         let s = self.display().to_string();
         let ident = syn::parse_str(&s).unwrap_or_else(|_| Ident::new_raw(&s, Span::call_site()));
@@ -396,33 +288,73 @@ impl ToTokens for CodegenIdentUsage<'_> {
 
 /// A scope for generating unique, valid Rust identifiers.
 #[derive(Debug)]
-pub struct CodegenIdentScope<'a>(UniqueNamesScope<'a>);
+pub struct UniqueIdents<'a>(UniqueNames<'a>);
 
-impl<'a> CodegenIdentScope<'a> {
+impl<'a> UniqueIdents<'a> {
     /// Creates a new identifier scope that's backed by the given arena.
-    pub fn new(arena: &'a UniqueNames) -> Self {
+    #[inline]
+    pub fn new(arena: &'a Arena) -> Self {
         Self::with_reserved(arena, &[])
     }
 
     /// Creates a new identifier scope that's backed by the given arena,
     /// with additional pre-reserved names.
-    pub fn with_reserved(arena: &'a UniqueNames, reserved: &[&str]) -> Self {
-        Self(arena.scope_with_reserved(itertools::chain!(
-            reserved.iter().copied(),
-            KEYWORDS.iter().copied(),
-            std::iter::once("")
-        )))
+    #[inline]
+    pub fn with_reserved(arena: &'a Arena, reserved: &[&str]) -> Self {
+        Self(UniqueNames::with_reserved(
+            arena,
+            itertools::chain!(
+                reserved.iter().copied(),
+                KEYWORDS.iter().copied(),
+                std::iter::once("")
+            ),
+        ))
     }
 
     /// Cleans the input string and returns a name that's unique
     /// within this scope, and valid for any [`CodegenIdentUsage`].
-    pub fn uniquify(&mut self, name: &str) -> CodegenIdent {
-        CodegenIdent(self.0.uniquify(&clean(name)).into_owned())
+    #[inline]
+    pub fn name(&mut self, name: &str) -> &'a UniqueIdent {
+        UniqueIdent::new(self.0.uniquify(&clean(name)))
     }
 
-    /// Uniquifies an identifier within this scope.
-    pub fn uniquify_ident(&mut self, ident: &CodegenIdentRef) -> CodegenIdent {
-        CodegenIdent(self.0.uniquify(&ident.0).into_owned())
+    /// Uniquifies a struct field name from a [`StructFieldNameHint`].
+    pub fn field_name_hint(&mut self, hint: StructFieldNameHint) -> &'a UniqueIdent {
+        use StructFieldNameHint::*;
+        UniqueIdent::new(match hint {
+            Index(index) => self.0.uniquify(&format!("variant_{index}")),
+            AdditionalProperties => self.0.uniquify("additional_properties"),
+        })
+    }
+
+    /// Uniquifies an untagged union variant name from an
+    /// [`UntaggedVariantNameHint`].
+    pub fn variant_name_hint(&mut self, hint: UntaggedVariantNameHint) -> &'a UniqueIdent {
+        use {PrimitiveType::*, UntaggedVariantNameHint::*};
+        UniqueIdent::new(match hint {
+            Primitive(String) => self.0.uniquify("String"),
+            Primitive(I8) => self.0.uniquify("I8"),
+            Primitive(U8) => self.0.uniquify("U8"),
+            Primitive(I16) => self.0.uniquify("I16"),
+            Primitive(U16) => self.0.uniquify("U16"),
+            Primitive(I32) => self.0.uniquify("I32"),
+            Primitive(U32) => self.0.uniquify("U32"),
+            Primitive(I64) => self.0.uniquify("I64"),
+            Primitive(U64) => self.0.uniquify("U64"),
+            Primitive(F32) => self.0.uniquify("F32"),
+            Primitive(F64) => self.0.uniquify("F64"),
+            Primitive(Bool) => self.0.uniquify("Bool"),
+            Primitive(DateTime) => self.0.uniquify("DateTime"),
+            Primitive(UnixTime) => self.0.uniquify("UnixTime"),
+            Primitive(Date) => self.0.uniquify("Date"),
+            Primitive(Url) => self.0.uniquify("Url"),
+            Primitive(Uuid) => self.0.uniquify("Uuid"),
+            Primitive(Bytes) => self.0.uniquify("Bytes"),
+            Primitive(Binary) => self.0.uniquify("Binary"),
+            Array => self.0.uniquify("Array"),
+            Map => self.0.uniquify("Map"),
+            Index(index) => self.0.uniquify(&format!("V{index}")),
+        })
     }
 }
 
@@ -430,6 +362,17 @@ impl<'a> CodegenIdentScope<'a> {
 pub struct CodegenTypePathSegment<'a>(&'a InlineTypePathSegment<'a>);
 
 impl<'a> CodegenTypePathSegment<'a> {
+    /// Formats an inline type path as a string suitable for use as
+    /// a Rust identifier.
+    #[inline]
+    fn join(segments: &[InlineTypePathSegment<'_>]) -> String {
+        segments
+            .iter()
+            .map(CodegenTypePathSegment)
+            .format_with("", |segment, f| f(&segment.display()))
+            .to_string()
+    }
+
     pub fn display(&self) -> impl Display {
         struct DisplaySegment<'a>(&'a InlineTypePathSegment<'a>);
         impl Display for DisplaySegment<'_> {
@@ -474,6 +417,7 @@ impl<'a> CodegenTypePathSegment<'a> {
 /// Note that the result may not itself be a valid Rust identifier,
 /// because Rust identifiers must start with `XID_Start`.
 /// This is checked and handled in [`CodegenIdentUsage`].
+#[inline]
 fn clean(s: &str) -> String {
     WordSegments::new(s)
         .flat_map(|s| s.split(|c| !unicode_ident::is_xid_continue(c)))
@@ -523,8 +467,10 @@ mod tests {
 
     #[test]
     fn test_codegen_ident_type() {
-        let ident = CodegenIdent::new("pet_store");
-        let usage = CodegenIdentUsage::Type(&ident);
+        let arena = Arena::new();
+        let mut scope = UniqueIdents::new(&arena);
+        let ident = scope.name("pet_store");
+        let usage = CodegenIdentUsage::Type(ident);
         let actual: syn::Ident = parse_quote!(#usage);
         let expected: syn::Ident = parse_quote!(PetStore);
         assert_eq!(actual, expected);
@@ -532,8 +478,10 @@ mod tests {
 
     #[test]
     fn test_codegen_ident_field() {
-        let ident = CodegenIdent::new("petStore");
-        let usage = CodegenIdentUsage::Field(&ident);
+        let arena = Arena::new();
+        let mut scope = UniqueIdents::new(&arena);
+        let ident = scope.name("petStore");
+        let usage = CodegenIdentUsage::Field(ident);
         let actual: syn::Ident = parse_quote!(#usage);
         let expected: syn::Ident = parse_quote!(pet_store);
         assert_eq!(actual, expected);
@@ -541,8 +489,10 @@ mod tests {
 
     #[test]
     fn test_codegen_ident_module() {
-        let ident = CodegenIdent::new("MyModule");
-        let usage = CodegenIdentUsage::Module(&ident);
+        let arena = Arena::new();
+        let mut scope = UniqueIdents::new(&arena);
+        let ident = scope.name("MyModule");
+        let usage = CodegenIdentUsage::Module(ident);
         let actual: syn::Ident = parse_quote!(#usage);
         let expected: syn::Ident = parse_quote!(my_module);
         assert_eq!(actual, expected);
@@ -550,8 +500,10 @@ mod tests {
 
     #[test]
     fn test_codegen_ident_variant() {
-        let ident = CodegenIdent::new("http_error");
-        let usage = CodegenIdentUsage::Variant(&ident);
+        let arena = Arena::new();
+        let mut scope = UniqueIdents::new(&arena);
+        let ident = scope.name("http_error");
+        let usage = CodegenIdentUsage::Variant(ident);
         let actual: syn::Ident = parse_quote!(#usage);
         let expected: syn::Ident = parse_quote!(HttpError);
         assert_eq!(actual, expected);
@@ -559,8 +511,10 @@ mod tests {
 
     #[test]
     fn test_codegen_ident_param() {
-        let ident = CodegenIdent::new("userId");
-        let usage = CodegenIdentUsage::Param(&ident);
+        let arena = Arena::new();
+        let mut scope = UniqueIdents::new(&arena);
+        let ident = scope.name("userId");
+        let usage = CodegenIdentUsage::Param(ident);
         let actual: syn::Ident = parse_quote!(#usage);
         let expected: syn::Ident = parse_quote!(user_id);
         assert_eq!(actual, expected);
@@ -568,8 +522,10 @@ mod tests {
 
     #[test]
     fn test_codegen_ident_method() {
-        let ident = CodegenIdent::new("getUserById");
-        let usage = CodegenIdentUsage::Method(&ident);
+        let arena = Arena::new();
+        let mut scope = UniqueIdents::new(&arena);
+        let ident = scope.name("getUserById");
+        let usage = CodegenIdentUsage::Method(ident);
         let actual: syn::Ident = parse_quote!(#usage);
         let expected: syn::Ident = parse_quote!(get_user_by_id);
         assert_eq!(actual, expected);
@@ -579,8 +535,10 @@ mod tests {
 
     #[test]
     fn test_codegen_ident_handles_rust_keywords() {
-        let ident = CodegenIdent::new("type");
-        let usage = CodegenIdentUsage::Field(&ident);
+        let arena = Arena::new();
+        let mut scope = UniqueIdents::new(&arena);
+        let ident = scope.name("type");
+        let usage = CodegenIdentUsage::Field(ident);
         let actual: syn::Ident = parse_quote!(#usage);
         let expected: syn::Ident = parse_quote!(r#type);
         assert_eq!(actual, expected);
@@ -588,8 +546,10 @@ mod tests {
 
     #[test]
     fn test_codegen_ident_handles_invalid_start_chars() {
-        let ident = CodegenIdent::new("123foo");
-        let usage = CodegenIdentUsage::Field(&ident);
+        let arena = Arena::new();
+        let mut scope = UniqueIdents::new(&arena);
+        let ident = scope.name("123foo");
+        let usage = CodegenIdentUsage::Field(ident);
         let actual: syn::Ident = parse_quote!(#usage);
         let expected: syn::Ident = parse_quote!(_123_foo);
         assert_eq!(actual, expected);
@@ -597,8 +557,10 @@ mod tests {
 
     #[test]
     fn test_codegen_ident_handles_special_chars() {
-        let ident = CodegenIdent::new("foo-bar-baz");
-        let usage = CodegenIdentUsage::Field(&ident);
+        let arena = Arena::new();
+        let mut scope = UniqueIdents::new(&arena);
+        let ident = scope.name("foo-bar-baz");
+        let usage = CodegenIdentUsage::Field(ident);
         let actual: syn::Ident = parse_quote!(#usage);
         let expected: syn::Ident = parse_quote!(foo_bar_baz);
         assert_eq!(actual, expected);
@@ -606,14 +568,16 @@ mod tests {
 
     #[test]
     fn test_codegen_ident_handles_number_prefix() {
-        let ident = CodegenIdent::new("1099KStatus");
+        let arena = Arena::new();
+        let mut scope = UniqueIdents::new(&arena);
+        let ident = scope.name("1099KStatus");
 
-        let usage = CodegenIdentUsage::Field(&ident);
+        let usage = CodegenIdentUsage::Field(ident);
         let actual: syn::Ident = parse_quote!(#usage);
         let expected: syn::Ident = parse_quote!(_1099_k_status);
         assert_eq!(actual, expected);
 
-        let usage = CodegenIdentUsage::Type(&ident);
+        let usage = CodegenIdentUsage::Type(ident);
         let actual: syn::Ident = parse_quote!(#usage);
         let expected: syn::Ident = parse_quote!(_1099KStatus);
         assert_eq!(actual, expected);
@@ -623,25 +587,30 @@ mod tests {
 
     #[test]
     fn test_untagged_variant_name_index() {
-        let name = CodegenIdentRef::from_variant_name_hint(UntaggedVariantNameHint::Index(0));
-        assert_eq!(&*name, CodegenIdentRef::new("V0"));
+        let arena = Arena::new();
+        let mut scope = UniqueIdents::new(&arena);
 
-        let name = CodegenIdentRef::from_variant_name_hint(UntaggedVariantNameHint::Index(42));
-        assert_eq!(&*name, CodegenIdentRef::new("V42"));
+        let ident = scope.variant_name_hint(UntaggedVariantNameHint::Index(0));
+        assert_eq!(&ident.0, "V0");
+
+        let ident = scope.variant_name_hint(UntaggedVariantNameHint::Index(42));
+        assert_eq!(&ident.0, "V42");
     }
 
     // MARK: Struct field names
 
     #[test]
     fn test_struct_field_name_index() {
-        let field_name = CodegenIdentRef::from_field_name_hint(StructFieldNameHint::Index(0));
-        let usage = CodegenIdentUsage::Field(&field_name);
+        let arena = Arena::new();
+        let mut scope = UniqueIdents::new(&arena);
+        let ident0 = scope.field_name_hint(StructFieldNameHint::Index(0));
+        let usage = CodegenIdentUsage::Field(ident0);
         let actual: syn::Ident = parse_quote!(#usage);
         let expected: syn::Ident = parse_quote!(variant_0);
         assert_eq!(actual, expected);
 
-        let field_name = CodegenIdentRef::from_field_name_hint(StructFieldNameHint::Index(5));
-        let usage = CodegenIdentUsage::Field(&field_name);
+        let ident5 = scope.field_name_hint(StructFieldNameHint::Index(5));
+        let usage = CodegenIdentUsage::Field(ident5);
         let actual: syn::Ident = parse_quote!(#usage);
         let expected: syn::Ident = parse_quote!(variant_5);
         assert_eq!(actual, expected);
@@ -649,9 +618,10 @@ mod tests {
 
     #[test]
     fn test_struct_field_name_additional_properties() {
-        let field_name =
-            CodegenIdentRef::from_field_name_hint(StructFieldNameHint::AdditionalProperties);
-        let usage = CodegenIdentUsage::Field(&field_name);
+        let arena = Arena::new();
+        let mut scope = UniqueIdents::new(&arena);
+        let ident = scope.field_name_hint(StructFieldNameHint::AdditionalProperties);
+        let usage = CodegenIdentUsage::Field(ident);
         let actual: syn::Ident = parse_quote!(#usage);
         let expected: syn::Ident = parse_quote!(additional_properties);
         assert_eq!(actual, expected);
@@ -694,16 +664,16 @@ mod tests {
 
     #[test]
     fn test_codegen_ident_scope_handles_empty() {
-        let unique = UniqueNames::new();
-        let mut scope = CodegenIdentScope::new(&unique);
-        let ident = scope.uniquify("");
+        let arena = Arena::new();
+        let mut scope = UniqueIdents::new(&arena);
+        let ident = scope.name("");
 
-        let usage = CodegenIdentUsage::Field(&ident);
+        let usage = CodegenIdentUsage::Field(ident);
         let actual: syn::Ident = parse_quote!(#usage);
         let expected: syn::Ident = parse_quote!(_2);
         assert_eq!(actual, expected);
 
-        let usage = CodegenIdentUsage::Type(&ident);
+        let usage = CodegenIdentUsage::Type(ident);
         let actual: syn::Ident = parse_quote!(#usage);
         let expected: syn::Ident = parse_quote!(_2);
         assert_eq!(actual, expected);

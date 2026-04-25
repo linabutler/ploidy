@@ -1,68 +1,79 @@
 use itertools::Itertools;
-use ploidy_core::ir::{InlineTypeView, OperationView, SchemaTypeView, View};
+use ploidy_core::ir::InlineTypeView;
 use proc_macro2::TokenStream;
 use quote::{ToTokens, TokenStreamExt, quote};
 
 use super::{
-    cfg::CfgFeature,
-    enum_::CodegenEnum,
-    naming::{CodegenTypeName, CodegenTypeNameSortKey},
-    struct_::CodegenStruct,
-    tagged::CodegenTagged,
-    untagged::CodegenUntagged,
+    cfg::CfgFeature, enum_::CodegenEnum, graph::CodegenGraph, naming::CodegenTypeIdent,
+    struct_::CodegenStruct, tagged::CodegenTagged, untagged::CodegenUntagged,
 };
 
-/// Generates an inline `mod types`, with definitions for all the inline types
-/// that are reachable from a resource or schema type.
+/// Generates an inline `mod types` block from a pre-collected slice
+/// of [`InlineTypeView`]s.
 ///
-/// Inline types nested _within_ referenced schemas are excluded; those are
-/// emitted by [`CodegenSchemaType`](crate::CodegenSchemaType) instead.
-#[derive(Clone, Copy, Debug)]
-pub enum CodegenInlines<'a> {
-    Resource(&'a [OperationView<'a>]),
-    Schema(&'a SchemaTypeView<'a>),
+/// Sorts the views by name, dispatches each to its codegen type,
+/// and wraps the result in `pub mod types { ... }`. Emits nothing
+/// if there are no inline types that need definitions (containers,
+/// primitives, and untyped values are emitted inline at their use
+/// site and skipped here).
+///
+/// Use [`with_cfg`](Self::with_cfg) for resource modules, where
+/// each inline type needs its own `#[cfg(feature = "...")]` gate.
+#[derive(Debug)]
+pub(crate) struct CodegenInlines<'a> {
+    graph: &'a CodegenGraph<'a>,
+    inlines: Vec<InlineTypeView<'a, 'a>>,
+    cfg: bool,
 }
 
-impl ToTokens for CodegenInlines<'_> {
-    fn to_tokens(&self, tokens: &mut TokenStream) {
-        match self {
-            Self::Resource(ops) => {
-                let items = CodegenInlineItems(IncludeCfgFeatures::Include, ops);
-                items.to_tokens(tokens);
-            }
-            &Self::Schema(ty) => {
-                let items = CodegenInlineItems(IncludeCfgFeatures::Omit, std::slice::from_ref(ty));
-                items.to_tokens(tokens);
-            }
+impl<'a> CodegenInlines<'a> {
+    /// Creates inline items without feature gates (for schema modules).
+    pub fn new(
+        graph: &'a CodegenGraph<'a>,
+        inlines: impl Iterator<Item = InlineTypeView<'a, 'a>>,
+    ) -> Self {
+        let mut inlines = inlines.collect_vec();
+        inlines.sort_by_key(|view| CodegenTypeIdent::Inline(view.path()));
+        Self {
+            graph,
+            inlines,
+            cfg: false,
+        }
+    }
+
+    /// Creates inline items with feature gates (for resource modules).
+    pub fn with_cfg(
+        graph: &'a CodegenGraph<'a>,
+        inlines: impl Iterator<Item = InlineTypeView<'a, 'a>>,
+    ) -> Self {
+        let mut inlines = inlines.collect_vec();
+        inlines.sort_by_key(|view| CodegenTypeIdent::Inline(view.path()));
+        Self {
+            graph,
+            inlines,
+            cfg: true,
         }
     }
 }
 
-#[derive(Debug)]
-struct CodegenInlineItems<'a, V>(IncludeCfgFeatures, &'a [V]);
-
-impl<'a, V> ToTokens for CodegenInlineItems<'a, V>
-where
-    V: View<'a>,
-{
+impl ToTokens for CodegenInlines<'_> {
     fn to_tokens(&self, tokens: &mut TokenStream) {
-        let mut inlines = self.1.iter().flat_map(|op| op.inlines()).collect_vec();
-        inlines.sort_by(|a, b| {
-            CodegenTypeNameSortKey::for_inline(a).cmp(&CodegenTypeNameSortKey::for_inline(b))
-        });
+        let graph = self.graph;
 
-        let mut items = inlines.into_iter().filter_map(|view| {
-            let name = CodegenTypeName::Inline(&view);
-            let ty = match &view {
-                InlineTypeView::Enum(_, view) => CodegenEnum::new(name, view).into_token_stream(),
+        let mut items = self.inlines.iter().filter_map(|view| {
+            let name = CodegenTypeIdent::Inline(view.path());
+            let ty = match view {
                 InlineTypeView::Struct(_, view) => {
-                    CodegenStruct::new(name, view).into_token_stream()
+                    CodegenStruct::new(graph, name, view).into_token_stream()
+                }
+                InlineTypeView::Enum(_, view) => {
+                    CodegenEnum::new(graph, name, view).into_token_stream()
                 }
                 InlineTypeView::Tagged(_, view) => {
-                    CodegenTagged::new(name, view).into_token_stream()
+                    CodegenTagged::new(graph, name, view).into_token_stream()
                 }
                 InlineTypeView::Untagged(_, view) => {
-                    CodegenUntagged::new(name, view).into_token_stream()
+                    CodegenUntagged::new(graph, name, view).into_token_stream()
                 }
                 InlineTypeView::Container(..)
                 | InlineTypeView::Primitive(..)
@@ -72,22 +83,21 @@ where
                     return None;
                 }
             };
-            Some(match self.0 {
-                IncludeCfgFeatures::Include => {
-                    // Wrap each type in an inner inline module, so that
-                    // the `#[cfg(...)]` applies to all items (types and `impl`s).
-                    let cfg = CfgFeature::for_inline_type(&view);
-                    let mod_name = name.into_module_name();
-                    quote! {
-                        #cfg
-                        mod #mod_name {
-                            #ty
-                        }
-                        #cfg
-                        pub use #mod_name::*;
+            Some(if self.cfg {
+                // Wrap each type in an inner module, so that the
+                // `#[cfg(...)]` applies to all items (types and `impl`s).
+                let cfg = CfgFeature::for_inline_type(view);
+                let mod_name = name.into_module();
+                quote! {
+                    #cfg
+                    mod #mod_name {
+                        #ty
                     }
+                    #cfg
+                    pub use #mod_name::*;
                 }
-                IncludeCfgFeatures::Omit => ty,
+            } else {
+                ty
             })
         });
 
@@ -102,20 +112,13 @@ where
     }
 }
 
-#[derive(Clone, Copy, Debug)]
-enum IncludeCfgFeatures {
-    Include,
-    Omit,
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    use itertools::Itertools;
     use ploidy_core::{
         arena::Arena,
-        ir::{RawGraph, Spec},
+        ir::{RawGraph, Spec, View},
         parse::Document,
     };
     use pretty_assertions::assert_eq;
@@ -152,8 +155,8 @@ mod tests {
         let spec = Spec::from_doc(&arena, &doc).unwrap();
         let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
-        let ops = graph.operations().collect_vec();
-        let inlines = CodegenInlines::Resource(&ops);
+        let inlines =
+            CodegenInlines::with_cfg(&graph, graph.operations().flat_map(|op| op.inlines()));
 
         let actual: syn::File = parse_quote!(#inlines);
         let expected: syn::File = parse_quote! {
@@ -211,8 +214,8 @@ mod tests {
         let spec = Spec::from_doc(&arena, &doc).unwrap();
         let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
-        let ops = graph.operations().collect_vec();
-        let inlines = CodegenInlines::Resource(&ops);
+        let inlines =
+            CodegenInlines::with_cfg(&graph, graph.operations().flat_map(|op| op.inlines()));
 
         // No inline types should be emitted, since the only inline (`Details`)
         // belongs to the referenced schema.
@@ -265,8 +268,8 @@ mod tests {
         let spec = Spec::from_doc(&arena, &doc).unwrap();
         let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
-        let ops = graph.operations().collect_vec();
-        let inlines = CodegenInlines::Resource(&ops);
+        let inlines =
+            CodegenInlines::with_cfg(&graph, graph.operations().flat_map(|op| op.inlines()));
 
         let actual: syn::File = parse_quote!(#inlines);
         // Types should be sorted: Apple, Mango, Zebra.
@@ -333,8 +336,8 @@ mod tests {
         let spec = Spec::from_doc(&arena, &doc).unwrap();
         let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
-        let ops = graph.operations().collect_vec();
-        let inlines = CodegenInlines::Resource(&ops);
+        let inlines =
+            CodegenInlines::with_cfg(&graph, graph.operations().flat_map(|op| op.inlines()));
 
         let actual: syn::File = parse_quote!(#inlines);
         let expected: syn::File = parse_quote! {};
@@ -371,8 +374,8 @@ mod tests {
         let spec = Spec::from_doc(&arena, &doc).unwrap();
         let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
-        let ops = graph.operations().collect_vec();
-        let inlines = CodegenInlines::Resource(&ops);
+        let inlines =
+            CodegenInlines::with_cfg(&graph, graph.operations().flat_map(|op| op.inlines()));
 
         let actual: syn::File = parse_quote!(#inlines);
         let expected: syn::File = parse_quote! {
@@ -423,8 +426,8 @@ mod tests {
         let spec = Spec::from_doc(&arena, &doc).unwrap();
         let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
-        let ops = graph.operations().collect_vec();
-        let inlines = CodegenInlines::Resource(&ops);
+        let inlines =
+            CodegenInlines::with_cfg(&graph, graph.operations().flat_map(|op| op.inlines()));
 
         let actual: syn::File = parse_quote!(#inlines);
         let expected: syn::File = parse_quote! {
@@ -475,8 +478,8 @@ mod tests {
         let spec = Spec::from_doc(&arena, &doc).unwrap();
         let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
-        let ops = graph.operations().collect_vec();
-        let inlines = CodegenInlines::Resource(&ops);
+        let inlines =
+            CodegenInlines::with_cfg(&graph, graph.operations().flat_map(|op| op.inlines()));
 
         let actual: syn::File = parse_quote!(#inlines);
         let expected: syn::File = parse_quote! {

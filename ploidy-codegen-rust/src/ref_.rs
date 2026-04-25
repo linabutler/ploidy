@@ -1,23 +1,23 @@
-use ploidy_core::ir::{
-    ContainerView, ExtendableView, InlineTypePathRoot, InlineTypeView, TypeView,
-};
+use ploidy_core::ir::{ContainerView, InlineTypePathRoot, InlineTypeView, TypeView};
 use proc_macro2::TokenStream;
 use quote::{ToTokens, TokenStreamExt, quote};
 use syn::parse_quote;
 
 use super::{
-    naming::{CargoFeature, CodegenIdent, CodegenIdentUsage, CodegenTypeName},
+    graph::CodegenGraph,
+    naming::{CodegenIdentUsage, CodegenTypeIdent},
     primitive::CodegenPrimitive,
 };
 
 #[derive(Clone, Copy, Debug)]
 pub struct CodegenRef<'a> {
-    ty: &'a TypeView<'a>,
+    graph: &'a CodegenGraph<'a>,
+    ty: &'a TypeView<'a, 'a>,
 }
 
 impl<'a> CodegenRef<'a> {
-    pub fn new(ty: &'a TypeView<'a>) -> Self {
-        Self { ty }
+    pub fn new(graph: &'a CodegenGraph<'a>, ty: &'a TypeView<'a, 'a>) -> Self {
+        Self { graph, ty }
     }
 }
 
@@ -29,21 +29,21 @@ impl ToTokens for CodegenRef<'_> {
             // named schema containers are always emitted as references.
             TypeView::Inline(InlineTypeView::Container(_, ContainerView::Array(inner))) => {
                 let inner_ty = inner.ty();
-                let inner_ref = CodegenRef::new(&inner_ty);
+                let inner_ref = CodegenRef::new(self.graph, &inner_ty);
                 quote! { ::std::vec::Vec<#inner_ref> }
             }
             TypeView::Inline(InlineTypeView::Container(_, ContainerView::Map(inner))) => {
                 let inner_ty = inner.ty();
-                let inner_ref = CodegenRef::new(&inner_ty);
+                let inner_ref = CodegenRef::new(self.graph, &inner_ty);
                 quote! { ::std::collections::BTreeMap<::std::string::String, #inner_ref> }
             }
             TypeView::Inline(InlineTypeView::Container(_, ContainerView::Optional(inner))) => {
                 let inner_ty = inner.ty();
-                let inner_ref = CodegenRef::new(&inner_ty);
+                let inner_ref = CodegenRef::new(self.graph, &inner_ty);
                 quote! { ::std::option::Option<#inner_ref> }
             }
             TypeView::Inline(InlineTypeView::Primitive(_, view)) => {
-                let ty = CodegenPrimitive::new(view);
+                let ty = CodegenPrimitive::new(self.graph, view);
                 quote!(#ty)
             }
             TypeView::Inline(InlineTypeView::Any(_, _)) => {
@@ -53,23 +53,23 @@ impl ToTokens for CodegenRef<'_> {
                 let path = ty.path();
                 let root: syn::Path = match path.root {
                     InlineTypePathRoot::Resource(resource) => {
-                        let feature = resource.map(CargoFeature::from_name).unwrap_or_default();
-                        let mod_name = CodegenIdentUsage::Module(feature.as_ident());
+                        let ident = resource
+                            .and_then(|r| self.graph.resource(r))
+                            .unwrap_or_default();
+                        let mod_name = CodegenIdentUsage::Module(&ident);
                         parse_quote!(crate::client::#mod_name::types)
                     }
                     InlineTypePathRoot::Type(name) => {
-                        let mod_ident = CodegenIdent::new(name);
-                        let mod_name = CodegenIdentUsage::Module(&mod_ident);
+                        let name = self.graph.schema(name).unwrap().ident();
+                        let mod_name = name.into_module();
                         parse_quote!(crate::types::#mod_name::types)
                     }
                 };
-                let ty_name = CodegenTypeName::Inline(ty);
+                let ty_name = CodegenTypeIdent::Inline(ty.path());
                 parse_quote!(#root::#ty_name)
             }
             TypeView::Schema(ty) => {
-                let ext = ty.extensions();
-                let ty_ident = ext.get::<CodegenIdent>().unwrap();
-                let ty_name = CodegenIdentUsage::Type(&ty_ident);
+                let ty_name = self.graph.schema(ty.name()).unwrap().ident();
                 quote! { crate::types::#ty_name }
             }
         })
@@ -116,8 +116,8 @@ mod tests {
         let spec = Spec::from_doc(&arena, &doc).unwrap();
         let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
-        let schema = graph.schemas().find(|s| s.name() == "Container");
-        let Some(SchemaTypeView::Struct(_, struct_view)) = &schema else {
+        let schema = graph.schema("Container").unwrap().into_view();
+        let SchemaTypeView::Struct(_, struct_view) = schema else {
             panic!("expected struct `Container`; got `{schema:?}`");
         };
         let field = struct_view
@@ -127,7 +127,7 @@ mod tests {
         let ty = field.ty();
         assert_matches!(ty, TypeView::Inline(InlineTypeView::Any(_, _)));
 
-        let ref_ = CodegenRef::new(&ty);
+        let ref_ = CodegenRef::new(&graph, &ty);
         let actual: syn::Type = parse_quote!(#ref_);
         let expected: syn::Type = parse_quote!(::ploidy_util::serde_json::Value);
         assert_eq!(actual, expected);
@@ -161,8 +161,8 @@ mod tests {
         let spec = Spec::from_doc(&arena, &doc).unwrap();
         let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
-        let schema = graph.schemas().find(|s| s.name() == "Container");
-        let Some(SchemaTypeView::Struct(_, struct_view)) = &schema else {
+        let schema = graph.schema("Container").unwrap().into_view();
+        let SchemaTypeView::Struct(_, struct_view) = schema else {
             panic!("expected struct `Container`; got `{schema:?}`");
         };
         let field = struct_view
@@ -170,7 +170,7 @@ mod tests {
             .find(|f| matches!(f.name(), StructFieldName::Name("items")))
             .unwrap();
         let ty = field.ty();
-        let ref_ = CodegenRef::new(&ty);
+        let ref_ = CodegenRef::new(&graph, &ty);
         let actual: syn::Type = parse_quote!(#ref_);
         let expected: syn::Type = parse_quote!(::std::vec::Vec<::std::string::String>);
         assert_eq!(actual, expected);
@@ -203,8 +203,8 @@ mod tests {
         let spec = Spec::from_doc(&arena, &doc).unwrap();
         let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
-        let schema = graph.schemas().find(|s| s.name() == "Container");
-        let Some(SchemaTypeView::Struct(_, struct_view)) = &schema else {
+        let schema = graph.schema("Container").unwrap().into_view();
+        let SchemaTypeView::Struct(_, struct_view) = schema else {
             panic!("expected struct `Container`; got `{schema:?}`");
         };
         let field = struct_view
@@ -212,7 +212,7 @@ mod tests {
             .find(|f| matches!(f.name(), StructFieldName::Name("numbers")))
             .unwrap();
         let ty = field.ty();
-        let ref_ = CodegenRef::new(&ty);
+        let ref_ = CodegenRef::new(&graph, &ty);
         let actual: syn::Type = parse_quote!(#ref_);
         let expected: syn::Type = parse_quote!(::std::vec::Vec<i32>);
         assert_eq!(actual, expected);
@@ -244,8 +244,8 @@ mod tests {
         let spec = Spec::from_doc(&arena, &doc).unwrap();
         let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
-        let schema = graph.schemas().find(|s| s.name() == "Container");
-        let Some(SchemaTypeView::Struct(_, struct_view)) = &schema else {
+        let schema = graph.schema("Container").unwrap().into_view();
+        let SchemaTypeView::Struct(_, struct_view) = schema else {
             panic!("expected struct `Container`; got `{schema:?}`");
         };
         let field = struct_view
@@ -253,7 +253,7 @@ mod tests {
             .find(|f| matches!(f.name(), StructFieldName::Name("metadata")))
             .unwrap();
         let ty = field.ty();
-        let ref_ = CodegenRef::new(&ty);
+        let ref_ = CodegenRef::new(&graph, &ty);
         let actual: syn::Type = parse_quote!(#ref_);
         let expected: syn::Type = parse_quote! {
             ::std::collections::BTreeMap<::std::string::String, ::std::string::String>
@@ -288,8 +288,8 @@ mod tests {
         let spec = Spec::from_doc(&arena, &doc).unwrap();
         let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
-        let schema = graph.schemas().find(|s| s.name() == "Container");
-        let Some(SchemaTypeView::Struct(_, struct_view)) = &schema else {
+        let schema = graph.schema("Container").unwrap().into_view();
+        let SchemaTypeView::Struct(_, struct_view) = schema else {
             panic!("expected struct `Container`; got `{schema:?}`");
         };
         let field = struct_view
@@ -297,7 +297,7 @@ mod tests {
             .find(|f| matches!(f.name(), StructFieldName::Name("counters")))
             .unwrap();
         let ty = field.ty();
-        let ref_ = CodegenRef::new(&ty);
+        let ref_ = CodegenRef::new(&graph, &ty);
         let actual: syn::Type = parse_quote!(#ref_);
         let expected: syn::Type = parse_quote! {
             ::std::collections::BTreeMap<::std::string::String, i64>
@@ -328,8 +328,8 @@ mod tests {
         let spec = Spec::from_doc(&arena, &doc).unwrap();
         let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
-        let schema = graph.schemas().find(|s| s.name() == "Container");
-        let Some(SchemaTypeView::Struct(_, struct_view)) = &schema else {
+        let schema = graph.schema("Container").unwrap().into_view();
+        let SchemaTypeView::Struct(_, struct_view) = schema else {
             panic!("expected struct `Container`; got `{schema:?}`");
         };
         let field = struct_view
@@ -342,7 +342,7 @@ mod tests {
             TypeView::Inline(InlineTypeView::Container(_, ContainerView::Optional(_)))
         );
 
-        let ref_ = CodegenRef::new(&ty);
+        let ref_ = CodegenRef::new(&graph, &ty);
         let actual: syn::Type = parse_quote!(#ref_);
         let expected: syn::Type = parse_quote!(::std::option::Option<::std::string::String>);
         assert_eq!(actual, expected);
@@ -372,8 +372,8 @@ mod tests {
         let spec = Spec::from_doc(&arena, &doc).unwrap();
         let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
-        let schema = graph.schemas().find(|s| s.name() == "Container");
-        let Some(SchemaTypeView::Struct(_, struct_view)) = &schema else {
+        let schema = graph.schema("Container").unwrap().into_view();
+        let SchemaTypeView::Struct(_, struct_view) = schema else {
             panic!("expected struct `Container`; got `{schema:?}`");
         };
         let field = struct_view
@@ -386,7 +386,7 @@ mod tests {
             TypeView::Inline(InlineTypeView::Container(_, ContainerView::Optional(_)))
         );
 
-        let ref_ = CodegenRef::new(&ty);
+        let ref_ = CodegenRef::new(&graph, &ty);
         let actual: syn::Type = parse_quote!(#ref_);
         let expected: syn::Type = parse_quote!(::std::option::Option<i32>);
         assert_eq!(actual, expected);
@@ -422,8 +422,8 @@ mod tests {
         let spec = Spec::from_doc(&arena, &doc).unwrap();
         let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
-        let schema = graph.schemas().find(|s| s.name() == "Container");
-        let Some(SchemaTypeView::Struct(_, struct_view)) = &schema else {
+        let schema = graph.schema("Container").unwrap().into_view();
+        let SchemaTypeView::Struct(_, struct_view) = schema else {
             panic!("expected struct `Container`; got `{schema:?}`");
         };
         let field = struct_view
@@ -432,7 +432,7 @@ mod tests {
             .unwrap();
         let ty = field.ty();
 
-        let ref_ = CodegenRef::new(&ty);
+        let ref_ = CodegenRef::new(&graph, &ty);
         let actual: syn::Type = parse_quote!(#ref_);
         let expected: syn::Type = parse_quote! {
             ::std::vec::Vec<::std::vec::Vec<i32>>
@@ -465,8 +465,8 @@ mod tests {
         let spec = Spec::from_doc(&arena, &doc).unwrap();
         let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
-        let schema = graph.schemas().find(|s| s.name() == "Container");
-        let Some(SchemaTypeView::Struct(_, struct_view)) = &schema else {
+        let schema = graph.schema("Container").unwrap().into_view();
+        let SchemaTypeView::Struct(_, struct_view) = schema else {
             panic!("expected struct `Container`; got `{schema:?}`");
         };
         let field = struct_view
@@ -479,7 +479,7 @@ mod tests {
             TypeView::Inline(InlineTypeView::Container(_, ContainerView::Optional(_)))
         );
 
-        let ref_ = CodegenRef::new(&ty);
+        let ref_ = CodegenRef::new(&graph, &ty);
         let actual: syn::Type = parse_quote!(#ref_);
         let expected: syn::Type = parse_quote! {
             ::std::option::Option<::std::vec::Vec<::std::string::String>>
@@ -514,8 +514,8 @@ mod tests {
         let spec = Spec::from_doc(&arena, &doc).unwrap();
         let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
-        let schema = graph.schemas().find(|s| s.name() == "Container");
-        let Some(SchemaTypeView::Struct(_, struct_view)) = &schema else {
+        let schema = graph.schema("Container").unwrap().into_view();
+        let SchemaTypeView::Struct(_, struct_view) = schema else {
             panic!("expected struct `Container`; got `{schema:?}`");
         };
         let field = struct_view
@@ -524,7 +524,7 @@ mod tests {
             .unwrap();
         let ty = field.ty();
 
-        let ref_ = CodegenRef::new(&ty);
+        let ref_ = CodegenRef::new(&graph, &ty);
         let actual: syn::Type = parse_quote!(#ref_);
         let expected: syn::Type = parse_quote! {
             ::std::collections::BTreeMap<::std::string::String, ::std::vec::Vec<bool>>
@@ -556,12 +556,9 @@ mod tests {
         let spec = Spec::from_doc(&arena, &doc).unwrap();
         let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
-        let schema = graph
-            .schemas()
-            .find(|s| s.name() == "Pet")
-            .expect("expected schema `Pet`");
-        let ty = TypeView::Schema(schema);
-        let ref_ = CodegenRef::new(&ty);
+        let schema = graph.schema("Pet").expect("expected schema `Pet`");
+        let ty = TypeView::Schema(schema.into_view());
+        let ref_ = CodegenRef::new(&graph, &ty);
         let actual: syn::Type = parse_quote!(#ref_);
         let expected: syn::Type = parse_quote!(crate::types::Pet);
         assert_eq!(actual, expected);
@@ -597,8 +594,8 @@ mod tests {
         let spec = Spec::from_doc(&arena, &doc).unwrap();
         let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
-        let schema = graph.schemas().find(|s| s.name() == "Container");
-        let Some(SchemaTypeView::Struct(_, struct_view)) = &schema else {
+        let schema = graph.schema("Container").unwrap().into_view();
+        let SchemaTypeView::Struct(_, struct_view) = schema else {
             panic!("expected struct `Container`; got `{schema:?}`");
         };
         let field = struct_view
@@ -607,7 +604,7 @@ mod tests {
             .unwrap();
         let ty = field.ty();
 
-        let ref_ = CodegenRef::new(&ty);
+        let ref_ = CodegenRef::new(&graph, &ty);
         let actual: syn::Type = parse_quote!(#ref_);
         let expected: syn::Type = parse_quote! {
             ::std::vec::Vec<crate::types::User>
@@ -639,12 +636,9 @@ mod tests {
         let spec = Spec::from_doc(&arena, &doc).unwrap();
         let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
-        let schema = graph
-            .schemas()
-            .find(|s| s.name() == "Tags")
-            .expect("expected schema `Tags`");
-        let ty = TypeView::Schema(schema);
-        let ref_ = CodegenRef::new(&ty);
+        let schema = graph.schema("Tags").expect("expected schema `Tags`");
+        let ty = TypeView::Schema(schema.into_view());
+        let ref_ = CodegenRef::new(&graph, &ty);
         let actual: syn::Type = parse_quote!(#ref_);
         let expected: syn::Type = parse_quote!(crate::types::Tags);
         assert_eq!(actual, expected);
@@ -679,8 +673,8 @@ mod tests {
         let spec = Spec::from_doc(&arena, &doc).unwrap();
         let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
-        let schema = graph.schemas().find(|s| s.name() == "Container");
-        let Some(SchemaTypeView::Struct(_, struct_view)) = &schema else {
+        let schema = graph.schema("Container").unwrap().into_view();
+        let SchemaTypeView::Struct(_, struct_view) = schema else {
             panic!("expected struct `Container`; got `{schema:?}`");
         };
         let field = struct_view
@@ -689,7 +683,7 @@ mod tests {
             .unwrap();
         let ty = field.ty();
 
-        let ref_ = CodegenRef::new(&ty);
+        let ref_ = CodegenRef::new(&graph, &ty);
         let actual: syn::Type = parse_quote!(#ref_);
         let expected: syn::Type = parse_quote!(crate::types::container::types::Nested);
         assert_eq!(actual, expected);
@@ -738,7 +732,7 @@ mod tests {
             );
         };
 
-        let ref_ = CodegenRef::new(&ty);
+        let ref_ = CodegenRef::new(&graph, &ty);
         let actual: syn::Type = parse_quote!(#ref_);
         let expected: syn::Type = parse_quote!(crate::client::pets::types::CreatePetRequest);
         assert_eq!(actual, expected);
@@ -788,7 +782,7 @@ mod tests {
 
         // Operations without a declared resource name
         // should use `default`.
-        let ref_ = CodegenRef::new(&ty);
+        let ref_ = CodegenRef::new(&graph, &ty);
         let actual: syn::Type = parse_quote!(#ref_);
         let expected: syn::Type = parse_quote!(crate::client::default::types::DoSomethingRequest);
         assert_eq!(actual, expected);

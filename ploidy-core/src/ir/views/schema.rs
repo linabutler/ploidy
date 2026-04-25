@@ -16,20 +16,20 @@ use super::{
 
 /// A graph-aware view of a [schema type][GraphSchemaType].
 #[derive(Debug)]
-pub enum SchemaTypeView<'a> {
-    Enum(SchemaTypeInfo<'a>, EnumView<'a>),
-    Struct(SchemaTypeInfo<'a>, StructView<'a>),
-    Tagged(SchemaTypeInfo<'a>, TaggedView<'a>),
-    Untagged(SchemaTypeInfo<'a>, UntaggedView<'a>),
-    Container(SchemaTypeInfo<'a>, ContainerView<'a>),
-    Primitive(SchemaTypeInfo<'a>, PrimitiveView<'a>),
-    Any(SchemaTypeInfo<'a>, AnyView<'a>),
+pub enum SchemaTypeView<'graph, 'a> {
+    Enum(SchemaTypeInfo<'a>, EnumView<'graph, 'a>),
+    Struct(SchemaTypeInfo<'a>, StructView<'graph, 'a>),
+    Tagged(SchemaTypeInfo<'a>, TaggedView<'graph, 'a>),
+    Untagged(SchemaTypeInfo<'a>, UntaggedView<'graph, 'a>),
+    Container(SchemaTypeInfo<'a>, ContainerView<'graph, 'a>),
+    Primitive(SchemaTypeInfo<'a>, PrimitiveView<'graph, 'a>),
+    Any(SchemaTypeInfo<'a>, AnyView<'graph, 'a>),
 }
 
-impl<'a> SchemaTypeView<'a> {
+impl<'graph, 'a> SchemaTypeView<'graph, 'a> {
     #[inline]
     pub(in crate::ir) fn new(
-        cooked: &'a CookedGraph<'a>,
+        cooked: &'graph CookedGraph<'a>,
         index: NodeIndex<usize>,
         ty: GraphSchemaType<'a>,
     ) -> Self {
@@ -69,7 +69,7 @@ impl<'a> SchemaTypeView<'a> {
 
     /// Returns whether this type transitively depends on `other`.
     #[inline]
-    pub fn depends_on(&self, other: &SchemaTypeView<'a>) -> bool {
+    pub fn depends_on(&self, other: &SchemaTypeView<'graph, 'a>) -> bool {
         self.cooked()
             .metadata
             .closure
@@ -91,9 +91,9 @@ impl<'a> SchemaTypeView<'a> {
     }
 }
 
-impl<'a> ViewNode<'a> for SchemaTypeView<'a> {
+impl<'graph, 'a> ViewNode<'graph, 'a> for SchemaTypeView<'graph, 'a> {
     #[inline]
-    fn cooked(&self) -> &'a CookedGraph<'a> {
+    fn cooked(&self) -> &'graph CookedGraph<'a> {
         match self {
             Self::Enum(_, view) => view.cooked(),
             Self::Struct(_, view) => view.cooked(),

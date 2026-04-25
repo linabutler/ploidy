@@ -1,10 +1,14 @@
-use ploidy_core::codegen::IntoCode;
-use ploidy_core::ir::{ContainerView, SchemaTypeView};
+use ploidy_core::{
+    codegen::IntoCode,
+    ir::{ContainerView, SchemaTypeView, View},
+};
 use proc_macro2::TokenStream;
 use quote::{ToTokens, TokenStreamExt, quote};
 
+use crate::CodegenSchemaView;
+
 use super::{
-    doc_attrs, enum_::CodegenEnum, inlines::CodegenInlines, naming::CodegenTypeName,
+    doc_attrs, enum_::CodegenEnum, graph::CodegenGraph, inlines::CodegenInlines,
     primitive::CodegenPrimitive, ref_::CodegenRef, struct_::CodegenStruct, tagged::CodegenTagged,
     untagged::CodegenUntagged,
 };
@@ -12,29 +16,37 @@ use super::{
 /// Generates a module for a named schema type.
 #[derive(Debug)]
 pub struct CodegenSchemaType<'a> {
-    ty: &'a SchemaTypeView<'a>,
+    graph: &'a CodegenGraph<'a>,
+    ty: &'a CodegenSchemaView<'a, 'a>,
 }
 
 impl<'a> CodegenSchemaType<'a> {
-    pub fn new(ty: &'a SchemaTypeView<'a>) -> Self {
-        Self { ty }
+    pub fn new(graph: &'a CodegenGraph<'a>, ty: &'a CodegenSchemaView<'a, 'a>) -> Self {
+        Self { graph, ty }
     }
 }
 
 impl ToTokens for CodegenSchemaType<'_> {
     fn to_tokens(&self, tokens: &mut TokenStream) {
-        let name = CodegenTypeName::Schema(self.ty);
-        let ty = match self.ty {
-            SchemaTypeView::Struct(_, view) => CodegenStruct::new(name, view).into_token_stream(),
-            SchemaTypeView::Enum(_, view) => CodegenEnum::new(name, view).into_token_stream(),
-            SchemaTypeView::Tagged(_, view) => CodegenTagged::new(name, view).into_token_stream(),
+        let name = self.ty.ident();
+        let s: &SchemaTypeView<'_, '_> = self.ty;
+        let ty = match s {
+            SchemaTypeView::Struct(_, view) => {
+                CodegenStruct::new(self.graph, name, view).into_token_stream()
+            }
+            SchemaTypeView::Enum(_, view) => {
+                CodegenEnum::new(self.graph, name, view).into_token_stream()
+            }
+            SchemaTypeView::Tagged(_, view) => {
+                CodegenTagged::new(self.graph, name, view).into_token_stream()
+            }
             SchemaTypeView::Untagged(_, view) => {
-                CodegenUntagged::new(name, view).into_token_stream()
+                CodegenUntagged::new(self.graph, name, view).into_token_stream()
             }
             SchemaTypeView::Container(_, ContainerView::Array(inner)) => {
                 let doc_attrs = inner.description().map(doc_attrs);
                 let inner_ty = inner.ty();
-                let inner_ref = CodegenRef::new(&inner_ty);
+                let inner_ref = CodegenRef::new(self.graph, &inner_ty);
                 quote! {
                     #doc_attrs
                     pub type #name = ::std::vec::Vec<#inner_ref>;
@@ -43,7 +55,7 @@ impl ToTokens for CodegenSchemaType<'_> {
             SchemaTypeView::Container(_, ContainerView::Map(inner)) => {
                 let doc_attrs = inner.description().map(doc_attrs);
                 let inner_ty = inner.ty();
-                let inner_ref = CodegenRef::new(&inner_ty);
+                let inner_ref = CodegenRef::new(self.graph, &inner_ty);
                 quote! {
                     #doc_attrs
                     pub type #name = ::std::collections::BTreeMap<::std::string::String, #inner_ref>;
@@ -52,14 +64,14 @@ impl ToTokens for CodegenSchemaType<'_> {
             SchemaTypeView::Container(_, ContainerView::Optional(inner)) => {
                 let doc_attrs = inner.description().map(doc_attrs);
                 let inner_ty = inner.ty();
-                let inner_ref = CodegenRef::new(&inner_ty);
+                let inner_ref = CodegenRef::new(self.graph, &inner_ty);
                 quote! {
                     #doc_attrs
                     pub type #name = ::std::option::Option<#inner_ref>;
                 }
             }
             SchemaTypeView::Primitive(_, view) => {
-                let primitive = CodegenPrimitive::new(view);
+                let primitive = CodegenPrimitive::new(self.graph, view);
                 quote! {
                     pub type #name = #primitive;
                 }
@@ -70,11 +82,9 @@ impl ToTokens for CodegenSchemaType<'_> {
                 }
             }
         };
-        let inlines = CodegenInlines::Schema(self.ty);
-        tokens.append_all(quote! {
-            #ty
-            #inlines
-        });
+        tokens.append_all(ty);
+
+        CodegenInlines::new(self.graph, self.ty.inlines()).to_tokens(tokens);
     }
 }
 
@@ -82,9 +92,8 @@ impl IntoCode for CodegenSchemaType<'_> {
     type Code = (String, TokenStream);
 
     fn into_code(self) -> Self::Code {
-        let name = CodegenTypeName::Schema(self.ty);
         (
-            format!("src/types/{}.rs", name.into_module_name().display()),
+            format!("src/types/{}.rs", self.ty.ident().into_module().display()),
             self.into_token_stream(),
         )
     }
@@ -141,12 +150,12 @@ mod tests {
         let spec = Spec::from_doc(&arena, &doc).unwrap();
         let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
-        let schema = graph.schemas().find(|s| s.name() == "Container");
-        let Some(schema @ SchemaTypeView::Struct(_, _)) = &schema else {
+        let schema = graph.schema("Container").unwrap();
+        let _view @ SchemaTypeView::Struct(_, _) = &*schema else {
             panic!("expected struct `Container`; got `{schema:?}`");
         };
 
-        let codegen = CodegenSchemaType::new(schema);
+        let codegen = CodegenSchemaType::new(&graph, &schema);
 
         let actual: syn::File = parse_quote!(#codegen);
         // The struct fields remain in their original order (`zebra`, `mango`, `apple`),
@@ -222,12 +231,12 @@ mod tests {
         let spec = Spec::from_doc(&arena, &doc).unwrap();
         let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
-        let schema = graph.schemas().find(|s| s.name() == "InvalidParameters");
-        let Some(schema @ SchemaTypeView::Container(_, _)) = &schema else {
+        let schema = graph.schema("InvalidParameters").unwrap();
+        let _view @ SchemaTypeView::Container(_, _) = &*schema else {
             panic!("expected container `InvalidParameters`; got `{schema:?}`");
         };
 
-        let codegen = CodegenSchemaType::new(schema);
+        let codegen = CodegenSchemaType::new(&graph, &schema);
 
         let actual: syn::File = parse_quote!(#codegen);
         let expected: syn::File = parse_quote! {
@@ -267,12 +276,12 @@ mod tests {
         let spec = Spec::from_doc(&arena, &doc).unwrap();
         let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
-        let schema = graph.schemas().find(|s| s.name() == "Tags");
-        let Some(schema @ SchemaTypeView::Container(_, _)) = &schema else {
+        let schema = graph.schema("Tags").unwrap();
+        let _view @ SchemaTypeView::Container(_, _) = &*schema else {
             panic!("expected container `Tags`; got `{schema:?}`");
         };
 
-        let codegen = CodegenSchemaType::new(schema);
+        let codegen = CodegenSchemaType::new(&graph, &schema);
 
         let actual: syn::File = parse_quote!(#codegen);
         let expected: syn::File = parse_quote! {
@@ -302,12 +311,12 @@ mod tests {
         let spec = Spec::from_doc(&arena, &doc).unwrap();
         let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
-        let schema = graph.schemas().find(|s| s.name() == "Metadata");
-        let Some(schema @ SchemaTypeView::Container(_, _)) = &schema else {
+        let schema = graph.schema("Metadata").unwrap();
+        let _view @ SchemaTypeView::Container(_, _) = &*schema else {
             panic!("expected container `Metadata`; got `{schema:?}`");
         };
 
-        let codegen = CodegenSchemaType::new(schema);
+        let codegen = CodegenSchemaType::new(&graph, &schema);
 
         let actual: syn::File = parse_quote!(#codegen);
         let expected: syn::File = parse_quote! {
@@ -351,11 +360,11 @@ mod tests {
         let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
         // `type: ["string", "null"]` becomes `Option<String>`.
-        let schema = graph.schemas().find(|s| s.name() == "NullableString");
-        let Some(schema @ SchemaTypeView::Container(_, _)) = &schema else {
+        let schema = graph.schema("NullableString").unwrap();
+        let _view @ SchemaTypeView::Container(_, _) = &*schema else {
             panic!("expected container `NullableString`; got `{schema:?}`");
         };
-        let codegen = CodegenSchemaType::new(schema);
+        let codegen = CodegenSchemaType::new(&graph, &schema);
         let actual: syn::File = parse_quote!(#codegen);
         let expected: syn::File = parse_quote! {
             pub type NullableString = ::std::option::Option<::std::string::String>;
@@ -363,11 +372,11 @@ mod tests {
         assert_eq!(actual, expected);
 
         // `type: ["array", "null"]` becomes `Option<Vec<String>>`.
-        let schema = graph.schemas().find(|s| s.name() == "NullableArray");
-        let Some(schema @ SchemaTypeView::Container(_, _)) = &schema else {
+        let schema = graph.schema("NullableArray").unwrap();
+        let _view @ SchemaTypeView::Container(_, _) = &*schema else {
             panic!("expected container `NullableArray`; got `{schema:?}`");
         };
-        let codegen = CodegenSchemaType::new(schema);
+        let codegen = CodegenSchemaType::new(&graph, &schema);
         let actual: syn::File = parse_quote!(#codegen);
         let expected: syn::File = parse_quote! {
             pub type NullableArray = ::std::option::Option<::std::vec::Vec<::std::string::String>>;
@@ -376,11 +385,11 @@ mod tests {
 
         // `type: ["object", "null"]` with `additionalProperties` becomes
         // `Option<BTreeMap<String, String>>`.
-        let schema = graph.schemas().find(|s| s.name() == "NullableMap");
-        let Some(schema @ SchemaTypeView::Container(_, _)) = &schema else {
+        let schema = graph.schema("NullableMap").unwrap();
+        let _view @ SchemaTypeView::Container(_, _) = &*schema else {
             panic!("expected container `NullableMap`; got `{schema:?}`");
         };
-        let codegen = CodegenSchemaType::new(schema);
+        let codegen = CodegenSchemaType::new(&graph, &schema);
         let actual: syn::File = parse_quote!(#codegen);
         let expected: syn::File = parse_quote! {
             pub type NullableMap = ::std::option::Option<::std::collections::BTreeMap<::std::string::String, ::std::string::String>>;
@@ -389,11 +398,11 @@ mod tests {
 
         // `oneOf` with an inline schema and `null` becomes an `Option<InlineStruct>`,
         // with the inline struct definition emitted in `mod types`.
-        let schema = graph.schemas().find(|s| s.name() == "NullableOneOf");
-        let Some(schema @ SchemaTypeView::Container(_, _)) = &schema else {
+        let schema = graph.schema("NullableOneOf").unwrap();
+        let _view @ SchemaTypeView::Container(_, _) = &*schema else {
             panic!("expected container `NullableOneOf`; got `{schema:?}`");
         };
-        let codegen = CodegenSchemaType::new(schema);
+        let codegen = CodegenSchemaType::new(&graph, &schema);
         let actual: syn::File = parse_quote!(#codegen);
         let expected: syn::File = parse_quote! {
             pub type NullableOneOf = ::std::option::Option<crate::types::nullable_one_of::types::V1>;
@@ -432,12 +441,12 @@ mod tests {
         let spec = Spec::from_doc(&arena, &doc).unwrap();
         let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
-        let schema = graph.schemas().find(|s| s.name() == "Tags");
-        let Some(schema @ SchemaTypeView::Container(_, _)) = &schema else {
+        let schema = graph.schema("Tags").unwrap();
+        let _view @ SchemaTypeView::Container(_, _) = &*schema else {
             panic!("expected container `Tags`; got `{schema:?}`");
         };
 
-        let codegen = CodegenSchemaType::new(schema);
+        let codegen = CodegenSchemaType::new(&graph, &schema);
 
         let actual: syn::File = parse_quote!(#codegen);
         let expected: syn::File = parse_quote! {

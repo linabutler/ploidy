@@ -44,16 +44,16 @@ use super::{ViewNode, ir::TypeView, struct_::FieldView};
 
 /// A graph-aware view of a [tagged union type][GraphTagged].
 #[derive(Debug)]
-pub struct TaggedView<'a> {
-    cooked: &'a CookedGraph<'a>,
+pub struct TaggedView<'graph, 'a> {
+    cooked: &'graph CookedGraph<'a>,
     index: NodeIndex<usize>,
     ty: GraphTagged<'a>,
 }
 
-impl<'a> TaggedView<'a> {
+impl<'graph, 'a> TaggedView<'graph, 'a> {
     #[inline]
     pub(in crate::ir) fn new(
-        cooked: &'a CookedGraph<'a>,
+        cooked: &'graph CookedGraph<'a>,
         index: NodeIndex<usize>,
         ty: GraphTagged<'a>,
     ) -> Self {
@@ -75,7 +75,7 @@ impl<'a> TaggedView<'a> {
     /// Returns the common fields declared alongside `oneOf`,
     /// shared across all variants.
     #[inline]
-    pub fn fields(&self) -> impl Iterator<Item = TaggedFieldView<'_, 'a>> {
+    pub fn fields(&self) -> impl Iterator<Item = TaggedFieldView<'_, 'graph, 'a>> {
         self.cooked
             .fields(self.index)
             .map(move |info| TaggedFieldView::new(self, info.meta, info.target, false))
@@ -83,7 +83,7 @@ impl<'a> TaggedView<'a> {
 
     /// Returns an iterator over this tagged union's variants.
     #[inline]
-    pub fn variants(&self) -> impl Iterator<Item = TaggedVariantView<'a>> {
+    pub fn variants(&self) -> impl Iterator<Item = TaggedVariantView<'graph, 'a>> {
         self.cooked
             .variants(self.index)
             .filter_map(move |info| match info.meta {
@@ -95,9 +95,9 @@ impl<'a> TaggedView<'a> {
     }
 }
 
-impl<'a> ViewNode<'a> for TaggedView<'a> {
+impl<'graph, 'a> ViewNode<'graph, 'a> for TaggedView<'graph, 'a> {
     #[inline]
-    fn cooked(&self) -> &'a CookedGraph<'a> {
+    fn cooked(&self) -> &'graph CookedGraph<'a> {
         self.cooked
     }
 
@@ -108,20 +108,20 @@ impl<'a> ViewNode<'a> for TaggedView<'a> {
 }
 
 /// A graph-aware view of a common tagged union field.
-pub type TaggedFieldView<'view, 'a> = FieldView<'view, 'a, TaggedView<'a>>;
+pub type TaggedFieldView<'view, 'graph, 'a> = FieldView<'view, 'a, TaggedView<'graph, 'a>>;
 
 /// A graph-aware view of a tagged union variant.
 #[derive(Debug)]
-pub struct TaggedVariantView<'a> {
-    cooked: &'a CookedGraph<'a>,
+pub struct TaggedVariantView<'graph, 'a> {
+    cooked: &'graph CookedGraph<'a>,
     index: NodeIndex<usize>,
     meta: TaggedVariantMeta<'a>,
 }
 
-impl<'a> TaggedVariantView<'a> {
+impl<'graph, 'a> TaggedVariantView<'graph, 'a> {
     #[inline]
     fn new(
-        cooked: &'a CookedGraph<'a>,
+        cooked: &'graph CookedGraph<'a>,
         index: NodeIndex<usize>,
         meta: TaggedVariantMeta<'a>,
     ) -> Self {
@@ -148,14 +148,14 @@ impl<'a> TaggedVariantView<'a> {
 
     /// Returns a view of this variant's type.
     #[inline]
-    pub fn ty(&self) -> TypeView<'a> {
+    pub fn ty(&self) -> TypeView<'graph, 'a> {
         TypeView::new(self.cooked, self.index)
     }
 }
 
-impl<'a> ViewNode<'a> for TaggedVariantView<'a> {
+impl<'graph, 'a> ViewNode<'graph, 'a> for TaggedVariantView<'graph, 'a> {
     #[inline]
-    fn cooked(&self) -> &'a CookedGraph<'a> {
+    fn cooked(&self) -> &'graph CookedGraph<'a> {
         self.cooked
     }
 

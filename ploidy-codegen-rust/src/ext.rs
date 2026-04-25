@@ -11,7 +11,7 @@ pub(crate) trait EnumViewExt {
     fn representable(&self) -> bool;
 }
 
-impl EnumViewExt for EnumView<'_> {
+impl EnumViewExt for EnumView<'_, '_> {
     fn representable(&self) -> bool {
         self.variants().iter().all(|variant| match variant {
             // Only non-empty string variants with at least one identifier
@@ -23,34 +23,34 @@ impl EnumViewExt for EnumView<'_> {
 }
 
 /// Rust-specific extensions to struct, tagged, and untagged union field views.
-pub(crate) trait FieldViewExt<'a> {
+pub(crate) trait FieldViewExt<'graph, 'a> {
     /// Returns the inner type after peeling all `Optional` layers
     /// (e.g., `Optional(T)`, `Optional(Optional(T))` both return `T`).
-    fn inner(&self) -> TypeView<'a>;
+    fn inner(&self) -> TypeView<'graph, 'a>;
 }
 
 /// Peels all [`ContainerView::Optional`] wrapper layers from a type.
-fn peel<'a>(mut ty: TypeView<'a>) -> TypeView<'a> {
+fn peel<'graph, 'a>(mut ty: TypeView<'graph, 'a>) -> TypeView<'graph, 'a> {
     while let Some(ContainerView::Optional(inner)) = ty.as_container() {
         ty = inner.ty();
     }
     ty
 }
 
-impl<'view, 'a> FieldViewExt<'a> for StructFieldView<'view, 'a> {
-    fn inner(&self) -> TypeView<'a> {
+impl<'view, 'graph, 'a> FieldViewExt<'graph, 'a> for StructFieldView<'view, 'graph, 'a> {
+    fn inner(&self) -> TypeView<'graph, 'a> {
         peel(self.ty())
     }
 }
 
-impl<'view, 'a> FieldViewExt<'a> for TaggedFieldView<'view, 'a> {
-    fn inner(&self) -> TypeView<'a> {
+impl<'view, 'graph, 'a> FieldViewExt<'graph, 'a> for TaggedFieldView<'view, 'graph, 'a> {
+    fn inner(&self) -> TypeView<'graph, 'a> {
         peel(self.ty())
     }
 }
 
-impl<'view, 'a> FieldViewExt<'a> for UntaggedFieldView<'view, 'a> {
-    fn inner(&self) -> TypeView<'a> {
+impl<'view, 'graph, 'a> FieldViewExt<'graph, 'a> for UntaggedFieldView<'view, 'graph, 'a> {
+    fn inner(&self) -> TypeView<'graph, 'a> {
         peel(self.ty())
     }
 }
@@ -64,7 +64,7 @@ pub(crate) trait ParameterViewExt {
     fn optional(&self) -> bool;
 }
 
-impl<'view, 'a> ParameterViewExt for ParameterView<'view, 'a, QueryParameter> {
+impl<'view, 'graph, 'a> ParameterViewExt for ParameterView<'view, 'graph, 'a, QueryParameter> {
     fn optional(&self) -> bool {
         !self.required() && !matches!(self.ty().as_container(), Some(ContainerView::Optional(_)))
     }

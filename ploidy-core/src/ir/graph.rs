@@ -60,6 +60,7 @@ pub struct RawGraph<'a> {
     arena: &'a Arena,
     spec: &'a Spec<'a>,
     graph: RawDiGraph<'a>,
+    schemas: FxHashMap<&'a str, NodeIndex<usize>>,
     ops: &'a [&'a GraphOperation<'a>],
 }
 
@@ -178,6 +179,7 @@ impl<'a> RawGraph<'a> {
             arena,
             spec,
             graph,
+            schemas,
             ops,
         }
     }
@@ -435,8 +437,10 @@ impl<'a> RawGraph<'a> {
 /// code generation.
 #[derive(Debug)]
 pub struct CookedGraph<'a> {
+    arena: &'a Arena,
     pub(super) graph: CookedDiGraph<'a>,
     info: &'a Info,
+    schemas: FxHashMap<&'a str, NodeIndex<usize>>,
     ops: &'a [&'a GraphOperation<'a>],
     /// Additional metadata for each node.
     pub(super) metadata: CookedGraphMetadata<'a>,
@@ -513,11 +517,23 @@ impl<'a> CookedGraph<'a> {
         let metadata = MetadataBuilder::new(&graph, ops).build();
 
         Self {
+            arena: raw.arena,
             graph,
             info: raw.spec.info,
+            schemas: raw
+                .schemas
+                .iter()
+                .map(|(&name, index)| (name, indices[index]))
+                .collect(),
             ops,
             metadata,
         }
+    }
+
+    /// Returns this graph's arena.
+    #[inline]
+    pub fn arena(&self) -> &'a Arena {
+        self.arena
     }
 
     /// Returns [`Info`] from the [`Document`][crate::parse::Document]
@@ -529,7 +545,7 @@ impl<'a> CookedGraph<'a> {
 
     /// Returns an iterator over all the named schemas in this graph.
     #[inline]
-    pub fn schemas(&self) -> impl Iterator<Item = SchemaTypeView<'_>> {
+    pub fn schemas(&self) -> impl Iterator<Item = SchemaTypeView<'_, 'a>> + use<'_, 'a> {
         self.graph
             .node_indices()
             .filter_map(|index| match self.graph[index] {
@@ -538,9 +554,20 @@ impl<'a> CookedGraph<'a> {
             })
     }
 
+    /// Looks up and returns a schema by name.
+    #[inline]
+    pub fn schema(&self, name: &str) -> Option<SchemaTypeView<'_, 'a>> {
+        self.schemas
+            .get(name)
+            .and_then(|&index| match self.graph[index] {
+                GraphType::Schema(ty) => Some(SchemaTypeView::new(self, index, ty)),
+                _ => None,
+            })
+    }
+
     /// Returns an iterator over all primitive type nodes in this graph.
     #[inline]
-    pub fn primitives(&self) -> impl Iterator<Item = PrimitiveView<'_>> {
+    pub fn primitives(&self) -> impl Iterator<Item = PrimitiveView<'_, 'a>> + use<'_, 'a> {
         self.graph
             .node_indices()
             .filter_map(|index| match self.graph[index] {
@@ -554,7 +581,7 @@ impl<'a> CookedGraph<'a> {
 
     /// Returns an iterator over all the operations in this graph.
     #[inline]
-    pub fn operations(&self) -> impl Iterator<Item = OperationView<'_>> {
+    pub fn operations(&self) -> impl Iterator<Item = OperationView<'_, 'a>> + use<'_, 'a> {
         self.ops.iter().map(move |&op| OperationView::new(self, op))
     }
 
