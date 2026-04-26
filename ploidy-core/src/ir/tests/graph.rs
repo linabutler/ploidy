@@ -1049,7 +1049,7 @@ fn test_dependencies_propagation() {
     let get_data = graph.operations().find(|o| o.id() == "getData").unwrap();
     let mut get_data_deps = get_data
         .dependencies()
-        .filter_map(|v| v.into_schema().ok())
+        .filter_map(|v| v.into_schema().right())
         .map(|s| s.name())
         .collect_vec();
     get_data_deps.sort();
@@ -1058,7 +1058,7 @@ fn test_dependencies_propagation() {
     let get_user = graph.operations().find(|o| o.id() == "getUser").unwrap();
     let get_user_deps = get_user
         .dependencies()
-        .filter_map(|v| v.into_schema().ok())
+        .filter_map(|v| v.into_schema().right())
         .map(|s| s.name())
         .collect_vec();
     assert_matches!(&*get_user_deps, ["User"]);
@@ -1201,7 +1201,7 @@ fn test_used_by_propagation() {
     let op = graph.operations().find(|o| o.id() == "createItem").unwrap();
     let mut op_resources = op
         .dependencies()
-        .filter_map(|v| v.into_schema().ok())
+        .filter_map(|v| v.into_schema().right())
         .map(|s| s.resource())
         .collect_vec();
     op_resources.sort();
@@ -1371,7 +1371,7 @@ fn test_dependents_simple_chain() {
     let c = graph.schemas().find(|s| s.name() == "C").unwrap();
     let mut c_dependents = c
         .dependents()
-        .filter_map(|v| v.into_schema().ok())
+        .filter_map(|v| v.into_schema().right())
         .map(|s| s.name())
         .collect_vec();
     c_dependents.sort();
@@ -1382,7 +1382,7 @@ fn test_dependents_simple_chain() {
     let b = graph.schemas().find(|s| s.name() == "B").unwrap();
     let mut b_dependents = b
         .dependents()
-        .filter_map(|v| v.into_schema().ok())
+        .filter_map(|v| v.into_schema().right())
         .map(|s| s.name())
         .collect_vec();
     b_dependents.sort();
@@ -1392,7 +1392,7 @@ fn test_dependents_simple_chain() {
     let a = graph.schemas().find(|s| s.name() == "A").unwrap();
     let a_dependents = a
         .dependents()
-        .filter_map(|v| v.into_schema().ok())
+        .filter_map(|v| v.into_schema().right())
         .map(|s| s.name())
         .collect_vec();
     assert!(a_dependents.is_empty());
@@ -1433,7 +1433,7 @@ fn test_dependents_multiple_dependents() {
     let c = graph.schemas().find(|s| s.name() == "C").unwrap();
     let mut c_dependents = c
         .dependents()
-        .filter_map(|v| v.into_schema().ok())
+        .filter_map(|v| v.into_schema().right())
         .map(|s| s.name())
         .collect_vec();
     c_dependents.sort();
@@ -1478,7 +1478,7 @@ fn test_dependents_cycle() {
     let a = graph.schemas().find(|s| s.name() == "A").unwrap();
     let mut a_dependents = a
         .dependents()
-        .filter_map(|v| v.into_schema().ok())
+        .filter_map(|v| v.into_schema().right())
         .map(|s| s.name())
         .collect_vec();
     a_dependents.sort();
@@ -1487,7 +1487,7 @@ fn test_dependents_cycle() {
     let b = graph.schemas().find(|s| s.name() == "B").unwrap();
     let mut b_dependents = b
         .dependents()
-        .filter_map(|v| v.into_schema().ok())
+        .filter_map(|v| v.into_schema().right())
         .map(|s| s.name())
         .collect_vec();
     b_dependents.sort();
@@ -1496,7 +1496,7 @@ fn test_dependents_cycle() {
     let c = graph.schemas().find(|s| s.name() == "C").unwrap();
     let mut c_dependents = c
         .dependents()
-        .filter_map(|v| v.into_schema().ok())
+        .filter_map(|v| v.into_schema().right())
         .map(|s| s.name())
         .collect_vec();
     c_dependents.sort();
@@ -1536,7 +1536,7 @@ fn test_dependents_is_inverse_of_dependencies() {
     // `Container` depends on `Item`.
     let container_deps = container
         .dependencies()
-        .filter_map(|v| v.into_schema().ok())
+        .filter_map(|v| v.into_schema().right())
         .map(|s| s.name())
         .collect_vec();
     assert_matches!(&*container_deps, ["Item"]);
@@ -1544,7 +1544,7 @@ fn test_dependents_is_inverse_of_dependencies() {
     // `Item`'s dependents include `Container`.
     let mut item_dependents = item
         .dependents()
-        .filter_map(|v| v.into_schema().ok())
+        .filter_map(|v| v.into_schema().right())
         .map(|s| s.name())
         .collect_vec();
     item_dependents.sort();
@@ -1598,7 +1598,7 @@ fn test_dependencies_diamond() {
     // A depends directly on B, C; transitively on D through B and C.
     let mut a_deps = a
         .dependencies()
-        .filter_map(|v| v.into_schema().ok())
+        .filter_map(|v| v.into_schema().right())
         .map(|s| s.name())
         .collect_vec();
     a_deps.sort();
@@ -1607,7 +1607,7 @@ fn test_dependencies_diamond() {
     // D's dependents should include A, B, and C.
     let mut d_dependents = d
         .dependents()
-        .filter_map(|v| v.into_schema().ok())
+        .filter_map(|v| v.into_schema().right())
         .map(|s| s.name())
         .collect_vec();
     d_dependents.sort();
@@ -1653,7 +1653,7 @@ fn test_operation_with_no_types() {
     // The operation has no type dependencies.
     let deps = op
         .dependencies()
-        .filter_map(|v| v.into_schema().ok())
+        .filter_map(|v| v.into_schema().right())
         .collect_vec();
     assert_matches!(&*deps, []);
 
@@ -1712,7 +1712,7 @@ fn test_parents_returns_immediate_parents() {
     // `User` should only have `NamedEntity` as a parent, not `Entity`.
     let parent_names = user_struct
         .parents()
-        .filter_map(|p| p.into_schema().ok())
+        .filter_map(|p| p.into_schema().right())
         .map(|s| s.name())
         .collect_vec();
     assert_matches!(&*parent_names, ["NamedEntity"]);
@@ -1764,7 +1764,7 @@ fn test_all_of_inheritance_with_fields() {
     // `Child` should have `Parent` as its parent.
     let parent_names = child_struct
         .parents()
-        .filter_map(|p| p.into_schema().ok())
+        .filter_map(|p| p.into_schema().right())
         .map(|s| s.name())
         .collect_vec();
     assert_matches!(&*parent_names, ["Parent"]);
@@ -1898,7 +1898,7 @@ fn test_multiple_parents() {
     // Should have both mixins as parents.
     let parent_names = combined_struct
         .parents()
-        .filter_map(|p| p.into_schema().ok())
+        .filter_map(|p| p.into_schema().right())
         .map(|s| s.name())
         .collect_vec();
     assert_matches!(&*parent_names, ["Mixin1", "Mixin2"]);

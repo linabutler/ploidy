@@ -59,7 +59,7 @@ impl CfgFeature {
         // transitive dependencies can be gated, either.
         let has_ungated_root_dependent = view
             .dependents()
-            .filter_map(|v| v.into_schema().ok())
+            .filter_map(|v| v.into_schema().right())
             .any(|s| s.resource().is_none() && s.used_by().all(|op| op.resource().is_none()));
         if has_ungated_root_dependent {
             return None;
@@ -93,7 +93,7 @@ impl CfgFeature {
         // See `for_schema_type` for the definition of an "ungated root".
         let has_ungated_root_dependent = view
             .dependents()
-            .filter_map(|v| v.into_schema().ok())
+            .filter_map(|v| v.into_schema().right())
             .any(|s| s.resource().is_none() && s.used_by().all(|op| op.resource().is_none()));
         if has_ungated_root_dependent {
             return None;
@@ -111,7 +111,7 @@ impl CfgFeature {
             // without a resource name, because these aren't gated.
             let pairs = view
                 .dependencies()
-                .filter_map(|v| v.into_schema().ok())
+                .filter_map(|v| v.into_schema().right())
                 .filter_map(|ty| ty.resource().map(|r| (CargoFeature::from_name(r), ty)))
                 .collect_vec();
             Self::all_of(reduce_transitive_features(&pairs))
@@ -127,7 +127,7 @@ impl CfgFeature {
         // reduce redundant features.
         let pairs = view
             .dependencies()
-            .filter_map(|v| v.into_schema().ok())
+            .filter_map(|v| v.into_schema().right())
             .filter_map(|ty| ty.resource().map(|r| (CargoFeature::from_name(r), ty)))
             .collect_vec();
 

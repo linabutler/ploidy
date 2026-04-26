@@ -5,6 +5,7 @@
 //! `components/schemas`, or an anonymous [`Inline`][InlineTypeView] schema
 //! nested inside another type or operation.
 
+use either::Either;
 use petgraph::graph::NodeIndex;
 
 use crate::ir::{graph::CookedGraph, types::GraphType};
@@ -28,13 +29,16 @@ impl<'a> TypeView<'a> {
         }
     }
 
-    /// If this is a view of a named schema type, returns that schema type;
-    /// otherwise, returns an [`Err`] with this view.
+    /// If this is a view of a named schema type, returns that type
+    /// on the [`Right`]; otherwise, returns this view on the [`Left`].
+    ///
+    /// [`Right`]: either::Right
+    /// [`Left`]: either::Left
     #[inline]
-    pub fn into_schema(self) -> Result<SchemaTypeView<'a>, Self> {
+    pub fn into_schema(self) -> Either<Self, SchemaTypeView<'a>> {
         match self {
-            Self::Schema(view) => Ok(view),
-            other => Err(other),
+            Self::Schema(view) => Either::Right(view),
+            other => Either::Left(other),
         }
     }
 

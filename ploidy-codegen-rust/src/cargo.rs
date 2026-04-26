@@ -45,7 +45,7 @@ impl<'a> CodegenCargoManifest<'a> {
                 };
                 let entry: &mut BTreeSet<_> = deps_by_feature.entry(feature).or_default();
                 for dep in schema.dependencies().filter_map(|ty| {
-                    match CargoFeature::from_name(ty.into_schema().ok()?.resource()?) {
+                    match CargoFeature::from_name(ty.into_schema().right()?.resource()?) {
                         CargoFeature::Named(name) => Some(CargoFeature::Named(name)),
                         CargoFeature::Default => None,
                     }
@@ -64,7 +64,7 @@ impl<'a> CodegenCargoManifest<'a> {
                 };
                 let entry = deps_by_feature.entry(feature).or_default();
                 for dep in op.dependencies().filter_map(|ty| {
-                    match CargoFeature::from_name(ty.into_schema().ok()?.resource()?) {
+                    match CargoFeature::from_name(ty.into_schema().right()?.resource()?) {
                         CargoFeature::Named(name) => Some(CargoFeature::Named(name)),
                         CargoFeature::Default => None,
                     }
