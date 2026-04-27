@@ -22,7 +22,7 @@ use crate::ir::{
     types::{Enum, EnumVariant},
 };
 
-use super::ViewNode;
+use super::{TypeViewId, ViewNode};
 
 /// A graph-aware view of an [enum type][Enum].
 #[derive(Debug)]
@@ -40,6 +40,12 @@ impl<'graph, 'a> EnumView<'graph, 'a> {
         ty: Enum<'a>,
     ) -> Self {
         Self { cooked, index, ty }
+    }
+
+    /// Returns an opaque identity for this schema type.
+    #[inline]
+    pub fn id(&self) -> TypeViewId {
+        TypeViewId(self.index())
     }
 
     /// Returns the description, if present in the schema.

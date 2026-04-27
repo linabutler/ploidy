@@ -10,7 +10,10 @@ use petgraph::graph::NodeIndex;
 
 use crate::ir::{graph::CookedGraph, types::GraphType};
 
-use super::{View, container::ContainerView, inline::InlineTypeView, schema::SchemaTypeView};
+use super::{
+    Identifiable, TypeViewId, View, container::ContainerView, inline::InlineTypeView,
+    schema::SchemaTypeView,
+};
 
 /// A graph-aware view of a [schema][crate::ir::GraphSchemaType] or
 /// an [inline][crate::ir::GraphInlineType] type.
@@ -26,6 +29,15 @@ impl<'graph, 'a> TypeView<'graph, 'a> {
         match cooked.graph[index] {
             GraphType::Schema(ty) => Self::Schema(SchemaTypeView::new(cooked, index, ty)),
             GraphType::Inline(ty) => Self::Inline(InlineTypeView::new(cooked, index, ty)),
+        }
+    }
+
+    /// Returns an opaque identity for this type.
+    #[inline]
+    pub fn id(&self) -> TypeViewId {
+        match self {
+            Self::Schema(ty) => ty.id(),
+            Self::Inline(ty) => ty.id(),
         }
     }
 

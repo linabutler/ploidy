@@ -54,17 +54,22 @@ impl<'graph, 'a> SchemaTypeView<'graph, 'a> {
         }
     }
 
+    #[inline]
+    pub fn info(&self) -> SchemaTypeInfo<'a> {
+        let &(Self::Enum(info, ..)
+        | Self::Struct(info, ..)
+        | Self::Tagged(info, ..)
+        | Self::Untagged(info, ..)
+        | Self::Container(info, ..)
+        | Self::Primitive(info, ..)
+        | Self::Any(info, ..)) = self;
+        info
+    }
+
     /// Returns the schema name from `components/schemas`.
     #[inline]
     pub fn name(&self) -> &'a str {
-        let (Self::Enum(SchemaTypeInfo { name, .. }, ..)
-        | Self::Struct(SchemaTypeInfo { name, .. }, ..)
-        | Self::Tagged(SchemaTypeInfo { name, .. }, ..)
-        | Self::Untagged(SchemaTypeInfo { name, .. }, ..)
-        | Self::Container(SchemaTypeInfo { name, .. }, ..)
-        | Self::Primitive(SchemaTypeInfo { name, .. }, ..)
-        | Self::Any(SchemaTypeInfo { name, .. }, ..)) = self;
-        name
+        self.info().name
     }
 
     /// Returns whether this type transitively depends on `other`.

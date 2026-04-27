@@ -36,7 +36,6 @@ pub use cfg::*;
 pub use client::*;
 pub use config::*;
 pub use graph::*;
-pub use inlines::*;
 pub use naming::*;
 pub use operation::*;
 pub use primitive::*;
@@ -47,8 +46,8 @@ pub use statics::*;
 pub use types::*;
 
 pub fn write_types_to_disk(output: &Path, graph: &CodegenGraph<'_>) -> miette::Result<()> {
-    for view in graph.schemas() {
-        let code = CodegenSchemaType::new(&view).into_code();
+    for schema in graph.schemas() {
+        let code = CodegenSchemaType::new(graph, &schema).into_code();
         write_to_disk(output, code)?;
     }
 
@@ -58,29 +57,25 @@ pub fn write_types_to_disk(output: &Path, graph: &CodegenGraph<'_>) -> miette::R
 }
 
 pub fn write_client_to_disk(output: &Path, graph: &CodegenGraph<'_>) -> miette::Result<()> {
-    // Group operations by feature. All operations belong to a feature,
-    // or `default` for operations without a named resource.
-    let ops_by_feature = graph
-        .operations()
-        .fold(BTreeMap::<_, Vec<_>>::new(), |mut map, view| {
-            let feature = view
+    // Group operations by resource name.
+    let ops_by_resource: BTreeMap<_, Vec<_>> =
+        graph.operations().fold(BTreeMap::default(), |mut map, op| {
+            let resource = op
                 .resource()
-                .map(CargoFeature::from_name)
+                .and_then(|r| graph.resource(r))
                 .unwrap_or_default();
-            map.entry(feature).or_default().push(view);
+            map.entry(resource).or_default().push(op);
             map
         });
 
-    // Write all operations for each feature into separate modules.
-    for (feature, ops) in &ops_by_feature {
-        let code = CodegenResource::new(feature, ops);
-        write_to_disk(output, code)?;
+    // Write a module per resource.
+    for (ident, ops) in &ops_by_resource {
+        write_to_disk(output, CodegenResource::new(graph, *ident, ops))?;
     }
 
     // Write the top-level client module.
-    let features = ops_by_feature.keys().collect_vec();
-    let mod_code = CodegenClientModule::new(graph, &features);
-    write_to_disk(output, mod_code)?;
+    let idents = ops_by_resource.keys().copied().collect_vec();
+    write_to_disk(output, CodegenClientModule::new(graph, &idents))?;
 
     Ok(())
 }

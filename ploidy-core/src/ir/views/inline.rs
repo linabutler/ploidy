@@ -1,48 +1,31 @@
 //! Inline types.
 //!
 //! [`InlineTypeView`] mirrors [`SchemaTypeView`][schema] for anonymous schemas
-//! that are nested inside other schemas or operations:
-//!
-//! ```yaml
-//! components:
-//!   schemas:
-//!     Pet:
-//!       type: object
-//!       properties:
-//!         address:
-//!           type: object
-//!           properties:
-//!             street:
-//!               type: string
-//! ```
-//!
-//! Here, `address` isn't a named schema in `components/schemas`, so Ploidy
-//! assigns it the inline path `Type("Pet") / Field("address")`. Each
-//! [`InlineTypeView`] variant pairs an OpenAPI type view with an
-//! [`InlineTypePath`] like this one, which codegen uses to derive a
-//! stable generated name.
+//! that are nested inside other schemas or operations. Each view variant
+//! pairs an OpenAPI type view with a compact [`InlinePath`] for codegen
+//! naming.
 //!
 //! [schema]: super::schema::SchemaTypeView
 
 use petgraph::graph::NodeIndex;
 
-use crate::ir::{InlineTypePath, graph::CookedGraph, types::GraphInlineType};
+use crate::ir::{InlineTypeId, graph::CookedGraph, types::GraphInlineType};
 
 use super::{
-    ViewNode, any::AnyView, container::ContainerView, enum_::EnumView, primitive::PrimitiveView,
-    struct_::StructView, tagged::TaggedView, untagged::UntaggedView,
+    ViewNode, any::AnyView, container::ContainerView, enum_::EnumView, path::InlineTypePathView,
+    primitive::PrimitiveView, struct_::StructView, tagged::TaggedView, untagged::UntaggedView,
 };
 
 /// A graph-aware view of an [inline type][GraphInlineType].
 #[derive(Debug)]
 pub enum InlineTypeView<'graph, 'a> {
-    Enum(InlineTypePath<'a>, EnumView<'graph, 'a>),
-    Struct(InlineTypePath<'a>, StructView<'graph, 'a>),
-    Tagged(InlineTypePath<'a>, TaggedView<'graph, 'a>),
-    Untagged(InlineTypePath<'a>, UntaggedView<'graph, 'a>),
-    Container(InlineTypePath<'a>, ContainerView<'graph, 'a>),
-    Primitive(InlineTypePath<'a>, PrimitiveView<'graph, 'a>),
-    Any(InlineTypePath<'a>, AnyView<'graph, 'a>),
+    Enum(InlineTypeId, EnumView<'graph, 'a>),
+    Struct(InlineTypeId, StructView<'graph, 'a>),
+    Tagged(InlineTypeId, TaggedView<'graph, 'a>),
+    Untagged(InlineTypeId, UntaggedView<'graph, 'a>),
+    Container(InlineTypeId, ContainerView<'graph, 'a>),
+    Primitive(InlineTypeId, PrimitiveView<'graph, 'a>),
+    Any(InlineTypeId, AnyView<'graph, 'a>),
 }
 
 impl<'graph, 'a> InlineTypeView<'graph, 'a> {
@@ -53,38 +36,34 @@ impl<'graph, 'a> InlineTypeView<'graph, 'a> {
         ty: GraphInlineType<'a>,
     ) -> Self {
         match ty {
-            GraphInlineType::Enum(path, ty) => Self::Enum(path, EnumView::new(cooked, index, ty)),
-            GraphInlineType::Struct(path, ty) => {
-                Self::Struct(path, StructView::new(cooked, index, ty))
+            GraphInlineType::Enum(id, ty) => Self::Enum(id, EnumView::new(cooked, index, ty)),
+            GraphInlineType::Struct(id, ty) => Self::Struct(id, StructView::new(cooked, index, ty)),
+            GraphInlineType::Tagged(id, ty) => Self::Tagged(id, TaggedView::new(cooked, index, ty)),
+            GraphInlineType::Untagged(id, ty) => {
+                Self::Untagged(id, UntaggedView::new(cooked, index, ty))
             }
-            GraphInlineType::Tagged(path, ty) => {
-                Self::Tagged(path, TaggedView::new(cooked, index, ty))
+            GraphInlineType::Container(id, container) => {
+                Self::Container(id, ContainerView::new(cooked, index, container))
             }
-            GraphInlineType::Untagged(path, ty) => {
-                Self::Untagged(path, UntaggedView::new(cooked, index, ty))
+            GraphInlineType::Primitive(id, p) => {
+                Self::Primitive(id, PrimitiveView::new(cooked, index, p))
             }
-            GraphInlineType::Container(path, container) => {
-                Self::Container(path, ContainerView::new(cooked, index, container))
-            }
-            GraphInlineType::Primitive(path, p) => {
-                Self::Primitive(path, PrimitiveView::new(cooked, index, p))
-            }
-            GraphInlineType::Any(path) => Self::Any(path, AnyView::new(cooked, index)),
+            GraphInlineType::Any(id) => Self::Any(id, AnyView::new(cooked, index)),
         }
     }
 
-    /// Returns the path describing where this inline type was found
-    /// in the spec.
+    /// Returns a lazy view that resolves the canonical path from
+    /// the root context to this inline type.
     #[inline]
-    pub fn path(&self) -> InlineTypePath<'a> {
-        let (Self::Enum(path, _)
-        | Self::Struct(path, _)
-        | Self::Tagged(path, _)
-        | Self::Untagged(path, _)
-        | Self::Container(path, _)
-        | Self::Primitive(path, _)
-        | Self::Any(path, _)) = self;
-        *path
+    pub fn path(&self) -> InlineTypePathView<'graph, 'a> {
+        let (Self::Enum(id, _)
+        | Self::Struct(id, _)
+        | Self::Tagged(id, _)
+        | Self::Untagged(id, _)
+        | Self::Container(id, _)
+        | Self::Primitive(id, _)
+        | Self::Any(id, _)) = self;
+        InlineTypePathView::new(self.cooked(), *id)
     }
 }
 

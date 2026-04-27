@@ -2,10 +2,14 @@
 
 use std::{
     cmp::Ordering,
+    fmt::{self, Display},
     hash::{Hash, Hasher},
+    ops::Deref,
 };
 
-use crate::arena::Arena;
+use ref_cast::{RefCastCustom, ref_cast_custom};
+
+use super::views::TypeViewId;
 
 pub use self::{graph::*, spec::*};
 
@@ -13,36 +17,8 @@ mod graph;
 pub mod shape;
 mod spec;
 
-/// Metadata about a type in the dependency graph.
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-pub enum TypeInfo<'a> {
-    Schema(SchemaTypeInfo<'a>),
-    Inline(InlineTypePath<'a>),
-}
-
-impl<'a> From<&'a str> for TypeInfo<'a> {
-    fn from(name: &'a str) -> Self {
-        Self::Schema(SchemaTypeInfo {
-            name,
-            resource: None,
-        })
-    }
-}
-
-impl<'a> From<SchemaTypeInfo<'a>> for TypeInfo<'a> {
-    fn from(info: SchemaTypeInfo<'a>) -> Self {
-        Self::Schema(info)
-    }
-}
-
-impl<'a> From<InlineTypePath<'a>> for TypeInfo<'a> {
-    fn from(path: InlineTypePath<'a>) -> Self {
-        Self::Inline(path)
-    }
-}
-
 /// Metadata for a named schema type.
-#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub struct SchemaTypeInfo<'a> {
     /// The name of the schema type.
     pub name: &'a str,
@@ -50,49 +26,112 @@ pub struct SchemaTypeInfo<'a> {
     pub resource: Option<&'a str>,
 }
 
-/// A path to an inline type.
+/// Opaque identity for an inline type node.
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
-pub struct InlineTypePath<'a> {
-    pub root: InlineTypePathRoot<'a>,
-    pub segments: &'a [InlineTypePathSegment<'a>],
-}
+pub struct InlineTypeId(usize);
 
-impl<'a> InlineTypePath<'a> {
-    /// Returns a new path with the suffix appended to the segments.
-    pub fn join(
-        self,
-        arena: &'a Arena,
-        suffix: &[InlineTypePathSegment<'a>],
-    ) -> InlineTypePath<'a> {
-        match suffix {
-            [] => self,
-            suffix => InlineTypePath {
-                root: self.root,
-                segments: arena.alloc_slice(self.segments.iter().chain(suffix).copied()),
-            },
-        }
+impl InlineTypeId {
+    /// Creates a new inline type ID from a raw index.
+    #[inline]
+    pub(in crate::ir) fn new(id: usize) -> Self {
+        Self(id)
     }
 }
 
-#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
-pub enum InlineTypePathRoot<'a> {
-    Resource(Option<&'a str>),
-    Type(&'a str),
+/// An `operationId` from the OpenAPI spec.
+#[derive(Debug, Eq, Hash, Ord, PartialEq, PartialOrd, RefCastCustom)]
+#[repr(transparent)]
+pub struct OperationId(str);
+
+impl OperationId {
+    #[ref_cast_custom]
+    #[inline]
+    pub(in crate::ir) fn new(s: &str) -> &Self;
 }
 
-/// A segment of an inline type path.
-#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+impl Deref for OperationId {
+    type Target = str;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl PartialEq<str> for OperationId {
+    #[inline]
+    fn eq(&self, other: &str) -> bool {
+        self.0 == *other
+    }
+}
+
+impl Display for OperationId {
+    #[inline]
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+/// A structural step from a parent type to a child inline type,
+/// derived from a single graph edge during the canonical-path BFS.
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub enum InlineTypePathSegment<'a> {
-    Operation(&'a str),
-    Parameter(&'a str),
-    Request,
-    Response,
-    Field(StructFieldName<'a>),
-    MapValue,
+    /// A struct field edge. Carries the parent [`TypeViewId`] so
+    /// codegen can resolve the uniquified field name.
+    Field(TypeViewId, StructFieldName<'a>),
+    /// A tagged union variant edge. Carries the parent [`TypeViewId`]
+    /// so codegen can resolve the uniquified variant name.
+    TaggedVariant(TypeViewId, &'a str),
+    /// An untagged union variant edge; 1-indexed from edge position.
+    UntaggedVariant(usize),
+    /// Array contains its item type.
     ArrayItem,
-    Variant(usize),
-    Parent(usize),
-    TaggedVariant(&'a str),
+    /// Map contains its value type.
+    MapValue,
+    /// Optional contains its inner type. Naming-invisible — produces
+    /// no name segment in Rust, but preserves path continuity so
+    /// the opaque ID disambiguates the wrapper from its inner node.
+    Optional,
+    /// Inherits from the n-th `allOf` parent (1-indexed).
+    Inherits(usize),
+}
+
+/// The root context for an inline path. Determines both the module
+/// path and the type-name prefix.
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub enum InlineTypePathRoot<'a, S, O> {
+    Schema(S),
+    Operation(InlineTypePathOperation<'a, O>),
+}
+
+impl<'a, S, O> From<InlineTypePathOperation<'a, O>> for InlineTypePathRoot<'a, S, O> {
+    fn from(op: InlineTypePathOperation<'a, O>) -> Self {
+        Self::Operation(op)
+    }
+}
+
+/// An inline type under an operation.
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub struct InlineTypePathOperation<'a, Id> {
+    /// The `operationId`, which drives the type-name prefix.
+    pub id: Id,
+    /// The resource name from `x-resource-name`, which drives the
+    /// module path. `None` falls back to `"default"`.
+    pub resource: Option<&'a str>,
+    /// The role of this inline within the operation.
+    pub role: OperationRole<'a>,
+}
+
+/// The role of an inline type root within an operation.
+#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub enum OperationRole<'a> {
+    /// A query parameter with the given name.
+    Path(&'a str),
+    /// A query parameter with the given name.
+    Query(&'a str),
+    /// The request body.
+    Request,
+    /// The response body.
+    Response,
 }
 
 /// A primitive type in the dependency graph.

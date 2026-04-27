@@ -48,6 +48,7 @@ pub mod enum_;
 pub mod inline;
 pub mod ir;
 pub mod operation;
+pub mod path;
 pub mod primitive;
 pub mod schema;
 pub mod struct_;
@@ -55,6 +56,11 @@ pub mod tagged;
 pub mod untagged;
 
 use self::{inline::InlineTypeView, ir::TypeView, operation::OperationView};
+
+pub trait Identifiable {
+    /// Returns an opaque identity for this inline type.
+    fn id(&self) -> TypeViewId;
+}
 
 /// A view of a type in the graph.
 pub trait View<'graph, 'a: 'graph> {
@@ -86,6 +92,15 @@ pub trait View<'graph, 'a: 'graph> {
     fn defaultable(&self) -> bool;
 }
 
+/// Opaque identity for a type in the graph.
+///
+/// Wraps a [`NodeIndex`] so that codegen can store and compare type
+/// identities without carrying a lifetime from the path or name.
+/// Always obtained from a view via [`.id()`](TypeView::id); never
+/// constructed by codegen directly.
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub struct TypeViewId(pub(in crate::ir) NodeIndex<usize>);
+
 /// A view of a graph type with extended data.
 ///
 /// Codegen backends use extended data to decorate types with extra information.
@@ -101,6 +116,15 @@ pub trait ExtendableView<'graph, 'a: 'graph>: View<'graph, 'a> {
     fn extensions_mut(&mut self) -> &mut ViewExtensions<Self>
     where
         Self: Sized;
+}
+
+impl<'graph, 'a: 'graph, T> Identifiable for T
+where
+    T: ViewNode<'graph, 'a>,
+{
+    fn id(&self) -> TypeViewId {
+        TypeViewId(self.index())
+    }
 }
 
 impl<'graph, 'a: 'graph, T> View<'graph, 'a> for T

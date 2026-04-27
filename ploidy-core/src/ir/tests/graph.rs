@@ -1075,7 +1075,7 @@ fn test_dependencies_propagation() {
     // operations; the others are only used by `getData`.
     let mut user_used_by = user.used_by().map(|op| op.id()).collect_vec();
     user_used_by.sort();
-    assert_matches!(&*user_used_by, ["getData", "getUser"]);
+    assert_eq!(&*user_used_by, ["getData", "getUser"]);
 
     let mut other_used_by = graph
         .schemas()
@@ -1084,7 +1084,7 @@ fn test_dependencies_propagation() {
         .map(|op| op.id())
         .collect_vec();
     other_used_by.dedup();
-    assert_matches!(&*other_used_by, ["getData"]);
+    assert_eq!(&*other_used_by, ["getData"]);
 }
 
 // MARK: Backward propagation

@@ -5,27 +5,27 @@ use quote::{ToTokens, TokenStreamExt, quote};
 use super::{
     cfg::CfgFeature,
     graph::CodegenGraph,
-    naming::{CargoFeature, CodegenIdentUsage},
+    naming::{CodegenIdentUsage, ResourceIdent},
 };
 
 /// Generates the `client/mod.rs` source file.
-#[derive(Clone, Copy, Debug)]
+#[derive(Debug)]
 pub struct CodegenClientModule<'a> {
     graph: &'a CodegenGraph<'a>,
-    features: &'a [&'a CargoFeature],
+    idents: &'a [ResourceIdent<'a>],
 }
 
 impl<'a> CodegenClientModule<'a> {
-    pub fn new(graph: &'a CodegenGraph<'a>, features: &'a [&'a CargoFeature]) -> Self {
-        Self { graph, features }
+    pub fn new(graph: &'a CodegenGraph<'a>, idents: &'a [ResourceIdent<'a>]) -> Self {
+        Self { graph, idents }
     }
 }
 
 impl ToTokens for CodegenClientModule<'_> {
     fn to_tokens(&self, tokens: &mut TokenStream) {
-        let mods = self.features.iter().map(|feature| {
-            let cfg = CfgFeature::for_resource_module(feature);
-            let mod_name = CodegenIdentUsage::Module(feature.as_ident());
+        let mods = self.idents.iter().map(|ident| {
+            let cfg = CfgFeature::for_resource_module(*ident);
+            let mod_name = CodegenIdentUsage::Module(ident);
             quote! {
                 #cfg
                 pub mod #mod_name;

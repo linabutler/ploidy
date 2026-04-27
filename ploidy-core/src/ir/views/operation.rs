@@ -66,7 +66,7 @@ use crate::{
         graph::CookedGraph,
         types::{
             GraphOperation, GraphParameter, GraphParameterInfo, GraphRequest, GraphResponse,
-            GraphType, ParameterStyle,
+            GraphType, OperationId, ParameterStyle,
         },
     },
     parse::{
@@ -95,8 +95,8 @@ impl<'graph, 'a> OperationView<'graph, 'a> {
 
     /// Returns the `operationId`.
     #[inline]
-    pub fn id(&self) -> &'a str {
-        self.op.id
+    pub fn id(&self) -> &'a OperationId {
+        OperationId::new(self.op.id)
     }
 
     /// Returns the HTTP method.

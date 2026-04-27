@@ -1,26 +1,24 @@
 use itertools::Itertools;
-use ploidy_core::{
-    codegen::UniqueNames,
-    ir::{TaggedView, View},
-};
+use ploidy_core::ir::{Identifiable, TaggedView, View};
 use proc_macro2::TokenStream;
 use quote::{ToTokens, TokenStreamExt, quote};
 
-use crate::{CodegenIdentScope, CodegenTypeName};
-
-use super::{derives::ExtraDerive, doc_attrs, naming::CodegenIdentUsage, ref_::CodegenRef};
+use super::{
+    derives::ExtraDerive, doc_attrs, graph::CodegenGraph, graph::IdentMapping,
+    naming::CodegenIdentUsage, ref_::CodegenRef,
+};
 
 /// Generates a tagged union as a Rust enum, with `#[serde(tag = ...)]`
 /// and associated data for each variant.
 #[derive(Clone, Debug)]
 pub struct CodegenTagged<'a> {
-    name: CodegenTypeName<'a>,
+    graph: &'a CodegenGraph<'a>,
     ty: &'a TaggedView<'a, 'a>,
 }
 
 impl<'a> CodegenTagged<'a> {
-    pub fn new(name: CodegenTypeName<'a>, ty: &'a TaggedView<'a, 'a>) -> Self {
-        Self { name, ty }
+    pub fn new(graph: &'a CodegenGraph<'a>, ty: &'a TaggedView<'a, 'a>) -> Self {
+        Self { graph, ty }
     }
 }
 
@@ -34,15 +32,16 @@ impl ToTokens for CodegenTagged<'_> {
             extra_derives.push(ExtraDerive::Hash);
         }
 
-        let unique = UniqueNames::new();
-        let mut scope = CodegenIdentScope::new(&unique);
         let variants = self
             .ty
             .variants()
             .map(|variant| {
                 // Look up the proper Rust type name.
                 let view = variant.ty();
-                let variant_name = CodegenIdentUsage::Variant(&scope.uniquify(variant.name()));
+                let scope_name = self
+                    .graph
+                    .ident(IdentMapping::TaggedVariant(self.ty.id(), variant.name()));
+                let variant_name = CodegenIdentUsage::Variant(&scope_name);
 
                 // Add `#[serde(alias = ...)]` attributes for multiple
                 // discriminator values that map to the same type.
@@ -67,14 +66,14 @@ impl ToTokens for CodegenTagged<'_> {
                     quote! { #[ploidy(pointer(rename = #primary))] }
                 });
 
-                let rust_type_name = CodegenRef::new(&view);
+                let rust_type_name = CodegenRef::new(self.graph, &view);
                 let v = quote! {
                     #serde_attr
                     #pointer_attr
                     #variant_name(#rust_type_name),
                 };
 
-                let type_name = &self.name;
+                let type_name = CodegenIdentUsage::Type(&self.graph.ident(self.ty.id()));
                 let from_impl = quote! {
                     impl ::std::convert::From<#rust_type_name> for #type_name {
                         fn from(value: #rust_type_name) -> Self {
@@ -93,7 +92,7 @@ impl ToTokens for CodegenTagged<'_> {
 
         let vs = variants.iter().map(|(variant, _)| variant);
         let fs = variants.iter().map(|(_, from_impl)| from_impl);
-        let type_name = &self.name;
+        let type_name = CodegenIdentUsage::Type(&self.graph.ident(self.ty.id()));
         let main = quote! {
             #doc_attrs
             #[derive(Debug, Clone, PartialEq, #(#extra_derives,)* ::ploidy_util::serde::Serialize, ::ploidy_util::serde::Deserialize, ::ploidy_util::pointer::JsonPointee, ::ploidy_util::pointer::JsonPointerTarget)]
@@ -122,7 +121,7 @@ mod tests {
     use pretty_assertions::assert_eq;
     use syn::parse_quote;
 
-    use crate::{CodegenGraph, CodegenTypeName};
+    use crate::CodegenGraph;
 
     #[test]
     fn test_tagged_union_serde_tag_attr() {
@@ -160,12 +159,11 @@ mod tests {
         let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
         let schema = graph.schema("Pet").unwrap();
-        let schema @ SchemaTypeView::Tagged(_, tagged) = &schema else {
+        let SchemaTypeView::Tagged(_, tagged) = schema else {
             panic!("expected tagged union `Pet`; got `{schema:?}`");
         };
 
-        let name = CodegenTypeName::Schema(schema);
-        let codegen = CodegenTagged::new(name, tagged);
+        let codegen = CodegenTagged::new(&graph, &tagged);
 
         let actual: syn::File = parse_quote!(#codegen);
         let expected: syn::File = parse_quote! {
@@ -230,12 +228,11 @@ mod tests {
         let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
         let schema = graph.schema("Pet").unwrap();
-        let schema @ SchemaTypeView::Tagged(_, tagged) = &schema else {
+        let SchemaTypeView::Tagged(_, tagged) = &schema else {
             panic!("expected tagged union `Pet`; got `{schema:?}`");
         };
 
-        let name = CodegenTypeName::Schema(schema);
-        let codegen = CodegenTagged::new(name, tagged);
+        let codegen = CodegenTagged::new(&graph, tagged);
 
         let actual: syn::File = parse_quote!(#codegen);
         let expected: syn::File = parse_quote! {
@@ -295,12 +292,11 @@ mod tests {
         let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
         let schema = graph.schema("Pet").unwrap();
-        let schema @ SchemaTypeView::Tagged(_, tagged) = &schema else {
+        let SchemaTypeView::Tagged(_, tagged) = &schema else {
             panic!("expected tagged union `Pet`; got `{schema:?}`");
         };
 
-        let name = CodegenTypeName::Schema(schema);
-        let codegen = CodegenTagged::new(name, tagged);
+        let codegen = CodegenTagged::new(&graph, tagged);
 
         let actual: syn::File = parse_quote!(#codegen);
         let expected: syn::File = parse_quote! {
@@ -358,12 +354,11 @@ mod tests {
         let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
         let schema = graph.schema("Pet").unwrap();
-        let schema @ SchemaTypeView::Tagged(_, tagged) = &schema else {
+        let SchemaTypeView::Tagged(_, tagged) = &schema else {
             panic!("expected tagged union `Pet`; got `{schema:?}`");
         };
 
-        let name = CodegenTypeName::Schema(schema);
-        let codegen = CodegenTagged::new(name, tagged);
+        let codegen = CodegenTagged::new(&graph, tagged);
 
         let actual: syn::File = parse_quote!(#codegen);
         let expected: syn::File = parse_quote! {
@@ -426,12 +421,11 @@ mod tests {
         let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
         let schema = graph.schema("Pet").unwrap();
-        let schema @ SchemaTypeView::Tagged(_, tagged) = &schema else {
+        let SchemaTypeView::Tagged(_, tagged) = &schema else {
             panic!("expected tagged union `Pet`; got `{schema:?}`");
         };
 
-        let name = CodegenTypeName::Schema(schema);
-        let codegen = CodegenTagged::new(name, tagged);
+        let codegen = CodegenTagged::new(&graph, tagged);
 
         let actual: syn::File = parse_quote!(#codegen);
         let expected: syn::File = parse_quote! {
@@ -506,12 +500,11 @@ mod tests {
         let graph = CodegenGraph::new(raw.cook());
 
         let schema = graph.schema("Pet").unwrap();
-        let schema @ SchemaTypeView::Tagged(_, tagged) = &schema else {
+        let SchemaTypeView::Tagged(_, tagged) = &schema else {
             panic!("expected tagged union `Pet`; got `{schema:?}`");
         };
 
-        let name = CodegenTypeName::Schema(schema);
-        let codegen = CodegenTagged::new(name, tagged);
+        let codegen = CodegenTagged::new(&graph, tagged);
 
         let actual: syn::File = parse_quote!(#codegen);
         let expected: syn::File = parse_quote! {
@@ -563,12 +556,11 @@ mod tests {
         let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
         let schema = graph.schema("Pet").unwrap();
-        let schema @ SchemaTypeView::Tagged(_, tagged) = &schema else {
+        let SchemaTypeView::Tagged(_, tagged) = &schema else {
             panic!("expected tagged union `Pet`; got `{schema:?}`");
         };
 
-        let name = CodegenTypeName::Schema(schema);
-        let codegen = CodegenTagged::new(name, tagged);
+        let codegen = CodegenTagged::new(&graph, tagged);
 
         let actual: syn::File = parse_quote!(#codegen);
         let expected: syn::File = parse_quote! {
@@ -638,12 +630,11 @@ mod tests {
         let graph = CodegenGraph::new(raw.cook());
 
         let schema = graph.schema("Pet").unwrap();
-        let schema @ SchemaTypeView::Tagged(_, tagged) = &schema else {
+        let SchemaTypeView::Tagged(_, tagged) = &schema else {
             panic!("expected tagged union `Pet`; got `{schema:?}`");
         };
 
-        let name = CodegenTypeName::Schema(schema);
-        let codegen = CodegenTagged::new(name, tagged);
+        let codegen = CodegenTagged::new(&graph, tagged);
 
         let actual: syn::File = parse_quote!(#codegen);
         // `Dog` is inlined, so `Pet::Dog` holds the inline type.

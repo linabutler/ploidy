@@ -14,12 +14,10 @@ use crate::{
 
 use super::{
     error::IrError,
-    transform::transform,
+    transform::{TransformContext, TypeInfo, transform_with_context},
     types::{
-        InlineTypePath, InlineTypePathRoot, InlineTypePathSegment,
         ParameterStyle as IrParameterStyle, SchemaTypeInfo, SpecInlineType, SpecOperation,
         SpecParameter, SpecParameterInfo, SpecRequest, SpecResponse, SpecSchemaType, SpecType,
-        TypeInfo,
     },
 };
 
@@ -38,6 +36,8 @@ pub struct Spec<'a> {
     pub operations: Vec<SpecOperation<'a>>,
     /// Named schemas from `components/schemas`, keyed by name.
     pub schemas: IndexMap<&'a str, SpecType<'a>>,
+    /// The number of [`InlineTypeId`]s allocated during transformation.
+    pub(super) next_inline_id: usize,
 }
 
 impl<'a> Spec<'a> {
@@ -47,14 +47,15 @@ impl<'a> Spec<'a> {
     /// long-lived data in the `arena`. Returns an error if the document is
     /// malformed.
     pub fn from_doc(arena: &'a Arena, doc: &'a Document) -> Result<Self, IrError> {
+        let context = TransformContext::new(arena, doc);
+
         let schemas = match &doc.components {
             Some(components) => components
                 .schemas
                 .iter()
                 .map(|(name, schema)| {
-                    let ty = transform(
-                        arena,
-                        doc,
+                    let ty = transform_with_context(
+                        &context,
                         TypeInfo::Schema(SchemaTypeInfo {
                             name,
                             resource: schema.extension("x-resourceId"),
@@ -150,28 +151,14 @@ impl<'a> Spec<'a> {
                         Source::Declared(param) => {
                             let ty: &_ = match &param.schema {
                                 Some(RefOrSchema::Ref(r)) => arena.alloc(SpecType::Ref(r)),
-                                Some(RefOrSchema::Inline(schema)) => arena.alloc(transform(
-                                    arena,
-                                    doc,
-                                    InlineTypePath {
-                                        root: InlineTypePathRoot::Resource(resource),
-                                        segments: arena.alloc_slice_copy(&[
-                                            InlineTypePathSegment::Operation(id),
-                                            InlineTypePathSegment::Parameter(param.name.as_str()),
-                                        ]),
-                                    },
-                                    schema,
-                                )),
-                                None => arena.alloc(
-                                    SpecInlineType::Any(InlineTypePath {
-                                        root: InlineTypePathRoot::Resource(resource),
-                                        segments: arena.alloc_slice_copy(&[
-                                            InlineTypePathSegment::Operation(id),
-                                            InlineTypePathSegment::Parameter(param.name.as_str()),
-                                        ]),
-                                    })
-                                    .into(),
-                                ),
+                                Some(RefOrSchema::Inline(schema)) => {
+                                    let id = context.next_inline_id();
+                                    arena.alloc(transform_with_context(&context, id, schema))
+                                }
+                                None => {
+                                    let id = context.next_inline_id();
+                                    arena.alloc(SpecInlineType::Any(id).into())
+                                }
                             };
                             let style = match (param.style, param.explode) {
                                 (Some(ParsedParameterStyle::DeepObject), Some(true) | None) => {
@@ -207,16 +194,8 @@ impl<'a> Spec<'a> {
                             })
                         }
                         Source::Synthesized(name) => {
-                            let ty: &_ = arena.alloc(
-                                SpecInlineType::Any(InlineTypePath {
-                                    root: InlineTypePathRoot::Resource(resource),
-                                    segments: arena.alloc_slice_copy(&[
-                                        InlineTypePathSegment::Operation(id),
-                                        InlineTypePathSegment::Parameter(name),
-                                    ]),
-                                })
-                                .into(),
-                            );
+                            let id = context.next_inline_id();
+                            let ty: &_ = arena.alloc(SpecInlineType::Any(id).into());
                             Some(SpecParameter::Path(SpecParameterInfo {
                                 name,
                                 ty,
@@ -262,31 +241,15 @@ impl<'a> Spec<'a> {
                             SpecRequest::Json(arena.alloc(SpecType::Ref(r)))
                         }
                         RequestContent::Json(RefOrSchema::Inline(schema)) => {
-                            SpecRequest::Json(arena.alloc(transform(
-                                arena,
-                                doc,
-                                InlineTypePath {
-                                    root: InlineTypePathRoot::Resource(resource),
-                                    segments: arena.alloc_slice_copy(&[
-                                        InlineTypePathSegment::Operation(id),
-                                        InlineTypePathSegment::Request,
-                                    ]),
-                                },
-                                schema,
-                            )))
+                            let id = context.next_inline_id();
+                            SpecRequest::Json(
+                                arena.alloc(transform_with_context(&context, id, schema)),
+                            )
                         }
-                        RequestContent::Any => SpecRequest::Json(
-                            arena.alloc(
-                                SpecInlineType::Any(InlineTypePath {
-                                    root: InlineTypePathRoot::Resource(resource),
-                                    segments: arena.alloc_slice_copy(&[
-                                        InlineTypePathSegment::Operation(id),
-                                        InlineTypePathSegment::Request,
-                                    ]),
-                                })
-                                .into(),
-                            ),
-                        ),
+                        RequestContent::Any => {
+                            let id = context.next_inline_id();
+                            SpecRequest::Json(arena.alloc(SpecInlineType::Any(id).into()))
+                        }
                     });
 
                 let response = {
@@ -333,31 +296,15 @@ impl<'a> Spec<'a> {
                                 SpecResponse::Json(arena.alloc(SpecType::Ref(r)))
                             }
                             ResponseContent::Json(RefOrSchema::Inline(schema)) => {
-                                SpecResponse::Json(arena.alloc(transform(
-                                    arena,
-                                    doc,
-                                    InlineTypePath {
-                                        root: InlineTypePathRoot::Resource(resource),
-                                        segments: arena.alloc_slice_copy(&[
-                                            InlineTypePathSegment::Operation(id),
-                                            InlineTypePathSegment::Response,
-                                        ]),
-                                    },
-                                    schema,
-                                )))
+                                let id = context.next_inline_id();
+                                SpecResponse::Json(
+                                    arena.alloc(transform_with_context(&context, id, schema)),
+                                )
                             }
-                            ResponseContent::Any => SpecResponse::Json(
-                                arena.alloc(
-                                    SpecInlineType::Any(InlineTypePath {
-                                        root: InlineTypePathRoot::Resource(resource),
-                                        segments: arena.alloc_slice_copy(&[
-                                            InlineTypePathSegment::Operation(id),
-                                            InlineTypePathSegment::Response,
-                                        ]),
-                                    })
-                                    .into(),
-                                ),
-                            ),
+                            ResponseContent::Any => {
+                                let id = context.next_inline_id();
+                                SpecResponse::Json(arena.alloc(SpecInlineType::Any(id).into()))
+                            }
                         })
                 };
 
@@ -379,6 +326,7 @@ impl<'a> Spec<'a> {
             info: &doc.info,
             operations,
             schemas,
+            next_inline_id: context.inline_id_count(),
         })
     }
 
