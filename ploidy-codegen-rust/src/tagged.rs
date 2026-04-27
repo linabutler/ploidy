@@ -159,8 +159,8 @@ mod tests {
         let spec = Spec::from_doc(&arena, &doc).unwrap();
         let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
-        let schema = graph.schemas().find(|s| s.name() == "Pet");
-        let Some(schema @ SchemaTypeView::Tagged(_, tagged)) = &schema else {
+        let schema = graph.schema("Pet").unwrap();
+        let schema @ SchemaTypeView::Tagged(_, tagged) = &schema else {
             panic!("expected tagged union `Pet`; got `{schema:?}`");
         };
 
@@ -229,8 +229,8 @@ mod tests {
         let spec = Spec::from_doc(&arena, &doc).unwrap();
         let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
-        let schema = graph.schemas().find(|s| s.name() == "Pet");
-        let Some(schema @ SchemaTypeView::Tagged(_, tagged)) = &schema else {
+        let schema = graph.schema("Pet").unwrap();
+        let schema @ SchemaTypeView::Tagged(_, tagged) = &schema else {
             panic!("expected tagged union `Pet`; got `{schema:?}`");
         };
 
@@ -294,8 +294,8 @@ mod tests {
         let spec = Spec::from_doc(&arena, &doc).unwrap();
         let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
-        let schema = graph.schemas().find(|s| s.name() == "Pet");
-        let Some(schema @ SchemaTypeView::Tagged(_, tagged)) = &schema else {
+        let schema = graph.schema("Pet").unwrap();
+        let schema @ SchemaTypeView::Tagged(_, tagged) = &schema else {
             panic!("expected tagged union `Pet`; got `{schema:?}`");
         };
 
@@ -357,8 +357,8 @@ mod tests {
         let spec = Spec::from_doc(&arena, &doc).unwrap();
         let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
-        let schema = graph.schemas().find(|s| s.name() == "Pet");
-        let Some(schema @ SchemaTypeView::Tagged(_, tagged)) = &schema else {
+        let schema = graph.schema("Pet").unwrap();
+        let schema @ SchemaTypeView::Tagged(_, tagged) = &schema else {
             panic!("expected tagged union `Pet`; got `{schema:?}`");
         };
 
@@ -425,8 +425,8 @@ mod tests {
         let spec = Spec::from_doc(&arena, &doc).unwrap();
         let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
-        let schema = graph.schemas().find(|s| s.name() == "Pet");
-        let Some(schema @ SchemaTypeView::Tagged(_, tagged)) = &schema else {
+        let schema = graph.schema("Pet").unwrap();
+        let schema @ SchemaTypeView::Tagged(_, tagged) = &schema else {
             panic!("expected tagged union `Pet`; got `{schema:?}`");
         };
 
@@ -505,8 +505,8 @@ mod tests {
         raw.inline_tagged_variants();
         let graph = CodegenGraph::new(raw.cook());
 
-        let schema = graph.schemas().find(|s| s.name() == "Pet");
-        let Some(schema @ SchemaTypeView::Tagged(_, tagged)) = &schema else {
+        let schema = graph.schema("Pet").unwrap();
+        let schema @ SchemaTypeView::Tagged(_, tagged) = &schema else {
             panic!("expected tagged union `Pet`; got `{schema:?}`");
         };
 
@@ -562,8 +562,8 @@ mod tests {
         let spec = Spec::from_doc(&arena, &doc).unwrap();
         let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
-        let schema = graph.schemas().find(|s| s.name() == "Pet");
-        let Some(schema @ SchemaTypeView::Tagged(_, tagged)) = &schema else {
+        let schema = graph.schema("Pet").unwrap();
+        let schema @ SchemaTypeView::Tagged(_, tagged) = &schema else {
             panic!("expected tagged union `Pet`; got `{schema:?}`");
         };
 
@@ -637,8 +637,8 @@ mod tests {
         raw.inline_tagged_variants();
         let graph = CodegenGraph::new(raw.cook());
 
-        let schema = graph.schemas().find(|s| s.name() == "Pet");
-        let Some(schema @ SchemaTypeView::Tagged(_, tagged)) = &schema else {
+        let schema = graph.schema("Pet").unwrap();
+        let schema @ SchemaTypeView::Tagged(_, tagged) = &schema else {
             panic!("expected tagged union `Pet`; got `{schema:?}`");
         };
 

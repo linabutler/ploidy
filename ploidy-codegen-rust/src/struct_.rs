@@ -223,8 +223,8 @@ mod tests {
         let spec = Spec::from_doc(&arena, &doc).unwrap();
         let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
-        let schema = graph.schemas().find(|s| s.name() == "Pet");
-        let Some(schema @ SchemaTypeView::Struct(_, struct_view)) = &schema else {
+        let schema = graph.schema("Pet").unwrap();
+        let schema @ SchemaTypeView::Struct(_, struct_view) = &schema else {
             panic!("expected struct `Pet`; got `{schema:?}`");
         };
 
@@ -283,8 +283,8 @@ mod tests {
         let spec = Spec::from_doc(&arena, &doc).unwrap();
         let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
-        let schema = graph.schemas().find(|s| s.name() == "Animal");
-        let Some(schema @ SchemaTypeView::Struct(_, struct_view)) = &schema else {
+        let schema = graph.schema("Animal").unwrap();
+        let schema @ SchemaTypeView::Struct(_, struct_view) = &schema else {
             panic!("expected struct `Animal`; got `{schema:?}`");
         };
 
@@ -334,8 +334,8 @@ mod tests {
         let spec = Spec::from_doc(&arena, &doc).unwrap();
         let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
-        let schema = graph.schemas().find(|s| s.name() == "Record");
-        let Some(schema @ SchemaTypeView::Struct(_, struct_view)) = &schema else {
+        let schema = graph.schema("Record").unwrap();
+        let schema @ SchemaTypeView::Struct(_, struct_view) = &schema else {
             panic!("expected struct `Record`; got `{schema:?}`");
         };
 
@@ -386,8 +386,8 @@ mod tests {
         let spec = Spec::from_doc(&arena, &doc).unwrap();
         let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
-        let schema = graph.schemas().find(|s| s.name() == "Record");
-        let Some(schema @ SchemaTypeView::Struct(_, struct_view)) = &schema else {
+        let schema = graph.schema("Record").unwrap();
+        let schema @ SchemaTypeView::Struct(_, struct_view) = &schema else {
             panic!("expected struct `Record`; got `{schema:?}`");
         };
 
@@ -439,8 +439,8 @@ mod tests {
         let spec = Spec::from_doc(&arena, &doc).unwrap();
         let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
-        let schema = graph.schemas().find(|s| s.name() == "Record");
-        let Some(schema @ SchemaTypeView::Struct(_, struct_view)) = &schema else {
+        let schema = graph.schema("Record").unwrap();
+        let schema @ SchemaTypeView::Struct(_, struct_view) = &schema else {
             panic!("expected struct `Record`; got `{schema:?}`");
         };
 
@@ -493,8 +493,8 @@ mod tests {
         let spec = Spec::from_doc(&arena, &doc).unwrap();
         let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
-        let schema = graph.schemas().find(|s| s.name() == "Record");
-        let Some(schema @ SchemaTypeView::Struct(_, struct_view)) = &schema else {
+        let schema = graph.schema("Record").unwrap();
+        let schema @ SchemaTypeView::Struct(_, struct_view) = &schema else {
             panic!("expected struct `Record`; got `{schema:?}`");
         };
 
@@ -544,8 +544,8 @@ mod tests {
         let spec = Spec::from_doc(&arena, &doc).unwrap();
         let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
-        let schema = graph.schemas().find(|s| s.name() == "User");
-        let Some(schema @ SchemaTypeView::Struct(_, struct_view)) = &schema else {
+        let schema = graph.schema("User").unwrap();
+        let schema @ SchemaTypeView::Struct(_, struct_view) = &schema else {
             panic!("expected struct `User`; got `{schema:?}`");
         };
 
@@ -596,8 +596,8 @@ mod tests {
         let spec = Spec::from_doc(&arena, &doc).unwrap();
         let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
-        let schema = graph.schemas().find(|s| s.name() == "Measurement");
-        let Some(schema @ SchemaTypeView::Struct(_, struct_view)) = &schema else {
+        let schema = graph.schema("Measurement").unwrap();
+        let schema @ SchemaTypeView::Struct(_, struct_view) = &schema else {
             panic!("expected struct `Measurement`; got `{schema:?}`");
         };
 
@@ -665,8 +665,8 @@ mod tests {
         let spec = Spec::from_doc(&arena, &doc).unwrap();
         let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
-        let schema = graph.schemas().find(|s| s.name() == "TextAction");
-        let Some(schema @ SchemaTypeView::Struct(_, struct_view)) = &schema else {
+        let schema = graph.schema("TextAction").unwrap();
+        let schema @ SchemaTypeView::Struct(_, struct_view) = &schema else {
             panic!("expected struct `TextAction`; got `{schema:?}`");
         };
 
@@ -726,8 +726,8 @@ mod tests {
         let spec = Spec::from_doc(&arena, &doc).unwrap();
         let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
-        let schema = graph.schemas().find(|s| s.name() == "TextAction");
-        let Some(schema @ SchemaTypeView::Struct(_, struct_view)) = &schema else {
+        let schema = graph.schema("TextAction").unwrap();
+        let schema @ SchemaTypeView::Struct(_, struct_view) = &schema else {
             panic!("expected struct `TextAction`; got `{schema:?}`");
         };
 
@@ -800,8 +800,8 @@ mod tests {
         let spec = Spec::from_doc(&arena, &doc).unwrap();
         let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
-        let schema = graph.schemas().find(|s| s.name() == "TextAction");
-        let Some(schema @ SchemaTypeView::Struct(_, struct_view)) = &schema else {
+        let schema = graph.schema("TextAction").unwrap();
+        let schema @ SchemaTypeView::Struct(_, struct_view) = &schema else {
             panic!("expected struct `TextAction`; got `{schema:?}`");
         };
 
@@ -867,8 +867,8 @@ mod tests {
         let spec = Spec::from_doc(&arena, &doc).unwrap();
         let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
-        let schema = graph.schemas().find(|s| s.name() == "TextAction");
-        let Some(schema @ SchemaTypeView::Struct(_, struct_view)) = &schema else {
+        let schema = graph.schema("TextAction").unwrap();
+        let schema @ SchemaTypeView::Struct(_, struct_view) = &schema else {
             panic!("expected struct `TextAction`; got `{schema:?}`");
         };
 
@@ -970,8 +970,8 @@ mod tests {
         let spec = Spec::from_doc(&arena, &doc).unwrap();
         let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
-        let schema = graph.schemas().find(|s| s.name() == "TextAction");
-        let Some(schema @ SchemaTypeView::Struct(_, struct_view)) = &schema else {
+        let schema = graph.schema("TextAction").unwrap();
+        let schema @ SchemaTypeView::Struct(_, struct_view) = &schema else {
             panic!("expected struct `TextAction`; got `{schema:?}`");
         };
 
@@ -1042,8 +1042,8 @@ mod tests {
         let spec = Spec::from_doc(&arena, &doc).unwrap();
         let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
-        let schema = graph.schemas().find(|s| s.name() == "N");
-        let Some(schema @ SchemaTypeView::Struct(_, struct_view)) = &schema else {
+        let schema = graph.schema("N").unwrap();
+        let schema @ SchemaTypeView::Struct(_, struct_view) = &schema else {
             panic!("expected struct `N`; got `{schema:?}`");
         };
 
@@ -1109,8 +1109,8 @@ mod tests {
         let spec = Spec::from_doc(&arena, &doc).unwrap();
         let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
-        let schema = graph.schemas().find(|s| s.name() == "X");
-        let Some(schema @ SchemaTypeView::Struct(_, struct_view)) = &schema else {
+        let schema = graph.schema("X").unwrap();
+        let schema @ SchemaTypeView::Struct(_, struct_view) = &schema else {
             panic!("expected struct `X`; got `{schema:?}`");
         };
 
@@ -1181,8 +1181,8 @@ mod tests {
         let spec = Spec::from_doc(&arena, &doc).unwrap();
         let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
-        let schema = graph.schemas().find(|s| s.name() == "B");
-        let Some(schema @ SchemaTypeView::Struct(_, struct_view)) = &schema else {
+        let schema = graph.schema("B").unwrap();
+        let schema @ SchemaTypeView::Struct(_, struct_view) = &schema else {
             panic!("expected struct `B`; got `{schema:?}`");
         };
 
@@ -1320,8 +1320,8 @@ mod tests {
         let spec = Spec::from_doc(&arena, &doc).unwrap();
         let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
-        let schema = graph.schemas().find(|s| s.name() == "Options");
-        let Some(schema @ SchemaTypeView::Struct(_, struct_view)) = &schema else {
+        let schema = graph.schema("Options").unwrap();
+        let schema @ SchemaTypeView::Struct(_, struct_view) = &schema else {
             panic!("expected struct `Options`; got `{schema:?}`");
         };
 
@@ -1370,8 +1370,8 @@ mod tests {
         let spec = Spec::from_doc(&arena, &doc).unwrap();
         let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
-        let schema = graph.schemas().find(|s| s.name() == "Outer");
-        let Some(schema @ SchemaTypeView::Struct(_, struct_view)) = &schema else {
+        let schema = graph.schema("Outer").unwrap();
+        let schema @ SchemaTypeView::Struct(_, struct_view) = &schema else {
             panic!("expected struct `Outer`; got `{schema:?}`");
         };
 
@@ -1424,8 +1424,8 @@ mod tests {
         let spec = Spec::from_doc(&arena, &doc).unwrap();
         let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
-        let schema = graph.schemas().find(|s| s.name() == "Outer");
-        let Some(schema @ SchemaTypeView::Struct(_, struct_view)) = &schema else {
+        let schema = graph.schema("Outer").unwrap();
+        let schema @ SchemaTypeView::Struct(_, struct_view) = &schema else {
             panic!("expected struct `Outer`; got `{schema:?}`");
         };
 
@@ -1488,8 +1488,8 @@ mod tests {
         let spec = Spec::from_doc(&arena, &doc).unwrap();
         let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
-        let schema = graph.schemas().find(|s| s.name() == "Owner");
-        let Some(schema @ SchemaTypeView::Struct(_, struct_view)) = &schema else {
+        let schema = graph.schema("Owner").unwrap();
+        let schema @ SchemaTypeView::Struct(_, struct_view) = &schema else {
             panic!("expected struct `Owner`; got `{schema:?}`");
         };
 
@@ -1538,8 +1538,8 @@ mod tests {
         let spec = Spec::from_doc(&arena, &doc).unwrap();
         let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
-        let schema = graph.schemas().find(|s| s.name() == "Container");
-        let Some(schema @ SchemaTypeView::Struct(_, struct_view)) = &schema else {
+        let schema = graph.schema("Container").unwrap();
+        let schema @ SchemaTypeView::Struct(_, struct_view) = &schema else {
             panic!("expected struct `Container`; got `{schema:?}`");
         };
 
@@ -1604,8 +1604,8 @@ mod tests {
         let spec = Spec::from_doc(&arena, &doc).unwrap();
         let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
-        let schema = graph.schemas().find(|s| s.name() == "Owner");
-        let Some(schema @ SchemaTypeView::Struct(_, struct_view)) = &schema else {
+        let schema = graph.schema("Owner").unwrap();
+        let schema @ SchemaTypeView::Struct(_, struct_view) = &schema else {
             panic!("expected struct `Owner`; got `{schema:?}`");
         };
 
@@ -1654,8 +1654,8 @@ mod tests {
         let spec = Spec::from_doc(&arena, &doc).unwrap();
         let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
-        let schema = graph.schemas().find(|s| s.name() == "Outer");
-        let Some(schema @ SchemaTypeView::Struct(_, struct_view)) = &schema else {
+        let schema = graph.schema("Outer").unwrap();
+        let schema @ SchemaTypeView::Struct(_, struct_view) = &schema else {
             panic!("expected struct `Outer`; got `{schema:?}`");
         };
 
@@ -1700,8 +1700,8 @@ mod tests {
         let spec = Spec::from_doc(&arena, &doc).unwrap();
         let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
-        let schema = graph.schemas().find(|s| s.name() == "Container");
-        let Some(schema @ SchemaTypeView::Struct(_, struct_view)) = &schema else {
+        let schema = graph.schema("Container").unwrap();
+        let schema @ SchemaTypeView::Struct(_, struct_view) = &schema else {
             panic!("expected struct `Container`; got `{schema:?}`");
         };
 
@@ -1753,8 +1753,8 @@ mod tests {
         let spec = Spec::from_doc(&arena, &doc).unwrap();
         let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
-        let schema = graph.schemas().find(|s| s.name() == "Defaults");
-        let Some(schema @ SchemaTypeView::Struct(_, struct_view)) = &schema else {
+        let schema = graph.schema("Defaults").unwrap();
+        let schema @ SchemaTypeView::Struct(_, struct_view) = &schema else {
             panic!("expected struct `Defaults`; got `{schema:?}`");
         };
 
@@ -1802,8 +1802,8 @@ mod tests {
         let spec = Spec::from_doc(&arena, &doc).unwrap();
         let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
-        let schema = graph.schemas().find(|s| s.name() == "Resource");
-        let Some(schema @ SchemaTypeView::Struct(_, struct_view)) = &schema else {
+        let schema = graph.schema("Resource").unwrap();
+        let schema @ SchemaTypeView::Struct(_, struct_view) = &schema else {
             panic!("expected struct `Resource`; got `{schema:?}`");
         };
 
@@ -1850,8 +1850,8 @@ mod tests {
         let spec = Spec::from_doc(&arena, &doc).unwrap();
         let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
-        let schema = graph.schemas().find(|s| s.name() == "Resource");
-        let Some(schema @ SchemaTypeView::Struct(_, struct_view)) = &schema else {
+        let schema = graph.schema("Resource").unwrap();
+        let schema @ SchemaTypeView::Struct(_, struct_view) = &schema else {
             panic!("expected struct `Resource`; got `{schema:?}`");
         };
 
@@ -1903,8 +1903,8 @@ mod tests {
         let spec = Spec::from_doc(&arena, &doc).unwrap();
         let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
-        let schema = graph.schemas().find(|s| s.name() == "Container");
-        let Some(schema @ SchemaTypeView::Struct(_, struct_view)) = &schema else {
+        let schema = graph.schema("Container").unwrap();
+        let schema @ SchemaTypeView::Struct(_, struct_view) = &schema else {
             panic!("expected struct `Container`; got `{schema:?}`");
         };
 
@@ -1973,8 +1973,8 @@ mod tests {
         let spec = Spec::from_doc(&arena, &doc).unwrap();
         let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
-        let schema = graph.schemas().find(|s| s.name() == "Corgi");
-        let Some(schema @ SchemaTypeView::Struct(_, struct_view)) = &schema else {
+        let schema = graph.schema("Corgi").unwrap();
+        let schema @ SchemaTypeView::Struct(_, struct_view) = &schema else {
             panic!("expected struct `Corgi`; got `{schema:?}`");
         };
 
@@ -2054,8 +2054,8 @@ mod tests {
         let spec = Spec::from_doc(&arena, &doc).unwrap();
         let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
-        let schema = graph.schemas().find(|s| s.name() == "Child");
-        let Some(schema @ SchemaTypeView::Struct(_, struct_view)) = &schema else {
+        let schema = graph.schema("Child").unwrap();
+        let schema @ SchemaTypeView::Struct(_, struct_view) = &schema else {
             panic!("expected struct `Child`; got `{schema:?}`");
         };
 
@@ -2125,8 +2125,8 @@ mod tests {
         let spec = Spec::from_doc(&arena, &doc).unwrap();
         let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
-        let schema = graph.schemas().find(|s| s.name() == "TextAction");
-        let Some(schema @ SchemaTypeView::Struct(_, struct_view)) = &schema else {
+        let schema = graph.schema("TextAction").unwrap();
+        let schema @ SchemaTypeView::Struct(_, struct_view) = &schema else {
             panic!("expected struct `TextAction`; got `{schema:?}`");
         };
 
@@ -2186,8 +2186,8 @@ mod tests {
         let spec = Spec::from_doc(&arena, &doc).unwrap();
         let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
-        let schema = graph.schemas().find(|s| s.name() == "TextAction");
-        let Some(schema @ SchemaTypeView::Struct(_, struct_view)) = &schema else {
+        let schema = graph.schema("TextAction").unwrap();
+        let schema @ SchemaTypeView::Struct(_, struct_view) = &schema else {
             panic!("expected struct `TextAction`; got `{schema:?}`");
         };
 
@@ -2236,8 +2236,8 @@ mod tests {
         let spec = Spec::from_doc(&arena, &doc).unwrap();
         let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
-        let schema = graph.schemas().find(|s| s.name() == "Node");
-        let Some(schema @ SchemaTypeView::Struct(_, struct_view)) = &schema else {
+        let schema = graph.schema("Node").unwrap();
+        let schema @ SchemaTypeView::Struct(_, struct_view) = &schema else {
             panic!("expected struct `Node`; got `{schema:?}`");
         };
 
@@ -2286,8 +2286,8 @@ mod tests {
         let spec = Spec::from_doc(&arena, &doc).unwrap();
         let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
-        let schema = graph.schemas().find(|s| s.name() == "Node");
-        let Some(schema @ SchemaTypeView::Struct(_, struct_view)) = &schema else {
+        let schema = graph.schema("Node").unwrap();
+        let schema @ SchemaTypeView::Struct(_, struct_view) = &schema else {
             panic!("expected struct `Node`; got `{schema:?}`");
         };
 
@@ -2340,8 +2340,8 @@ mod tests {
         let spec = Spec::from_doc(&arena, &doc).unwrap();
         let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
-        let schema = graph.schemas().find(|s| s.name() == "Node");
-        let Some(schema @ SchemaTypeView::Struct(_, struct_view)) = &schema else {
+        let schema = graph.schema("Node").unwrap();
+        let schema @ SchemaTypeView::Struct(_, struct_view) = &schema else {
             panic!("expected struct `Node`; got `{schema:?}`");
         };
 
@@ -2392,8 +2392,8 @@ mod tests {
         let spec = Spec::from_doc(&arena, &doc).unwrap();
         let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
-        let schema = graph.schemas().find(|s| s.name() == "Node");
-        let Some(schema @ SchemaTypeView::Struct(_, struct_view)) = &schema else {
+        let schema = graph.schema("Node").unwrap();
+        let schema @ SchemaTypeView::Struct(_, struct_view) = &schema else {
             panic!("expected struct `Node`; got `{schema:?}`");
         };
 
@@ -2457,8 +2457,8 @@ mod tests {
         let spec = Spec::from_doc(&arena, &doc).unwrap();
         let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
-        let schema = graph.schemas().find(|s| s.name() == "Person");
-        let Some(schema @ SchemaTypeView::Struct(_, struct_view)) = &schema else {
+        let schema = graph.schema("Person").unwrap();
+        let schema @ SchemaTypeView::Struct(_, struct_view) = &schema else {
             panic!("expected struct `Person`; got `{schema:?}`");
         };
 
@@ -2509,8 +2509,8 @@ mod tests {
         let spec = Spec::from_doc(&arena, &doc).unwrap();
         let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
-        let schema = graph.schemas().find(|s| s.name() == "Config");
-        let Some(schema @ SchemaTypeView::Struct(_, struct_view)) = &schema else {
+        let schema = graph.schema("Config").unwrap();
+        let schema @ SchemaTypeView::Struct(_, struct_view) = &schema else {
             panic!("expected struct `Config`; got `{schema:?}`");
         };
 
@@ -2578,8 +2578,8 @@ mod tests {
         raw.inline_tagged_variants();
         let graph = CodegenGraph::new(raw.cook());
 
-        let schema = graph.schemas().find(|s| s.name() == "Dog");
-        let Some(schema @ SchemaTypeView::Struct(_, struct_view)) = &schema else {
+        let schema = graph.schema("Dog").unwrap();
+        let schema @ SchemaTypeView::Struct(_, struct_view) = &schema else {
             panic!("expected struct `Dog`; got `{schema:?}`");
         };
 
@@ -2636,8 +2636,8 @@ mod tests {
         let spec = Spec::from_doc(&arena, &doc).unwrap();
         let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
-        let schema = graph.schemas().find(|s| s.name() == "Pet");
-        let Some(schema @ SchemaTypeView::Struct(_, struct_view)) = &schema else {
+        let schema = graph.schema("Pet").unwrap();
+        let schema @ SchemaTypeView::Struct(_, struct_view) = &schema else {
             panic!("expected struct `Pet`; got `{schema:?}`");
         };
 
@@ -2688,8 +2688,8 @@ mod tests {
         let spec = Spec::from_doc(&arena, &doc).unwrap();
         let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
-        let schema = graph.schemas().find(|s| s.name() == "Pet");
-        let Some(schema @ SchemaTypeView::Struct(_, struct_view)) = &schema else {
+        let schema = graph.schema("Pet").unwrap();
+        let schema @ SchemaTypeView::Struct(_, struct_view) = &schema else {
             panic!("expected struct `Pet`; got `{schema:?}`");
         };
 
@@ -2740,8 +2740,8 @@ mod tests {
         let spec = Spec::from_doc(&arena, &doc).unwrap();
         let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
-        let schema = graph.schemas().find(|s| s.name() == "Pet");
-        let Some(schema @ SchemaTypeView::Struct(_, struct_view)) = &schema else {
+        let schema = graph.schema("Pet").unwrap();
+        let schema @ SchemaTypeView::Struct(_, struct_view) = &schema else {
             panic!("expected struct `Pet`; got `{schema:?}`");
         };
 
@@ -2794,8 +2794,8 @@ mod tests {
         let spec = Spec::from_doc(&arena, &doc).unwrap();
         let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
-        let schema = graph.schemas().find(|s| s.name() == "Pet");
-        let Some(schema @ SchemaTypeView::Struct(_, struct_view)) = &schema else {
+        let schema = graph.schema("Pet").unwrap();
+        let schema @ SchemaTypeView::Struct(_, struct_view) = &schema else {
             panic!("expected struct `Pet`; got `{schema:?}`");
         };
 
@@ -2847,8 +2847,8 @@ mod tests {
         let spec = Spec::from_doc(&arena, &doc).unwrap();
         let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
-        let schema = graph.schemas().find(|s| s.name() == "Config");
-        let Some(schema @ SchemaTypeView::Struct(_, struct_view)) = &schema else {
+        let schema = graph.schema("Config").unwrap();
+        let schema @ SchemaTypeView::Struct(_, struct_view) = &schema else {
             panic!("expected struct `Config`; got `{schema:?}`");
         };
 
@@ -2905,8 +2905,8 @@ mod tests {
         let spec = Spec::from_doc(&arena, &doc).unwrap();
         let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
-        let schema = graph.schemas().find(|s| s.name() == "Pet");
-        let Some(schema @ SchemaTypeView::Struct(_, struct_view)) = &schema else {
+        let schema = graph.schema("Pet").unwrap();
+        let schema @ SchemaTypeView::Struct(_, struct_view) = &schema else {
             panic!("expected struct `Pet`; got `{schema:?}`");
         };
 

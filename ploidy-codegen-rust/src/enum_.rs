@@ -176,8 +176,8 @@ mod tests {
         let spec = Spec::from_doc(&arena, &doc).unwrap();
         let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
-        let schema = graph.schemas().find(|s| s.name() == "Status");
-        let Some(schema @ SchemaTypeView::Enum(_, enum_view)) = &schema else {
+        let schema = graph.schema("Status").unwrap();
+        let schema @ SchemaTypeView::Enum(_, enum_view) = &schema else {
             panic!("expected enum `Status`; got `{schema:?}`");
         };
 
@@ -285,8 +285,8 @@ mod tests {
         let spec = Spec::from_doc(&arena, &doc).unwrap();
         let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
-        let schema = graph.schemas().find(|s| s.name() == "Priority");
-        let Some(schema @ SchemaTypeView::Enum(_, view)) = &schema else {
+        let schema = graph.schema("Priority").unwrap();
+        let schema @ SchemaTypeView::Enum(_, view) = &schema else {
             panic!("expected enum `Priority`; got `{schema:?}`");
         };
 

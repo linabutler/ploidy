@@ -41,7 +41,7 @@ fn test_struct_view_fields_iterator() {
     let spec = Spec::from_doc(&arena, &doc).unwrap();
     let graph = RawGraph::new(&arena, &spec).cook();
 
-    let person_schema = graph.schemas().find(|s| s.name() == "Person").unwrap();
+    let person_schema = graph.schema("Person").unwrap();
     let person_struct = match person_schema {
         SchemaTypeView::Struct(_, view) => view,
         other => panic!("expected struct `Person`; got {other:?}"),
@@ -82,7 +82,7 @@ fn test_struct_field_view_accessors() {
     let spec = Spec::from_doc(&arena, &doc).unwrap();
     let graph = RawGraph::new(&arena, &spec).cook();
 
-    let record_schema = graph.schemas().find(|s| s.name() == "Record").unwrap();
+    let record_schema = graph.schema("Record").unwrap();
     let record_struct = match record_schema {
         SchemaTypeView::Struct(_, view) => view,
         other => panic!("expected struct `Record`; got {other:?}"),
@@ -121,8 +121,8 @@ fn test_schema_view_from_graph() {
     let graph = RawGraph::new(&arena, &spec).cook();
 
     // Should be able to construct views for different schema types.
-    let struct_view = graph.schemas().find(|s| s.name() == "MyStruct").unwrap();
-    let enum_view = graph.schemas().find(|s| s.name() == "MyEnum").unwrap();
+    let struct_view = graph.schema("MyStruct").unwrap();
+    let enum_view = graph.schema("MyEnum").unwrap();
 
     // Verify types.
     assert_matches!(struct_view, SchemaTypeView::Struct(..));
@@ -235,8 +235,8 @@ fn test_extension_per_node_type() {
     let spec = Spec::from_doc(&arena, &doc).unwrap();
     let graph = RawGraph::new(&arena, &spec).cook();
 
-    let mut schema1 = graph.schemas().find(|s| s.name() == "Struct1").unwrap();
-    let mut schema2 = graph.schemas().find(|s| s.name() == "Struct2").unwrap();
+    let mut schema1 = graph.schema("Struct1").unwrap();
+    let mut schema2 = graph.schema("Struct2").unwrap();
 
     // Set different extensions on different node types.
     schema1.extensions_mut().insert("data_1");
@@ -253,7 +253,7 @@ fn test_extension_per_node_type() {
 
     // Extensions are per-type, not per-node, so `Struct3`'s fields
     // should return the same extensions.
-    let schema3 = graph.schemas().find(|s| s.name() == "Struct3").unwrap();
+    let schema3 = graph.schema("Struct3").unwrap();
     let struct3_view = match schema3 {
         SchemaTypeView::Struct(_, struct_) => struct_,
         other => panic!("expected struct `Struct3`; got {other:?}"),
@@ -323,7 +323,7 @@ fn test_dependencies_multiple() {
     let spec = Spec::from_doc(&arena, &doc).unwrap();
     let graph = RawGraph::new(&arena, &spec).cook();
 
-    let branch_schema = graph.schemas().find(|s| s.name() == "Branch").unwrap();
+    let branch_schema = graph.schema("Branch").unwrap();
 
     // `dependencies()` should include `Leaf1` and `Leaf2`,
     // but not `Branch` itself.
@@ -395,7 +395,7 @@ fn test_dependencies_handles_cycles_without_infinite_loop() {
     let spec = Spec::from_doc(&arena, &doc).unwrap();
     let graph = RawGraph::new(&arena, &spec).cook();
 
-    let a_schema = graph.schemas().find(|s| s.name() == "A").unwrap();
+    let a_schema = graph.schema("A").unwrap();
 
     // `dependencies()` should not revisit already-visited schemas.
     assert_eq!(a_schema.dependencies().count(), 1);
@@ -431,7 +431,7 @@ fn test_dependencies_from_array_includes_inner_types() {
     let spec = Spec::from_doc(&arena, &doc).unwrap();
     let graph = RawGraph::new(&arena, &spec).cook();
 
-    let container_schema = graph.schemas().find(|s| s.name() == "Container").unwrap();
+    let container_schema = graph.schema("Container").unwrap();
     let container_struct = match container_schema {
         SchemaTypeView::Struct(_, view) => view,
         other => panic!("expected struct `Container`; got {other:?}"),
@@ -498,7 +498,7 @@ fn test_dependencies_from_map_includes_inner_types() {
     let spec = Spec::from_doc(&arena, &doc).unwrap();
     let graph = RawGraph::new(&arena, &spec).cook();
 
-    let container_schema = graph.schemas().find(|s| s.name() == "Container").unwrap();
+    let container_schema = graph.schema("Container").unwrap();
     let container_struct = match container_schema {
         SchemaTypeView::Struct(_, view) => view,
         other => panic!("expected struct `Container`; got {other:?}"),
@@ -564,7 +564,7 @@ fn test_dependencies_from_nullable_includes_inner_types() {
     let spec = Spec::from_doc(&arena, &doc).unwrap();
     let graph = RawGraph::new(&arena, &spec).cook();
 
-    let container_schema = graph.schemas().find(|s| s.name() == "Container").unwrap();
+    let container_schema = graph.schema("Container").unwrap();
     let container_struct = match container_schema {
         SchemaTypeView::Struct(_, view) => view,
         other => panic!("expected struct `Container`; got {other:?}"),
@@ -633,7 +633,7 @@ fn test_dependencies_from_inline_includes_inner_types() {
     let spec = Spec::from_doc(&arena, &doc).unwrap();
     let graph = RawGraph::new(&arena, &spec).cook();
 
-    let container_schema = graph.schemas().find(|s| s.name() == "Container").unwrap();
+    let container_schema = graph.schema("Container").unwrap();
     let container_struct = match container_schema {
         SchemaTypeView::Struct(_, view) => view,
         other => panic!("expected struct `Container`; got {other:?}"),
@@ -851,7 +851,7 @@ fn test_inlines_empty_for_schemas_with_no_inlines() {
     let spec = Spec::from_doc(&arena, &doc).unwrap();
     let graph = RawGraph::new(&arena, &spec).cook();
 
-    let simple_schema = graph.schemas().find(|s| s.name() == "Simple").unwrap();
+    let simple_schema = graph.schema("Simple").unwrap();
 
     // `Simple` has one inline: an optional for the `field` property.
     assert_eq!(simple_schema.inlines().count(), 1);
@@ -894,7 +894,7 @@ fn test_inlines_discovers_nested_inline_all_of_parents() {
     let spec = Spec::from_doc(&arena, &doc).unwrap();
     let graph = RawGraph::new(&arena, &spec).cook();
 
-    let child = graph.schemas().find(|s| s.name() == "Child").unwrap();
+    let child = graph.schema("Child").unwrap();
     let inlines = child.inlines().collect_vec();
 
     // The grandparent inline struct (with `grandparent_field`) must
@@ -948,7 +948,7 @@ fn test_tagged_variant_names_and_aliases() {
     let spec = Spec::from_doc(&arena, &doc).unwrap();
     let graph = RawGraph::new(&arena, &spec).cook();
 
-    let animal_schema = graph.schemas().find(|s| s.name() == "Animal").unwrap();
+    let animal_schema = graph.schema("Animal").unwrap();
     let tagged_view = match animal_schema {
         SchemaTypeView::Tagged(_, view) => view,
         other => panic!("expected tagged union `Animal`; got {other:?}"),
@@ -990,7 +990,7 @@ fn test_tagged_variant_type_access() {
     let spec = Spec::from_doc(&arena, &doc).unwrap();
     let graph = RawGraph::new(&arena, &spec).cook();
 
-    let animal_schema = graph.schemas().find(|s| s.name() == "Animal").unwrap();
+    let animal_schema = graph.schema("Animal").unwrap();
     let tagged_view = match animal_schema {
         SchemaTypeView::Tagged(_, view) => view,
         other => panic!("expected tagged union `Animal`; got {other:?}"),
@@ -1035,7 +1035,7 @@ fn test_untagged_variant_iteration() {
     let spec = Spec::from_doc(&arena, &doc).unwrap();
     let graph = RawGraph::new(&arena, &spec).cook();
 
-    let animal_schema = graph.schemas().find(|s| s.name() == "Animal").unwrap();
+    let animal_schema = graph.schema("Animal").unwrap();
     let untagged_view = match animal_schema {
         SchemaTypeView::Untagged(_, view) => view,
         _ => panic!("`Animal` should be an untagged union"),
@@ -1496,7 +1496,7 @@ fn test_untagged_variant_with_null_type() {
     let spec = Spec::from_doc(&arena, &doc).unwrap();
     let graph = RawGraph::new(&arena, &spec).cook();
 
-    let animal_schema = graph.schemas().find(|s| s.name() == "Animal").unwrap();
+    let animal_schema = graph.schema("Animal").unwrap();
     let untagged_view = match animal_schema {
         SchemaTypeView::Untagged(_, view) => view,
         other => panic!("expected untagged union `Animal`; got {other:?}"),
@@ -1574,7 +1574,7 @@ fn test_null_variant_demotes_tagged_to_untagged() {
 
     // The discriminator is ignored because `{type: "null"}` is an
     // inline schema, causing `try_tagged` to bail.
-    let animal = graph.schemas().find(|s| s.name() == "Animal").unwrap();
+    let animal = graph.schema("Animal").unwrap();
     let SchemaTypeView::Untagged(_, untagged) = animal else {
         panic!("expected untagged `Animal`; got `{animal:?}`");
     };
@@ -1620,7 +1620,7 @@ fn test_enum_view_variants() {
     let spec = Spec::from_doc(&arena, &doc).unwrap();
     let graph = RawGraph::new(&arena, &spec).cook();
 
-    let status_schema = graph.schemas().find(|s| s.name() == "Status").unwrap();
+    let status_schema = graph.schema("Status").unwrap();
     let enum_view = match status_schema {
         SchemaTypeView::Enum(_, view) => view,
         other => panic!("expected enum `Status`; got {other:?}"),
@@ -1658,7 +1658,7 @@ fn test_enum_view_with_description() {
     let spec = Spec::from_doc(&arena, &doc).unwrap();
     let graph = RawGraph::new(&arena, &spec).cook();
 
-    let priority_schema = graph.schemas().find(|s| s.name() == "Priority").unwrap();
+    let priority_schema = graph.schema("Priority").unwrap();
     let enum_view = match priority_schema {
         SchemaTypeView::Enum(_, view) => view,
         other => panic!("expected enum `Priority`; got {other:?}"),
@@ -1685,7 +1685,7 @@ fn test_enum_view_without_description() {
     let spec = Spec::from_doc(&arena, &doc).unwrap();
     let graph = RawGraph::new(&arena, &spec).cook();
 
-    let status_schema = graph.schemas().find(|s| s.name() == "Status").unwrap();
+    let status_schema = graph.schema("Status").unwrap();
     let enum_view = match status_schema {
         SchemaTypeView::Enum(_, view) => view,
         other => panic!("expected enum `Status`; got {other:?}"),
@@ -1712,7 +1712,7 @@ fn test_enum_view_variants_with_numbers() {
     let spec = Spec::from_doc(&arena, &doc).unwrap();
     let graph = RawGraph::new(&arena, &spec).cook();
 
-    let priority_schema = graph.schemas().find(|s| s.name() == "Priority").unwrap();
+    let priority_schema = graph.schema("Priority").unwrap();
     let enum_view = match priority_schema {
         SchemaTypeView::Enum(_, view) => view,
         other => panic!("expected enum `Priority`; got {other:?}"),
@@ -1752,7 +1752,7 @@ fn test_enum_view_variants_with_booleans() {
     let spec = Spec::from_doc(&arena, &doc).unwrap();
     let graph = RawGraph::new(&arena, &spec).cook();
 
-    let toggle_schema = graph.schemas().find(|s| s.name() == "Toggle").unwrap();
+    let toggle_schema = graph.schema("Toggle").unwrap();
     let enum_view = match toggle_schema {
         SchemaTypeView::Enum(_, view) => view,
         other => panic!("expected enum `Toggle`; got {other:?}"),
@@ -1800,7 +1800,7 @@ fn test_enum_view_with_view_trait_methods() {
     let spec = Spec::from_doc(&arena, &doc).unwrap();
     let graph = RawGraph::new(&arena, &spec).cook();
 
-    let status_schema = graph.schemas().find(|s| s.name() == "Status").unwrap();
+    let status_schema = graph.schema("Status").unwrap();
     let enum_view = match &status_schema {
         SchemaTypeView::Enum(_, view) => view,
         other => panic!("expected enum `Status`; got {other:?}"),
@@ -2774,7 +2774,7 @@ fn test_variant_field_matching_tagged_union_tag_is_tag() {
 
     // `Comment.kind` should be detected as a tag field because
     // `Comment` is a direct variant of the `Post` tagged union.
-    let comment = graph.schemas().find(|s| s.name() == "Comment").unwrap();
+    let comment = graph.schema("Comment").unwrap();
     let SchemaTypeView::Struct(_, comment_struct) = comment else {
         panic!("expected struct `Comment`; got `{comment:?}`");
     };
@@ -2792,7 +2792,7 @@ fn test_variant_field_matching_tagged_union_tag_is_tag() {
     assert!(!id_field.tag());
 
     // `Reaction.kind` should also be detected as a tag field.
-    let reaction = graph.schemas().find(|s| s.name() == "Reaction").unwrap();
+    let reaction = graph.schema("Reaction").unwrap();
     let SchemaTypeView::Struct(_, reaction_struct) = reaction else {
         panic!("expected struct `Reaction`; got `{reaction:?}`");
     };
@@ -2847,7 +2847,7 @@ fn test_transitive_dependency_field_matching_tag_is_not_tag() {
 
     // `Wrapper.kind` _is_ a tag field, because `Wrapper` is a
     // direct variant of `Outer`.
-    let wrapper = graph.schemas().find(|s| s.name() == "Wrapper").unwrap();
+    let wrapper = graph.schema("Wrapper").unwrap();
     let SchemaTypeView::Struct(_, wrapper_struct) = wrapper else {
         panic!("expected struct `Wrapper`; got `{wrapper:?}`");
     };
@@ -2859,7 +2859,7 @@ fn test_transitive_dependency_field_matching_tag_is_not_tag() {
 
     // `Inner.kind` is _not_ a tag field, because `Inner` is only
     // transitively reachable from `Outer`, not a direct variant.
-    let inner = graph.schemas().find(|s| s.name() == "Inner").unwrap();
+    let inner = graph.schema("Inner").unwrap();
     let SchemaTypeView::Struct(_, inner_struct) = inner else {
         panic!("expected struct `Inner`; got `{inner:?}`");
     };
@@ -2904,7 +2904,7 @@ fn test_own_struct_tag_field() {
     let spec = Spec::from_doc(&arena, &doc).unwrap();
     let graph = RawGraph::new(&arena, &spec).cook();
 
-    let base = graph.schemas().find(|s| s.name() == "Base").unwrap();
+    let base = graph.schema("Base").unwrap();
     let SchemaTypeView::Struct(_, base_struct) = base else {
         panic!("expected struct `Base`; got `{base:?}`");
     };
@@ -2962,7 +2962,7 @@ fn test_inherited_tag_field() {
     let spec = Spec::from_doc(&arena, &doc).unwrap();
     let graph = RawGraph::new(&arena, &spec).cook();
 
-    let child = graph.schemas().find(|s| s.name() == "Child").unwrap();
+    let child = graph.schema("Child").unwrap();
     let SchemaTypeView::Struct(_, child_struct) = child else {
         panic!("expected struct `Child`; got `{child:?}`");
     };
@@ -3015,7 +3015,7 @@ fn test_fields_linearizes_inline_all_of_parents() {
     let spec = Spec::from_doc(&arena, &doc).unwrap();
     let graph = RawGraph::new(&arena, &spec).cook();
 
-    let person = graph.schemas().find(|s| s.name() == "Person").unwrap();
+    let person = graph.schema("Person").unwrap();
     let SchemaTypeView::Struct(_, person_struct) = person else {
         panic!("expected struct `Person`; got `{person:?}`");
     };
@@ -3110,7 +3110,7 @@ fn test_fields_linearizes_diamond_inheritance() {
     let spec = Spec::from_doc(&arena, &doc).unwrap();
     let graph = RawGraph::new(&arena, &spec).cook();
 
-    let child = graph.schemas().find(|s| s.name() == "Child").unwrap();
+    let child = graph.schema("Child").unwrap();
     let SchemaTypeView::Struct(_, child_struct) = child else {
         panic!("expected struct `Child`; got `{child:?}`");
     };
@@ -3178,7 +3178,7 @@ fn test_inline_tagged_view_construction() {
     let spec = Spec::from_doc(&arena, &doc).unwrap();
     let graph = RawGraph::new(&arena, &spec).cook();
 
-    let container_schema = graph.schemas().find(|s| s.name() == "Container").unwrap();
+    let container_schema = graph.schema("Container").unwrap();
     let container_struct = match container_schema {
         SchemaTypeView::Struct(_, view) => view,
         other => panic!("expected struct `Container`; got {other:?}"),
@@ -3241,7 +3241,7 @@ fn test_inline_tagged_view_variant_types() {
     let spec = Spec::from_doc(&arena, &doc).unwrap();
     let graph = RawGraph::new(&arena, &spec).cook();
 
-    let container_schema = graph.schemas().find(|s| s.name() == "Container").unwrap();
+    let container_schema = graph.schema("Container").unwrap();
     let container_struct = match container_schema {
         SchemaTypeView::Struct(_, view) => view,
         other => panic!("expected struct `Container`; got {other:?}"),
@@ -3306,7 +3306,7 @@ fn test_inlines_finds_inline_tagged_unions() {
     let spec = Spec::from_doc(&arena, &doc).unwrap();
     let graph = RawGraph::new(&arena, &spec).cook();
 
-    let container_schema = graph.schemas().find(|s| s.name() == "Container").unwrap();
+    let container_schema = graph.schema("Container").unwrap();
 
     // Should find the optional for `animal` and the inline tagged union.
     let inlines = container_schema.inlines().collect_vec();
@@ -3382,7 +3382,7 @@ fn test_struct_not_hashable_when_inherited_field_type_inherits_float() {
     let graph = RawGraph::new(&arena, &spec).cook();
 
     // `s.data` reaches an `f64` through `Parent`, so `s` is unhashable.
-    let s = graph.schemas().find(|s| s.name() == "S").unwrap();
+    let s = graph.schema("S").unwrap();
     assert!(!s.hashable());
 }
 
@@ -3468,7 +3468,7 @@ fn test_struct_not_defaultable_when_inherited_field_type_inherits_non_defaultabl
 
     // `s.data` reaches tagged union `Kind` through `Parent`,
     // so `s` is undefaultable.
-    let s = graph.schemas().find(|s| s.name() == "S").unwrap();
+    let s = graph.schema("S").unwrap();
     assert!(!s.defaultable());
 }
 
@@ -3511,10 +3511,10 @@ fn test_struct_not_hashable_when_own_field_type_inherits_float() {
     let spec = Spec::from_doc(&arena, &doc).unwrap();
     let graph = RawGraph::new(&arena, &spec).cook();
 
-    let x = graph.schemas().find(|s| s.name() == "X").unwrap();
+    let x = graph.schema("X").unwrap();
     assert!(!x.hashable());
     // `T` itself is also not hashable.
-    let t = graph.schemas().find(|s| s.name() == "T").unwrap();
+    let t = graph.schema("T").unwrap();
     assert!(!t.hashable());
 }
 
@@ -3575,7 +3575,7 @@ fn test_struct_not_defaultable_when_own_field_type_inherits_non_defaultable() {
     let spec = Spec::from_doc(&arena, &doc).unwrap();
     let graph = RawGraph::new(&arena, &spec).cook();
 
-    let x = graph.schemas().find(|s| s.name() == "X").unwrap();
+    let x = graph.schema("X").unwrap();
     assert!(!x.defaultable());
 }
 
@@ -3605,7 +3605,7 @@ fn test_struct_not_hashable_when_own_field_is_float() {
     let spec = Spec::from_doc(&arena, &doc).unwrap();
     let graph = RawGraph::new(&arena, &spec).cook();
 
-    let x = graph.schemas().find(|s| s.name() == "X").unwrap();
+    let x = graph.schema("X").unwrap();
     assert!(!x.hashable());
 }
 
@@ -3637,7 +3637,7 @@ fn test_struct_not_hashable_when_container_field_holds_float() {
     let spec = Spec::from_doc(&arena, &doc).unwrap();
     let graph = RawGraph::new(&arena, &spec).cook();
 
-    let x = graph.schemas().find(|s| s.name() == "X").unwrap();
+    let x = graph.schema("X").unwrap();
     assert!(!x.hashable());
 }
 
@@ -3693,7 +3693,7 @@ fn test_struct_not_hashable_when_union_field_has_unhashable_variant() {
     let spec = Spec::from_doc(&arena, &doc).unwrap();
     let graph = RawGraph::new(&arena, &spec).cook();
 
-    let x = graph.schemas().find(|s| s.name() == "X").unwrap();
+    let x = graph.schema("X").unwrap();
     assert!(!x.hashable());
 }
 
@@ -3724,7 +3724,7 @@ fn test_struct_defaultable_when_all_fields_optional() {
     let spec = Spec::from_doc(&arena, &doc).unwrap();
     let graph = RawGraph::new(&arena, &spec).cook();
 
-    let x = graph.schemas().find(|s| s.name() == "X").unwrap();
+    let x = graph.schema("X").unwrap();
     assert!(x.defaultable());
 }
 
@@ -3758,7 +3758,7 @@ fn test_recursive_struct_is_hashable() {
     let spec = Spec::from_doc(&arena, &doc).unwrap();
     let graph = RawGraph::new(&arena, &spec).cook();
 
-    let node = graph.schemas().find(|s| s.name() == "Node").unwrap();
+    let node = graph.schema("Node").unwrap();
     assert!(node.hashable());
 }
 
@@ -3791,7 +3791,7 @@ fn test_recursive_struct_defaultable_when_self_reference_optional() {
     let spec = Spec::from_doc(&arena, &doc).unwrap();
     let graph = RawGraph::new(&arena, &spec).cook();
 
-    let node = graph.schemas().find(|s| s.name() == "Node").unwrap();
+    let node = graph.schema("Node").unwrap();
     assert!(node.defaultable());
 }
 
@@ -3825,7 +3825,7 @@ fn test_recursive_struct_defaultable_when_self_reference_required() {
     let spec = Spec::from_doc(&arena, &doc).unwrap();
     let graph = RawGraph::new(&arena, &spec).cook();
 
-    let node = graph.schemas().find(|s| s.name() == "Node").unwrap();
+    let node = graph.schema("Node").unwrap();
     assert!(node.defaultable());
 }
 
@@ -3867,8 +3867,8 @@ fn test_struct_hashable_when_field_and_inheritance_form_cycle() {
     let spec = Spec::from_doc(&arena, &doc).unwrap();
     let graph = RawGraph::new(&arena, &spec).cook();
 
-    let a = graph.schemas().find(|s| s.name() == "A").unwrap();
-    let b = graph.schemas().find(|s| s.name() == "B").unwrap();
+    let a = graph.schema("A").unwrap();
+    let b = graph.schema("B").unwrap();
     assert!(a.hashable());
     assert!(b.hashable());
     assert!(a.defaultable());
@@ -3915,8 +3915,8 @@ fn test_struct_not_hashable_when_field_and_inheritance_cycle_reaches_float() {
     let spec = Spec::from_doc(&arena, &doc).unwrap();
     let graph = RawGraph::new(&arena, &spec).cook();
 
-    let a = graph.schemas().find(|s| s.name() == "A").unwrap();
-    let b = graph.schemas().find(|s| s.name() == "B").unwrap();
+    let a = graph.schema("A").unwrap();
+    let b = graph.schema("B").unwrap();
     assert!(!a.hashable());
     assert!(!b.hashable());
 }
@@ -3976,7 +3976,7 @@ fn test_shadow_edges_hide_inlines_but_preserve_dependencies() {
     let graph = raw.cook();
 
     // The original `Dog` schema should own the inline `metadata` struct.
-    let dog = graph.schemas().find(|s| s.name() == "Dog").unwrap();
+    let dog = graph.schema("Dog").unwrap();
     let dog_inline_paths = dog
         .inlines()
         .filter_map(|i| match i {
@@ -3995,7 +3995,7 @@ fn test_shadow_edges_hide_inlines_but_preserve_dependencies() {
     );
 
     // The inlined variant `Pet/Dog` should _not_ claim `Dog`'s inline types.
-    let pet = graph.schemas().find(|s| s.name() == "Pet").unwrap();
+    let pet = graph.schema("Pet").unwrap();
     let SchemaTypeView::Tagged(_, pet_tagged) = pet else {
         panic!("expected tagged `Pet`; got `{pet:?}`");
     };
@@ -4084,7 +4084,7 @@ fn test_shadow_inherits_hides_ancestor_inlines() {
     let graph = raw.cook();
 
     // `Animal` should own the inline `tag` struct.
-    let animal = graph.schemas().find(|s| s.name() == "Animal").unwrap();
+    let animal = graph.schema("Animal").unwrap();
     let animal_inline_paths = animal
         .inlines()
         .filter_map(|i| match i {
@@ -4101,7 +4101,7 @@ fn test_shadow_inherits_hides_ancestor_inlines() {
     );
 
     // The inlined `Pet/Dog` should _not_ claim `Animal`'s inline types.
-    let pet = graph.schemas().find(|s| s.name() == "Pet").unwrap();
+    let pet = graph.schema("Pet").unwrap();
     let SchemaTypeView::Tagged(_, pet_tagged) = pet else {
         panic!("expected tagged `Pet`; got `{pet:?}`");
     };
@@ -4169,7 +4169,7 @@ fn test_tag_false_for_inlined_struct() {
     raw.inline_tagged_variants();
     let graph = raw.cook();
 
-    let dog = graph.schemas().find(|s| s.name() == "Dog").unwrap();
+    let dog = graph.schema("Dog").unwrap();
     let SchemaTypeView::Struct(_, dog_struct) = dog else {
         panic!("expected struct `Dog`; got `{dog:?}`");
     };
@@ -4227,7 +4227,7 @@ fn test_inlined_when_tagged_unions_disagree_on_tag() {
 
     // `Dog` is inlined because the two tagged unions disagree on
     // their tag. The original struct keeps all fields.
-    let dog = graph.schemas().find(|s| s.name() == "Dog").unwrap();
+    let dog = graph.schema("Dog").unwrap();
     let SchemaTypeView::Struct(_, dog_struct) = dog else {
         panic!("expected struct `Dog`; got `{dog:?}`");
     };
@@ -4243,7 +4243,7 @@ fn test_inlined_when_tagged_unions_disagree_on_tag() {
 
     // Each tagged union should have an inline variant with all
     // fields present, and tag field should be `tag()`.
-    let by_kind = graph.schemas().find(|s| s.name() == "ByKind").unwrap();
+    let by_kind = graph.schema("ByKind").unwrap();
     let SchemaTypeView::Tagged(_, by_kind_tagged) = by_kind else {
         panic!("expected tagged `ByKind`; got `{by_kind:?}`");
     };
@@ -4267,7 +4267,7 @@ fn test_inlined_when_tagged_unions_disagree_on_tag() {
         .collect_vec();
     assert_matches!(&*tags, [StructFieldName::Name("kind")]);
 
-    let by_category = graph.schemas().find(|s| s.name() == "ByCategory").unwrap();
+    let by_category = graph.schema("ByCategory").unwrap();
     let SchemaTypeView::Tagged(_, by_category_tagged) = by_category else {
         panic!("expected tagged `ByCategory`; got `{by_category:?}`");
     };
@@ -4346,7 +4346,7 @@ fn test_inlined_when_tagged_unions_disagree_on_fields() {
     let graph = raw.cook();
 
     // The original `Dog` keeps all its own fields.
-    let dog = graph.schemas().find(|s| s.name() == "Dog").unwrap();
+    let dog = graph.schema("Dog").unwrap();
     let SchemaTypeView::Struct(_, dog_struct) = dog else {
         panic!("expected struct `Dog`; got `{dog:?}`");
     };
@@ -4359,7 +4359,7 @@ fn test_inlined_when_tagged_unions_disagree_on_fields() {
     // Each inlined `Dog` has an inheritance edge back to its
     // parent tagged union. `Dog`'s own fields come first, then
     // the union's own fields; minus duplicates like `kind`.
-    let union_a = graph.schemas().find(|s| s.name() == "UnionA").unwrap();
+    let union_a = graph.schema("UnionA").unwrap();
     let SchemaTypeView::Tagged(_, union_a_tagged) = union_a else {
         panic!("expected tagged `UnionA`; got `{union_a:?}`");
     };
@@ -4379,7 +4379,7 @@ fn test_inlined_when_tagged_unions_disagree_on_fields() {
         ]
     );
 
-    let union_b = graph.schemas().find(|s| s.name() == "UnionB").unwrap();
+    let union_b = graph.schema("UnionB").unwrap();
     let SchemaTypeView::Tagged(_, union_b_tagged) = union_b else {
         panic!("expected tagged `UnionB`; got `{union_b:?}`");
     };
@@ -4448,7 +4448,7 @@ fn test_not_inlined_when_variant_already_inherits_union_fields() {
     // `Dog` is referenced by `Owner.dog` and inherits from `Pet` via `allOf`,
     // so the inline would be identical. The variant should remain
     // a direct reference to `Dog`, not an inline copy.
-    let pet = graph.schemas().find(|s| s.name() == "Pet").unwrap();
+    let pet = graph.schema("Pet").unwrap();
     let tagged = match pet {
         SchemaTypeView::Tagged(_, view) => view,
         other => panic!("expected tagged `Pet`; got {other:?}"),
@@ -4457,7 +4457,7 @@ fn test_not_inlined_when_variant_already_inherits_union_fields() {
     assert_matches!(variant.ty(), TypeView::Schema(SchemaTypeView::Struct(..)));
 
     // `Dog` should still have the inherited fields from `Pet`.
-    let dog = graph.schemas().find(|s| s.name() == "Dog").unwrap();
+    let dog = graph.schema("Dog").unwrap();
     let SchemaTypeView::Struct(_, dog_struct) = dog else {
         panic!("expected struct `Dog`; got `{dog:?}`");
     };
@@ -4523,7 +4523,7 @@ fn test_inlining_preserves_field_type_edges() {
     // `Dog` is inlined because `Owner.dog` gives it a non-tagged incoming edge.
     // After inlining, `pet.inlines()` must still include the inline enum from
     // `Pet.severity`.
-    let pet = graph.schemas().find(|s| s.name() == "Pet").unwrap();
+    let pet = graph.schema("Pet").unwrap();
     let has_inline_enum = pet.inlines().any(|i| matches!(i, InlineTypeView::Enum(..)));
     assert!(has_inline_enum);
 }
@@ -4572,7 +4572,7 @@ fn test_inlined_variant_inline_field_types_not_leaked() {
     raw.inline_tagged_variants();
     let graph = raw.cook();
 
-    let pet = graph.schemas().find(|s| s.name() == "Pet").unwrap();
+    let pet = graph.schema("Pet").unwrap();
     let pet_inlines = pet.inlines().collect_vec();
 
     // Inlines should only include the inline struct variant `Dog`,
@@ -4585,7 +4585,7 @@ fn test_inlined_variant_inline_field_types_not_leaked() {
 
     // `Dog`'s own `inlines()` still contains its inline types:
     // containers for optional fields, the `Details` struct, etc.
-    let dog = graph.schemas().find(|s| s.name() == "Dog").unwrap();
+    let dog = graph.schema("Dog").unwrap();
     let dog_inlines = dog.inlines().collect_vec();
     assert!(
         dog_inlines
@@ -4646,7 +4646,7 @@ fn test_inlined_variant_parents_yields_tagged_union_and_original() {
     raw.inline_tagged_variants();
     let graph = raw.cook();
 
-    let pet = graph.schemas().find(|s| s.name() == "Pet").unwrap();
+    let pet = graph.schema("Pet").unwrap();
     let SchemaTypeView::Tagged(_, pet_tagged) = pet else {
         panic!("expected tagged `Pet`; got `{pet:?}`");
     };
@@ -4725,7 +4725,7 @@ fn test_tag_false_when_only_operation_prevents_inlining() {
 
     // `Dog` must be inlined because the operation needs the schema
     // struct with `kind` as a regular field.
-    let dog = graph.schemas().find(|s| s.name() == "Dog").unwrap();
+    let dog = graph.schema("Dog").unwrap();
     let SchemaTypeView::Struct(_, dog_struct) = dog else {
         panic!("expected struct `Dog`; got `{dog:?}`");
     };
@@ -4789,7 +4789,7 @@ fn test_inlined_when_struct_field_references_tagged_variant() {
 
     // The schema struct `Dog` should retain `kind` as a regular field,
     // not a tag, because it's referenced by `Owner.dog`.
-    let dog = graph.schemas().find(|s| s.name() == "Dog").unwrap();
+    let dog = graph.schema("Dog").unwrap();
     let SchemaTypeView::Struct(_, dog_struct) = dog else {
         panic!("expected struct `Dog`; got `{dog:?}`");
     };
@@ -4805,7 +4805,7 @@ fn test_inlined_when_struct_field_references_tagged_variant() {
 
     // The `Pet` tagged union should wrap an inline variant,
     // not the schema struct directly.
-    let pet = graph.schemas().find(|s| s.name() == "Pet").unwrap();
+    let pet = graph.schema("Pet").unwrap();
     let SchemaTypeView::Tagged(_, pet_tagged) = pet else {
         panic!("expected tagged `Pet`; got `{pet:?}`");
     };
@@ -4887,7 +4887,7 @@ fn test_tag_false_for_common_field_target() {
     raw.inline_tagged_variants();
     let graph = raw.cook();
 
-    let header = graph.schemas().find(|s| s.name() == "Header").unwrap();
+    let header = graph.schema("Header").unwrap();
     let SchemaTypeView::Struct(_, header_struct) = header else {
         panic!("expected struct `Header`; got `{header:?}`");
     };
@@ -4938,7 +4938,7 @@ fn test_all_of_closer_ancestor_overrides_field() {
     let spec = Spec::from_doc(&arena, &doc).unwrap();
     let graph = RawGraph::new(&arena, &spec).cook();
 
-    let c = graph.schemas().find(|s| s.name() == "C").unwrap();
+    let c = graph.schema("C").unwrap();
     let SchemaTypeView::Struct(_, c_struct) = c else {
         panic!("expected struct `C`; got `{c:?}`");
     };

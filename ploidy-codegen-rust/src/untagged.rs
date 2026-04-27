@@ -106,8 +106,8 @@ mod tests {
         let spec = Spec::from_doc(&arena, &doc).unwrap();
         let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
-        let schema = graph.schemas().find(|s| s.name() == "StringOrInt");
-        let Some(schema @ SchemaTypeView::Untagged(_, untagged_view)) = &schema else {
+        let schema = graph.schema("StringOrInt").unwrap();
+        let schema @ SchemaTypeView::Untagged(_, untagged_view) = &schema else {
             panic!("expected untagged union `StringOrInt`; got `{schema:?}`");
         };
 
@@ -147,8 +147,8 @@ mod tests {
         let spec = Spec::from_doc(&arena, &doc).unwrap();
         let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
-        let schema = graph.schemas().find(|s| s.name() == "DateOrUnix");
-        let Some(schema @ SchemaTypeView::Untagged(_, untagged_view)) = &schema else {
+        let schema = graph.schema("DateOrUnix").unwrap();
+        let schema @ SchemaTypeView::Untagged(_, untagged_view) = &schema else {
             panic!("expected untagged union `DateOrUnix`; got `{schema:?}`");
         };
 
@@ -199,8 +199,8 @@ mod tests {
         let spec = Spec::from_doc(&arena, &doc).unwrap();
         let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
-        let schema = graph.schemas().find(|s| s.name() == "Animal");
-        let Some(schema @ SchemaTypeView::Untagged(_, untagged_view)) = &schema else {
+        let schema = graph.schema("Animal").unwrap();
+        let schema @ SchemaTypeView::Untagged(_, untagged_view) = &schema else {
             panic!("expected untagged union `Animal`; got `{schema:?}`");
         };
 
@@ -243,8 +243,8 @@ mod tests {
         let spec = Spec::from_doc(&arena, &doc).unwrap();
         let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
-        let schema = graph.schemas().find(|s| s.name() == "StringOrInt");
-        let Some(schema @ SchemaTypeView::Untagged(_, untagged_view)) = &schema else {
+        let schema = graph.schema("StringOrInt").unwrap();
+        let schema @ SchemaTypeView::Untagged(_, untagged_view) = &schema else {
             panic!("expected untagged union `StringOrInt`; got `{schema:?}`");
         };
 
@@ -287,8 +287,8 @@ mod tests {
         let spec = Spec::from_doc(&arena, &doc).unwrap();
         let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
-        let schema = graph.schemas().find(|s| s.name() == "StringOrFloat");
-        let Some(schema @ SchemaTypeView::Untagged(_, untagged_view)) = &schema else {
+        let schema = graph.schema("StringOrFloat").unwrap();
+        let schema @ SchemaTypeView::Untagged(_, untagged_view) = &schema else {
             panic!("expected untagged union `StringOrFloat`; got `{schema:?}`");
         };
 
@@ -330,8 +330,8 @@ mod tests {
         let spec = Spec::from_doc(&arena, &doc).unwrap();
         let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
-        let schema = graph.schemas().find(|s| s.name() == "StringOrDouble");
-        let Some(schema @ SchemaTypeView::Untagged(_, untagged_view)) = &schema else {
+        let schema = graph.schema("StringOrDouble").unwrap();
+        let schema @ SchemaTypeView::Untagged(_, untagged_view) = &schema else {
             panic!("expected untagged union `StringOrDouble`; got `{schema:?}`");
         };
 
@@ -382,8 +382,8 @@ mod tests {
         let spec = Spec::from_doc(&arena, &doc).unwrap();
         let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
-        let schema = graph.schemas().find(|s| s.name() == "Input");
-        let Some(schema @ SchemaTypeView::Untagged(_, untagged_view)) = &schema else {
+        let schema = graph.schema("Input").unwrap();
+        let schema @ SchemaTypeView::Untagged(_, untagged_view) = &schema else {
             panic!("expected untagged union `Input`; got `{schema:?}`");
         };
 
@@ -426,8 +426,8 @@ mod tests {
         let spec = Spec::from_doc(&arena, &doc).unwrap();
         let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
-        let schema = graph.schemas().find(|s| s.name() == "Weird");
-        let Some(schema @ SchemaTypeView::Untagged(_, untagged_view)) = &schema else {
+        let schema = graph.schema("Weird").unwrap();
+        let schema @ SchemaTypeView::Untagged(_, untagged_view) = &schema else {
             panic!("expected untagged union `Weird`; got `{schema:?}`");
         };
 

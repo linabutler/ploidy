@@ -60,6 +60,7 @@ pub struct RawGraph<'a> {
     arena: &'a Arena,
     spec: &'a Spec<'a>,
     graph: RawDiGraph<'a>,
+    schemas: FxHashMap<&'a str, NodeIndex<usize>>,
     ops: &'a [&'a GraphOperation<'a>],
 }
 
@@ -178,6 +179,7 @@ impl<'a> RawGraph<'a> {
             arena,
             spec,
             graph,
+            schemas,
             ops,
         }
     }
@@ -437,6 +439,7 @@ impl<'a> RawGraph<'a> {
 pub struct CookedGraph<'a> {
     pub(super) graph: CookedDiGraph<'a>,
     info: &'a Info,
+    schemas: FxHashMap<&'a str, NodeIndex<usize>>,
     ops: &'a [&'a GraphOperation<'a>],
     /// Additional metadata for each node.
     pub(super) metadata: CookedGraphMetadata<'a>,
@@ -515,6 +518,11 @@ impl<'a> CookedGraph<'a> {
         Self {
             graph,
             info: raw.spec.info,
+            schemas: raw
+                .schemas
+                .iter()
+                .map(|(&name, index)| (name, indices[index]))
+                .collect(),
             ops,
             metadata,
         }
@@ -533,6 +541,17 @@ impl<'a> CookedGraph<'a> {
         self.graph
             .node_indices()
             .filter_map(|index| match self.graph[index] {
+                GraphType::Schema(ty) => Some(SchemaTypeView::new(self, index, ty)),
+                _ => None,
+            })
+    }
+
+    /// Looks up and returns a schema by name.
+    #[inline]
+    pub fn schema(&self, name: &str) -> Option<SchemaTypeView<'_, 'a>> {
+        self.schemas
+            .get(name)
+            .and_then(|&index| match self.graph[index] {
                 GraphType::Schema(ty) => Some(SchemaTypeView::new(self, index, ty)),
                 _ => None,
             })

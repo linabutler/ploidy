@@ -141,8 +141,8 @@ mod tests {
         let spec = Spec::from_doc(&arena, &doc).unwrap();
         let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
-        let schema = graph.schemas().find(|s| s.name() == "Container");
-        let Some(schema @ SchemaTypeView::Struct(_, _)) = &schema else {
+        let schema = graph.schema("Container").unwrap();
+        let schema @ SchemaTypeView::Struct(_, _) = &schema else {
             panic!("expected struct `Container`; got `{schema:?}`");
         };
 
@@ -222,8 +222,8 @@ mod tests {
         let spec = Spec::from_doc(&arena, &doc).unwrap();
         let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
-        let schema = graph.schemas().find(|s| s.name() == "InvalidParameters");
-        let Some(schema @ SchemaTypeView::Container(_, _)) = &schema else {
+        let schema = graph.schema("InvalidParameters").unwrap();
+        let schema @ SchemaTypeView::Container(_, _) = &schema else {
             panic!("expected container `InvalidParameters`; got `{schema:?}`");
         };
 
@@ -267,8 +267,8 @@ mod tests {
         let spec = Spec::from_doc(&arena, &doc).unwrap();
         let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
-        let schema = graph.schemas().find(|s| s.name() == "Tags");
-        let Some(schema @ SchemaTypeView::Container(_, _)) = &schema else {
+        let schema = graph.schema("Tags").unwrap();
+        let schema @ SchemaTypeView::Container(_, _) = &schema else {
             panic!("expected container `Tags`; got `{schema:?}`");
         };
 
@@ -302,8 +302,8 @@ mod tests {
         let spec = Spec::from_doc(&arena, &doc).unwrap();
         let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
-        let schema = graph.schemas().find(|s| s.name() == "Metadata");
-        let Some(schema @ SchemaTypeView::Container(_, _)) = &schema else {
+        let schema = graph.schema("Metadata").unwrap();
+        let schema @ SchemaTypeView::Container(_, _) = &schema else {
             panic!("expected container `Metadata`; got `{schema:?}`");
         };
 
@@ -351,8 +351,8 @@ mod tests {
         let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
         // `type: ["string", "null"]` becomes `Option<String>`.
-        let schema = graph.schemas().find(|s| s.name() == "NullableString");
-        let Some(schema @ SchemaTypeView::Container(_, _)) = &schema else {
+        let schema = graph.schema("NullableString").unwrap();
+        let schema @ SchemaTypeView::Container(_, _) = &schema else {
             panic!("expected container `NullableString`; got `{schema:?}`");
         };
         let codegen = CodegenSchemaType::new(schema);
@@ -363,8 +363,8 @@ mod tests {
         assert_eq!(actual, expected);
 
         // `type: ["array", "null"]` becomes `Option<Vec<String>>`.
-        let schema = graph.schemas().find(|s| s.name() == "NullableArray");
-        let Some(schema @ SchemaTypeView::Container(_, _)) = &schema else {
+        let schema = graph.schema("NullableArray").unwrap();
+        let schema @ SchemaTypeView::Container(_, _) = &schema else {
             panic!("expected container `NullableArray`; got `{schema:?}`");
         };
         let codegen = CodegenSchemaType::new(schema);
@@ -376,8 +376,8 @@ mod tests {
 
         // `type: ["object", "null"]` with `additionalProperties` becomes
         // `Option<BTreeMap<String, String>>`.
-        let schema = graph.schemas().find(|s| s.name() == "NullableMap");
-        let Some(schema @ SchemaTypeView::Container(_, _)) = &schema else {
+        let schema = graph.schema("NullableMap").unwrap();
+        let schema @ SchemaTypeView::Container(_, _) = &schema else {
             panic!("expected container `NullableMap`; got `{schema:?}`");
         };
         let codegen = CodegenSchemaType::new(schema);
@@ -389,8 +389,8 @@ mod tests {
 
         // `oneOf` with an inline schema and `null` becomes an `Option<InlineStruct>`,
         // with the inline struct definition emitted in `mod types`.
-        let schema = graph.schemas().find(|s| s.name() == "NullableOneOf");
-        let Some(schema @ SchemaTypeView::Container(_, _)) = &schema else {
+        let schema = graph.schema("NullableOneOf").unwrap();
+        let schema @ SchemaTypeView::Container(_, _) = &schema else {
             panic!("expected container `NullableOneOf`; got `{schema:?}`");
         };
         let codegen = CodegenSchemaType::new(schema);
@@ -432,8 +432,8 @@ mod tests {
         let spec = Spec::from_doc(&arena, &doc).unwrap();
         let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
-        let schema = graph.schemas().find(|s| s.name() == "Tags");
-        let Some(schema @ SchemaTypeView::Container(_, _)) = &schema else {
+        let schema = graph.schema("Tags").unwrap();
+        let schema @ SchemaTypeView::Container(_, _) = &schema else {
             panic!("expected container `Tags`; got `{schema:?}`");
         };
 
