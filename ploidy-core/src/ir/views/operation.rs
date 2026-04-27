@@ -58,7 +58,7 @@ use std::{collections::VecDeque, marker::PhantomData};
 
 use petgraph::{
     graph::NodeIndex,
-    visit::{Bfs, EdgeFiltered, EdgeRef, Visitable},
+    visit::{Bfs, EdgeFiltered, EdgeRef, IntoEdges, VisitMap, Visitable},
 };
 
 use crate::{
@@ -66,7 +66,7 @@ use crate::{
         graph::CookedGraph,
         types::{
             GraphOperation, GraphParameter, GraphParameterInfo, GraphRequest, GraphResponse,
-            GraphType, ParameterStyle,
+            GraphType, OperationId, ParameterStyle,
         },
     },
     parse::{
@@ -95,8 +95,8 @@ impl<'graph, 'a> OperationView<'graph, 'a> {
 
     /// Returns the `operationId`.
     #[inline]
-    pub fn id(&self) -> &'a str {
-        self.op.id
+    pub fn id(&self) -> &'a OperationId {
+        OperationId::new(self.op.id)
     }
 
     /// Returns the HTTP method.
@@ -154,11 +154,12 @@ impl<'graph, 'a> OperationView<'graph, 'a> {
 impl<'graph, 'a> View<'graph, 'a> for OperationView<'graph, 'a> {
     /// Returns an iterator over all the inline types that are
     /// contained within this operation's referenced types.
+    /// Returns an iterator over all the inline types that are
+    /// contained within this operation's referenced types.
     #[inline]
     fn inlines(&self) -> impl Iterator<Item = InlineTypeView<'graph, 'a>> + use<'graph, 'a> {
         let cooked = self.cooked;
         // Follow edges to inline schemas, skipping shadow edges.
-        // See `GraphEdge::shadow()` for an explanation.
         let filtered = EdgeFiltered::from_fn(&cooked.graph, |e| {
             !e.weight().shadow() && matches!(cooked.graph[e.target()], GraphType::Inline(_))
         });
@@ -182,7 +183,10 @@ impl<'graph, 'a> View<'graph, 'a> for OperationView<'graph, 'a> {
         // the operation contains types; it's not a type itself.
         std::iter::from_fn(move || bfs.next(&filtered)).filter_map(|index| {
             match cooked.graph[index] {
-                GraphType::Inline(ty) => Some(InlineTypeView::new(cooked, index, ty)),
+                GraphType::Inline(ty) => {
+                    let trace = cooked.trace(ty.id());
+                    Some(InlineTypeView::new(cooked, index, trace, ty))
+                }
                 _ => None,
             }
         })
@@ -301,31 +305,43 @@ impl<'view, 'graph, 'a, T> View<'graph, 'a> for ParameterView<'view, 'graph, 'a,
     ) -> impl Iterator<Item = InlineTypeView<'graph, 'a>> + use<'view, 'graph, 'a, T> {
         let cooked = self.op.cooked;
         let start = self.info.ty;
-        // Follow edges to inline schemas, skipping shadow edges.
-        // See `GraphEdge::shadow()` for an explanation.
+
+        if !matches!(cooked.graph[start], GraphType::Inline(_)) {
+            return Vec::new().into_iter();
+        }
+
         let filtered = EdgeFiltered::from_fn(&cooked.graph, |e| {
             !e.weight().shadow() && matches!(cooked.graph[e.target()], GraphType::Inline(_))
         });
-        let mut bfs = {
-            // Exclude parameter types that aren't inline schemas;
-            // those types, and their inlines, are already emitted as
-            // named schema types.
-            let stack = match cooked.graph[start] {
-                GraphType::Inline(_) => std::iter::once(start).collect(),
-                _ => VecDeque::new(),
-            };
-            let mut discovered = cooked.graph.visit_map();
-            discovered.extend(stack.iter().copied().map(NodeIndex::index));
-            Bfs { stack, discovered }
-        };
-        // Unlike `View::inlines()`, we include the starting node:
-        // the parameter references a type; it's not a type itself.
-        std::iter::from_fn(move || bfs.next(&filtered)).filter_map(|index| {
-            match cooked.graph[index] {
-                GraphType::Inline(ty) => Some(InlineTypeView::new(cooked, index, ty)),
-                _ => None,
+
+        let mut results = Vec::new();
+        let mut discovered = cooked.graph.visit_map();
+        discovered.visit(start);
+
+        // Include the starting node (the parameter references a type).
+        if let GraphType::Inline(ty) = cooked.graph[start] {
+            let trace = cooked.trace(ty.id());
+            results.push(InlineTypeView::new(cooked, start, trace, ty));
+        }
+
+        let mut stack: VecDeque<NodeIndex<usize>> = VecDeque::new();
+        stack.push_back(start);
+
+        while let Some(source) = stack.pop_front() {
+            for edge in filtered.edges(source) {
+                let target = edge.target();
+                if !discovered.visit(target) {
+                    continue;
+                }
+                stack.push_back(target);
+                if let GraphType::Inline(ty) = cooked.graph[target] {
+                    let trace = cooked.trace(ty.id());
+                    results.push(InlineTypeView::new(cooked, target, trace, ty));
+                }
             }
-        })
+        }
+
+        results.into_iter()
     }
 
     fn used_by(

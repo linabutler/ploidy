@@ -119,7 +119,10 @@ where
         std::iter::from_fn(move || bfs.next(&filtered))
             .skip(1) // Skip the starting node.
             .filter_map(|index| match cooked.graph[index] {
-                GraphType::Inline(ty) => Some(InlineTypeView::new(cooked, index, ty)),
+                GraphType::Inline(ty) => {
+                    let trace = cooked.trace(ty.id());
+                    Some(InlineTypeView::new(cooked, index, trace, ty))
+                }
                 _ => None,
             })
     }

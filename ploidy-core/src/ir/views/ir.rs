@@ -25,7 +25,10 @@ impl<'graph, 'a> TypeView<'graph, 'a> {
     pub(in crate::ir) fn new(cooked: &'graph CookedGraph<'a>, index: NodeIndex<usize>) -> Self {
         match cooked.graph[index] {
             GraphType::Schema(ty) => Self::Schema(SchemaTypeView::new(cooked, index, ty)),
-            GraphType::Inline(ty) => Self::Inline(InlineTypeView::new(cooked, index, ty)),
+            GraphType::Inline(ty) => {
+                let trace = cooked.trace(ty.id());
+                Self::Inline(InlineTypeView::new(cooked, index, trace, ty))
+            }
         }
     }
 
@@ -48,7 +51,7 @@ impl<'graph, 'a> TypeView<'graph, 'a> {
     pub fn as_container(&self) -> Option<&ContainerView<'graph, 'a>> {
         match self {
             Self::Schema(SchemaTypeView::Container(_, view)) => Some(view),
-            Self::Inline(InlineTypeView::Container(_, view)) => Some(view),
+            Self::Inline(InlineTypeView::Container(_, _, view)) => Some(view),
             _ => None,
         }
     }

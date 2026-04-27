@@ -3,7 +3,8 @@
 use petgraph::graph::NodeIndex;
 
 use super::{
-    Enum, InlineTypePath, PrimitiveType, SchemaTypeInfo, StructFieldName, UntaggedVariantNameHint,
+    Enum, InlineTypeId, PrimitiveType, SchemaTypeInfo, StructFieldName, TypeInfo,
+    UntaggedVariantNameHint,
     shape::{Operation, Parameter, ParameterInfo, Request, Response},
     spec::{SpecContainer, SpecInlineType, SpecSchemaType},
 };
@@ -13,6 +14,17 @@ use super::{
 pub enum GraphType<'a> {
     Schema(GraphSchemaType<'a>),
     Inline(GraphInlineType<'a>),
+}
+
+impl<'a> GraphType<'a> {
+    /// Returns the [`TypeInfo`] for this graph node.
+    #[inline]
+    pub fn info(&self) -> TypeInfo<'a> {
+        match self {
+            GraphType::Schema(s) => TypeInfo::Schema(s.info()),
+            GraphType::Inline(i) => TypeInfo::Inline(i.id()),
+        }
+    }
 }
 
 /// A named schema type in the graph.
@@ -35,6 +47,19 @@ pub enum GraphSchemaType<'a> {
 }
 
 impl<'a> GraphSchemaType<'a> {
+    /// Returns the [`SchemaTypeInfo`] for this schema type.
+    #[inline]
+    pub fn info(&self) -> SchemaTypeInfo<'a> {
+        let (Self::Enum(info, ..)
+        | Self::Struct(info, ..)
+        | Self::Tagged(info, ..)
+        | Self::Untagged(info, ..)
+        | Self::Container(info, ..)
+        | Self::Primitive(info, ..)
+        | Self::Any(info)) = *self;
+        info
+    }
+
     #[inline]
     pub fn name(&self) -> &'a str {
         let (Self::Enum(info, ..)
@@ -93,55 +118,56 @@ impl<'a> From<SpecSchemaType<'a>> for GraphSchemaType<'a> {
 /// An inline type in the graph.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub enum GraphInlineType<'a> {
-    Enum(InlineTypePath<'a>, Enum<'a>),
-    Struct(InlineTypePath<'a>, GraphStruct<'a>),
-    Tagged(InlineTypePath<'a>, GraphTagged<'a>),
-    Untagged(InlineTypePath<'a>, GraphUntagged<'a>),
-    Container(InlineTypePath<'a>, GraphContainer<'a>),
-    Primitive(InlineTypePath<'a>, PrimitiveType),
-    Any(InlineTypePath<'a>),
+    Enum(InlineTypeId, Enum<'a>),
+    Struct(InlineTypeId, GraphStruct<'a>),
+    Tagged(InlineTypeId, GraphTagged<'a>),
+    Untagged(InlineTypeId, GraphUntagged<'a>),
+    Container(InlineTypeId, GraphContainer<'a>),
+    Primitive(InlineTypeId, PrimitiveType),
+    Any(InlineTypeId),
 }
 
 impl<'a> GraphInlineType<'a> {
+    /// Returns the opaque identity for this inline type node.
     #[inline]
-    pub fn path(&self) -> &InlineTypePath<'a> {
-        let (Self::Enum(path, _)
-        | Self::Struct(path, _)
-        | Self::Tagged(path, _)
-        | Self::Untagged(path, _)
-        | Self::Container(path, _)
-        | Self::Primitive(path, _)
-        | Self::Any(path)) = self;
-        path
+    pub fn id(&self) -> InlineTypeId {
+        let (Self::Enum(id, _)
+        | Self::Struct(id, _)
+        | Self::Tagged(id, _)
+        | Self::Untagged(id, _)
+        | Self::Container(id, _)
+        | Self::Primitive(id, _)
+        | Self::Any(id)) = *self;
+        id
     }
 }
 
 impl<'a> From<SpecInlineType<'a>> for GraphInlineType<'a> {
     fn from(spec: SpecInlineType<'a>) -> Self {
         match spec {
-            SpecInlineType::Enum(path, e) => Self::Enum(path, e),
-            SpecInlineType::Struct(path, s) => Self::Struct(
-                path,
+            SpecInlineType::Enum(id, e) => Self::Enum(id, e),
+            SpecInlineType::Struct(id, s) => Self::Struct(
+                id,
                 GraphStruct {
                     description: s.description,
                 },
             ),
-            SpecInlineType::Tagged(path, t) => Self::Tagged(
-                path,
+            SpecInlineType::Tagged(id, t) => Self::Tagged(
+                id,
                 GraphTagged {
                     description: t.description,
                     tag: t.tag,
                 },
             ),
-            SpecInlineType::Untagged(path, u) => Self::Untagged(
-                path,
+            SpecInlineType::Untagged(id, u) => Self::Untagged(
+                id,
                 GraphUntagged {
                     description: u.description,
                 },
             ),
-            SpecInlineType::Container(path, c) => Self::Container(path, c.into()),
-            SpecInlineType::Primitive(path, p) => Self::Primitive(path, p),
-            SpecInlineType::Any(path) => Self::Any(path),
+            SpecInlineType::Container(id, c) => Self::Container(id, c.into()),
+            SpecInlineType::Primitive(id, p) => Self::Primitive(id, p),
+            SpecInlineType::Any(id) => Self::Any(id),
         }
     }
 }

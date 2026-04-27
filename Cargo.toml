@@ -26,6 +26,7 @@ ploidy-pointer = { path = "ploidy-pointer", version = "0.12.2" }
 ploidy-pointer-derive = { path = "ploidy-pointer-derive", version = "0.12.2" }
 pretty_assertions = "1"
 ref-cast = "1"
+rustc-hash = "2"
 toml_edit = { version = "0.25", features = ["serde"] }
 
 [workspace.lints.rust]

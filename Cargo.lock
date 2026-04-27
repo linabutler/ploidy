@@ -1130,6 +1130,7 @@ dependencies = [
  "proc-macro2",
  "quote",
  "ref-cast",
+ "rustc-hash",
  "semver",
  "serde",
  "syn",

@@ -1,25 +1,37 @@
-use ploidy_core::{codegen::IntoCode, ir::OperationView};
+use itertools::Itertools;
+use ploidy_core::{
+    codegen::IntoCode,
+    ir::{OperationView, View},
+};
 use proc_macro2::TokenStream;
 use quote::{ToTokens, TokenStreamExt, format_ident, quote};
 
+use crate::CodegenResourceIdent;
+
 use super::{
-    cfg::CfgFeature,
-    inlines::CodegenInlines,
-    naming::{CargoFeature, CodegenIdent, CodegenIdentUsage},
-    operation::CodegenOperation,
-    query::CodegenQueryParameters,
+    cfg::CfgFeature, graph::CodegenGraph, inlines::CodegenInlines, naming::CodegenIdentUsage,
+    operation::CodegenOperation, query::CodegenQueryParameters,
 };
 
 /// Generates an `impl Client` block for a feature-gated resource,
 /// with all its operations and inline types.
 pub struct CodegenResource<'a> {
-    feature: &'a CargoFeature,
+    graph: &'a CodegenGraph<'a>,
+    module_ident: CodegenResourceIdent<'a>,
     ops: &'a [OperationView<'a, 'a>],
 }
 
 impl<'a> CodegenResource<'a> {
-    pub fn new(feature: &'a CargoFeature, ops: &'a [OperationView<'a, 'a>]) -> Self {
-        Self { feature, ops }
+    pub fn new(
+        graph: &'a CodegenGraph<'a>,
+        module_ident: CodegenResourceIdent<'a>,
+        ops: &'a [OperationView<'a, 'a>],
+    ) -> Self {
+        Self {
+            graph,
+            module_ident,
+            ops,
+        }
     }
 }
 
@@ -30,15 +42,20 @@ impl ToTokens for CodegenResource<'_> {
     )]
     fn to_tokens(&self, tokens: &mut TokenStream) {
         // Each method gets its own `#[cfg(...)]` attribute.
-        let methods = self.ops.iter().map(|view| {
-            let cfg = CfgFeature::for_operation(view);
-            let method = CodegenOperation::new(view).into_token_stream();
-            quote! {
-                #cfg
-                #method
-            }
-        });
-        let inlines = CodegenInlines::Resource(self.ops);
+        let methods = self
+            .ops
+            .iter()
+            .map(|op| {
+                let cfg = CfgFeature::for_operation(op);
+                let method = CodegenOperation::new(self.graph, op).into_token_stream();
+                quote! {
+                    #cfg
+                    #method
+                }
+            })
+            .collect_vec();
+        let inlines =
+            CodegenInlines::with_cfg(self.graph, self.ops.iter().flat_map(|op| op.inlines()));
 
         let params = self
             .ops
@@ -48,9 +65,9 @@ impl ToTokens for CodegenResource<'_> {
                 // that have at least one query parameter.
                 op.query().next().is_some().then(|| {
                     let cfg = CfgFeature::for_operation(op);
-                    let query = CodegenQueryParameters::new(op);
-                    let op_ident = CodegenIdent::new(op.id());
-                    let mod_name = format_ident!("{}_query", CodegenIdentUsage::Module(&op_ident));
+                    let query = CodegenQueryParameters::new(self.graph, op);
+                    let name = self.graph.ident(op.id());
+                    let mod_name = format_ident!("{}_query", CodegenIdentUsage::Module(&name));
                     quote! {
                         #cfg
                         mod #mod_name {
@@ -87,7 +104,7 @@ impl IntoCode for CodegenResource<'_> {
         (
             format!(
                 "src/client/{}.rs",
-                CodegenIdentUsage::Module(self.feature.as_ident()).display()
+                CodegenIdentUsage::Module(&self.module_ident).display()
             ),
             self.into_token_stream(),
         )
@@ -107,7 +124,7 @@ mod tests {
     use pretty_assertions::assert_eq;
     use syn::parse_quote;
 
-    use crate::{graph::CodegenGraph, naming::CargoFeature};
+    use crate::graph::CodegenGraph;
 
     // MARK: Feature gating
 
@@ -152,8 +169,8 @@ mod tests {
         let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
         let ops = graph.operations().collect_vec();
-        let feature = CargoFeature::from_name("customer");
-        let resource = CodegenResource::new(&feature, &ops);
+        let module_ident = graph.resource("customer").unwrap();
+        let resource = CodegenResource::new(&graph, module_ident, &ops);
 
         // No `#[cfg(...)]` on the method because none of its
         // dependencies have an `x-resourceId`.
@@ -233,8 +250,8 @@ mod tests {
         let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
         let ops = graph.operations().collect_vec();
-        let feature = CargoFeature::from_name("orders");
-        let resource = CodegenResource::new(&feature, &ops);
+        let module_ident = graph.resource("orders").unwrap();
+        let resource = CodegenResource::new(&graph, module_ident, &ops);
 
         // `#[cfg(feature = "customer")]` because `Order` depends on
         // `Customer`, which has `x-resourceId: customer`.
@@ -304,8 +321,8 @@ mod tests {
         let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
         let ops = graph.operations().collect_vec();
-        let feature = CargoFeature::from_name("customer");
-        let resource = CodegenResource::new(&feature, &ops);
+        let module_ident = graph.resource("customer").unwrap();
+        let resource = CodegenResource::new(&graph, module_ident, &ops);
 
         let actual: syn::File = parse_quote!(#resource);
         let expected: syn::File = parse_quote! {
@@ -402,8 +419,8 @@ mod tests {
         let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
         let ops = graph.operations().collect_vec();
-        let feature = CargoFeature::from_name("customer");
-        let resource = CodegenResource::new(&feature, &ops);
+        let module_ident = graph.resource("customer").unwrap();
+        let resource = CodegenResource::new(&graph, module_ident, &ops);
 
         let actual: syn::File = parse_quote!(#resource);
         let expected: syn::File = parse_quote! {
@@ -524,8 +541,8 @@ mod tests {
         let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
         let ops = graph.operations().collect_vec();
-        let feature = CargoFeature::from_name("customer");
-        let resource = CodegenResource::new(&feature, &ops);
+        let module_ident = graph.resource("customer").unwrap();
+        let resource = CodegenResource::new(&graph, module_ident, &ops);
 
         let actual: syn::File = parse_quote!(#resource);
         let expected: syn::File = parse_quote! {

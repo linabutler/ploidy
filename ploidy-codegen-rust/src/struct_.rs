@@ -1,35 +1,32 @@
 use itertools::Itertools;
-use ploidy_core::{
-    codegen::UniqueNames,
-    ir::{Required, StructFieldName, StructFieldView, StructView, View},
-};
+use ploidy_core::ir::{Required, StructFieldName, StructFieldView, StructView, TypeInfo, View};
 use proc_macro2::TokenStream;
 use quote::{ToTokens, TokenStreamExt, quote};
 
 use super::{
-    derives::ExtraDerive,
-    doc_attrs,
-    ext::FieldViewExt,
-    naming::{CodegenIdentRef, CodegenIdentScope, CodegenIdentUsage, CodegenTypeName},
-    ref_::CodegenRef,
+    derives::ExtraDerive, doc_attrs, ext::FieldViewExt, graph::CodegenGraph, graph::IdentMapping,
+    naming::CodegenIdentUsage, ref_::CodegenRef,
 };
 
 #[derive(Clone, Debug)]
 pub struct CodegenStruct<'a> {
-    name: CodegenTypeName<'a>,
+    graph: &'a CodegenGraph<'a>,
+    info: TypeInfo<'a>,
     ty: &'a StructView<'a, 'a>,
 }
 
 impl<'a> CodegenStruct<'a> {
-    pub fn new(name: CodegenTypeName<'a>, ty: &'a StructView<'a, 'a>) -> Self {
-        Self { name, ty }
+    pub fn new(
+        graph: &'a CodegenGraph<'a>,
+        info: TypeInfo<'a>,
+        ty: &'a StructView<'a, 'a>,
+    ) -> Self {
+        Self { graph, info, ty }
     }
 }
 
 impl ToTokens for CodegenStruct<'_> {
     fn to_tokens(&self, tokens: &mut TokenStream) {
-        let unique = UniqueNames::new();
-        let mut scope = CodegenIdentScope::new(&unique);
         let fields = self
             .ty
             .fields()
@@ -37,15 +34,12 @@ impl ToTokens for CodegenStruct<'_> {
             .map(|field| {
                 let doc_attrs = field.description().map(doc_attrs);
 
-                let name = match field.name() {
-                    StructFieldName::Name(n) => scope.uniquify(n),
-                    StructFieldName::Hint(hint) => {
-                        scope.uniquify_ident(&CodegenIdentRef::from_field_name_hint(hint))
-                    }
-                };
+                let name = self
+                    .graph
+                    .ident(IdentMapping::StructField(self.info, field.name()));
                 let field_name = CodegenIdentUsage::Field(&name);
                 let field_attrs = StructFieldAttrs::new(field_name, &field);
-                let ty = CodegenField::new(&field);
+                let ty = CodegenField::new(self.graph, &field);
 
                 quote! {
                     #doc_attrs
@@ -69,7 +63,7 @@ impl ToTokens for CodegenStruct<'_> {
             extra_derives.push(ExtraDerive::Default);
         }
 
-        let type_name = &self.name;
+        let type_name = CodegenIdentUsage::Type(&self.graph.ident(self.info));
         let doc_attrs = self.ty.description().map(doc_attrs);
 
         tokens.append_all(quote! {
@@ -87,19 +81,20 @@ impl ToTokens for CodegenStruct<'_> {
 /// A field in a struct, ready for code generation.
 #[derive(Debug)]
 struct CodegenField<'view, 'a> {
+    graph: &'a CodegenGraph<'a>,
     field: &'a StructFieldView<'view, 'a, 'a>,
 }
 
 impl<'view, 'a> CodegenField<'view, 'a> {
-    fn new(field: &'a StructFieldView<'view, 'a, 'a>) -> Self {
-        Self { field }
+    fn new(graph: &'a CodegenGraph<'a>, field: &'a StructFieldView<'view, 'a, 'a>) -> Self {
+        Self { graph, field }
     }
 }
 
 impl ToTokens for CodegenField<'_, '_> {
     fn to_tokens(&self, tokens: &mut TokenStream) {
         let ty = self.field.inner();
-        let ref_ = CodegenRef::new(&ty);
+        let ref_ = CodegenRef::new(self.graph, &ty);
         let boxed = if self.field.needs_box() {
             quote! { ::std::boxed::Box<#ref_> }
         } else {
@@ -188,7 +183,7 @@ mod tests {
 
     use ploidy_core::{
         arena::Arena,
-        ir::{RawGraph, SchemaTypeView, Spec},
+        ir::{RawGraph, SchemaTypeView, Spec, TypeInfo},
         parse::Document,
     };
     use pretty_assertions::assert_eq;
@@ -224,12 +219,11 @@ mod tests {
         let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
         let schema = graph.schema("Pet").unwrap();
-        let schema @ SchemaTypeView::Struct(_, struct_view) = &schema else {
+        let SchemaTypeView::Struct(info, struct_view) = &schema else {
             panic!("expected struct `Pet`; got `{schema:?}`");
         };
 
-        let name = CodegenTypeName::Schema(schema);
-        let codegen = CodegenStruct::new(name, struct_view);
+        let codegen = CodegenStruct::new(&graph, TypeInfo::Schema(*info), struct_view);
 
         let actual: syn::ItemStruct = parse_quote!(#codegen);
         // `name` is a required string field, which implements `Default`,
@@ -284,12 +278,11 @@ mod tests {
         let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
         let schema = graph.schema("Animal").unwrap();
-        let schema @ SchemaTypeView::Struct(_, struct_view) = &schema else {
+        let SchemaTypeView::Struct(info, struct_view) = &schema else {
             panic!("expected struct `Animal`; got `{schema:?}`");
         };
 
-        let name = CodegenTypeName::Schema(schema);
-        let codegen = CodegenStruct::new(name, struct_view);
+        let codegen = CodegenStruct::new(&graph, TypeInfo::Schema(*info), struct_view);
 
         let actual: syn::ItemStruct = parse_quote!(#codegen);
         // `name` is a required string field, which implements `Default`,
@@ -335,12 +328,11 @@ mod tests {
         let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
         let schema = graph.schema("Record").unwrap();
-        let schema @ SchemaTypeView::Struct(_, struct_view) = &schema else {
+        let SchemaTypeView::Struct(info, struct_view) = &schema else {
             panic!("expected struct `Record`; got `{schema:?}`");
         };
 
-        let name = CodegenTypeName::Schema(schema);
-        let codegen = CodegenStruct::new(name, struct_view);
+        let codegen = CodegenStruct::new(&graph, TypeInfo::Schema(*info), struct_view);
 
         let actual: syn::ItemStruct = parse_quote!(#codegen);
         // Required nullable field uses `Option<T>`, not `AbsentOr<T>`,
@@ -387,12 +379,11 @@ mod tests {
         let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
         let schema = graph.schema("Record").unwrap();
-        let schema @ SchemaTypeView::Struct(_, struct_view) = &schema else {
+        let SchemaTypeView::Struct(info, struct_view) = &schema else {
             panic!("expected struct `Record`; got `{schema:?}`");
         };
 
-        let name = CodegenTypeName::Schema(schema);
-        let codegen = CodegenStruct::new(name, struct_view);
+        let codegen = CodegenStruct::new(&graph, TypeInfo::Schema(*info), struct_view);
 
         let actual: syn::ItemStruct = parse_quote!(#codegen);
         // OpenAPI 3.1 `type: [T, 'null']` syntax should behave identically to
@@ -440,12 +431,11 @@ mod tests {
         let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
         let schema = graph.schema("Record").unwrap();
-        let schema @ SchemaTypeView::Struct(_, struct_view) = &schema else {
+        let SchemaTypeView::Struct(info, struct_view) = &schema else {
             panic!("expected struct `Record`; got `{schema:?}`");
         };
 
-        let name = CodegenTypeName::Schema(schema);
-        let codegen = CodegenStruct::new(name, struct_view);
+        let codegen = CodegenStruct::new(&graph, TypeInfo::Schema(*info), struct_view);
 
         let actual: syn::ItemStruct = parse_quote!(#codegen);
         // Optional nullable field uses `AbsentOr<T>` with `#[serde(...)]` attributes.
@@ -494,12 +484,11 @@ mod tests {
         let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
         let schema = graph.schema("Record").unwrap();
-        let schema @ SchemaTypeView::Struct(_, struct_view) = &schema else {
+        let SchemaTypeView::Struct(info, struct_view) = &schema else {
             panic!("expected struct `Record`; got `{schema:?}`");
         };
 
-        let name = CodegenTypeName::Schema(schema);
-        let codegen = CodegenStruct::new(name, struct_view);
+        let codegen = CodegenStruct::new(&graph, TypeInfo::Schema(*info), struct_view);
 
         let actual: syn::ItemStruct = parse_quote!(#codegen);
         // The field should be `AbsentOr<String>`, not `AbsentOr<NullableString>`
@@ -545,12 +534,11 @@ mod tests {
         let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
         let schema = graph.schema("User").unwrap();
-        let schema @ SchemaTypeView::Struct(_, struct_view) = &schema else {
+        let SchemaTypeView::Struct(info, struct_view) = &schema else {
             panic!("expected struct `User`; got `{schema:?}`");
         };
 
-        let name = CodegenTypeName::Schema(schema);
-        let codegen = CodegenStruct::new(name, struct_view);
+        let codegen = CodegenStruct::new(&graph, TypeInfo::Schema(*info), struct_view);
 
         let actual: syn::ItemStruct = parse_quote!(#codegen);
         // `id` is a required string field, which implements `Default`,
@@ -597,12 +585,11 @@ mod tests {
         let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
         let schema = graph.schema("Measurement").unwrap();
-        let schema @ SchemaTypeView::Struct(_, struct_view) = &schema else {
+        let SchemaTypeView::Struct(info, struct_view) = &schema else {
             panic!("expected struct `Measurement`; got `{schema:?}`");
         };
 
-        let name = CodegenTypeName::Schema(schema);
-        let codegen = CodegenStruct::new(name, struct_view);
+        let codegen = CodegenStruct::new(&graph, TypeInfo::Schema(*info), struct_view);
 
         let actual: syn::ItemStruct = parse_quote!(#codegen);
         // `value` and `unit` are required primitive fields. `f64` prevents `Eq`
@@ -666,12 +653,11 @@ mod tests {
         let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
         let schema = graph.schema("TextAction").unwrap();
-        let schema @ SchemaTypeView::Struct(_, struct_view) = &schema else {
+        let SchemaTypeView::Struct(info, struct_view) = &schema else {
             panic!("expected struct `TextAction`; got `{schema:?}`");
         };
 
-        let name = CodegenTypeName::Schema(schema);
-        let codegen = CodegenStruct::new(name, struct_view);
+        let codegen = CodegenStruct::new(&graph, TypeInfo::Schema(*info), struct_view);
 
         let actual: syn::ItemStruct = parse_quote!(#codegen);
         let expected: syn::ItemStruct = parse_quote! {
@@ -727,12 +713,11 @@ mod tests {
         let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
         let schema = graph.schema("TextAction").unwrap();
-        let schema @ SchemaTypeView::Struct(_, struct_view) = &schema else {
+        let SchemaTypeView::Struct(info, struct_view) = &schema else {
             panic!("expected struct `TextAction`; got `{schema:?}`");
         };
 
-        let name = CodegenTypeName::Schema(schema);
-        let codegen = CodegenStruct::new(name, struct_view);
+        let codegen = CodegenStruct::new(&graph, TypeInfo::Schema(*info), struct_view);
 
         let actual: syn::ItemStruct = parse_quote!(#codegen);
         let expected: syn::ItemStruct = parse_quote! {
@@ -801,12 +786,11 @@ mod tests {
         let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
         let schema = graph.schema("TextAction").unwrap();
-        let schema @ SchemaTypeView::Struct(_, struct_view) = &schema else {
+        let SchemaTypeView::Struct(info, struct_view) = &schema else {
             panic!("expected struct `TextAction`; got `{schema:?}`");
         };
 
-        let name = CodegenTypeName::Schema(schema);
-        let codegen = CodegenStruct::new(name, struct_view);
+        let codegen = CodegenStruct::new(&graph, TypeInfo::Schema(*info), struct_view);
 
         let actual: syn::ItemStruct = parse_quote!(#codegen);
         let expected: syn::ItemStruct = parse_quote! {
@@ -868,12 +852,11 @@ mod tests {
         let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
         let schema = graph.schema("TextAction").unwrap();
-        let schema @ SchemaTypeView::Struct(_, struct_view) = &schema else {
+        let SchemaTypeView::Struct(info, struct_view) = &schema else {
             panic!("expected struct `TextAction`; got `{schema:?}`");
         };
 
-        let name = CodegenTypeName::Schema(schema);
-        let codegen = CodegenStruct::new(name, struct_view);
+        let codegen = CodegenStruct::new(&graph, TypeInfo::Schema(*info), struct_view);
 
         let actual: syn::ItemStruct = parse_quote!(#codegen);
         let expected: syn::ItemStruct = parse_quote! {
@@ -971,12 +954,11 @@ mod tests {
         let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
         let schema = graph.schema("TextAction").unwrap();
-        let schema @ SchemaTypeView::Struct(_, struct_view) = &schema else {
+        let SchemaTypeView::Struct(info, struct_view) = &schema else {
             panic!("expected struct `TextAction`; got `{schema:?}`");
         };
 
-        let name = CodegenTypeName::Schema(schema);
-        let codegen = CodegenStruct::new(name, struct_view);
+        let codegen = CodegenStruct::new(&graph, TypeInfo::Schema(*info), struct_view);
 
         let actual: syn::ItemStruct = parse_quote!(#codegen);
         let expected: syn::ItemStruct = parse_quote! {
@@ -1043,12 +1025,11 @@ mod tests {
         let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
         let schema = graph.schema("N").unwrap();
-        let schema @ SchemaTypeView::Struct(_, struct_view) = &schema else {
+        let SchemaTypeView::Struct(info, struct_view) = &schema else {
             panic!("expected struct `N`; got `{schema:?}`");
         };
 
-        let name = CodegenTypeName::Schema(schema);
-        let codegen = CodegenStruct::new(name, struct_view);
+        let codegen = CodegenStruct::new(&graph, TypeInfo::Schema(*info), struct_view);
 
         let actual: syn::ItemStruct = parse_quote!(#codegen);
         let expected: syn::ItemStruct = parse_quote! {
@@ -1110,12 +1091,11 @@ mod tests {
         let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
         let schema = graph.schema("X").unwrap();
-        let schema @ SchemaTypeView::Struct(_, struct_view) = &schema else {
+        let SchemaTypeView::Struct(info, struct_view) = &schema else {
             panic!("expected struct `X`; got `{schema:?}`");
         };
 
-        let name = CodegenTypeName::Schema(schema);
-        let codegen = CodegenStruct::new(name, struct_view);
+        let codegen = CodegenStruct::new(&graph, TypeInfo::Schema(*info), struct_view);
 
         let actual: syn::ItemStruct = parse_quote!(#codegen);
         let expected: syn::ItemStruct = parse_quote! {
@@ -1182,12 +1162,11 @@ mod tests {
         let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
         let schema = graph.schema("B").unwrap();
-        let schema @ SchemaTypeView::Struct(_, struct_view) = &schema else {
+        let SchemaTypeView::Struct(info, struct_view) = &schema else {
             panic!("expected struct `B`; got `{schema:?}`");
         };
 
-        let name = CodegenTypeName::Schema(schema);
-        let codegen = CodegenStruct::new(name, struct_view);
+        let codegen = CodegenStruct::new(&graph, TypeInfo::Schema(*info), struct_view);
 
         let actual: syn::ItemStruct = parse_quote!(#codegen);
         let expected: syn::ItemStruct = parse_quote! {
@@ -1256,13 +1235,13 @@ mod tests {
         let actual: syn::File = syn::parse2(
             graph
                 .schemas()
-                .filter(|s| matches!(s.name(), "A" | "N" | "T"))
+                .filter(|schema| matches!(SchemaTypeView::name(schema), "A" | "N" | "T"))
                 .map(|schema| {
-                    let schema @ SchemaTypeView::Struct(_, struct_view) = &schema else {
+                    let SchemaTypeView::Struct(info, struct_view) = &schema else {
                         panic!("expected struct; got `{schema:?}`");
                     };
-                    let name = CodegenTypeName::Schema(schema);
-                    let codegen = CodegenStruct::new(name, struct_view);
+
+                    let codegen = CodegenStruct::new(&graph, TypeInfo::Schema(*info), struct_view);
                     quote!(#codegen)
                 })
                 .reduce(|a, b| quote! { #a #b })
@@ -1321,12 +1300,11 @@ mod tests {
         let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
         let schema = graph.schema("Options").unwrap();
-        let schema @ SchemaTypeView::Struct(_, struct_view) = &schema else {
+        let SchemaTypeView::Struct(info, struct_view) = &schema else {
             panic!("expected struct `Options`; got `{schema:?}`");
         };
 
-        let name = CodegenTypeName::Schema(schema);
-        let codegen = CodegenStruct::new(name, struct_view);
+        let codegen = CodegenStruct::new(&graph, TypeInfo::Schema(*info), struct_view);
 
         let actual: syn::ItemStruct = parse_quote!(#codegen);
         let expected: syn::ItemStruct = parse_quote! {
@@ -1371,12 +1349,11 @@ mod tests {
         let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
         let schema = graph.schema("Outer").unwrap();
-        let schema @ SchemaTypeView::Struct(_, struct_view) = &schema else {
+        let SchemaTypeView::Struct(info, struct_view) = &schema else {
             panic!("expected struct `Outer`; got `{schema:?}`");
         };
 
-        let name = CodegenTypeName::Schema(schema);
-        let codegen = CodegenStruct::new(name, struct_view);
+        let codegen = CodegenStruct::new(&graph, TypeInfo::Schema(*info), struct_view);
 
         let actual: syn::ItemStruct = parse_quote!(#codegen);
         // Both `Outer` and `Inner` have all optional fields,
@@ -1425,12 +1402,11 @@ mod tests {
         let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
         let schema = graph.schema("Outer").unwrap();
-        let schema @ SchemaTypeView::Struct(_, struct_view) = &schema else {
+        let SchemaTypeView::Struct(info, struct_view) = &schema else {
             panic!("expected struct `Outer`; got `{schema:?}`");
         };
 
-        let name = CodegenTypeName::Schema(schema);
-        let codegen = CodegenStruct::new(name, struct_view);
+        let codegen = CodegenStruct::new(&graph, TypeInfo::Schema(*info), struct_view);
 
         let actual: syn::ItemStruct = parse_quote!(#codegen);
         // `Outer.inner` is required, and `Inner` has a required field (`id`),
@@ -1489,12 +1465,11 @@ mod tests {
         let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
         let schema = graph.schema("Owner").unwrap();
-        let schema @ SchemaTypeView::Struct(_, struct_view) = &schema else {
+        let SchemaTypeView::Struct(info, struct_view) = &schema else {
             panic!("expected struct `Owner`; got `{schema:?}`");
         };
 
-        let name = CodegenTypeName::Schema(schema);
-        let codegen = CodegenStruct::new(name, struct_view);
+        let codegen = CodegenStruct::new(&graph, TypeInfo::Schema(*info), struct_view);
 
         let actual: syn::ItemStruct = parse_quote!(#codegen);
         // `Pet` is a tagged union, but `Owner.pet` is optional (`AbsentOr<Pet>`),
@@ -1539,12 +1514,11 @@ mod tests {
         let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
         let schema = graph.schema("Container").unwrap();
-        let schema @ SchemaTypeView::Struct(_, struct_view) = &schema else {
+        let SchemaTypeView::Struct(info, struct_view) = &schema else {
             panic!("expected struct `Container`; got `{schema:?}`");
         };
 
-        let name = CodegenTypeName::Schema(schema);
-        let codegen = CodegenStruct::new(name, struct_view);
+        let codegen = CodegenStruct::new(&graph, TypeInfo::Schema(*info), struct_view);
 
         let actual: syn::ItemStruct = parse_quote!(#codegen);
         // `StringOrInt` is an untagged union, but `Container.value` is optional
@@ -1605,12 +1579,11 @@ mod tests {
         let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
         let schema = graph.schema("Owner").unwrap();
-        let schema @ SchemaTypeView::Struct(_, struct_view) = &schema else {
+        let SchemaTypeView::Struct(info, struct_view) = &schema else {
             panic!("expected struct `Owner`; got `{schema:?}`");
         };
 
-        let name = CodegenTypeName::Schema(schema);
-        let codegen = CodegenStruct::new(name, struct_view);
+        let codegen = CodegenStruct::new(&graph, TypeInfo::Schema(*info), struct_view);
 
         let actual: syn::ItemStruct = parse_quote!(#codegen);
         // `Pet` is a required field, so `Owner` can't derive `Default`.
@@ -1655,12 +1628,11 @@ mod tests {
         let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
         let schema = graph.schema("Outer").unwrap();
-        let schema @ SchemaTypeView::Struct(_, struct_view) = &schema else {
+        let SchemaTypeView::Struct(info, struct_view) = &schema else {
             panic!("expected struct `Outer`; got `{schema:?}`");
         };
 
-        let name = CodegenTypeName::Schema(schema);
-        let codegen = CodegenStruct::new(name, struct_view);
+        let codegen = CodegenStruct::new(&graph, TypeInfo::Schema(*info), struct_view);
 
         let actual: syn::ItemStruct = parse_quote!(#codegen);
         // `Outer.inner` is optional, so `Outer` can derive `Default` even though
@@ -1701,12 +1673,11 @@ mod tests {
         let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
         let schema = graph.schema("Container").unwrap();
-        let schema @ SchemaTypeView::Struct(_, struct_view) = &schema else {
+        let SchemaTypeView::Struct(info, struct_view) = &schema else {
             panic!("expected struct `Container`; got `{schema:?}`");
         };
 
-        let name = CodegenTypeName::Schema(schema);
-        let codegen = CodegenStruct::new(name, struct_view);
+        let codegen = CodegenStruct::new(&graph, TypeInfo::Schema(*info), struct_view);
 
         let actual: syn::ItemStruct = parse_quote!(#codegen);
         // `data` is a required `Any` field. Since `serde_json::Value` implements
@@ -1754,12 +1725,11 @@ mod tests {
         let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
         let schema = graph.schema("Defaults").unwrap();
-        let schema @ SchemaTypeView::Struct(_, struct_view) = &schema else {
+        let SchemaTypeView::Struct(info, struct_view) = &schema else {
             panic!("expected struct `Defaults`; got `{schema:?}`");
         };
 
-        let name = CodegenTypeName::Schema(schema);
-        let codegen = CodegenStruct::new(name, struct_view);
+        let codegen = CodegenStruct::new(&graph, TypeInfo::Schema(*info), struct_view);
 
         let actual: syn::ItemStruct = parse_quote!(#codegen);
         // Primitives like `String`, `i32`, and `bool` implement `Default`,
@@ -1803,12 +1773,11 @@ mod tests {
         let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
         let schema = graph.schema("Resource").unwrap();
-        let schema @ SchemaTypeView::Struct(_, struct_view) = &schema else {
+        let SchemaTypeView::Struct(info, struct_view) = &schema else {
             panic!("expected struct `Resource`; got `{schema:?}`");
         };
 
-        let name = CodegenTypeName::Schema(schema);
-        let codegen = CodegenStruct::new(name, struct_view);
+        let codegen = CodegenStruct::new(&graph, TypeInfo::Schema(*info), struct_view);
 
         let actual: syn::ItemStruct = parse_quote!(#codegen);
         // `Url` doesn't implement `Default`, so the struct can't derive it.
@@ -1851,12 +1820,11 @@ mod tests {
         let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
         let schema = graph.schema("Resource").unwrap();
-        let schema @ SchemaTypeView::Struct(_, struct_view) = &schema else {
+        let SchemaTypeView::Struct(info, struct_view) = &schema else {
             panic!("expected struct `Resource`; got `{schema:?}`");
         };
 
-        let name = CodegenTypeName::Schema(schema);
-        let codegen = CodegenStruct::new(name, struct_view);
+        let codegen = CodegenStruct::new(&graph, TypeInfo::Schema(*info), struct_view);
 
         let actual: syn::ItemStruct = parse_quote!(#codegen);
         let expected: syn::ItemStruct = parse_quote! {
@@ -1904,12 +1872,11 @@ mod tests {
         let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
         let schema = graph.schema("Container").unwrap();
-        let schema @ SchemaTypeView::Struct(_, struct_view) = &schema else {
+        let SchemaTypeView::Struct(info, struct_view) = &schema else {
             panic!("expected struct `Container`; got `{schema:?}`");
         };
 
-        let name = CodegenTypeName::Schema(schema);
-        let codegen = CodegenStruct::new(name, struct_view);
+        let codegen = CodegenStruct::new(&graph, TypeInfo::Schema(*info), struct_view);
 
         let actual: syn::ItemStruct = parse_quote!(#codegen);
         // `Tags` is a type alias for `Vec<String>`, which implements `Default`,
@@ -1974,12 +1941,11 @@ mod tests {
         let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
         let schema = graph.schema("Corgi").unwrap();
-        let schema @ SchemaTypeView::Struct(_, struct_view) = &schema else {
+        let SchemaTypeView::Struct(info, struct_view) = &schema else {
             panic!("expected struct `Corgi`; got `{schema:?}`");
         };
 
-        let name = CodegenTypeName::Schema(schema);
-        let codegen = CodegenStruct::new(name, struct_view);
+        let codegen = CodegenStruct::new(&graph, TypeInfo::Schema(*info), struct_view);
 
         let actual: syn::ItemStruct = parse_quote!(#codegen);
         // `Corgi` inherits from the tagged union `Animal` via `allOf`.
@@ -2055,12 +2021,11 @@ mod tests {
         let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
         let schema = graph.schema("Child").unwrap();
-        let schema @ SchemaTypeView::Struct(_, struct_view) = &schema else {
+        let SchemaTypeView::Struct(info, struct_view) = &schema else {
             panic!("expected struct `Child`; got `{schema:?}`");
         };
 
-        let name = CodegenTypeName::Schema(schema);
-        let codegen = CodegenStruct::new(name, struct_view);
+        let codegen = CodegenStruct::new(&graph, TypeInfo::Schema(*info), struct_view);
 
         let actual: syn::ItemStruct = parse_quote!(#codegen);
         // `Child` inherits non-defaultable `source` from `Base`.
@@ -2126,12 +2091,11 @@ mod tests {
         let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
         let schema = graph.schema("TextAction").unwrap();
-        let schema @ SchemaTypeView::Struct(_, struct_view) = &schema else {
+        let SchemaTypeView::Struct(info, struct_view) = &schema else {
             panic!("expected struct `TextAction`; got `{schema:?}`");
         };
 
-        let name = CodegenTypeName::Schema(schema);
-        let codegen = CodegenStruct::new(name, struct_view);
+        let codegen = CodegenStruct::new(&graph, TypeInfo::Schema(*info), struct_view);
 
         let actual: syn::ItemStruct = parse_quote!(#codegen);
         let expected: syn::ItemStruct = parse_quote! {
@@ -2187,12 +2151,11 @@ mod tests {
         let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
         let schema = graph.schema("TextAction").unwrap();
-        let schema @ SchemaTypeView::Struct(_, struct_view) = &schema else {
+        let SchemaTypeView::Struct(info, struct_view) = &schema else {
             panic!("expected struct `TextAction`; got `{schema:?}`");
         };
 
-        let name = CodegenTypeName::Schema(schema);
-        let codegen = CodegenStruct::new(name, struct_view);
+        let codegen = CodegenStruct::new(&graph, TypeInfo::Schema(*info), struct_view);
 
         let actual: syn::ItemStruct = parse_quote!(#codegen);
         let expected: syn::ItemStruct = parse_quote! {
@@ -2237,12 +2200,11 @@ mod tests {
         let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
         let schema = graph.schema("Node").unwrap();
-        let schema @ SchemaTypeView::Struct(_, struct_view) = &schema else {
+        let SchemaTypeView::Struct(info, struct_view) = &schema else {
             panic!("expected struct `Node`; got `{schema:?}`");
         };
 
-        let name = CodegenTypeName::Schema(schema);
-        let codegen = CodegenStruct::new(name, struct_view);
+        let codegen = CodegenStruct::new(&graph, TypeInfo::Schema(*info), struct_view);
 
         let actual: syn::ItemStruct = parse_quote!(#codegen);
         // `next` is required and recursive, so it should be boxed.
@@ -2287,12 +2249,11 @@ mod tests {
         let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
         let schema = graph.schema("Node").unwrap();
-        let schema @ SchemaTypeView::Struct(_, struct_view) = &schema else {
+        let SchemaTypeView::Struct(info, struct_view) = &schema else {
             panic!("expected struct `Node`; got `{schema:?}`");
         };
 
-        let name = CodegenTypeName::Schema(schema);
-        let codegen = CodegenStruct::new(name, struct_view);
+        let codegen = CodegenStruct::new(&graph, TypeInfo::Schema(*info), struct_view);
 
         let actual: syn::ItemStruct = parse_quote!(#codegen);
         // `next` is optional and recursive. The box should be inside `AbsentOr`,
@@ -2341,12 +2302,11 @@ mod tests {
         let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
         let schema = graph.schema("Node").unwrap();
-        let schema @ SchemaTypeView::Struct(_, struct_view) = &schema else {
+        let SchemaTypeView::Struct(info, struct_view) = &schema else {
             panic!("expected struct `Node`; got `{schema:?}`");
         };
 
-        let name = CodegenTypeName::Schema(schema);
-        let codegen = CodegenStruct::new(name, struct_view);
+        let codegen = CodegenStruct::new(&graph, TypeInfo::Schema(*info), struct_view);
 
         let actual: syn::ItemStruct = parse_quote!(#codegen);
         // `children` is an array of recursive elements, but arrays (`Vec`)
@@ -2393,12 +2353,11 @@ mod tests {
         let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
         let schema = graph.schema("Node").unwrap();
-        let schema @ SchemaTypeView::Struct(_, struct_view) = &schema else {
+        let SchemaTypeView::Struct(info, struct_view) = &schema else {
             panic!("expected struct `Node`; got `{schema:?}`");
         };
 
-        let name = CodegenTypeName::Schema(schema);
-        let codegen = CodegenStruct::new(name, struct_view);
+        let codegen = CodegenStruct::new(&graph, TypeInfo::Schema(*info), struct_view);
 
         let actual: syn::ItemStruct = parse_quote!(#codegen);
         // `children` is an optional array of recursive elements. Arrays provide
@@ -2458,12 +2417,11 @@ mod tests {
         let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
         let schema = graph.schema("Person").unwrap();
-        let schema @ SchemaTypeView::Struct(_, struct_view) = &schema else {
+        let SchemaTypeView::Struct(info, struct_view) = &schema else {
             panic!("expected struct `Person`; got `{schema:?}`");
         };
 
-        let name = CodegenTypeName::Schema(schema);
-        let codegen = CodegenStruct::new(name, struct_view);
+        let codegen = CodegenStruct::new(&graph, TypeInfo::Schema(*info), struct_view);
 
         let actual: syn::ItemStruct = parse_quote!(#codegen);
         // Inherited fields from inline `allOf` parents should appear first
@@ -2510,12 +2468,11 @@ mod tests {
         let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
         let schema = graph.schema("Config").unwrap();
-        let schema @ SchemaTypeView::Struct(_, struct_view) = &schema else {
+        let SchemaTypeView::Struct(info, struct_view) = &schema else {
             panic!("expected struct `Config`; got `{schema:?}`");
         };
 
-        let name = CodegenTypeName::Schema(schema);
-        let codegen = CodegenStruct::new(name, struct_view);
+        let codegen = CodegenStruct::new(&graph, TypeInfo::Schema(*info), struct_view);
 
         let actual: syn::ItemStruct = parse_quote!(#codegen);
         let expected: syn::ItemStruct = parse_quote! {
@@ -2579,12 +2536,11 @@ mod tests {
         let graph = CodegenGraph::new(raw.cook());
 
         let schema = graph.schema("Dog").unwrap();
-        let schema @ SchemaTypeView::Struct(_, struct_view) = &schema else {
+        let SchemaTypeView::Struct(info, struct_view) = &schema else {
             panic!("expected struct `Dog`; got `{schema:?}`");
         };
 
-        let name = CodegenTypeName::Schema(schema);
-        let codegen = CodegenStruct::new(name, struct_view);
+        let codegen = CodegenStruct::new(&graph, TypeInfo::Schema(*info), struct_view);
 
         let actual: syn::ItemStruct = parse_quote!(#codegen);
         // Both `kind` and `bark` should be present. After inlining, the
@@ -2637,12 +2593,11 @@ mod tests {
         let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
         let schema = graph.schema("Pet").unwrap();
-        let schema @ SchemaTypeView::Struct(_, struct_view) = &schema else {
+        let SchemaTypeView::Struct(info, struct_view) = &schema else {
             panic!("expected struct `Pet`; got `{schema:?}`");
         };
 
-        let name = CodegenTypeName::Schema(schema);
-        let codegen = CodegenStruct::new(name, struct_view);
+        let codegen = CodegenStruct::new(&graph, TypeInfo::Schema(*info), struct_view);
 
         let actual: syn::ItemStruct = parse_quote!(#codegen);
         let expected: syn::ItemStruct = parse_quote! {
@@ -2689,12 +2644,11 @@ mod tests {
         let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
         let schema = graph.schema("Pet").unwrap();
-        let schema @ SchemaTypeView::Struct(_, struct_view) = &schema else {
+        let SchemaTypeView::Struct(info, struct_view) = &schema else {
             panic!("expected struct `Pet`; got `{schema:?}`");
         };
 
-        let name = CodegenTypeName::Schema(schema);
-        let codegen = CodegenStruct::new(name, struct_view);
+        let codegen = CodegenStruct::new(&graph, TypeInfo::Schema(*info), struct_view);
 
         let actual: syn::ItemStruct = parse_quote!(#codegen);
         let expected: syn::ItemStruct = parse_quote! {
@@ -2741,12 +2695,11 @@ mod tests {
         let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
         let schema = graph.schema("Pet").unwrap();
-        let schema @ SchemaTypeView::Struct(_, struct_view) = &schema else {
+        let SchemaTypeView::Struct(info, struct_view) = &schema else {
             panic!("expected struct `Pet`; got `{schema:?}`");
         };
 
-        let name = CodegenTypeName::Schema(schema);
-        let codegen = CodegenStruct::new(name, struct_view);
+        let codegen = CodegenStruct::new(&graph, TypeInfo::Schema(*info), struct_view);
 
         let actual: syn::ItemStruct = parse_quote!(#codegen);
         let expected: syn::ItemStruct = parse_quote! {
@@ -2795,12 +2748,11 @@ mod tests {
         let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
         let schema = graph.schema("Pet").unwrap();
-        let schema @ SchemaTypeView::Struct(_, struct_view) = &schema else {
+        let SchemaTypeView::Struct(info, struct_view) = &schema else {
             panic!("expected struct `Pet`; got `{schema:?}`");
         };
 
-        let name = CodegenTypeName::Schema(schema);
-        let codegen = CodegenStruct::new(name, struct_view);
+        let codegen = CodegenStruct::new(&graph, TypeInfo::Schema(*info), struct_view);
 
         // Required nullable enum fields become `Option<T>` without
         // `skip_serializing_if`, since their type is
@@ -2848,12 +2800,11 @@ mod tests {
         let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
         let schema = graph.schema("Config").unwrap();
-        let schema @ SchemaTypeView::Struct(_, struct_view) = &schema else {
+        let SchemaTypeView::Struct(info, struct_view) = &schema else {
             panic!("expected struct `Config`; got `{schema:?}`");
         };
 
-        let name = CodegenTypeName::Schema(schema);
-        let codegen = CodegenStruct::new(name, struct_view);
+        let codegen = CodegenStruct::new(&graph, TypeInfo::Schema(*info), struct_view);
 
         let actual: syn::ItemStruct = parse_quote!(#codegen);
         let expected: syn::ItemStruct = parse_quote! {
@@ -2906,12 +2857,11 @@ mod tests {
         let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
         let schema = graph.schema("Pet").unwrap();
-        let schema @ SchemaTypeView::Struct(_, struct_view) = &schema else {
+        let SchemaTypeView::Struct(info, struct_view) = &schema else {
             panic!("expected struct `Pet`; got `{schema:?}`");
         };
 
-        let name = CodegenTypeName::Schema(schema);
-        let codegen = CodegenStruct::new(name, struct_view);
+        let codegen = CodegenStruct::new(&graph, TypeInfo::Schema(*info), struct_view);
 
         // Unrepresentable enums become `String` type aliases,
         // so no `skip_serializing_if` is added.

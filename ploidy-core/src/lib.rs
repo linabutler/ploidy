@@ -46,8 +46,9 @@
 //!   in the OpenAPI document. Each carries a [`SchemaTypeInfo`] with
 //!   the schema name and additional metadata.
 //! - **Inline types** are anonymous schemas nested inside other types.
-//!   Each carries an [`InlineTypePath`](ir::InlineTypePath) that
-//!   encodes the type's position in the document.
+//!   Each carries an [`InlineTypeId`](ir::InlineTypeId) for identity
+//!   and an [`InlineTrace`](ir::InlineTrace) that encodes the type's
+//!   position in the graph.
 //!
 //! The two kinds carry different metadata, but share the same structural
 //! shapes: [any], [containers], [enums], [primitives], [structs],
