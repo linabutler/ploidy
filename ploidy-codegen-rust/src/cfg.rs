@@ -23,35 +23,40 @@
 
 use std::collections::BTreeSet;
 
-use itertools::Itertools;
-use ploidy_core::ir::{InlineTypeView, OperationView, SchemaTypeView, View};
+use ploidy_core::ir::{HasResource, InlineTypeView, OperationView, SchemaTypeView, View};
 use proc_macro2::TokenStream;
 use quote::{ToTokens, quote};
 
-use super::naming::CargoFeature;
+use super::{
+    graph::CodegenGraph,
+    naming::{AsFeatureName, ResourceGroup, UniqueIdent},
+};
 
 /// Generates a `#[cfg(...)]` attribute for conditional compilation.
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub enum CfgFeature {
+pub enum CfgFeature<'a> {
     /// A single `feature = "name"` predicate.
-    Single(CargoFeature),
+    Single(&'a UniqueIdent),
     /// A compound `any(feature = "a", feature = "b", ...)` predicate.
-    AnyOf(BTreeSet<CargoFeature>),
+    AnyOf(BTreeSet<&'a UniqueIdent>),
     /// A compound `all(feature = "a", feature = "b", ...)` predicate.
-    AllOf(BTreeSet<CargoFeature>),
+    AllOf(BTreeSet<&'a UniqueIdent>),
     /// A compound `all(feature = "own", any(feature = "a", ...))` predicate,
     /// used for schema types that both specify an `x-resourceId`, and are
     /// used by operations that specify an `x-resource-name`.
     OwnAndUsedBy {
-        own: CargoFeature,
-        used_by: BTreeSet<CargoFeature>,
+        own: &'a UniqueIdent,
+        used_by: BTreeSet<&'a UniqueIdent>,
     },
 }
 
-impl CfgFeature {
+impl<'a> CfgFeature<'a> {
     /// Builds a `#[cfg(...)]` attribute for a schema type, based on
     /// its own resource, and the resources of the operations that use it.
-    pub fn for_schema_type(view: &SchemaTypeView<'_, '_>) -> Option<Self> {
+    pub fn for_schema_type(
+        graph: &CodegenGraph<'a>,
+        view: &SchemaTypeView<'_, 'a>,
+    ) -> Option<Self> {
         // If this type has any transitive ungated root dependents,
         // it can't have a feature gate. An "ungated root" type
         // has no `x-resourceId`, _and_ isn't used by any operation with
@@ -60,35 +65,38 @@ impl CfgFeature {
         let has_ungated_root_dependent = view
             .dependents()
             .filter_map(|v| v.into_schema().right())
-            .any(|s| s.resource().is_none() && s.used_by().all(|op| op.resource().is_none()));
+            .any(|s| {
+                graph.resource_for(&s).is_default()
+                    && s.used_by().all(|op| graph.resource_for(&op).is_default())
+            });
         if has_ungated_root_dependent {
             return None;
         }
 
         // Compute all the operations with resources that use this type.
-        let used_by_features: BTreeSet<_> = view
+        let used_by_resources: BTreeSet<_> = view
             .used_by()
-            .filter_map(|op| op.resource())
-            .map(CargoFeature::from_name)
+            .filter_map(|op| graph.resource_for(&op).name())
             .collect();
 
-        match (view.resource(), used_by_features.is_empty()) {
+        match (graph.resource_for(view), used_by_resources.is_empty()) {
             // Type has own resource, _and_ is used by operations.
-            (Some(name), false) => {
-                Self::own_and_used_by(CargoFeature::from_name(name), used_by_features)
-            }
+            (ResourceGroup::Named(name), false) => Self::own_and_used_by(name, used_by_resources),
             // Type has own resource only (Stripe-style; no resources on operations).
-            (Some(name), true) => Some(Self::Single(CargoFeature::from_name(name))),
+            (ResourceGroup::Named(name), true) => Some(Self::Single(name)),
             // Type has no own resource, but is used by operations
             // (resource annotation-style; no resources on types).
-            (None, false) => Self::any_of(used_by_features),
+            (ResourceGroup::Default, false) => Self::any_of(used_by_resources),
             // No resource name; not used by any operation.
-            (None, true) => None,
+            (ResourceGroup::Default, true) => None,
         }
     }
 
     /// Builds a `#[cfg(...)]` attribute for an inline type.
-    pub fn for_inline_type(view: &InlineTypeView<'_, '_>) -> Option<Self> {
+    pub fn for_inline_type(
+        graph: &CodegenGraph<'a>,
+        view: &InlineTypeView<'_, 'a>,
+    ) -> Option<Self> {
         // Inline types depended on by ungated root types can't be gated, either.
         // See `for_schema_type` for the definition of an "ungated root".
         let has_ungated_root_dependent = view
@@ -99,59 +107,28 @@ impl CfgFeature {
             return None;
         }
 
-        let used_by_features: BTreeSet<_> = view
+        let used_by_resources: BTreeSet<_> = view
             .used_by()
-            .filter_map(|op| op.resource())
-            .map(CargoFeature::from_name)
+            .filter_map(|op| graph.resource_for(&op).name())
             .collect();
 
-        if used_by_features.is_empty() {
+        if used_by_resources.is_empty() {
             // No operations use this inline type directly, so use its
-            // transitive dependencies for gating. Filter out dependencies
-            // without a resource name, because these aren't gated.
-            let pairs = view
-                .dependencies()
-                .filter_map(|v| v.into_schema().right())
-                .filter_map(|ty| ty.resource().map(|r| (CargoFeature::from_name(r), ty)))
-                .collect_vec();
-            Self::all_of(reduce_transitive_features(&pairs))
+            // transitive dependencies for gating.
+            Self::all_of(reduce_transitive_features(graph, view))
         } else {
             // Some operations use this inline type; use those operations for gating.
-            Self::any_of(used_by_features)
+            Self::any_of(used_by_resources)
         }
     }
 
     /// Builds a `#[cfg(...)]` attribute for a client method.
-    pub fn for_operation(view: &OperationView<'_, '_>) -> Option<Self> {
-        // Collect all features from transitive dependencies, then
-        // reduce redundant features.
-        let pairs = view
-            .dependencies()
-            .filter_map(|v| v.into_schema().right())
-            .filter_map(|ty| ty.resource().map(|r| (CargoFeature::from_name(r), ty)))
-            .collect_vec();
-
-        Self::all_of(reduce_transitive_features(&pairs))
-    }
-
-    /// Builds a `#[cfg(...)]` attribute for a resource `mod` declaration in a
-    /// [`CodegenClientModule`](super::client::CodegenClientModule).
-    pub fn for_resource_module(feature: &CargoFeature) -> Option<Self> {
-        if matches!(feature, CargoFeature::Default) {
-            // Modules associated with the default resource shouldn't be gated,
-            // because that would make them unreachable under
-            // `--no-default-features`.
-            return None;
-        }
-        Some(Self::Single(feature.clone()))
+    pub fn for_operation(graph: &CodegenGraph<'a>, view: &OperationView<'_, 'a>) -> Option<Self> {
+        Self::all_of(reduce_transitive_features(graph, view))
     }
 
     /// Builds a `#[cfg(any(...))]` predicate, simplifying if possible.
-    fn any_of(mut features: BTreeSet<CargoFeature>) -> Option<Self> {
-        if features.contains(&CargoFeature::Default) {
-            // Items associated with the default resource shouldn't be gated.
-            return None;
-        }
+    fn any_of(mut features: BTreeSet<&'a UniqueIdent>) -> Option<Self> {
         let first = features.pop_first()?;
         Some(if features.is_empty() {
             // Simplify `any(first)` to `first`.
@@ -163,11 +140,7 @@ impl CfgFeature {
     }
 
     /// Builds a `#[cfg(all(...))]` predicate, simplifying if possible.
-    fn all_of(mut features: BTreeSet<CargoFeature>) -> Option<Self> {
-        if features.contains(&CargoFeature::Default) {
-            // Items associated with the default resource shouldn't be gated.
-            return None;
-        }
+    fn all_of(mut features: BTreeSet<&'a UniqueIdent>) -> Option<Self> {
         let first = features.pop_first()?;
         Some(if features.is_empty() {
             // Simplify `all(first)` to `first`.
@@ -179,11 +152,10 @@ impl CfgFeature {
     }
 
     /// Builds a `#[cfg(all(own, any(...)))]` predicate, simplifying if possible.
-    fn own_and_used_by(own: CargoFeature, mut used_by: BTreeSet<CargoFeature>) -> Option<Self> {
-        if matches!(own, CargoFeature::Default) || used_by.contains(&CargoFeature::Default) {
-            // Items associated with the default resource shouldn't be gated.
-            return None;
-        }
+    fn own_and_used_by(
+        own: &'a UniqueIdent,
+        mut used_by: BTreeSet<&'a UniqueIdent>,
+    ) -> Option<Self> {
         let Some(first) = used_by.pop_first() else {
             // No `used_by`; simplify to `own`.
             return Some(Self::Single(own));
@@ -199,31 +171,31 @@ impl CfgFeature {
     }
 }
 
-impl ToTokens for CfgFeature {
+impl ToTokens for CfgFeature<'_> {
     fn to_tokens(&self, tokens: &mut TokenStream) {
         let predicate = match self {
-            Self::Single(feature) => {
-                let name = feature.display().to_string();
+            Self::Single(resource) => {
+                let name = AsFeatureName(resource).to_string();
                 quote! { feature = #name }
             }
-            Self::AnyOf(features) => {
-                let predicates = features.iter().map(|f| {
-                    let name = f.display().to_string();
+            Self::AnyOf(resources) => {
+                let predicates = resources.iter().map(|f| {
+                    let name = AsFeatureName(f).to_string();
                     quote! { feature = #name }
                 });
                 quote! { any(#(#predicates),*) }
             }
-            Self::AllOf(features) => {
-                let predicates = features.iter().map(|f| {
-                    let name = f.display().to_string();
+            Self::AllOf(resources) => {
+                let predicates = resources.iter().map(|f| {
+                    let name = AsFeatureName(f).to_string();
                     quote! { feature = #name }
                 });
                 quote! { all(#(#predicates),*) }
             }
             Self::OwnAndUsedBy { own, used_by } => {
-                let own_name = own.display().to_string();
+                let own_name = AsFeatureName(own).to_string();
                 let used_by_predicates = used_by.iter().map(|f| {
-                    let name = f.display().to_string();
+                    let name = AsFeatureName(f).to_string();
                     quote! { feature = #name }
                 });
                 quote! { all(feature = #own_name, any(#(#used_by_predicates),*)) }
@@ -233,35 +205,38 @@ impl ToTokens for CfgFeature {
     }
 }
 
-/// Reduces a set of (feature, type) pairs by removing all the features
-/// that are transitively implied by other features. If feature A's type
-/// depends on feature B's type, then enabling A in `Cargo.toml` already
-/// enables B, so B is redundant.
-fn reduce_transitive_features(
-    pairs: &[(CargoFeature, SchemaTypeView<'_, '_>)],
-) -> BTreeSet<CargoFeature> {
-    pairs
-        .iter()
-        .enumerate()
-        .filter(|&(i, (feature, ty))| {
-            // Keep this `feature` unless some `other_ty` depends on it,
-            // meaning that `other_feature` already enables this `feature`.
-            let mut others = pairs.iter().enumerate().filter(|&(j, _)| i != j);
-            !others.any(|(_, (other_feature, other_ty))| {
-                // Does the other type depend on this type?
-                if !other_ty.depends_on(ty) {
-                    return false;
-                }
-                // Do the types form a cycle, and depend on each other?
-                // If so, the lexicographically lower feature name
-                // breaks the tie.
-                if ty.depends_on(other_ty) {
-                    return other_feature < feature;
-                }
-                true
-            })
+/// Reduces the set of resource features in a view's dependencies by
+/// removing features that are transitively implied by other features.
+/// If feature A's type depends on feature B's type, then enabling A
+/// in `Cargo.toml` already enables B, so B is redundant.
+fn reduce_transitive_features<'graph, 'a: 'graph>(
+    graph: &CodegenGraph<'a>,
+    view: &impl View<'graph, 'a>,
+) -> BTreeSet<&'a UniqueIdent> {
+    view.dependencies()
+        .filter_map(|v| {
+            let ty = v.into_schema().right()?;
+            // Filter out dependencies without a resource name,
+            // because these aren't gated.
+            let feature = graph.resource_for(&ty).name()?;
+            // Keep our `feature` unless some `other_ty` depends on it,
+            // meaning that `other_feature` already enables ours.
+            // If this `ty` and `other_ty` depend on each other, the
+            // lexicographically lower feature name breaks the tie.
+            let implied = view
+                .dependencies()
+                .filter_map(|v| v.into_schema().right())
+                .any(|other_ty| {
+                    if let ResourceGroup::Named(other_feature) = graph.resource_for(&other_ty)
+                        && other_ty.depends_on(&ty)
+                    {
+                        !ty.depends_on(&other_ty) || other_feature < feature
+                    } else {
+                        false
+                    }
+                });
+            (!implied).then_some(feature)
         })
-        .map(|(_, (feature, _))| feature.clone())
         .collect()
 }
 
@@ -278,13 +253,15 @@ mod tests {
     use pretty_assertions::assert_eq;
     use syn::parse_quote;
 
-    use crate::graph::CodegenGraph;
+    use crate::{UniqueIdents, graph::CodegenGraph};
 
     // MARK: Predicates
 
     #[test]
     fn test_single_feature() {
-        let cfg = CfgFeature::Single(CargoFeature::from_name("pets"));
+        let arena = Arena::new();
+        let mut scope = UniqueIdents::new(&arena);
+        let cfg = CfgFeature::Single(scope.ident("pets"));
 
         let actual: syn::Attribute = parse_quote!(#cfg);
         let expected: syn::Attribute = parse_quote!(#[cfg(feature = "pets")]);
@@ -293,10 +270,12 @@ mod tests {
 
     #[test]
     fn test_any_of_features() {
+        let arena = Arena::new();
+        let mut scope = UniqueIdents::new(&arena);
         let cfg = CfgFeature::AnyOf(BTreeSet::from_iter([
-            CargoFeature::from_name("cats"),
-            CargoFeature::from_name("dogs"),
-            CargoFeature::from_name("aardvarks"),
+            scope.ident("cats"),
+            scope.ident("dogs"),
+            scope.ident("aardvarks"),
         ]));
 
         let actual: syn::Attribute = parse_quote!(#cfg);
@@ -307,10 +286,12 @@ mod tests {
 
     #[test]
     fn test_all_of_features() {
+        let arena = Arena::new();
+        let mut scope = UniqueIdents::new(&arena);
         let cfg = CfgFeature::AllOf(BTreeSet::from_iter([
-            CargoFeature::from_name("cats"),
-            CargoFeature::from_name("dogs"),
-            CargoFeature::from_name("aardvarks"),
+            scope.ident("cats"),
+            scope.ident("dogs"),
+            scope.ident("aardvarks"),
         ]));
 
         let actual: syn::Attribute = parse_quote!(#cfg);
@@ -321,12 +302,11 @@ mod tests {
 
     #[test]
     fn test_own_and_used_by_feature() {
+        let arena = Arena::new();
+        let mut scope = UniqueIdents::new(&arena);
         let cfg = CfgFeature::OwnAndUsedBy {
-            own: CargoFeature::from_name("own"),
-            used_by: BTreeSet::from_iter([
-                CargoFeature::from_name("a"),
-                CargoFeature::from_name("b"),
-            ]),
+            own: scope.ident("own"),
+            used_by: BTreeSet::from_iter([scope.ident("a"), scope.ident("b")]),
         };
 
         let actual: syn::Attribute = parse_quote!(#cfg);
@@ -337,7 +317,9 @@ mod tests {
 
     #[test]
     fn test_any_of_simplifies_single_feature() {
-        let cfg = CfgFeature::any_of(BTreeSet::from_iter([CargoFeature::from_name("pets")]));
+        let arena = Arena::new();
+        let mut scope = UniqueIdents::new(&arena);
+        let cfg = CfgFeature::any_of(BTreeSet::from_iter([scope.ident("pets")]));
 
         let actual: syn::Attribute = parse_quote!(#cfg);
         let expected: syn::Attribute = parse_quote!(#[cfg(feature = "pets")]);
@@ -346,7 +328,9 @@ mod tests {
 
     #[test]
     fn test_all_of_simplifies_single_feature() {
-        let cfg = CfgFeature::all_of(BTreeSet::from_iter([CargoFeature::from_name("pets")]));
+        let arena = Arena::new();
+        let mut scope = UniqueIdents::new(&arena);
+        let cfg = CfgFeature::all_of(BTreeSet::from_iter([scope.ident("pets")]));
 
         let actual: syn::Attribute = parse_quote!(#cfg);
         let expected: syn::Attribute = parse_quote!(#[cfg(feature = "pets")]);
@@ -360,77 +344,33 @@ mod tests {
     }
 
     #[test]
-    fn test_any_of_returns_none_when_contains_default() {
-        // Items associated with the default resource shouldn't be gated.
-        let cfg = CfgFeature::any_of(BTreeSet::from_iter([
-            CargoFeature::from_name("customer"),
-            CargoFeature::Default,
-            CargoFeature::from_name("billing"),
-        ]));
-        assert_eq!(cfg, None);
-    }
-
-    #[test]
     fn test_all_of_returns_none_for_empty() {
         let cfg = CfgFeature::all_of(BTreeSet::new());
         assert_eq!(cfg, None);
     }
 
     #[test]
-    fn test_all_of_returns_none_when_contains_default() {
-        // Items associated with the default resource shouldn't be gated.
-        let cfg = CfgFeature::all_of(BTreeSet::from_iter([
-            CargoFeature::from_name("customer"),
-            CargoFeature::Default,
-            CargoFeature::from_name("billing"),
-        ]));
-        assert_eq!(cfg, None);
-    }
-
-    #[test]
     fn test_own_and_used_by_simplifies_single_used_by_to_all_of() {
+        let arena = Arena::new();
+        let mut scope = UniqueIdents::new(&arena);
+        let own = scope.ident("own");
+        let other = scope.ident("other");
         // `OwnedAndUsedBy` with one `used_by` feature should simplify to `AllOf`.
-        let cfg = CfgFeature::own_and_used_by(
-            CargoFeature::from_name("own"),
-            BTreeSet::from_iter([CargoFeature::from_name("other")]),
-        );
+        let cfg = CfgFeature::own_and_used_by(own, BTreeSet::from_iter([other]));
         assert_eq!(
             cfg,
-            Some(CfgFeature::AllOf(BTreeSet::from_iter([
-                CargoFeature::from_name("other"),
-                CargoFeature::from_name("own"),
-            ])))
+            Some(CfgFeature::AllOf(BTreeSet::from_iter([other, own])))
         );
     }
 
     #[test]
     fn test_own_and_used_by_simplifies_empty_to_single() {
+        let arena = Arena::new();
+        let mut scope = UniqueIdents::new(&arena);
+        let own = scope.ident("own");
         // `OwnedAndUsedBy` with no `used_by` features should simplify to `Single`.
-        let cfg = CfgFeature::own_and_used_by(CargoFeature::from_name("own"), BTreeSet::new());
-        assert_eq!(
-            cfg,
-            Some(CfgFeature::Single(CargoFeature::from_name("own")))
-        );
-    }
-
-    #[test]
-    fn test_own_and_used_by_returns_none_when_own_is_default() {
-        // Items associated with the default resource shouldn't be gated.
-        let cfg = CfgFeature::own_and_used_by(
-            CargoFeature::Default,
-            BTreeSet::from_iter([CargoFeature::from_name("other")]),
-        );
-        assert_eq!(cfg, None);
-    }
-
-    #[test]
-    fn test_own_and_used_by_returns_none_when_used_by_contains_default() {
-        // Items associated with the default resource shouldn't be gated.
-        let cfg = CfgFeature::own_and_used_by(
-            CargoFeature::from_name("own"),
-            BTreeSet::from_iter([CargoFeature::from_name("other"), CargoFeature::Default]),
-        );
-        assert_eq!(cfg, None);
+        let cfg = CfgFeature::own_and_used_by(own, BTreeSet::new());
+        assert_eq!(cfg, Some(CfgFeature::Single(own)));
     }
 
     // MARK: Schema types
@@ -460,7 +400,7 @@ mod tests {
         let customer = graph.schema("Customer").unwrap();
 
         // Shouldn't generate any feature gates for graph without named resources.
-        let cfg = CfgFeature::for_schema_type(&customer);
+        let cfg = CfgFeature::for_schema_type(&graph, &customer);
         assert_eq!(cfg, None);
     }
 
@@ -489,7 +429,7 @@ mod tests {
         let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
         let customer = graph.schema("Customer").unwrap();
-        let cfg = CfgFeature::for_schema_type(&customer);
+        let cfg = CfgFeature::for_schema_type(&graph, &customer);
 
         let actual: syn::Attribute = parse_quote!(#cfg);
         let expected: syn::Attribute = parse_quote!(#[cfg(feature = "customer")]);
@@ -527,15 +467,47 @@ mod tests {
 
         // `Customer` should be gated.
         let customer = graph.schema("Customer").unwrap();
-        let cfg = CfgFeature::for_schema_type(&customer);
+        let cfg = CfgFeature::for_schema_type(&graph, &customer);
         let actual: syn::Attribute = parse_quote!(#cfg);
         let expected: syn::Attribute = parse_quote!(#[cfg(feature = "customer")]);
         assert_eq!(actual, expected);
 
         // `Address` should be ungated.
         let address = graph.schema("Address").unwrap();
-        let cfg = CfgFeature::for_schema_type(&address);
+        let cfg = CfgFeature::for_schema_type(&graph, &address);
         assert_eq!(cfg, None);
+    }
+
+    #[test]
+    fn test_for_schema_type_with_resource_id_named_default() {
+        // `CodegenGraph` reserves `default` for the `default` Cargo feature,
+        // so a resource named "default" won't collide with it.
+        let doc = Document::from_yaml(indoc::indoc! {"
+            openapi: 3.0.0
+            info:
+              title: Test
+              version: 1.0.0
+            components:
+              schemas:
+                Default:
+                  type: object
+                  x-resourceId: default
+                  properties:
+                    value:
+                      type: string
+        "})
+        .unwrap();
+
+        let arena = Arena::new();
+        let spec = Spec::from_doc(&arena, &doc).unwrap();
+        let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
+
+        let default_type = graph.schema("Default").unwrap();
+        let cfg = CfgFeature::for_schema_type(&graph, &default_type);
+
+        let actual: syn::Attribute = parse_quote!(#cfg);
+        let expected: syn::Attribute = parse_quote!(#[cfg(feature = "default2")]);
+        assert_eq!(actual, expected);
     }
 
     // MARK: Resource annotation-style
@@ -576,7 +548,7 @@ mod tests {
         let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
         let customer = graph.schema("Customer").unwrap();
-        let cfg = CfgFeature::for_schema_type(&customer);
+        let cfg = CfgFeature::for_schema_type(&graph, &customer);
 
         let actual: syn::Attribute = parse_quote!(#cfg);
         let expected: syn::Attribute = parse_quote!(#[cfg(feature = "customer")]);
@@ -632,7 +604,7 @@ mod tests {
         let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
         let address = graph.schema("Address").unwrap();
-        let cfg = CfgFeature::for_schema_type(&address);
+        let cfg = CfgFeature::for_schema_type(&graph, &address);
 
         let actual: syn::Attribute = parse_quote!(#cfg);
         let expected: syn::Attribute =
@@ -677,7 +649,7 @@ mod tests {
         let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
         let customer = graph.schema("Customer").unwrap();
-        let cfg = CfgFeature::for_schema_type(&customer);
+        let cfg = CfgFeature::for_schema_type(&graph, &customer);
 
         let actual: syn::Attribute = parse_quote!(#cfg);
         let expected: syn::Attribute =
@@ -731,7 +703,7 @@ mod tests {
         let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
         let customer = graph.schema("Customer").unwrap();
-        let cfg = CfgFeature::for_schema_type(&customer);
+        let cfg = CfgFeature::for_schema_type(&graph, &customer);
 
         let actual: syn::Attribute = parse_quote!(#cfg);
         let expected: syn::Attribute = parse_quote!(
@@ -784,7 +756,7 @@ mod tests {
 
         // `Customer` keeps its compound feature gate (own + used by).
         let customer = graph.schema("Customer").unwrap();
-        let cfg = CfgFeature::for_schema_type(&customer);
+        let cfg = CfgFeature::for_schema_type(&graph, &customer);
         let actual: syn::Attribute = parse_quote!(#cfg);
         let expected: syn::Attribute =
             parse_quote!(#[cfg(all(feature = "billing", feature = "customer"))]);
@@ -793,7 +765,7 @@ mod tests {
         // `Address` has no `x-resourceId`, but is used by the operation transitively,
         // so it inherits the operation's feature gate.
         let address = graph.schema("Address").unwrap();
-        let cfg = CfgFeature::for_schema_type(&address);
+        let cfg = CfgFeature::for_schema_type(&graph, &address);
         let actual: syn::Attribute = parse_quote!(#cfg);
         let expected: syn::Attribute = parse_quote!(#[cfg(feature = "billing")]);
         assert_eq!(actual, expected);
@@ -831,10 +803,76 @@ mod tests {
         let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
         let simple = graph.schema("Simple").unwrap();
-        let cfg = CfgFeature::for_schema_type(&simple);
+        let cfg = CfgFeature::for_schema_type(&graph, &simple);
 
         // Types without a resource, and without operations that use them,
         // should be ungated.
+        assert_eq!(cfg, None);
+    }
+
+    #[test]
+    fn test_for_schema_type_used_by_unresourced_operation() {
+        // `Status` is only used by `healthCheck`, which doesn't have an
+        // `x-resource-name`. Even though the spec has other resourced
+        // operations, `Status` should be ungated because its only consumer
+        // is ungated.
+        let doc = Document::from_yaml(indoc::indoc! {"
+            openapi: 3.0.0
+            info:
+              title: Test
+              version: 1.0.0
+            paths:
+              /customers:
+                get:
+                  operationId: listCustomers
+                  x-resource-name: customer
+                  responses:
+                    '200':
+                      description: OK
+                      content:
+                        application/json:
+                          schema:
+                            $ref: '#/components/schemas/Customer'
+              /health:
+                get:
+                  operationId: healthCheck
+                  responses:
+                    '200':
+                      description: OK
+                      content:
+                        application/json:
+                          schema:
+                            $ref: '#/components/schemas/Status'
+            components:
+              schemas:
+                Customer:
+                  type: object
+                  properties:
+                    name:
+                      type: string
+                Status:
+                  type: object
+                  properties:
+                    ok:
+                      type: boolean
+        "})
+        .unwrap();
+
+        let arena = Arena::new();
+        let spec = Spec::from_doc(&arena, &doc).unwrap();
+        let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
+
+        // `Customer` is used by a resourced operation; it should be gated.
+        let customer = graph.schema("Customer").unwrap();
+        let cfg = CfgFeature::for_schema_type(&graph, &customer);
+        let actual: syn::Attribute = parse_quote!(#cfg);
+        let expected: syn::Attribute = parse_quote!(#[cfg(feature = "customer")]);
+        assert_eq!(actual, expected);
+
+        // `Status` is only used by an unresourced operation;
+        // it should be ungated.
+        let status = graph.schema("Status").unwrap();
+        let cfg = CfgFeature::for_schema_type(&graph, &status);
         assert_eq!(cfg, None);
     }
 
@@ -879,15 +917,15 @@ mod tests {
         // In a cycle involving B, all types become ungated, because
         // B depends on C, which depends on A, which depends on B.
         let a = graph.schema("A").unwrap();
-        let cfg = CfgFeature::for_schema_type(&a);
+        let cfg = CfgFeature::for_schema_type(&graph, &a);
         assert_eq!(cfg, None);
 
         let b = graph.schema("B").unwrap();
-        let cfg = CfgFeature::for_schema_type(&b);
+        let cfg = CfgFeature::for_schema_type(&graph, &b);
         assert_eq!(cfg, None);
 
         let c = graph.schema("C").unwrap();
-        let cfg = CfgFeature::for_schema_type(&c);
+        let cfg = CfgFeature::for_schema_type(&graph, &c);
         assert_eq!(cfg, None);
     }
 
@@ -931,19 +969,19 @@ mod tests {
         // Each type uses just its own feature; Cargo feature dependencies
         // handle the transitive requirements.
         let a = graph.schema("A").unwrap();
-        let cfg = CfgFeature::for_schema_type(&a);
+        let cfg = CfgFeature::for_schema_type(&graph, &a);
         let actual: syn::Attribute = parse_quote!(#cfg);
         let expected: syn::Attribute = parse_quote!(#[cfg(feature = "a")]);
         assert_eq!(actual, expected);
 
         let b = graph.schema("B").unwrap();
-        let cfg = CfgFeature::for_schema_type(&b);
+        let cfg = CfgFeature::for_schema_type(&graph, &b);
         let actual: syn::Attribute = parse_quote!(#cfg);
         let expected: syn::Attribute = parse_quote!(#[cfg(feature = "b")]);
         assert_eq!(actual, expected);
 
         let c = graph.schema("C").unwrap();
-        let cfg = CfgFeature::for_schema_type(&c);
+        let cfg = CfgFeature::for_schema_type(&graph, &c);
         let actual: syn::Attribute = parse_quote!(#cfg);
         let expected: syn::Attribute = parse_quote!(#[cfg(feature = "c")]);
         assert_eq!(actual, expected);
@@ -986,27 +1024,7 @@ mod tests {
         assert!(!inlines.is_empty());
 
         // Shouldn't generate any feature gates for graph without named resources.
-        let cfg = CfgFeature::for_inline_type(&inlines[0]);
-        assert_eq!(cfg, None);
-    }
-
-    // MARK: Resource modules
-
-    #[test]
-    fn test_for_resource_module_with_named_feature() {
-        let cfg = CfgFeature::for_resource_module(&CargoFeature::from_name("pets"));
-
-        let actual: syn::Attribute = parse_quote!(#cfg);
-        let expected: syn::Attribute = parse_quote!(#[cfg(feature = "pets")]);
-        assert_eq!(actual, expected);
-    }
-
-    #[test]
-    fn test_for_resource_module_skips_default_feature() {
-        // The `default` feature is built in to Cargo. Gating a module
-        // behind it makes operations unreachable when individual features
-        // are enabled via `--no-default-features --features foo`.
-        let cfg = CfgFeature::for_resource_module(&CargoFeature::Default);
+        let cfg = CfgFeature::for_inline_type(&graph, &inlines[0]);
         assert_eq!(cfg, None);
     }
 
@@ -1060,7 +1078,7 @@ mod tests {
         let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
         let op = graph.operations().find(|o| o.id() == "getThings").unwrap();
-        let cfg = CfgFeature::for_operation(&op);
+        let cfg = CfgFeature::for_operation(&graph, &op);
 
         let actual: syn::Attribute = parse_quote!(#cfg);
         let expected: syn::Attribute = parse_quote!(#[cfg(feature = "a")]);
@@ -1116,7 +1134,7 @@ mod tests {
         let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
         let op = graph.operations().find(|o| o.id() == "getThings").unwrap();
-        let cfg = CfgFeature::for_operation(&op);
+        let cfg = CfgFeature::for_operation(&graph, &op);
 
         // All three are in a cycle; the lowest feature name wins.
         let actual: syn::Attribute = parse_quote!(#cfg);
@@ -1171,7 +1189,7 @@ mod tests {
         let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
         let op = graph.operations().find(|o| o.id() == "getThings").unwrap();
-        let cfg = CfgFeature::for_operation(&op);
+        let cfg = CfgFeature::for_operation(&graph, &op);
 
         let actual: syn::Attribute = parse_quote!(#cfg);
         let expected: syn::Attribute = parse_quote!(#[cfg(all(feature = "a", feature = "b"))]);
@@ -1231,7 +1249,7 @@ mod tests {
         let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
         let op = graph.operations().find(|o| o.id() == "getThings").unwrap();
-        let cfg = CfgFeature::for_operation(&op);
+        let cfg = CfgFeature::for_operation(&graph, &op);
 
         let actual: syn::Attribute = parse_quote!(#cfg);
         let expected: syn::Attribute = parse_quote!(#[cfg(all(feature = "a", feature = "c"))]);
@@ -1294,7 +1312,7 @@ mod tests {
         let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
         let op = graph.operations().find(|o| o.id() == "getThings").unwrap();
-        let cfg = CfgFeature::for_operation(&op);
+        let cfg = CfgFeature::for_operation(&graph, &op);
 
         // A transitively implies B, C, and D; only `a` should remain.
         let actual: syn::Attribute = parse_quote!(#cfg);
@@ -1328,7 +1346,7 @@ mod tests {
             .operations()
             .find(|o| o.id() == "healthCheck")
             .unwrap();
-        let cfg = CfgFeature::for_operation(&op);
+        let cfg = CfgFeature::for_operation(&graph, &op);
 
         // An operation with no type dependencies should have no feature gate.
         assert_eq!(cfg, None);
@@ -1388,7 +1406,7 @@ mod tests {
         let inlines = ops.iter().flat_map(|op| op.inlines()).collect_vec();
         assert!(!inlines.is_empty());
 
-        let cfg = CfgFeature::for_inline_type(&inlines[0]);
+        let cfg = CfgFeature::for_inline_type(&graph, &inlines[0]);
 
         let actual: syn::Attribute = parse_quote!(#cfg);
         let expected: syn::Attribute = parse_quote!(#[cfg(feature = "a")]);

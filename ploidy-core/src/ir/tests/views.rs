@@ -1,14 +1,16 @@
 //! Tests for the IR view layer, indirection, and extension system.
 
+use std::num::NonZeroUsize;
+
 use itertools::Itertools;
 
 use crate::{
     arena::Arena,
     ir::{
-        ContainerView, EnumVariant, ExtendableView, InlineTypePath, InlineTypePathRoot,
-        InlineTypePathSegment, InlineTypeView, ParameterStyle, PrimitiveType, RawGraph,
-        RequestView, Required, ResponseView, SchemaTypeInfo, SchemaTypeView, SomeUntaggedVariant,
-        Spec, StructFieldName, TypeView, View,
+        ContainerView, EnumVariant, ExtendableView, HasResource, HasTypeId, InlineTypePathRoot,
+        InlineTypePathSegment, InlineTypeView, OperationUsage, ParameterStyle, PrimitiveType,
+        RawGraph, RequestView, Required, ResponseView, SchemaTypeInfo, SchemaTypeView,
+        SomeUntaggedVariant, Spec, StructFieldName, TypeView, View,
     },
     parse::{Document, Method, path::PathFragment},
     tests::assert_matches,
@@ -900,15 +902,249 @@ fn test_inlines_discovers_nested_inline_all_of_parents() {
     // The grandparent inline struct (with `grandparent_field`) must
     // be discovered, along with its `grandparent_field` inline struct.
     let has_grandparent_field_struct = inlines.iter().any(|i| {
-        matches!(i, InlineTypeView::Struct(path, _)
-            if path.segments.iter().any(|s| matches!(s,
-                InlineTypePathSegment::Field(StructFieldName::Name("grandparent_field")))))
+        matches!(i, InlineTypeView::Struct(_, _)
+            if i.path().segments().collect_vec().iter().any(|s| matches!(s,
+                InlineTypePathSegment::Field(_, StructFieldName::Name("grandparent_field")))))
     });
     assert!(
         has_grandparent_field_struct,
         "expected `Child.inlines()` to discover the grandparent's \
          inline field struct; got {inlines:?}"
     );
+}
+
+#[test]
+fn test_inlines_multiple_inline_all_of_parents_have_distinct_paths() {
+    // When a struct has multiple inline `allOf` parents, each parent's path
+    // must carry a distinct `Inherits(n)` segment, so that codegen can
+    // produce unique names.
+    let doc = Document::from_yaml(indoc::indoc! {"
+        openapi: 3.0.0
+        info:
+          title: Test
+          version: 1.0.0
+        components:
+          schemas:
+            Combined:
+              allOf:
+                - type: object
+                  properties:
+                    alpha:
+                      type: string
+                - type: object
+                  properties:
+                    beta:
+                      type: string
+                - type: object
+                  properties:
+                    gamma:
+                      type: string
+    "})
+    .unwrap();
+
+    let arena = Arena::new();
+    let spec = Spec::from_doc(&arena, &doc).unwrap();
+    let graph = RawGraph::new(&arena, &spec).cook();
+
+    let combined = match graph.schema("Combined").unwrap() {
+        SchemaTypeView::Struct(_, view) => view,
+        other => panic!("expected struct `Combined`; got {other:?}"),
+    };
+    // Each inline parent struct should have a path with a single
+    // `Inherits(n)` segment.
+    let paths = combined
+        .parents()
+        .map(|parent| match parent {
+            TypeView::Inline(i) => i.path().segments().collect_vec(),
+            other => panic!("expected inline type; got {other:?}"),
+        })
+        .collect_vec();
+    let paths = paths.iter().map(|path| path.as_slice()).collect_vec();
+    assert_eq!(
+        &*paths,
+        [
+            [InlineTypePathSegment::Inherits(
+                NonZeroUsize::new(1).unwrap()
+            )],
+            [InlineTypePathSegment::Inherits(
+                NonZeroUsize::new(2).unwrap()
+            )],
+            [InlineTypePathSegment::Inherits(
+                NonZeroUsize::new(3).unwrap()
+            )],
+        ]
+    );
+}
+
+#[test]
+fn test_nested_type_array_inline_paths_are_distinct() {
+    let doc = Document::from_yaml(indoc::indoc! {"
+        openapi: 3.1.0
+        info:
+          title: Test
+          version: 1.0.0
+        components:
+          schemas:
+            StringOrIntArrayOrNull:
+              type: [array, 'null']
+              items:
+                type: [string, integer]
+    "})
+    .unwrap();
+
+    let arena = Arena::new();
+    let spec = Spec::from_doc(&arena, &doc).unwrap();
+    let graph = RawGraph::new(&arena, &spec).cook();
+
+    let schema = graph.schema("StringOrIntArrayOrNull").unwrap();
+
+    let array = schema
+        .inlines()
+        .find(|inline| {
+            matches!(
+                inline,
+                InlineTypeView::Container(_, ContainerView::Array(_))
+            )
+        })
+        .unwrap();
+    assert_eq!(array.path().root(), InlineTypePathRoot::Schema(schema.id()));
+    assert_matches!(
+        &*array.path().segments().collect_vec(),
+        [InlineTypePathSegment::Optional]
+    );
+
+    let untagged = schema
+        .inlines()
+        .find(|inline| matches!(inline, InlineTypeView::Untagged(_, _)))
+        .unwrap();
+    assert_eq!(
+        untagged.path().root(),
+        InlineTypePathRoot::Schema(schema.id())
+    );
+    assert_matches!(
+        &*untagged.path().segments().collect_vec(),
+        [
+            InlineTypePathSegment::Optional,
+            InlineTypePathSegment::ArrayItem,
+        ]
+    );
+
+    let string = schema
+        .inlines()
+        .find(|inline| {
+            matches!(inline, InlineTypeView::Primitive(_, p) if p.ty() == PrimitiveType::String)
+        })
+        .unwrap();
+    assert_eq!(
+        string.path().root(),
+        InlineTypePathRoot::Schema(schema.id())
+    );
+    assert_eq!(
+        &*string.path().segments().collect_vec(),
+        [
+            InlineTypePathSegment::Optional,
+            InlineTypePathSegment::ArrayItem,
+            InlineTypePathSegment::UntaggedVariant(NonZeroUsize::new(1).unwrap()),
+        ],
+    );
+
+    let integer = schema
+        .inlines()
+        .find(|inline| {
+            matches!(inline, InlineTypeView::Primitive(_, p) if p.ty() == PrimitiveType::I32)
+        })
+        .unwrap();
+    assert_eq!(
+        integer.path().root(),
+        InlineTypePathRoot::Schema(schema.id()),
+    );
+    assert_eq!(
+        &*integer.path().segments().collect_vec(),
+        [
+            InlineTypePathSegment::Optional,
+            InlineTypePathSegment::ArrayItem,
+            InlineTypePathSegment::UntaggedVariant(NonZeroUsize::new(2).unwrap()),
+        ]
+    );
+}
+
+#[test]
+fn test_inherits_position_excludes_shadow_edges() {
+    // `Shared` has two inline `allOf` parents, and is a variant of
+    // two tagged unions with different discriminators. This triggers
+    // `inline_tagged_variants`, which creates an inline copy of
+    // `Shared` with shadow `Inherits` edges (to the tagged union and
+    // the original `Shared`). The inlined copy's path must not be
+    // polluted by the shadow edges.
+    let doc = Document::from_yaml(indoc::indoc! {"
+        openapi: 3.0.0
+        info:
+          title: Test
+          version: 1.0.0
+        components:
+          schemas:
+            UnionA:
+              oneOf:
+                - $ref: '#/components/schemas/Shared'
+              discriminator:
+                propertyName: kindA
+            UnionB:
+              oneOf:
+                - $ref: '#/components/schemas/Shared'
+              discriminator:
+                propertyName: kindB
+            Shared:
+              type: object
+              allOf:
+                - type: object
+                  properties:
+                    first:
+                      type: string
+                - type: object
+                  properties:
+                    second:
+                      type: string
+              properties:
+                kindA:
+                  type: string
+                kindB:
+                  type: string
+    "})
+    .unwrap();
+
+    let arena = Arena::new();
+    let spec = Spec::from_doc(&arena, &doc).unwrap();
+    let mut raw = RawGraph::new(&arena, &spec);
+    raw.inline_tagged_variants();
+    let graph = raw.cook();
+
+    // Find the inlined copy through the tagged union's variant.
+    let union_a = graph.schema("UnionA").unwrap();
+    let SchemaTypeView::Tagged(_, tagged) = union_a else {
+        panic!("expected tagged `UnionA`; got `{union_a:?}`");
+    };
+    let variant = tagged.variants().next().unwrap();
+    let TypeView::Inline(inlined @ InlineTypeView::Struct(..)) = variant.ty() else {
+        panic!("expected inline struct variant; got `{:?}`", variant.ty());
+    };
+
+    // The inlined copy has shadow `Inherits` edges to `UnionA` and `Shared`.
+    // Its own path should be a single `TaggedVariant` segment, not
+    // an `Inherits` segment from the shadow edges.
+    let path = inlined.path();
+    assert_eq!(path.root(), InlineTypePathRoot::Schema(tagged.id()));
+    assert_matches!(
+        path.segments().collect_vec().as_slice(),
+        [InlineTypePathSegment::TaggedVariant(_, "Shared")]
+    );
+
+    // The inlined copy's `inlines()` should not discover `Shared`'s
+    // inline `allOf` parents; those are behind shadow edges.
+    let inline_paths = inlined
+        .inlines()
+        .map(|i| i.path().segments().collect_vec())
+        .collect_vec();
+    assert_matches!(&*inline_paths, []);
 }
 
 // MARK: Tagged union variant views
@@ -1235,9 +1471,19 @@ fn test_inline_struct_view_construction_and_path_access() {
     // Should be able to match on the `Struct` variant.
     assert_matches!(inline_view, InlineTypeView::Struct(_, _));
 
-    // `path()` should return the path to the inline type.
+    // `path()` returns the precomputed path.
     let path = inline_view.path();
-    assert_eq!(path.segments.len(), 1);
+    assert_eq!(
+        path.root(),
+        InlineTypePathRoot::Schema(container_struct.id())
+    );
+    assert_matches!(
+        path.segments().collect_vec().as_slice(),
+        [InlineTypePathSegment::Field(
+            _,
+            StructFieldName::Name("inline_obj")
+        )]
+    );
 }
 
 #[test]
@@ -1386,13 +1632,15 @@ fn test_inline_view_path_method() {
         other => panic!("expected inline type; got {other:?}"),
     };
 
-    // `path()` should return a path with one segment.
+    // `path()` returns the precomputed path.
     let path = nested_inline.path();
+    assert_eq!(path.root(), InlineTypePathRoot::Schema(parent_struct.id()));
     assert_matches!(
-        path.segments,
-        [InlineTypePathSegment::Field(StructFieldName::Name(
-            "nested"
-        ))]
+        path.segments().collect_vec().as_slice(),
+        [InlineTypePathSegment::Field(
+            _,
+            StructFieldName::Name("nested")
+        )]
     );
 }
 
@@ -2427,14 +2675,9 @@ fn test_operation_view_inlines_finds_inline_types() {
     let address = inlines
         .iter()
         .find(|inline| {
-            matches!(inline, InlineTypeView::Struct(path, _) if matches!(
-                path.segments,
-                [
-                    InlineTypePathSegment::Operation("createUser"),
-                    InlineTypePathSegment::Request,
-                    InlineTypePathSegment::Field(StructFieldName::Name("address")),
-                ],
-            ))
+            matches!(inline, InlineTypeView::Struct(_, _)
+                if inline.path().segments().collect_vec().iter().any(|s| matches!(s,
+                    InlineTypePathSegment::Field(_, StructFieldName::Name("address")))))
         })
         .unwrap();
     assert_matches!(address, InlineTypeView::Struct(_, _));
@@ -2442,13 +2685,16 @@ fn test_operation_view_inlines_finds_inline_types() {
     let request = inlines
         .iter()
         .find(|inline| {
-            matches!(inline, InlineTypeView::Struct(path, _) if matches!(
-                path.segments,
-                [
-                    InlineTypePathSegment::Operation("createUser"),
-                    InlineTypePathSegment::Request,
-                ],
-            ))
+            matches!(inline, InlineTypeView::Struct(_, _)
+                if inline.path().segments().collect_vec().is_empty()
+                    && matches!(
+                        inline.path().root(),
+                        InlineTypePathRoot::Operation {
+                            usage: OperationUsage::Request,
+                            ..
+                        },
+                    )
+            )
         })
         .unwrap();
     assert_matches!(request, InlineTypeView::Struct(_, _));
@@ -2456,13 +2702,16 @@ fn test_operation_view_inlines_finds_inline_types() {
     let response = inlines
         .iter()
         .find(|inline| {
-            matches!(inline, InlineTypeView::Struct(path, _) if matches!(
-                path.segments,
-                [
-                    InlineTypePathSegment::Operation("createUser"),
-                    InlineTypePathSegment::Response,
-                ],
-            ))
+            matches!(inline, InlineTypeView::Struct(_, _)
+                if inline.path().segments().collect_vec().is_empty()
+                    && matches!(
+                        inline.path().root(),
+                        InlineTypePathRoot::Operation {
+                            usage: OperationUsage::Response,
+                            ..
+                        },
+                    )
+            )
         })
         .unwrap();
     assert_matches!(response, InlineTypeView::Struct(_, _));
@@ -2512,14 +2761,16 @@ fn test_operation_request_and_response() {
             operation.request(),
         );
     };
-    assert_matches!(request.path().root, InlineTypePathRoot::Resource(None));
+    let req_path = request.path();
     assert_matches!(
-        request.path().segments,
-        [
-            InlineTypePathSegment::Operation("createUser"),
-            InlineTypePathSegment::Request,
-        ],
+        req_path.root(),
+        InlineTypePathRoot::Operation {
+            id,
+            resource: None,
+            usage: OperationUsage::Request,
+        } if id == "createUser",
     );
+    assert!(req_path.segments().next().is_none());
 
     let Some(ResponseView::Json(TypeView::Inline(response))) = operation.response() else {
         panic!(
@@ -2527,14 +2778,16 @@ fn test_operation_request_and_response() {
             operation.response(),
         );
     };
-    assert_matches!(response.path().root, InlineTypePathRoot::Resource(None));
+    let resp_path = response.path();
     assert_matches!(
-        response.path().segments,
-        [
-            InlineTypePathSegment::Operation("createUser"),
-            InlineTypePathSegment::Response,
-        ],
+        resp_path.root(),
+        InlineTypePathRoot::Operation {
+            id,
+            resource: None,
+            usage: OperationUsage::Response,
+        } if id == "createUser",
     );
+    assert!(resp_path.segments().next().is_none());
 }
 
 // MARK: Parameter views
@@ -2598,43 +2851,41 @@ fn test_parameter_inlines_finds_inline_types() {
     // The root inline is the `filter` struct itself.
     let root = filter_inlines
         .iter()
-        .filter_map(|inline| match inline {
-            InlineTypeView::Struct(path, _) => Some(path),
-            _ => None,
-        })
-        .next()
+        .find(|inline| matches!(inline, InlineTypeView::Struct(_, _)))
         .unwrap();
+    let root_path = root.path();
     assert_matches!(
-        root,
-        InlineTypePath {
-            root: InlineTypePathRoot::Resource(Some("user")),
-            segments: [
-                InlineTypePathSegment::Operation("getUser"),
-                InlineTypePathSegment::Parameter("filter"),
-            ],
+        root_path.root(),
+        InlineTypePathRoot::Operation {
+            resource: Some("user"),
+            usage: OperationUsage::Query("filter"),
+            ..
         },
     );
+    assert!(root_path.segments().next().is_none());
 
     // The nested struct carries the full path.
     let nested = filter_inlines
         .iter()
-        .filter_map(|inline| match inline {
-            InlineTypeView::Struct(path, _) => Some(path),
-            _ => None,
-        })
+        .filter(|inline| matches!(inline, InlineTypeView::Struct(_, _)))
         .skip(1)
         .exactly_one()
         .unwrap();
+    let nested_path = nested.path();
     assert_matches!(
-        nested,
-        InlineTypePath {
-            root: InlineTypePathRoot::Resource(Some("user")),
-            segments: [
-                InlineTypePathSegment::Operation("getUser"),
-                InlineTypePathSegment::Parameter("filter"),
-                InlineTypePathSegment::Field(StructFieldName::Name("nested")),
-            ],
+        nested_path.root(),
+        InlineTypePathRoot::Operation {
+            resource: Some("user"),
+            usage: OperationUsage::Query("filter"),
+            ..
         },
+    );
+    assert_matches!(
+        nested_path.segments().collect_vec().as_slice(),
+        [
+            InlineTypePathSegment::Field(_, StructFieldName::Name("nested")),
+            InlineTypePathSegment::Optional
+        ],
     );
 }
 
@@ -3977,21 +4228,19 @@ fn test_shadow_edges_hide_inlines_but_preserve_dependencies() {
 
     // The original `Dog` schema should own the inline `metadata` struct.
     let dog = graph.schema("Dog").unwrap();
-    let dog_inline_paths = dog
+    let dog_inline_structs = dog
         .inlines()
-        .filter_map(|i| match i {
-            InlineTypeView::Struct(path, _) => Some(path),
-            _ => None,
-        })
+        .filter(|i| matches!(i, InlineTypeView::Struct(_, _)))
         .collect_vec();
+    assert_eq!(dog_inline_structs.len(), 1);
+    let path = dog_inline_structs[0].path();
+    assert_eq!(path.root(), InlineTypePathRoot::Schema(dog.id()));
     assert_matches!(
-        &*dog_inline_paths,
-        [InlineTypePath {
-            root: InlineTypePathRoot::Type("Dog"),
-            segments: [InlineTypePathSegment::Field(StructFieldName::Name(
-                "metadata"
-            ))],
-        }],
+        path.segments().collect_vec().as_slice(),
+        [InlineTypePathSegment::Field(
+            _,
+            StructFieldName::Name("metadata")
+        )],
     );
 
     // The inlined variant `Pet/Dog` should _not_ claim `Dog`'s inline types.
@@ -4005,10 +4254,7 @@ fn test_shadow_edges_hide_inlines_but_preserve_dependencies() {
     };
     let claimed_inline_structs = inlined_dog
         .inlines()
-        .filter_map(|i| match i {
-            InlineTypeView::Struct(path, _) => Some(path),
-            _ => None,
-        })
+        .filter(|i| matches!(i, InlineTypeView::Struct(_, _)))
         .collect_vec();
     assert_matches!(&*claimed_inline_structs, []);
 
@@ -4085,19 +4331,19 @@ fn test_shadow_inherits_hides_ancestor_inlines() {
 
     // `Animal` should own the inline `tag` struct.
     let animal = graph.schema("Animal").unwrap();
-    let animal_inline_paths = animal
+    let animal_inline_structs = animal
         .inlines()
-        .filter_map(|i| match i {
-            InlineTypeView::Struct(path, _) => Some(path),
-            _ => None,
-        })
+        .filter(|i| matches!(i, InlineTypeView::Struct(_, _)))
         .collect_vec();
+    assert_eq!(animal_inline_structs.len(), 1);
+    let path = animal_inline_structs[0].path();
+    assert_eq!(path.root(), InlineTypePathRoot::Schema(animal.id()));
     assert_matches!(
-        &*animal_inline_paths,
-        [InlineTypePath {
-            root: InlineTypePathRoot::Type("Animal"),
-            segments: [InlineTypePathSegment::Field(StructFieldName::Name("tag"))],
-        }],
+        path.segments().collect_vec().as_slice(),
+        [InlineTypePathSegment::Field(
+            _,
+            StructFieldName::Name("tag")
+        )],
     );
 
     // The inlined `Pet/Dog` should _not_ claim `Animal`'s inline types.
@@ -4111,10 +4357,7 @@ fn test_shadow_inherits_hides_ancestor_inlines() {
     };
     let claimed_inline_structs = inlined_dog
         .inlines()
-        .filter_map(|i| match i {
-            InlineTypeView::Struct(path, _) => Some(path),
-            _ => None,
-        })
+        .filter(|i| matches!(i, InlineTypeView::Struct(_, _)))
         .collect_vec();
     assert_matches!(&*claimed_inline_structs, []);
 
@@ -4577,11 +4820,15 @@ fn test_inlined_variant_inline_field_types_not_leaked() {
 
     // Inlines should only include the inline struct variant `Dog`,
     // not `Dog`'s inline field type `Details`.
-    let [InlineTypeView::Struct(path, _)] = &*pet_inlines else {
+    let [InlineTypeView::Struct(_, _)] = &*pet_inlines else {
         panic!("expected inline struct variant `Dog`; got `{pet_inlines:?}`");
     };
-    assert_matches!(path.root, InlineTypePathRoot::Type("Pet"));
-    assert_matches!(path.segments, [InlineTypePathSegment::TaggedVariant("Dog")]);
+    let path = pet_inlines[0].path();
+    assert_eq!(path.root(), InlineTypePathRoot::Schema(pet.id()));
+    assert_matches!(
+        path.segments().collect_vec().as_slice(),
+        [InlineTypePathSegment::TaggedVariant(_, "Dog")]
+    );
 
     // `Dog`'s own `inlines()` still contains its inline types:
     // containers for optional fields, the `Details` struct, etc.
@@ -4596,7 +4843,7 @@ fn test_inlined_variant_inline_field_types_not_leaked() {
     assert!(
         dog_inlines
             .iter()
-            .all(|i| i.path().root == InlineTypePathRoot::Type("Dog")),
+            .all(|i| i.path().root() == InlineTypePathRoot::Schema(dog.id())),
         "all of `Dog`'s inlines should be rooted at `Dog`"
     );
 }
@@ -4810,11 +5057,18 @@ fn test_inlined_when_struct_field_references_tagged_variant() {
         panic!("expected tagged `Pet`; got `{pet:?}`");
     };
     let variant = pet_tagged.variants().next().unwrap();
-    let TypeView::Inline(InlineTypeView::Struct(path, inline_struct)) = variant.ty() else {
+    let TypeView::Inline(inline_view) = variant.ty() else {
         panic!("expected inline struct variant; got `{:?}`", variant.ty());
     };
-    assert_matches!(path.root, InlineTypePathRoot::Type("Pet"));
-    assert_matches!(path.segments, [InlineTypePathSegment::TaggedVariant("Dog")]);
+    let path = inline_view.path();
+    assert_eq!(path.root(), InlineTypePathRoot::Schema(pet_tagged.id()));
+    assert_matches!(
+        path.segments().collect_vec().as_slice(),
+        [InlineTypePathSegment::TaggedVariant(_, "Dog")]
+    );
+    let InlineTypeView::Struct(_, inline_struct) = inline_view else {
+        panic!("expected inline struct variant; got `{inline_view:?}`");
+    };
 
     // The inline struct should have the same fields, and `kind`
     // should be a tag there; it's the tag for `Pet`.

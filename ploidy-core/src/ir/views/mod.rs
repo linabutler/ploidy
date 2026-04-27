@@ -28,7 +28,7 @@
 //! [`ExtendableView`] attaches a type-erased extension map to each view node.
 //! Codegen backends use this to store and retrieve arbitrary metadata.
 
-use std::{any::TypeId, fmt::Debug};
+use std::{any::TypeId as StdTypeId, fmt::Debug};
 
 use atomic_refcell::{AtomicRef, AtomicRefMut};
 use petgraph::{
@@ -48,6 +48,7 @@ pub mod enum_;
 pub mod inline;
 pub mod ir;
 pub mod operation;
+pub mod path;
 pub mod primitive;
 pub mod schema;
 pub mod struct_;
@@ -86,6 +87,22 @@ pub trait View<'graph, 'a: 'graph> {
     fn defaultable(&self) -> bool;
 }
 
+/// A uniquely identifiable graph type view.
+pub trait HasTypeId {
+    /// Returns an opaque identity for this type.
+    fn id(&self) -> TypeId;
+}
+
+/// Opaque identity for a type in a [`CookedGraph`].
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub struct TypeId(pub(in crate::ir) NodeIndex<usize>);
+
+/// A graph view that can belong to a resource.
+pub trait HasResource<'a> {
+    /// Returns the resource name, if this view belongs to one.
+    fn resource(&self) -> Option<&'a str>;
+}
+
 /// A view of a graph type with extended data.
 ///
 /// Codegen backends use extended data to decorate types with extra information.
@@ -101,6 +118,15 @@ pub trait ExtendableView<'graph, 'a: 'graph>: View<'graph, 'a> {
     fn extensions_mut(&mut self) -> &mut ViewExtensions<Self>
     where
         Self: Sized;
+}
+
+impl<'graph, 'a: 'graph, T> HasTypeId for T
+where
+    T: ViewNode<'graph, 'a>,
+{
+    fn id(&self) -> TypeId {
+        TypeId(self.index())
+    }
 }
 
 impl<'graph, 'a: 'graph, T> View<'graph, 'a> for T
@@ -231,7 +257,7 @@ impl<'a, X: internal::Extendable<'a>> ViewExtensions<X> {
     {
         AtomicRef::filter_map(self.0.ext(), |ext| {
             Some(
-                ext.get(&TypeId::of::<T>())?
+                ext.get(&StdTypeId::of::<T>())?
                     .as_ref()
                     .downcast_ref::<T>()
                     .unwrap(),
@@ -245,7 +271,7 @@ impl<'a, X: internal::Extendable<'a>> ViewExtensions<X> {
     pub fn insert<T: Send + Sync + 'static>(&mut self, value: T) -> Option<T> {
         self.0
             .ext_mut()
-            .insert(TypeId::of::<T>(), Box::new(value))
+            .insert(StdTypeId::of::<T>(), Box::new(value))
             .and_then(|old| *Extension::into_inner(old).downcast().unwrap())
     }
 }

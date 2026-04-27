@@ -1,3 +1,5 @@
+use std::sync::atomic::AtomicUsize;
+
 use bumpalo::{
     Bump,
     collections::{CollectIn, Vec as BumpVec},
@@ -21,6 +23,12 @@ impl Arena {
     #[inline]
     pub(crate) fn alloc<T: Copy>(&self, value: T) -> &mut T {
         self.0.alloc(value)
+    }
+
+    /// Allocates and returns a mutable reference to an atomic primitive.
+    #[inline]
+    pub(crate) fn alloc_atomic<T: ToAtomic>(&self, value: T) -> &mut T::Atomic {
+        self.0.alloc(value.to_atomic())
     }
 
     /// Copies and returns a mutable reference to a slice.
@@ -57,5 +65,23 @@ impl Arena {
     #[inline]
     pub(crate) fn alloc_str(&self, s: &str) -> &mut str {
         self.0.alloc_str(s)
+    }
+}
+
+// Atomics aren't `Copy`, but are trivially droppable, and so OK to allocate
+// in an arena directly. We can replace this trait with `Atomic<T>` once
+// the `generic_atomic` feature stabilizes.
+pub(crate) trait ToAtomic {
+    type Atomic;
+
+    fn to_atomic(self) -> Self::Atomic;
+}
+
+impl ToAtomic for usize {
+    type Atomic = AtomicUsize;
+
+    #[inline]
+    fn to_atomic(self) -> Self::Atomic {
+        AtomicUsize::new(self)
     }
 }

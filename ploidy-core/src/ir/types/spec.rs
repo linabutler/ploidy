@@ -4,7 +4,7 @@
 use crate::parse::ComponentRef;
 
 use super::{
-    Enum, InlineTypePath, PrimitiveType, SchemaTypeInfo, StructFieldName, UntaggedVariantNameHint,
+    Enum, InlineTypeId, PrimitiveType, SchemaTypeInfo, StructFieldName, UntaggedVariantNameHint,
     shape::{Operation, Parameter, ParameterInfo, Request, Response},
 };
 
@@ -79,26 +79,27 @@ impl<'a> SpecSchemaType<'a> {
 /// An inline schema type with [`SpecType`] references.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub enum SpecInlineType<'a> {
-    Enum(InlineTypePath<'a>, Enum<'a>),
-    Struct(InlineTypePath<'a>, SpecStruct<'a>),
-    Tagged(InlineTypePath<'a>, SpecTagged<'a>),
-    Untagged(InlineTypePath<'a>, SpecUntagged<'a>),
-    Container(InlineTypePath<'a>, SpecContainer<'a>),
-    Primitive(InlineTypePath<'a>, PrimitiveType),
-    Any(InlineTypePath<'a>),
+    Enum(InlineTypeId, Enum<'a>),
+    Struct(InlineTypeId, SpecStruct<'a>),
+    Tagged(InlineTypeId, SpecTagged<'a>),
+    Untagged(InlineTypeId, SpecUntagged<'a>),
+    Container(InlineTypeId, SpecContainer<'a>),
+    Primitive(InlineTypeId, PrimitiveType),
+    Any(InlineTypeId),
 }
 
 impl<'a> SpecInlineType<'a> {
+    /// Returns the opaque identity for this inline type node.
     #[inline]
-    pub fn path(&self) -> &InlineTypePath<'a> {
-        let (Self::Enum(path, _)
-        | Self::Struct(path, _)
-        | Self::Tagged(path, _)
-        | Self::Untagged(path, _)
-        | Self::Container(path, _)
-        | Self::Primitive(path, _)
-        | Self::Any(path)) = self;
-        path
+    pub fn id(&self) -> InlineTypeId {
+        let (Self::Enum(id, _)
+        | Self::Struct(id, _)
+        | Self::Tagged(id, _)
+        | Self::Untagged(id, _)
+        | Self::Container(id, _)
+        | Self::Primitive(id, _)
+        | Self::Any(id)) = *self;
+        id
     }
 }
 

@@ -13,7 +13,7 @@ use semver::Version;
 use serde::{Deserialize, de::IntoDeserializer};
 use toml_edit::{Array, DocumentMut, InlineTable, Table, TableLike, value};
 
-use super::{config::CodegenConfig, graph::CodegenGraph, naming::CargoFeature};
+use super::{config::CodegenConfig, graph::CodegenGraph, naming::AsFeatureName};
 
 const PLOIDY_VERSION: &str = env!("CARGO_PKG_VERSION");
 
@@ -33,55 +33,48 @@ impl<'a> CodegenCargoManifest<'a> {
         // Translate resource names from operations and schemas into
         // Cargo feature names with dependencies.
         let features = {
-            let mut deps_by_feature = BTreeMap::new();
+            let mut deps_by_resource = BTreeMap::new();
 
             // For each schema type with an explicitly declared resource name,
-            // use the resource name as the feature name, and enable features
+            // use the resource as the feature name, and enable features
             // for all its transitive dependencies.
             for schema in self.graph.schemas() {
-                let feature = match schema.resource().map(CargoFeature::from_name) {
-                    Some(CargoFeature::Named(name)) => CargoFeature::Named(name),
-                    _ => continue,
+                let Some(resource) = self.graph.resource_for(&schema).name() else {
+                    continue;
                 };
-                let entry: &mut BTreeSet<_> = deps_by_feature.entry(feature).or_default();
-                for dep in schema.dependencies().filter_map(|ty| {
-                    match CargoFeature::from_name(ty.into_schema().right()?.resource()?) {
-                        CargoFeature::Named(name) => Some(CargoFeature::Named(name)),
-                        CargoFeature::Default => None,
-                    }
-                }) {
-                    entry.insert(dep);
-                }
+                let entry: &mut BTreeSet<_> = deps_by_resource.entry(resource).or_default();
+                entry.extend(
+                    schema
+                        .dependencies()
+                        .filter_map(|ty| ty.into_schema().right())
+                        .filter_map(|schema| self.graph.resource_for(&schema).name()),
+                );
             }
 
             // For each operation with an explicitly declared resource name,
-            // use the resource name as the feature name, and enable features for
+            // use the resource as the feature name, and enable features for
             // all the types that are reachable from the operation.
             for op in self.graph.operations() {
-                let feature = match op.resource().map(CargoFeature::from_name) {
-                    Some(CargoFeature::Named(name)) => CargoFeature::Named(name),
-                    _ => continue,
+                let Some(resource) = self.graph.resource_for(&op).name() else {
+                    continue;
                 };
-                let entry = deps_by_feature.entry(feature).or_default();
-                for dep in op.dependencies().filter_map(|ty| {
-                    match CargoFeature::from_name(ty.into_schema().right()?.resource()?) {
-                        CargoFeature::Named(name) => Some(CargoFeature::Named(name)),
-                        CargoFeature::Default => None,
-                    }
-                }) {
-                    entry.insert(dep);
-                }
+                let entry = deps_by_resource.entry(resource).or_default();
+                entry.extend(
+                    op.dependencies()
+                        .filter_map(|ty| ty.into_schema().right())
+                        .filter_map(|schema| self.graph.resource_for(&schema).name()),
+                );
             }
 
             // Build the `features` section of the manifest.
-            let mut features: BTreeMap<_, _> = deps_by_feature
+            let mut features: BTreeMap<_, _> = deps_by_resource
                 .iter()
-                .map(|(feature, deps)| {
+                .map(|(resource, deps)| {
                     (
-                        feature.display().to_string(),
+                        AsFeatureName(resource).to_string(),
                         FeatureDependencies(
                             deps.iter()
-                                .map(|dep| dep.display().to_string())
+                                .map(|resource| AsFeatureName(resource).to_string())
                                 .collect_vec(),
                         ),
                     )
@@ -94,9 +87,9 @@ impl<'a> CodegenCargoManifest<'a> {
                 features.insert(
                     "default".to_owned(),
                     FeatureDependencies(
-                        deps_by_feature
+                        deps_by_resource
                             .keys()
-                            .map(|feature| feature.display().to_string())
+                            .map(|resource| AsFeatureName(resource).to_string())
                             .collect_vec(),
                     ),
                 );

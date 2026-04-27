@@ -10,8 +10,8 @@ use petgraph::graph::NodeIndex;
 use crate::ir::{SchemaTypeInfo, graph::CookedGraph, types::GraphSchemaType};
 
 use super::{
-    ViewNode, any::AnyView, container::ContainerView, enum_::EnumView, primitive::PrimitiveView,
-    struct_::StructView, tagged::TaggedView, untagged::UntaggedView,
+    HasResource, ViewNode, any::AnyView, container::ContainerView, enum_::EnumView,
+    primitive::PrimitiveView, struct_::StructView, tagged::TaggedView, untagged::UntaggedView,
 };
 
 /// A graph-aware view of a [schema type][GraphSchemaType].
@@ -54,17 +54,22 @@ impl<'graph, 'a> SchemaTypeView<'graph, 'a> {
         }
     }
 
+    #[inline]
+    pub fn info(&self) -> SchemaTypeInfo<'a> {
+        let &(Self::Enum(info, ..)
+        | Self::Struct(info, ..)
+        | Self::Tagged(info, ..)
+        | Self::Untagged(info, ..)
+        | Self::Container(info, ..)
+        | Self::Primitive(info, ..)
+        | Self::Any(info, ..)) = self;
+        info
+    }
+
     /// Returns the schema name from `components/schemas`.
     #[inline]
     pub fn name(&self) -> &'a str {
-        let (Self::Enum(SchemaTypeInfo { name, .. }, ..)
-        | Self::Struct(SchemaTypeInfo { name, .. }, ..)
-        | Self::Tagged(SchemaTypeInfo { name, .. }, ..)
-        | Self::Untagged(SchemaTypeInfo { name, .. }, ..)
-        | Self::Container(SchemaTypeInfo { name, .. }, ..)
-        | Self::Primitive(SchemaTypeInfo { name, .. }, ..)
-        | Self::Any(SchemaTypeInfo { name, .. }, ..)) = self;
-        name
+        self.info().name
     }
 
     /// Returns whether this type transitively depends on `other`.
@@ -75,11 +80,13 @@ impl<'graph, 'a> SchemaTypeView<'graph, 'a> {
             .closure
             .depends_on(self.index(), other.index())
     }
+}
 
+impl<'a> HasResource<'a> for SchemaTypeView<'_, 'a> {
     /// Returns the resource name that this schema type declares
     /// in its `x-resourceId` extension field.
     #[inline]
-    pub fn resource(&self) -> Option<&'a str> {
+    fn resource(&self) -> Option<&'a str> {
         let (&Self::Enum(SchemaTypeInfo { resource, .. }, ..)
         | &Self::Struct(SchemaTypeInfo { resource, .. }, ..)
         | &Self::Tagged(SchemaTypeInfo { resource, .. }, ..)

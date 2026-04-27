@@ -66,7 +66,7 @@ use crate::{
         graph::CookedGraph,
         types::{
             GraphOperation, GraphParameter, GraphParameterInfo, GraphRequest, GraphResponse,
-            GraphType, ParameterStyle,
+            GraphType, OperationId, ParameterStyle,
         },
     },
     parse::{
@@ -75,7 +75,7 @@ use crate::{
     },
 };
 
-use super::{View, inline::InlineTypeView, ir::TypeView};
+use super::{HasResource, View, inline::InlineTypeView, ir::TypeView};
 
 /// A graph-aware view of an [operation][GraphOperation].
 #[derive(Debug)]
@@ -95,8 +95,8 @@ impl<'graph, 'a> OperationView<'graph, 'a> {
 
     /// Returns the `operationId`.
     #[inline]
-    pub fn id(&self) -> &'a str {
-        self.op.id
+    pub fn id(&self) -> &'a OperationId {
+        OperationId::new(self.op.id)
     }
 
     /// Returns the HTTP method.
@@ -142,11 +142,13 @@ impl<'graph, 'a> OperationView<'graph, 'a> {
             GraphResponse::Json(index) => ResponseView::Json(TypeView::new(self.cooked, *index)),
         })
     }
+}
 
+impl<'a> HasResource<'a> for OperationView<'_, 'a> {
     /// Returns the resource name that this operation declares
     /// in its `x-resource-name` extension field.
     #[inline]
-    pub fn resource(&self) -> Option<&'a str> {
+    fn resource(&self) -> Option<&'a str> {
         self.op.resource
     }
 }

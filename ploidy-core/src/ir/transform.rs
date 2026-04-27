@@ -3,44 +3,52 @@ use rustc_hash::FxHashMap;
 
 use crate::{
     arena::Arena,
-    ir::JsonF64,
+    ir::{JsonF64, SchemaTypeInfo},
     parse::{AdditionalProperties, Document, Format, RefOrSchema, Schema, Ty},
 };
 
 use super::types::{
-    Enum, EnumVariant, InlineTypePath, InlineTypePathRoot, InlineTypePathSegment, PrimitiveType,
-    SpecContainer, SpecInlineType, SpecInner, SpecSchemaType, SpecStruct, SpecStructField,
-    SpecTagged, SpecTaggedVariant, SpecType, SpecUntagged, SpecUntaggedVariant, StructFieldName,
-    StructFieldNameHint, TypeInfo, UntaggedVariantNameHint,
+    Enum, EnumVariant, InlineTypeId, InlineTypeIds, PrimitiveType, SpecContainer, SpecInlineType,
+    SpecInner, SpecSchemaType, SpecStruct, SpecStructField, SpecTagged, SpecTaggedVariant,
+    SpecType, SpecUntagged, SpecUntaggedVariant, StructFieldName, StructFieldNameHint,
+    UntaggedVariantNameHint,
 };
 
-#[inline]
-pub fn transform<'a>(
-    arena: &'a Arena,
-    doc: &'a Document,
-    name: impl Into<TypeInfo<'a>>,
-    schema: &'a Schema,
-) -> SpecType<'a> {
-    let context = TransformContext::new(arena, doc);
-    transform_with_context(&context, name.into(), schema)
+/// Metadata about a type in the dependency graph.
+#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub enum TypeInfo<'a> {
+    Schema(SchemaTypeInfo<'a>),
+    Inline(InlineTypeId),
+}
+
+impl<'a> From<SchemaTypeInfo<'a>> for TypeInfo<'a> {
+    fn from(info: SchemaTypeInfo<'a>) -> Self {
+        Self::Schema(info)
+    }
+}
+
+impl From<InlineTypeId> for TypeInfo<'_> {
+    fn from(id: InlineTypeId) -> Self {
+        Self::Inline(id)
+    }
 }
 
 /// Context for the [`IrTransformer`].
 #[derive(Debug)]
 pub struct TransformContext<'a> {
-    pub arena: &'a Arena,
-    /// The document being transformed.
-    pub doc: &'a Document,
+    arena: &'a Arena,
+    doc: &'a Document,
+    ids: InlineTypeIds<'a>,
 }
 
 impl<'a> TransformContext<'a> {
     /// Creates a new context for the given document.
-    pub fn new(arena: &'a Arena, doc: &'a Document) -> Self {
-        Self { arena, doc }
+    pub fn new(arena: &'a Arena, doc: &'a Document, ids: InlineTypeIds<'a>) -> Self {
+        Self { arena, doc, ids }
     }
 }
 
-fn transform_with_context<'context, 'a>(
+pub(super) fn transform_with_context<'context, 'a>(
     context: &'context TransformContext<'a>,
     name: impl Into<TypeInfo<'a>>,
     schema: &'a Schema,
@@ -128,7 +136,7 @@ impl<'context, 'a> IrTransformer<'context, 'a> {
 
         Ok(match self.name {
             TypeInfo::Schema(info) => SpecSchemaType::Tagged(info, tagged).into(),
-            TypeInfo::Inline(path) => SpecInlineType::Tagged(path, tagged).into(),
+            TypeInfo::Inline(id) => SpecInlineType::Tagged(id, tagged).into(),
         })
     }
 
@@ -141,7 +149,7 @@ impl<'context, 'a> IrTransformer<'context, 'a> {
             [] => {
                 return Ok(match self.name {
                     TypeInfo::Schema(info) => SpecSchemaType::Any(info).into(),
-                    TypeInfo::Inline(path) => SpecInlineType::Any(path).into(),
+                    TypeInfo::Inline(id) => SpecInlineType::Any(id).into(),
                 });
             }
             [schema] => {
@@ -150,7 +158,7 @@ impl<'context, 'a> IrTransformer<'context, 'a> {
                     RefOrSchema::Ref(r) => SpecType::Ref(r),
                     RefOrSchema::Inline(s) if matches!(&*s.ty, [Ty::Null]) => match self.name {
                         TypeInfo::Schema(info) => SpecSchemaType::Any(info).into(),
-                        TypeInfo::Inline(path) => SpecInlineType::Any(path).into(),
+                        TypeInfo::Inline(id) => SpecInlineType::Any(id).into(),
                     },
                     RefOrSchema::Inline(schema) => {
                         transform_with_context(self.context, self.name, schema)
@@ -166,15 +174,8 @@ impl<'context, 'a> IrTransformer<'context, 'a> {
                         RefOrSchema::Ref(r) => Some(SpecType::Ref(r)),
                         RefOrSchema::Inline(s) if matches!(&*s.ty, [Ty::Null]) => None,
                         RefOrSchema::Inline(schema) => {
-                            let segment = InlineTypePathSegment::Variant(index);
-                            let path = match self.name {
-                                TypeInfo::Schema(info) => InlineTypePath {
-                                    root: InlineTypePathRoot::Type(info.name),
-                                    segments: self.arena().alloc_slice_copy(&[segment]),
-                                },
-                                TypeInfo::Inline(path) => path.join(self.arena(), &[segment]),
-                            };
-                            Some(transform_with_context(self.context, path, schema))
+                            let id = self.context.ids.next();
+                            Some(transform_with_context(self.context, id, schema))
                         }
                     };
                     ty.map(|ty| {
@@ -219,7 +220,7 @@ impl<'context, 'a> IrTransformer<'context, 'a> {
                 });
                 match self.name {
                     TypeInfo::Schema(info) => SpecSchemaType::Container(info, container).into(),
-                    TypeInfo::Inline(path) => SpecInlineType::Container(path, container).into(),
+                    TypeInfo::Inline(id) => SpecInlineType::Container(id, container).into(),
                 }
             }
 
@@ -231,7 +232,7 @@ impl<'context, 'a> IrTransformer<'context, 'a> {
                 };
                 match self.name {
                     TypeInfo::Schema(info) => SpecSchemaType::Untagged(info, untagged).into(),
-                    TypeInfo::Inline(path) => SpecInlineType::Untagged(path, untagged).into(),
+                    TypeInfo::Inline(id) => SpecInlineType::Untagged(id, untagged).into(),
                 }
             }
         })
@@ -258,9 +259,6 @@ impl<'context, 'a> IrTransformer<'context, 'a> {
             .map(|(index, schema)| {
                 let (field_name, ty, description) = match schema {
                     RefOrSchema::Ref(r) => {
-                        // For references, use the referenced type's name
-                        // as the field name. For example, a pointer like
-                        // `#/components/schemas/Address` becomes `address`.
                         let name = StructFieldName::Name(self.arena().alloc_str(&r.name()));
                         let ty: &_ = self.arena().alloc(SpecType::Ref(r));
                         let desc = r
@@ -271,36 +269,20 @@ impl<'context, 'a> IrTransformer<'context, 'a> {
                         (name, ty, desc)
                     }
                     RefOrSchema::Inline(schema) => {
-                        // For inline schemas, we don't have a name that we can use,
-                        // so use its index in `anyOf` as a naming hint.
                         let name = StructFieldName::Hint(StructFieldNameHint::Index(index + 1));
-                        let segment = InlineTypePathSegment::Field(name);
-                        let path = match self.name {
-                            TypeInfo::Schema(info) => InlineTypePath {
-                                root: InlineTypePathRoot::Type(info.name),
-                                segments: self.arena().alloc_slice_copy(&[segment]),
-                            },
-                            TypeInfo::Inline(path) => path.join(self.arena(), &[segment]),
-                        };
+                        let id = self.context.ids.next();
                         let ty: &_ =
                             self.arena()
-                                .alloc(transform_with_context(self.context, path, schema));
+                                .alloc(transform_with_context(self.context, id, schema));
                         let desc = schema.description.as_deref();
                         (name, ty, desc)
                     }
                 };
                 // Flattened `anyOf` fields are always optional.
-                let segment = InlineTypePathSegment::Field(field_name);
-                let path = match self.name {
-                    TypeInfo::Schema(info) => InlineTypePath {
-                        root: InlineTypePathRoot::Type(info.name),
-                        segments: self.arena().alloc_slice_copy(&[segment]),
-                    },
-                    TypeInfo::Inline(path) => path.join(self.arena(), &[segment]),
-                };
+                let id = self.context.ids.next();
                 let ty: &_ = self.arena().alloc(
                     SpecInlineType::Container(
-                        path,
+                        id,
                         SpecContainer::Optional(SpecInner { description, ty }),
                     )
                     .into(),
@@ -329,7 +311,7 @@ impl<'context, 'a> IrTransformer<'context, 'a> {
 
         Ok(match self.name {
             TypeInfo::Schema(info) => SpecSchemaType::Struct(info, ty).into(),
-            TypeInfo::Inline(path) => SpecInlineType::Struct(path, ty).into(),
+            TypeInfo::Inline(id) => SpecInlineType::Struct(id, ty).into(),
         })
     }
 
@@ -365,7 +347,7 @@ impl<'context, 'a> IrTransformer<'context, 'a> {
         };
         Ok(match self.name {
             TypeInfo::Schema(info) => SpecSchemaType::Enum(info, ty).into(),
-            TypeInfo::Inline(path) => SpecInlineType::Enum(path, ty).into(),
+            TypeInfo::Inline(id) => SpecInlineType::Enum(id, ty).into(),
         })
     }
 
@@ -384,7 +366,7 @@ impl<'context, 'a> IrTransformer<'context, 'a> {
         };
         Ok(match self.name {
             TypeInfo::Schema(info) => SpecSchemaType::Struct(info, ty).into(),
-            TypeInfo::Inline(path) => SpecInlineType::Struct(path, ty).into(),
+            TypeInfo::Inline(id) => SpecInlineType::Struct(id, ty).into(),
         })
     }
 
@@ -397,100 +379,55 @@ impl<'context, 'a> IrTransformer<'context, 'a> {
         for ty in &self.schema.ty {
             let variant = match (ty, self.schema.format) {
                 (Ty::String, Some(Format::DateTime)) => {
-                    OtherVariant::Primitive(self.name, PrimitiveType::DateTime)
+                    OtherVariant::Primitive(PrimitiveType::DateTime)
                 }
-                (Ty::String, Some(Format::Date)) => {
-                    OtherVariant::Primitive(self.name, PrimitiveType::Date)
-                }
-                (Ty::String, Some(Format::Uri)) => {
-                    OtherVariant::Primitive(self.name, PrimitiveType::Url)
-                }
-                (Ty::String, Some(Format::Uuid)) => {
-                    OtherVariant::Primitive(self.name, PrimitiveType::Uuid)
-                }
-                (Ty::String, Some(Format::Byte)) => {
-                    OtherVariant::Primitive(self.name, PrimitiveType::Bytes)
-                }
+                (Ty::String, Some(Format::Date)) => OtherVariant::Primitive(PrimitiveType::Date),
+                (Ty::String, Some(Format::Uri)) => OtherVariant::Primitive(PrimitiveType::Url),
+                (Ty::String, Some(Format::Uuid)) => OtherVariant::Primitive(PrimitiveType::Uuid),
+                (Ty::String, Some(Format::Byte)) => OtherVariant::Primitive(PrimitiveType::Bytes),
                 (Ty::String, Some(Format::Binary)) => {
-                    OtherVariant::Primitive(self.name, PrimitiveType::Binary)
+                    OtherVariant::Primitive(PrimitiveType::Binary)
                 }
-                (Ty::String, _) => OtherVariant::Primitive(self.name, PrimitiveType::String),
+                (Ty::String, _) => OtherVariant::Primitive(PrimitiveType::String),
 
-                (Ty::Integer, Some(Format::Int8)) => {
-                    OtherVariant::Primitive(self.name, PrimitiveType::I8)
-                }
-                (Ty::Integer, Some(Format::UInt8)) => {
-                    OtherVariant::Primitive(self.name, PrimitiveType::U8)
-                }
-                (Ty::Integer, Some(Format::Int16)) => {
-                    OtherVariant::Primitive(self.name, PrimitiveType::I16)
-                }
-                (Ty::Integer, Some(Format::UInt16)) => {
-                    OtherVariant::Primitive(self.name, PrimitiveType::U16)
-                }
-                (Ty::Integer, Some(Format::Int32)) => {
-                    OtherVariant::Primitive(self.name, PrimitiveType::I32)
-                }
-                (Ty::Integer, Some(Format::UInt32)) => {
-                    OtherVariant::Primitive(self.name, PrimitiveType::U32)
-                }
-                (Ty::Integer, Some(Format::Int64)) => {
-                    OtherVariant::Primitive(self.name, PrimitiveType::I64)
-                }
-                (Ty::Integer, Some(Format::UInt64)) => {
-                    OtherVariant::Primitive(self.name, PrimitiveType::U64)
-                }
+                (Ty::Integer, Some(Format::Int8)) => OtherVariant::Primitive(PrimitiveType::I8),
+                (Ty::Integer, Some(Format::UInt8)) => OtherVariant::Primitive(PrimitiveType::U8),
+                (Ty::Integer, Some(Format::Int16)) => OtherVariant::Primitive(PrimitiveType::I16),
+                (Ty::Integer, Some(Format::UInt16)) => OtherVariant::Primitive(PrimitiveType::U16),
+                (Ty::Integer, Some(Format::Int32)) => OtherVariant::Primitive(PrimitiveType::I32),
+                (Ty::Integer, Some(Format::UInt32)) => OtherVariant::Primitive(PrimitiveType::U32),
+                (Ty::Integer, Some(Format::Int64)) => OtherVariant::Primitive(PrimitiveType::I64),
+                (Ty::Integer, Some(Format::UInt64)) => OtherVariant::Primitive(PrimitiveType::U64),
                 (Ty::Integer, Some(Format::UnixTime)) => {
-                    OtherVariant::Primitive(self.name, PrimitiveType::UnixTime)
+                    OtherVariant::Primitive(PrimitiveType::UnixTime)
                 }
-                (Ty::Integer, _) => OtherVariant::Primitive(self.name, PrimitiveType::I32),
+                (Ty::Integer, _) => OtherVariant::Primitive(PrimitiveType::I32),
 
-                (Ty::Number, Some(Format::Float)) => {
-                    OtherVariant::Primitive(self.name, PrimitiveType::F32)
-                }
-                (Ty::Number, Some(Format::Double)) => {
-                    OtherVariant::Primitive(self.name, PrimitiveType::F64)
-                }
+                (Ty::Number, Some(Format::Float)) => OtherVariant::Primitive(PrimitiveType::F32),
+                (Ty::Number, Some(Format::Double)) => OtherVariant::Primitive(PrimitiveType::F64),
                 (Ty::Number, Some(Format::UnixTime)) => {
-                    OtherVariant::Primitive(self.name, PrimitiveType::UnixTime)
+                    OtherVariant::Primitive(PrimitiveType::UnixTime)
                 }
-                (Ty::Number, _) => OtherVariant::Primitive(self.name, PrimitiveType::F64),
+                (Ty::Number, _) => OtherVariant::Primitive(PrimitiveType::F64),
 
-                (Ty::Boolean, _) => OtherVariant::Primitive(self.name, PrimitiveType::Bool),
+                (Ty::Boolean, _) => OtherVariant::Primitive(PrimitiveType::Bool),
 
                 (Ty::Array, _) => {
                     let items = match &self.schema.items {
                         Some(RefOrSchema::Ref(r)) => SpecType::Ref(r),
                         Some(RefOrSchema::Inline(schema)) => {
-                            let segment = InlineTypePathSegment::ArrayItem;
-                            let path = match self.name {
-                                TypeInfo::Schema(info) => InlineTypePath {
-                                    root: InlineTypePathRoot::Type(info.name),
-                                    segments: self.arena().alloc_slice_copy(&[segment]),
-                                },
-                                TypeInfo::Inline(path) => path.join(self.arena(), &[segment]),
-                            };
-                            transform_with_context(self.context, path, schema)
+                            let id = self.context.ids.next();
+                            transform_with_context(self.context, id, schema)
                         }
                         None => {
-                            let segment = InlineTypePathSegment::ArrayItem;
-                            let path = match self.name {
-                                TypeInfo::Schema(info) => InlineTypePath {
-                                    root: InlineTypePathRoot::Type(info.name),
-                                    segments: self.arena().alloc_slice_copy(&[segment]),
-                                },
-                                TypeInfo::Inline(path) => path.join(self.arena(), &[segment]),
-                            };
-                            SpecInlineType::Any(path).into()
+                            let id = self.context.ids.next();
+                            SpecInlineType::Any(id).into()
                         }
                     };
-                    OtherVariant::Array(
-                        self.name,
-                        SpecInner {
-                            description: self.schema.description.as_deref(),
-                            ty: self.arena().alloc(items),
-                        },
-                    )
+                    OtherVariant::Array(SpecInner {
+                        description: self.schema.description.as_deref(),
+                        ty: self.arena().alloc(items),
+                    })
                 }
 
                 (Ty::Object, _) => {
@@ -502,44 +439,30 @@ impl<'context, 'a> IrTransformer<'context, 'a> {
                             })
                         }
                         Some(AdditionalProperties::RefOrSchema(RefOrSchema::Inline(schema))) => {
-                            let segment = InlineTypePathSegment::MapValue;
-                            let path = match self.name {
-                                TypeInfo::Schema(info) => InlineTypePath {
-                                    root: InlineTypePathRoot::Type(info.name),
-                                    segments: self.arena().alloc_slice_copy(&[segment]),
-                                },
-                                TypeInfo::Inline(path) => path.join(self.arena(), &[segment]),
-                            };
+                            let id = self.context.ids.next();
                             Some(SpecInner {
                                 description: self.schema.description.as_deref(),
                                 ty: self.arena().alloc(transform_with_context(
                                     self.context,
-                                    path,
+                                    id,
                                     schema,
                                 )),
                             })
                         }
                         Some(AdditionalProperties::Bool(true)) => {
-                            let segment = InlineTypePathSegment::MapValue;
-                            let path = match self.name {
-                                TypeInfo::Schema(info) => InlineTypePath {
-                                    root: InlineTypePathRoot::Type(info.name),
-                                    segments: self.arena().alloc_slice_copy(&[segment]),
-                                },
-                                TypeInfo::Inline(path) => path.join(self.arena(), &[segment]),
-                            };
+                            let id = self.context.ids.next();
                             Some(SpecInner {
                                 description: self.schema.description.as_deref(),
                                 ty: self
                                     .arena()
-                                    .alloc(SpecType::Inline(SpecInlineType::Any(path))),
+                                    .alloc(SpecType::Inline(SpecInlineType::Any(id))),
                             })
                         }
                         _ => None,
                     };
                     match inner {
-                        Some(inner) => OtherVariant::Map(self.name, inner),
-                        None => OtherVariant::Any(self.name),
+                        Some(inner) => OtherVariant::Map(inner),
+                        None => OtherVariant::Any,
                     }
                 }
 
@@ -556,29 +479,34 @@ impl<'context, 'a> IrTransformer<'context, 'a> {
             // but we treat it as "any type".
             ([], false) => match self.name {
                 TypeInfo::Schema(info) => SpecSchemaType::Any(info).into(),
-                TypeInfo::Inline(path) => SpecInlineType::Any(path).into(),
+                TypeInfo::Inline(id) => SpecInlineType::Any(id).into(),
             },
 
             // A `null` variant becomes `Any`.
             ([], true) => match self.name {
                 TypeInfo::Schema(info) => SpecSchemaType::Any(info).into(),
-                TypeInfo::Inline(path) => SpecInlineType::Any(path).into(),
+                TypeInfo::Inline(id) => SpecInlineType::Any(id).into(),
             },
 
             // A union with a single, non-`null` variant unwraps to
             // the type of that variant.
-            ([variant], false) => variant.to_type(),
+            ([variant], false) => match self.name {
+                TypeInfo::Schema(info) => variant.to_schema_type(info).into(),
+                TypeInfo::Inline(id) => variant.to_inline_type(id).into(),
+            },
 
             // A two-variant union, with one type T and one `null` variant,
             // simplifies to `Optional(T)`.
             ([variant], true) => {
                 let container = SpecContainer::Optional(SpecInner {
                     description: self.schema.description.as_deref(),
-                    ty: self.arena().alloc(variant.to_inline_type()),
+                    ty: self
+                        .arena()
+                        .alloc(variant.to_inline_type(self.context.ids.next()).into()),
                 });
                 match self.name {
                     TypeInfo::Schema(info) => SpecSchemaType::Container(info, container).into(),
-                    TypeInfo::Inline(path) => SpecInlineType::Container(path, container).into(),
+                    TypeInfo::Inline(id) => SpecInlineType::Container(id, container).into(),
                 }
             }
 
@@ -593,7 +521,8 @@ impl<'context, 'a> IrTransformer<'context, 'a> {
                             variant
                                 .hint()
                                 .unwrap_or(UntaggedVariantNameHint::Index(index)),
-                            self.arena().alloc(variant.to_inline_type()),
+                            self.arena()
+                                .alloc(variant.to_inline_type(self.context.ids.next()).into()),
                         )
                     })
                     .collect_vec();
@@ -607,7 +536,7 @@ impl<'context, 'a> IrTransformer<'context, 'a> {
                 };
                 match self.name {
                     TypeInfo::Schema(info) => SpecSchemaType::Untagged(info, untagged).into(),
-                    TypeInfo::Inline(path) => SpecInlineType::Untagged(path, untagged).into(),
+                    TypeInfo::Inline(id) => SpecInlineType::Untagged(id, untagged).into(),
                 }
             }
         }
@@ -623,19 +552,12 @@ impl<'context, 'a> IrTransformer<'context, 'a> {
             .flatten()
             .enumerate()
             .map(|(index, parent)| (index + 1, parent))
-            .map(move |(index, parent)| &*match parent {
+            .map(move |(_index, parent)| &*match parent {
                 RefOrSchema::Ref(r) => self.arena().alloc(SpecType::Ref(r)),
                 RefOrSchema::Inline(schema) => {
-                    let segment = InlineTypePathSegment::Parent(index);
-                    let path = match self.name {
-                        TypeInfo::Schema(info) => InlineTypePath {
-                            root: InlineTypePathRoot::Type(info.name),
-                            segments: self.arena().alloc_slice_copy(&[segment]),
-                        },
-                        TypeInfo::Inline(path) => path.join(self.arena(), &[segment]),
-                    };
+                    let id = self.context.ids.next();
                     self.arena()
-                        .alloc(transform_with_context(self.context, path, schema))
+                        .alloc(transform_with_context(self.context, id, schema))
                 }
             })
     }
@@ -653,17 +575,9 @@ impl<'context, 'a> IrTransformer<'context, 'a> {
                 let ty: &_ = match field_schema {
                     RefOrSchema::Ref(r) => self.arena().alloc(SpecType::Ref(r)),
                     RefOrSchema::Inline(schema) => {
-                        let segment =
-                            InlineTypePathSegment::Field(StructFieldName::Name(field_name));
-                        let path = match self.name {
-                            TypeInfo::Schema(info) => InlineTypePath {
-                                root: InlineTypePathRoot::Type(info.name),
-                                segments: self.arena().alloc_slice_copy(&[segment]),
-                            },
-                            TypeInfo::Inline(path) => path.join(self.arena(), &[segment]),
-                        };
+                        let id = self.context.ids.next();
                         self.arena()
-                            .alloc(transform_with_context(self.context, path, schema))
+                            .alloc(transform_with_context(self.context, id, schema))
                     }
                 };
                 let description = match field_schema {
@@ -686,16 +600,9 @@ impl<'context, 'a> IrTransformer<'context, 'a> {
                 // explicitly nullable, or implicitly optional. The `required`
                 // flag distinguishes between the two for codegen.
                 let ty: &_ = if nullable || !required {
-                    let segment = InlineTypePathSegment::Field(StructFieldName::Name(field_name));
-                    let path = match self.name {
-                        TypeInfo::Schema(info) => InlineTypePath {
-                            root: InlineTypePathRoot::Type(info.name),
-                            segments: self.arena().alloc_slice_copy(&[segment]),
-                        },
-                        TypeInfo::Inline(path) => path.join(self.arena(), &[segment]),
-                    };
+                    let id = self.context.ids.next();
                     self.arena().alloc(SpecType::from(SpecInlineType::Container(
-                        path,
+                        id,
                         SpecContainer::Optional(SpecInner { description, ty }),
                     )))
                 } else {
@@ -715,17 +622,6 @@ impl<'context, 'a> IrTransformer<'context, 'a> {
     /// if the schema specifies them.
     fn additional_properties(&self) -> Option<SpecStructField<'a>> {
         let name = StructFieldName::Hint(StructFieldNameHint::AdditionalProperties);
-        let path = match self.name {
-            TypeInfo::Schema(info) => InlineTypePath {
-                root: InlineTypePathRoot::Type(info.name),
-                segments: self
-                    .arena()
-                    .alloc_slice_copy(&[InlineTypePathSegment::Field(name)]),
-            },
-            TypeInfo::Inline(path) => {
-                path.join(self.arena(), &[InlineTypePathSegment::Field(name)])
-            }
-        };
 
         let inner = match &self.schema.additional_properties {
             Some(AdditionalProperties::RefOrSchema(RefOrSchema::Ref(r))) => SpecInner {
@@ -733,28 +629,29 @@ impl<'context, 'a> IrTransformer<'context, 'a> {
                 ty: self.arena().alloc(SpecType::Ref(r)),
             },
             Some(AdditionalProperties::RefOrSchema(RefOrSchema::Inline(schema))) => {
-                let path = path.join(self.arena(), &[InlineTypePathSegment::MapValue]);
+                let id = self.context.ids.next();
                 SpecInner {
                     description: self.schema.description.as_deref(),
                     ty: self
                         .arena()
-                        .alloc(transform_with_context(self.context, path, schema)),
+                        .alloc(transform_with_context(self.context, id, schema)),
                 }
             }
             Some(AdditionalProperties::Bool(true)) => {
-                let path = path.join(self.arena(), &[InlineTypePathSegment::MapValue]);
+                let id = self.context.ids.next();
                 SpecInner {
                     description: self.schema.description.as_deref(),
                     ty: self
                         .arena()
-                        .alloc(SpecType::Inline(SpecInlineType::Any(path))),
+                        .alloc(SpecType::Inline(SpecInlineType::Any(id))),
                 }
             }
             _ => return None,
         };
 
+        let map_id = self.context.ids.next();
         let ty: &_ = self.arena().alloc(SpecType::from(SpecInlineType::Container(
-            path,
+            map_id,
             SpecContainer::Map(inner),
         )));
 
@@ -778,101 +675,40 @@ struct Other<'a> {
 /// A variant of an [`Other`] union.
 #[derive(Clone, Copy)]
 enum OtherVariant<'a> {
-    Primitive(TypeInfo<'a>, PrimitiveType),
-    Array(TypeInfo<'a>, SpecInner<'a>),
-    Map(TypeInfo<'a>, SpecInner<'a>),
-    Any(TypeInfo<'a>),
+    Primitive(PrimitiveType),
+    Array(SpecInner<'a>),
+    Map(SpecInner<'a>),
+    Any,
 }
 
 impl<'a> OtherVariant<'a> {
     /// Returns the name hint for this variant when used in an untagged union.
     fn hint(self) -> Option<UntaggedVariantNameHint> {
         Some(match self {
-            Self::Primitive(_, p) => UntaggedVariantNameHint::Primitive(p),
+            Self::Primitive(p) => UntaggedVariantNameHint::Primitive(p),
             Self::Array(..) => UntaggedVariantNameHint::Array,
             Self::Map(..) => UntaggedVariantNameHint::Map,
-            Self::Any(_) => return None,
+            Self::Any => return None,
         })
     }
 
-    /// Converts this variant to a [`SpecType`].
-    ///
-    /// This is used to unwrap variants for the single-variant
-    /// and untagged union cases.
-    fn to_type(self) -> SpecType<'a> {
+    /// Converts this variant to a [`SpecSchemaType`].
+    fn to_schema_type(self, info: SchemaTypeInfo<'a>) -> SpecSchemaType<'a> {
         match self {
-            Self::Primitive(name, p) => match name {
-                TypeInfo::Schema(info) => SpecSchemaType::Primitive(info, p).into(),
-                TypeInfo::Inline(path) => SpecInlineType::Primitive(path, p).into(),
-            },
-            Self::Array(name, inner) => {
-                let container = SpecContainer::Array(inner);
-                match name {
-                    TypeInfo::Schema(info) => SpecSchemaType::Container(info, container).into(),
-                    TypeInfo::Inline(path) => SpecInlineType::Container(path, container).into(),
-                }
-            }
-            Self::Map(name, inner) => {
-                let container = SpecContainer::Map(inner);
-                match name {
-                    TypeInfo::Schema(info) => SpecSchemaType::Container(info, container).into(),
-                    TypeInfo::Inline(path) => SpecInlineType::Container(path, container).into(),
-                }
-            }
-            Self::Any(name) => match name {
-                TypeInfo::Schema(info) => SpecSchemaType::Any(info).into(),
-                TypeInfo::Inline(path) => SpecInlineType::Any(path).into(),
-            },
+            Self::Primitive(p) => SpecSchemaType::Primitive(info, p),
+            Self::Array(inner) => SpecSchemaType::Container(info, SpecContainer::Array(inner)),
+            Self::Map(inner) => SpecSchemaType::Container(info, SpecContainer::Map(inner)),
+            Self::Any => SpecSchemaType::Any(info),
         }
     }
 
-    /// Converts this variant to an inline [`SpecType`].
-    ///
-    /// This is used to rewrite `[T, null]` unions as `Optional(T)`.
-    fn to_inline_type(self) -> SpecType<'a> {
+    /// Converts this variant to a [`SpecInlineType`].
+    fn to_inline_type(self, id: InlineTypeId) -> SpecInlineType<'a> {
         match self {
-            Self::Primitive(name, p) => {
-                let path = match name {
-                    TypeInfo::Schema(info) => InlineTypePath {
-                        root: InlineTypePathRoot::Type(info.name),
-                        segments: &[],
-                    },
-                    TypeInfo::Inline(path) => path,
-                };
-                SpecInlineType::Primitive(path, p).into()
-            }
-            Self::Array(name, inner) => {
-                let container = SpecContainer::Array(inner);
-                let path = match name {
-                    TypeInfo::Schema(info) => InlineTypePath {
-                        root: InlineTypePathRoot::Type(info.name),
-                        segments: &[],
-                    },
-                    TypeInfo::Inline(path) => path,
-                };
-                SpecInlineType::Container(path, container).into()
-            }
-            Self::Map(name, inner) => {
-                let container = SpecContainer::Map(inner);
-                let path = match name {
-                    TypeInfo::Schema(info) => InlineTypePath {
-                        root: InlineTypePathRoot::Type(info.name),
-                        segments: &[],
-                    },
-                    TypeInfo::Inline(path) => path,
-                };
-                SpecInlineType::Container(path, container).into()
-            }
-            Self::Any(name) => {
-                let path = match name {
-                    TypeInfo::Schema(info) => InlineTypePath {
-                        root: InlineTypePathRoot::Type(info.name),
-                        segments: &[],
-                    },
-                    TypeInfo::Inline(path) => path,
-                };
-                SpecInlineType::Any(path).into()
-            }
+            Self::Primitive(p) => SpecInlineType::Primitive(id, p),
+            Self::Array(inner) => SpecInlineType::Container(id, SpecContainer::Array(inner)),
+            Self::Map(inner) => SpecInlineType::Container(id, SpecContainer::Map(inner)),
+            Self::Any => SpecInlineType::Any(id),
         }
     }
 }
