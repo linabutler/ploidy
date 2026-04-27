@@ -14,11 +14,11 @@ use super::{
 /// with all its operations and inline types.
 pub struct CodegenResource<'a> {
     feature: &'a CargoFeature,
-    ops: &'a [OperationView<'a>],
+    ops: &'a [OperationView<'a, 'a>],
 }
 
 impl<'a> CodegenResource<'a> {
-    pub fn new(feature: &'a CargoFeature, ops: &'a [OperationView<'a>]) -> Self {
+    pub fn new(feature: &'a CargoFeature, ops: &'a [OperationView<'a, 'a>]) -> Self {
         Self { feature, ops }
     }
 }

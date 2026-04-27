@@ -12,11 +12,11 @@ use super::{
 #[derive(Clone, Debug)]
 pub struct CodegenEnum<'a> {
     name: CodegenTypeName<'a>,
-    ty: &'a EnumView<'a>,
+    ty: &'a EnumView<'a, 'a>,
 }
 
 impl<'a> CodegenEnum<'a> {
-    pub fn new(name: CodegenTypeName<'a>, ty: &'a EnumView<'a>) -> Self {
+    pub fn new(name: CodegenTypeName<'a>, ty: &'a EnumView<'a, 'a>) -> Self {
         Self { name, ty }
     }
 }

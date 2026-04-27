@@ -16,17 +16,20 @@ use super::{
 
 /// Generates a single client method for an API operation.
 pub struct CodegenOperation<'a> {
-    op: &'a OperationView<'a>,
+    op: &'a OperationView<'a, 'a>,
 }
 
 impl<'a> CodegenOperation<'a> {
-    pub fn new(op: &'a OperationView<'a>) -> Self {
+    pub fn new(op: &'a OperationView<'a, 'a>) -> Self {
         Self { op }
     }
 
     /// Generates code to build and interpolate path parameters into
     /// the request URL.
-    fn url(&self, params: &[(CodegenIdent, ParameterView<'_, '_, PathParameter>)]) -> TokenStream {
+    fn url(
+        &self,
+        params: &[(CodegenIdent, ParameterView<'_, '_, '_, PathParameter>)],
+    ) -> TokenStream {
         let segments = self
             .op
             .path()

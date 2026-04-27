@@ -15,14 +15,14 @@ use super::{View, container::ContainerView, inline::InlineTypeView, schema::Sche
 /// A graph-aware view of a [schema][crate::ir::GraphSchemaType] or
 /// an [inline][crate::ir::GraphInlineType] type.
 #[derive(Debug)]
-pub enum TypeView<'a> {
-    Schema(SchemaTypeView<'a>),
-    Inline(InlineTypeView<'a>),
+pub enum TypeView<'graph, 'a> {
+    Schema(SchemaTypeView<'graph, 'a>),
+    Inline(InlineTypeView<'graph, 'a>),
 }
 
-impl<'a> TypeView<'a> {
+impl<'graph, 'a> TypeView<'graph, 'a> {
     #[inline]
-    pub(in crate::ir) fn new(cooked: &'a CookedGraph<'a>, index: NodeIndex<usize>) -> Self {
+    pub(in crate::ir) fn new(cooked: &'graph CookedGraph<'a>, index: NodeIndex<usize>) -> Self {
         match cooked.graph[index] {
             GraphType::Schema(ty) => Self::Schema(SchemaTypeView::new(cooked, index, ty)),
             GraphType::Inline(ty) => Self::Inline(InlineTypeView::new(cooked, index, ty)),
@@ -35,7 +35,7 @@ impl<'a> TypeView<'a> {
     /// [`Right`]: either::Right
     /// [`Left`]: either::Left
     #[inline]
-    pub fn into_schema(self) -> Either<Self, SchemaTypeView<'a>> {
+    pub fn into_schema(self) -> Either<Self, SchemaTypeView<'graph, 'a>> {
         match self {
             Self::Schema(view) => Either::Right(view),
             other => Either::Left(other),
@@ -45,7 +45,7 @@ impl<'a> TypeView<'a> {
     /// If this is a view of a named or inline container type,
     /// returns the container view.
     #[inline]
-    pub fn as_container(&self) -> Option<&ContainerView<'a>> {
+    pub fn as_container(&self) -> Option<&ContainerView<'graph, 'a>> {
         match self {
             Self::Schema(SchemaTypeView::Container(_, view)) => Some(view),
             Self::Inline(InlineTypeView::Container(_, view)) => Some(view),
@@ -55,7 +55,7 @@ impl<'a> TypeView<'a> {
 
     /// Returns an iterator over all the types that this type transitively depends on.
     #[inline]
-    pub fn dependencies(&self) -> impl Iterator<Item = TypeView<'a>> + use<'a> {
+    pub fn dependencies(&self) -> impl Iterator<Item = TypeView<'graph, 'a>> + use<'graph, 'a> {
         either!(match self {
             Self::Schema(v) => v.dependencies(),
             Self::Inline(v) => v.dependencies(),

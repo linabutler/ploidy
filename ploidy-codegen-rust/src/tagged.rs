@@ -15,11 +15,11 @@ use super::{derives::ExtraDerive, doc_attrs, naming::CodegenIdentUsage, ref_::Co
 #[derive(Clone, Debug)]
 pub struct CodegenTagged<'a> {
     name: CodegenTypeName<'a>,
-    ty: &'a TaggedView<'a>,
+    ty: &'a TaggedView<'a, 'a>,
 }
 
 impl<'a> CodegenTagged<'a> {
-    pub fn new(name: CodegenTypeName<'a>, ty: &'a TaggedView<'a>) -> Self {
+    pub fn new(name: CodegenTypeName<'a>, ty: &'a TaggedView<'a, 'a>) -> Self {
         Self { name, ty }
     }
 }

@@ -35,20 +35,20 @@ use super::{
 
 /// A graph-aware view of an [inline type][GraphInlineType].
 #[derive(Debug)]
-pub enum InlineTypeView<'a> {
-    Enum(InlineTypePath<'a>, EnumView<'a>),
-    Struct(InlineTypePath<'a>, StructView<'a>),
-    Tagged(InlineTypePath<'a>, TaggedView<'a>),
-    Untagged(InlineTypePath<'a>, UntaggedView<'a>),
-    Container(InlineTypePath<'a>, ContainerView<'a>),
-    Primitive(InlineTypePath<'a>, PrimitiveView<'a>),
-    Any(InlineTypePath<'a>, AnyView<'a>),
+pub enum InlineTypeView<'graph, 'a> {
+    Enum(InlineTypePath<'a>, EnumView<'graph, 'a>),
+    Struct(InlineTypePath<'a>, StructView<'graph, 'a>),
+    Tagged(InlineTypePath<'a>, TaggedView<'graph, 'a>),
+    Untagged(InlineTypePath<'a>, UntaggedView<'graph, 'a>),
+    Container(InlineTypePath<'a>, ContainerView<'graph, 'a>),
+    Primitive(InlineTypePath<'a>, PrimitiveView<'graph, 'a>),
+    Any(InlineTypePath<'a>, AnyView<'graph, 'a>),
 }
 
-impl<'a> InlineTypeView<'a> {
+impl<'graph, 'a> InlineTypeView<'graph, 'a> {
     #[inline]
     pub(in crate::ir) fn new(
-        cooked: &'a CookedGraph<'a>,
+        cooked: &'graph CookedGraph<'a>,
         index: NodeIndex<usize>,
         ty: GraphInlineType<'a>,
     ) -> Self {
@@ -88,9 +88,9 @@ impl<'a> InlineTypeView<'a> {
     }
 }
 
-impl<'a> ViewNode<'a> for InlineTypeView<'a> {
+impl<'graph, 'a> ViewNode<'graph, 'a> for InlineTypeView<'graph, 'a> {
     #[inline]
-    fn cooked(&self) -> &'a CookedGraph<'a> {
+    fn cooked(&self) -> &'graph CookedGraph<'a> {
         match self {
             Self::Enum(_, view) => view.cooked(),
             Self::Struct(_, view) => view.cooked(),

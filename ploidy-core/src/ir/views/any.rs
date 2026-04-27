@@ -13,18 +13,18 @@ use super::ViewNode;
 
 /// A graph-aware view of an untyped JSON value.
 #[derive(Debug)]
-pub struct AnyView<'a>(&'a CookedGraph<'a>, NodeIndex<usize>);
+pub struct AnyView<'graph, 'a>(&'graph CookedGraph<'a>, NodeIndex<usize>);
 
-impl<'a> AnyView<'a> {
+impl<'graph, 'a> AnyView<'graph, 'a> {
     #[inline]
-    pub(in crate::ir) fn new(cooked: &'a CookedGraph<'a>, index: NodeIndex<usize>) -> Self {
+    pub(in crate::ir) fn new(cooked: &'graph CookedGraph<'a>, index: NodeIndex<usize>) -> Self {
         Self(cooked, index)
     }
 }
 
-impl<'a> ViewNode<'a> for AnyView<'a> {
+impl<'graph, 'a> ViewNode<'graph, 'a> for AnyView<'graph, 'a> {
     #[inline]
-    fn cooked(&self) -> &'a CookedGraph<'a> {
+    fn cooked(&self) -> &'graph CookedGraph<'a> {
         self.0
     }
 

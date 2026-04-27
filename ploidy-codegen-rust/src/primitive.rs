@@ -6,11 +6,11 @@ use super::config::DateTimeFormat;
 
 #[derive(Clone, Copy, Debug)]
 pub struct CodegenPrimitive<'a> {
-    ty: &'a PrimitiveView<'a>,
+    ty: &'a PrimitiveView<'a, 'a>,
 }
 
 impl<'a> CodegenPrimitive<'a> {
-    pub fn new(ty: &'a PrimitiveView<'a>) -> Self {
+    pub fn new(ty: &'a PrimitiveView<'a, 'a>) -> Self {
         Self { ty }
     }
 }

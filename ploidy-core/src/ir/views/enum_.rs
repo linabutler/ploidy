@@ -26,16 +26,16 @@ use super::ViewNode;
 
 /// A graph-aware view of an [enum type][Enum].
 #[derive(Debug)]
-pub struct EnumView<'a> {
-    cooked: &'a CookedGraph<'a>,
+pub struct EnumView<'graph, 'a> {
+    cooked: &'graph CookedGraph<'a>,
     index: NodeIndex<usize>,
     ty: Enum<'a>,
 }
 
-impl<'a> EnumView<'a> {
+impl<'graph, 'a> EnumView<'graph, 'a> {
     #[inline]
     pub(in crate::ir) fn new(
-        cooked: &'a CookedGraph<'a>,
+        cooked: &'graph CookedGraph<'a>,
         index: NodeIndex<usize>,
         ty: Enum<'a>,
     ) -> Self {
@@ -55,9 +55,9 @@ impl<'a> EnumView<'a> {
     }
 }
 
-impl<'a> ViewNode<'a> for EnumView<'a> {
+impl<'graph, 'a> ViewNode<'graph, 'a> for EnumView<'graph, 'a> {
     #[inline]
-    fn cooked(&self) -> &'a CookedGraph<'a> {
+    fn cooked(&self) -> &'graph CookedGraph<'a> {
         self.cooked
     }
 

@@ -529,7 +529,7 @@ impl<'a> CookedGraph<'a> {
 
     /// Returns an iterator over all the named schemas in this graph.
     #[inline]
-    pub fn schemas(&self) -> impl Iterator<Item = SchemaTypeView<'_>> {
+    pub fn schemas(&self) -> impl Iterator<Item = SchemaTypeView<'_, 'a>> + use<'_, 'a> {
         self.graph
             .node_indices()
             .filter_map(|index| match self.graph[index] {
@@ -540,7 +540,7 @@ impl<'a> CookedGraph<'a> {
 
     /// Returns an iterator over all primitive type nodes in this graph.
     #[inline]
-    pub fn primitives(&self) -> impl Iterator<Item = PrimitiveView<'_>> {
+    pub fn primitives(&self) -> impl Iterator<Item = PrimitiveView<'_, 'a>> + use<'_, 'a> {
         self.graph
             .node_indices()
             .filter_map(|index| match self.graph[index] {
@@ -554,8 +554,8 @@ impl<'a> CookedGraph<'a> {
 
     /// Returns an iterator over all the operations in this graph.
     #[inline]
-    pub fn operations(&self) -> impl Iterator<Item = OperationView<'_>> {
-        self.ops.iter().map(move |&op| OperationView::new(self, op))
+    pub fn operations(&self) -> impl Iterator<Item = OperationView<'_, 'a>> + use<'_, 'a> {
+        self.ops.iter().map(|&op| OperationView::new(self, op))
     }
 
     #[inline]
@@ -793,7 +793,7 @@ impl<'graph, 'a> MetadataBuilder<'graph, 'a> {
         scc.run(&box_edges, |_| ());
         self.graph
             .node_indices()
-            .map(move |node| scc.node_component_index(&box_edges, node))
+            .map(|node| scc.node_component_index(&box_edges, node))
             .collect()
     }
 

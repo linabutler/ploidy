@@ -17,11 +17,11 @@ use super::{
 #[derive(Clone, Debug)]
 pub struct CodegenStruct<'a> {
     name: CodegenTypeName<'a>,
-    ty: &'a StructView<'a>,
+    ty: &'a StructView<'a, 'a>,
 }
 
 impl<'a> CodegenStruct<'a> {
-    pub fn new(name: CodegenTypeName<'a>, ty: &'a StructView<'a>) -> Self {
+    pub fn new(name: CodegenTypeName<'a>, ty: &'a StructView<'a, 'a>) -> Self {
         Self { name, ty }
     }
 }
@@ -87,11 +87,11 @@ impl ToTokens for CodegenStruct<'_> {
 /// A field in a struct, ready for code generation.
 #[derive(Debug)]
 struct CodegenField<'view, 'a> {
-    field: &'a StructFieldView<'view, 'a>,
+    field: &'a StructFieldView<'view, 'a, 'a>,
 }
 
 impl<'view, 'a> CodegenField<'view, 'a> {
-    fn new(field: &'a StructFieldView<'view, 'a>) -> Self {
+    fn new(field: &'a StructFieldView<'view, 'a, 'a>) -> Self {
         Self { field }
     }
 }
@@ -119,11 +119,11 @@ impl ToTokens for CodegenField<'_, '_> {
 #[derive(Debug)]
 struct StructFieldAttrs<'view, 'a> {
     field_name: CodegenIdentUsage<'a>,
-    field: &'a StructFieldView<'view, 'a>,
+    field: &'a StructFieldView<'view, 'a, 'a>,
 }
 
 impl<'view, 'a> StructFieldAttrs<'view, 'a> {
-    fn new(field_name: CodegenIdentUsage<'a>, field: &'a StructFieldView<'view, 'a>) -> Self {
+    fn new(field_name: CodegenIdentUsage<'a>, field: &'a StructFieldView<'view, 'a, 'a>) -> Self {
         Self { field_name, field }
     }
 }

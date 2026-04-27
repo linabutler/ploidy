@@ -79,14 +79,17 @@ use super::{View, inline::InlineTypeView, ir::TypeView};
 
 /// A graph-aware view of an [operation][GraphOperation].
 #[derive(Debug)]
-pub struct OperationView<'a> {
-    cooked: &'a CookedGraph<'a>,
-    op: &'a GraphOperation<'a>,
+pub struct OperationView<'graph, 'a> {
+    cooked: &'graph CookedGraph<'a>,
+    op: &'graph GraphOperation<'a>,
 }
 
-impl<'a> OperationView<'a> {
+impl<'graph, 'a> OperationView<'graph, 'a> {
     #[inline]
-    pub(in crate::ir) fn new(cooked: &'a CookedGraph<'a>, op: &'a GraphOperation<'a>) -> Self {
+    pub(in crate::ir) fn new(
+        cooked: &'graph CookedGraph<'a>,
+        op: &'graph GraphOperation<'a>,
+    ) -> Self {
         Self { cooked, op }
     }
 
@@ -104,7 +107,7 @@ impl<'a> OperationView<'a> {
 
     /// Returns a view of this operation's path template.
     #[inline]
-    pub fn path(&self) -> OperationViewPath<'_, 'a> {
+    pub fn path(&self) -> OperationViewPath<'_, 'graph, 'a> {
         OperationViewPath(self)
     }
 
@@ -116,8 +119,8 @@ impl<'a> OperationView<'a> {
 
     /// Returns an iterator over this operation's query parameters.
     #[inline]
-    pub fn query(&self) -> impl Iterator<Item = ParameterView<'_, 'a, QueryParameter>> {
-        self.op.params.iter().filter_map(move |param| match param {
+    pub fn query(&self) -> impl Iterator<Item = ParameterView<'_, 'graph, 'a, QueryParameter>> {
+        self.op.params.iter().filter_map(|param| match param {
             GraphParameter::Query(info) => Some(ParameterView::new(self, info)),
             _ => None,
         })
@@ -125,7 +128,7 @@ impl<'a> OperationView<'a> {
 
     /// Returns a view of the request body, if present.
     #[inline]
-    pub fn request(&self) -> Option<RequestView<'a>> {
+    pub fn request(&self) -> Option<RequestView<'graph, 'a>> {
         self.op.request.as_ref().map(|ty| match ty {
             GraphRequest::Json(index) => RequestView::Json(TypeView::new(self.cooked, *index)),
             GraphRequest::Multipart => RequestView::Multipart,
@@ -134,7 +137,7 @@ impl<'a> OperationView<'a> {
 
     /// Returns a view of the response body, if present.
     #[inline]
-    pub fn response(&self) -> Option<ResponseView<'a>> {
+    pub fn response(&self) -> Option<ResponseView<'graph, 'a>> {
         self.op.response.as_ref().map(|ty| match ty {
             GraphResponse::Json(index) => ResponseView::Json(TypeView::new(self.cooked, *index)),
         })
@@ -148,11 +151,11 @@ impl<'a> OperationView<'a> {
     }
 }
 
-impl<'a> View<'a> for OperationView<'a> {
+impl<'graph, 'a> View<'graph, 'a> for OperationView<'graph, 'a> {
     /// Returns an iterator over all the inline types that are
     /// contained within this operation's referenced types.
     #[inline]
-    fn inlines(&self) -> impl Iterator<Item = InlineTypeView<'a>> + use<'a> {
+    fn inlines(&self) -> impl Iterator<Item = InlineTypeView<'graph, 'a>> + use<'graph, 'a> {
         let cooked = self.cooked;
         // Follow edges to inline schemas, skipping shadow edges.
         // See `GraphEdge::shadow()` for an explanation.
@@ -188,22 +191,22 @@ impl<'a> View<'a> for OperationView<'a> {
     /// Returns an empty iterator. Operations aren't "used by" other operations;
     /// they use types.
     #[inline]
-    fn used_by(&self) -> impl Iterator<Item = OperationView<'a>> + use<'a> {
+    fn used_by(&self) -> impl Iterator<Item = OperationView<'graph, 'a>> + use<'graph, 'a> {
         std::iter::empty()
     }
 
     #[inline]
-    fn dependencies(&self) -> impl Iterator<Item = TypeView<'a>> + use<'a> {
+    fn dependencies(&self) -> impl Iterator<Item = TypeView<'graph, 'a>> + use<'graph, 'a> {
         let cooked = self.cooked;
         cooked.metadata.uses[self.op]
             .ones()
             .map(NodeIndex::new)
-            .map(move |index| TypeView::new(cooked, index))
+            .map(|index| TypeView::new(cooked, index))
     }
 
     /// Returns an empty iterator. Operations don't have dependents.
     #[inline]
-    fn dependents(&self) -> impl Iterator<Item = TypeView<'a>> + use<'a> {
+    fn dependents(&self) -> impl Iterator<Item = TypeView<'graph, 'a>> + use<'graph, 'a> {
         std::iter::empty()
     }
 
@@ -220,9 +223,9 @@ impl<'a> View<'a> for OperationView<'a> {
 
 /// A graph-aware view of operation's path template and parameters.
 #[derive(Clone, Copy, Debug)]
-pub struct OperationViewPath<'view, 'a>(&'view OperationView<'a>);
+pub struct OperationViewPath<'view, 'graph, 'a>(&'view OperationView<'graph, 'a>);
 
-impl<'view, 'a> OperationViewPath<'view, 'a> {
+impl<'view, 'graph, 'a> OperationViewPath<'view, 'graph, 'a> {
     /// Returns an iterator over this path's segments.
     #[inline]
     pub fn segments(self) -> std::slice::Iter<'view, PathSegment<'a>> {
@@ -238,30 +241,26 @@ impl<'view, 'a> OperationViewPath<'view, 'a> {
 
     /// Returns an iterator over this operation's path parameters.
     #[inline]
-    pub fn params(self) -> impl Iterator<Item = ParameterView<'view, 'a, PathParameter>> {
-        self.0
-            .op
-            .params
-            .iter()
-            .filter_map(move |param| match param {
-                GraphParameter::Path(info) => Some(ParameterView::new(self.0, info)),
-                _ => None,
-            })
+    pub fn params(self) -> impl Iterator<Item = ParameterView<'view, 'graph, 'a, PathParameter>> {
+        self.0.op.params.iter().filter_map(|param| match param {
+            GraphParameter::Path(info) => Some(ParameterView::new(self.0, info)),
+            _ => None,
+        })
     }
 }
 
 /// A graph-aware view of an operation parameter.
 #[derive(Debug)]
-pub struct ParameterView<'view, 'a, T> {
-    op: &'view OperationView<'a>,
+pub struct ParameterView<'view, 'graph, 'a, T> {
+    op: &'view OperationView<'graph, 'a>,
     info: &'a GraphParameterInfo<'a>,
     phantom: PhantomData<T>,
 }
 
-impl<'view, 'a, T> ParameterView<'view, 'a, T> {
+impl<'view, 'graph, 'a, T> ParameterView<'view, 'graph, 'a, T> {
     #[inline]
     pub(in crate::ir) fn new(
-        op: &'view OperationView<'a>,
+        op: &'view OperationView<'graph, 'a>,
         info: &'a GraphParameterInfo<'a>,
     ) -> Self {
         Self {
@@ -279,7 +278,7 @@ impl<'view, 'a, T> ParameterView<'view, 'a, T> {
 
     /// Returns a view of the parameter's type.
     #[inline]
-    pub fn ty(&self) -> TypeView<'a> {
+    pub fn ty(&self) -> TypeView<'graph, 'a> {
         TypeView::new(self.op.cooked, self.info.ty)
     }
 
@@ -296,8 +295,10 @@ impl<'view, 'a, T> ParameterView<'view, 'a, T> {
     }
 }
 
-impl<'view, 'a, T> View<'a> for ParameterView<'view, 'a, T> {
-    fn inlines(&self) -> impl Iterator<Item = InlineTypeView<'a>> + use<'view, 'a, T> {
+impl<'view, 'graph, 'a, T> View<'graph, 'a> for ParameterView<'view, 'graph, 'a, T> {
+    fn inlines(
+        &self,
+    ) -> impl Iterator<Item = InlineTypeView<'graph, 'a>> + use<'view, 'graph, 'a, T> {
         let cooked = self.op.cooked;
         let start = self.info.ty;
         // Follow edges to inline schemas, skipping shadow edges.
@@ -327,21 +328,25 @@ impl<'view, 'a, T> View<'a> for ParameterView<'view, 'a, T> {
         })
     }
 
-    fn used_by(&self) -> impl Iterator<Item = OperationView<'a>> + use<'view, 'a, T> {
+    fn used_by(
+        &self,
+    ) -> impl Iterator<Item = OperationView<'graph, 'a>> + use<'view, 'graph, 'a, T> {
         std::iter::once(OperationView::new(self.op.cooked, self.op.op))
     }
 
-    fn dependencies(&self) -> impl Iterator<Item = TypeView<'a>> + use<'view, 'a, T> {
+    fn dependencies(
+        &self,
+    ) -> impl Iterator<Item = TypeView<'graph, 'a>> + use<'view, 'graph, 'a, T> {
         let cooked = self.op.cooked;
         cooked
             .metadata
             .closure
             .dependencies_of(self.info.ty)
-            .map(move |index| TypeView::new(cooked, index))
+            .map(|index| TypeView::new(cooked, index))
     }
 
     /// Returns an empty iterator; other types don't depend on parameters.
-    fn dependents(&self) -> impl Iterator<Item = TypeView<'a>> + use<'view, 'a, T> {
+    fn dependents(&self) -> impl Iterator<Item = TypeView<'graph, 'a>> + use<'view, 'graph, 'a, T> {
         std::iter::empty()
     }
 
@@ -366,13 +371,13 @@ pub enum QueryParameter {}
 
 /// A graph-aware view of an operation's request body.
 #[derive(Debug)]
-pub enum RequestView<'a> {
-    Json(TypeView<'a>),
+pub enum RequestView<'graph, 'a> {
+    Json(TypeView<'graph, 'a>),
     Multipart,
 }
 
 /// A graph-aware view of an operation's response body.
 #[derive(Debug)]
-pub enum ResponseView<'a> {
-    Json(TypeView<'a>),
+pub enum ResponseView<'graph, 'a> {
+    Json(TypeView<'graph, 'a>),
 }

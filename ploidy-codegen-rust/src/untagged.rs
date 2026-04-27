@@ -15,11 +15,11 @@ use super::{
 #[derive(Clone, Debug)]
 pub struct CodegenUntagged<'a> {
     name: CodegenTypeName<'a>,
-    ty: &'a UntaggedView<'a>,
+    ty: &'a UntaggedView<'a, 'a>,
 }
 
 impl<'a> CodegenUntagged<'a> {
-    pub fn new(name: CodegenTypeName<'a>, ty: &'a UntaggedView<'a>) -> Self {
+    pub fn new(name: CodegenTypeName<'a>, ty: &'a UntaggedView<'a, 'a>) -> Self {
         Self { name, ty }
     }
 }

@@ -12,11 +12,11 @@ use super::{
 /// Generates a module for a named schema type.
 #[derive(Debug)]
 pub struct CodegenSchemaType<'a> {
-    ty: &'a SchemaTypeView<'a>,
+    ty: &'a SchemaTypeView<'a, 'a>,
 }
 
 impl<'a> CodegenSchemaType<'a> {
-    pub fn new(ty: &'a SchemaTypeView<'a>) -> Self {
+    pub fn new(ty: &'a SchemaTypeView<'a, 'a>) -> Self {
         Self { ty }
     }
 }

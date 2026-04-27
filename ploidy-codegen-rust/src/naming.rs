@@ -36,8 +36,8 @@ const KEYWORDS: &[&str] = &["crate", "self", "super", "Self"];
 /// and [`into_sort_key`](Self::into_sort_key) for deterministic sorting.
 #[derive(Clone, Copy, Debug)]
 pub enum CodegenTypeName<'a> {
-    Schema(&'a SchemaTypeView<'a>),
-    Inline(&'a InlineTypeView<'a>),
+    Schema(&'a SchemaTypeView<'a, 'a>),
+    Inline(&'a InlineTypeView<'a, 'a>),
 }
 
 impl<'a> CodegenTypeName<'a> {
@@ -131,12 +131,12 @@ pub struct CodegenTypeNameSortKey<'a>(CodegenTypeName<'a>);
 
 impl<'a> CodegenTypeNameSortKey<'a> {
     #[inline]
-    pub fn for_schema(view: &'a SchemaTypeView<'a>) -> Self {
+    pub fn for_schema(view: &'a SchemaTypeView<'a, 'a>) -> Self {
         Self(CodegenTypeName::Schema(view))
     }
 
     #[inline]
-    pub fn for_inline(view: &'a InlineTypeView<'a>) -> Self {
+    pub fn for_inline(view: &'a InlineTypeView<'a, 'a>) -> Self {
         Self(CodegenTypeName::Inline(view))
     }
 

@@ -12,11 +12,11 @@ use super::{
 
 #[derive(Clone, Copy, Debug)]
 pub struct CodegenRef<'a> {
-    ty: &'a TypeView<'a>,
+    ty: &'a TypeView<'a, 'a>,
 }
 
 impl<'a> CodegenRef<'a> {
-    pub fn new(ty: &'a TypeView<'a>) -> Self {
+    pub fn new(ty: &'a TypeView<'a, 'a>) -> Self {
         Self { ty }
     }
 }

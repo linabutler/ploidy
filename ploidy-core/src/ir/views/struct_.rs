@@ -61,16 +61,16 @@ use super::{ViewNode, container::ContainerView, ir::TypeView};
 
 /// A graph-aware view of a [struct type][GraphStruct].
 #[derive(Debug)]
-pub struct StructView<'a> {
-    cooked: &'a CookedGraph<'a>,
+pub struct StructView<'graph, 'a> {
+    cooked: &'graph CookedGraph<'a>,
     index: NodeIndex<usize>,
     ty: GraphStruct<'a>,
 }
 
-impl<'a> StructView<'a> {
+impl<'graph, 'a> StructView<'graph, 'a> {
     #[inline]
     pub(in crate::ir) fn new(
-        cooked: &'a CookedGraph<'a>,
+        cooked: &'graph CookedGraph<'a>,
         index: NodeIndex<usize>,
         ty: GraphStruct<'a>,
     ) -> Self {
@@ -88,7 +88,7 @@ impl<'a> StructView<'a> {
     /// ancestor fields first, in the order of their parents in `allOf`;
     /// then this struct's own fields.
     #[inline]
-    pub fn fields(&self) -> impl Iterator<Item = StructFieldView<'_, 'a>> {
+    pub fn fields(&self) -> impl Iterator<Item = StructFieldView<'_, 'graph, 'a>> {
         let all = self
             .inherited_fields() // Not a `DoubleEndedIterator`; can't reverse directly.
             .chain(self.own_fields())
@@ -108,7 +108,7 @@ impl<'a> StructView<'a> {
 
     /// Returns an iterator over all fields inherited from
     /// this struct's ancestors.
-    fn inherited_fields(&self) -> impl Iterator<Item = StructFieldView<'_, 'a>> {
+    fn inherited_fields(&self) -> impl Iterator<Item = StructFieldView<'_, 'graph, 'a>> {
         enum Step {
             Enter(NodeIndex<usize>),
             Exit(NodeIndex<usize>),
@@ -158,25 +158,25 @@ impl<'a> StructView<'a> {
     /// Returns an iterator over fields declared directly on this struct,
     /// excluding inherited fields.
     #[inline]
-    pub fn own_fields(&self) -> impl Iterator<Item = StructFieldView<'_, 'a>> {
+    pub fn own_fields(&self) -> impl Iterator<Item = StructFieldView<'_, 'graph, 'a>> {
         self.cooked
             .fields(self.index)
-            .map(move |info| StructFieldView::new(self, info.meta, info.target, false))
+            .map(|info| StructFieldView::new(self, info.meta, info.target, false))
     }
 
     /// Returns an iterator over immediate parent types from `allOf`,
     /// including named and inline schemas.
     #[inline]
-    pub fn parents(&self) -> impl Iterator<Item = TypeView<'a>> {
+    pub fn parents(&self) -> impl Iterator<Item = TypeView<'graph, 'a>> {
         self.cooked
             .inherits(self.index)
-            .map(move |info| TypeView::new(self.cooked, info.target))
+            .map(|info| TypeView::new(self.cooked, info.target))
     }
 }
 
-impl<'a> ViewNode<'a> for StructView<'a> {
+impl<'graph, 'a> ViewNode<'graph, 'a> for StructView<'graph, 'a> {
     #[inline]
-    fn cooked(&self) -> &'a CookedGraph<'a> {
+    fn cooked(&self) -> &'graph CookedGraph<'a> {
         self.cooked
     }
 
@@ -187,7 +187,7 @@ impl<'a> ViewNode<'a> for StructView<'a> {
 }
 
 /// A graph-aware view of a struct field.
-pub type StructFieldView<'view, 'a> = FieldView<'view, 'a, StructView<'a>>;
+pub type StructFieldView<'view, 'graph, 'a> = FieldView<'view, 'a, StructView<'graph, 'a>>;
 
 /// A graph-aware view of a struct or union field.
 #[derive(Debug)]
@@ -199,7 +199,7 @@ pub struct FieldView<'view, 'a, P> {
 }
 
 #[allow(private_bounds, reason = "`ViewNode` is sealed")]
-impl<'view, 'a, P: ViewNode<'a>> FieldView<'view, 'a, P> {
+impl<'view, 'graph, 'a: 'graph, P: ViewNode<'graph, 'a>> FieldView<'view, 'a, P> {
     #[inline]
     pub(in crate::ir) fn new(
         parent: &'view P,
@@ -223,7 +223,7 @@ impl<'view, 'a, P: ViewNode<'a>> FieldView<'view, 'a, P> {
 
     /// Returns a view of the inner type that this type wraps.
     #[inline]
-    pub fn ty(&self) -> TypeView<'a> {
+    pub fn ty(&self) -> TypeView<'graph, 'a> {
         TypeView::new(self.parent.cooked(), self.ty)
     }
 
@@ -267,7 +267,7 @@ pub enum Required {
     Optional,
 }
 
-impl<'view, 'a> FieldView<'view, 'a, StructView<'a>> {
+impl<'view, 'graph, 'a> FieldView<'view, 'a, StructView<'graph, 'a>> {
     /// Returns `true` if this field was inherited from a parent via `allOf`.
     #[inline]
     pub fn inherited(&self) -> bool {

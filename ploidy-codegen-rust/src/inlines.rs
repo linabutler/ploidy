@@ -19,8 +19,8 @@ use super::{
 /// emitted by [`CodegenSchemaType`](crate::CodegenSchemaType) instead.
 #[derive(Clone, Copy, Debug)]
 pub enum CodegenInlines<'a> {
-    Resource(&'a [OperationView<'a>]),
-    Schema(&'a SchemaTypeView<'a>),
+    Resource(&'a [OperationView<'a, 'a>]),
+    Schema(&'a SchemaTypeView<'a, 'a>),
 }
 
 impl ToTokens for CodegenInlines<'_> {
@@ -43,7 +43,7 @@ struct CodegenInlineItems<'a, V>(IncludeCfgFeatures, &'a [V]);
 
 impl<'a, V> ToTokens for CodegenInlineItems<'a, V>
 where
-    V: View<'a>,
+    V: View<'a, 'a>,
 {
     fn to_tokens(&self, tokens: &mut TokenStream) {
         let mut inlines = self.1.iter().flat_map(|op| op.inlines()).collect_vec();

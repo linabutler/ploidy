@@ -21,13 +21,13 @@ use super::{
 /// with per-parameter serialization style overrides.
 #[derive(Debug)]
 pub struct CodegenQueryParameters<'a> {
-    op: &'a OperationView<'a>,
+    op: &'a OperationView<'a, 'a>,
 }
 
 impl<'a> CodegenQueryParameters<'a> {
     /// Creates a new query parameter struct for the given operation.
     #[inline]
-    pub fn new(op: &'a OperationView<'a>) -> Self {
+    pub fn new(op: &'a OperationView<'a, 'a>) -> Self {
         Self { op }
     }
 }
@@ -125,13 +125,13 @@ impl ToTokens for CodegenQueryParameters<'_> {
 #[derive(Debug)]
 struct SerdeQueryFieldAttr<'param, 'a> {
     field_name: CodegenIdentUsage<'param>,
-    param: &'param ParameterView<'param, 'a, QueryParameter>,
+    param: &'param ParameterView<'param, 'a, 'a, QueryParameter>,
 }
 
 impl<'param, 'a> SerdeQueryFieldAttr<'param, 'a> {
     fn new(
         field_name: CodegenIdentUsage<'param>,
-        param: &'param ParameterView<'param, 'a, QueryParameter>,
+        param: &'param ParameterView<'param, 'a, 'a, QueryParameter>,
     ) -> Self {
         Self { field_name, param }
     }
