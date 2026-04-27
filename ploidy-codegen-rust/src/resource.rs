@@ -1,11 +1,15 @@
-use ploidy_core::{codegen::IntoCode, ir::OperationView};
+use ploidy_core::{
+    codegen::IntoCode,
+    ir::{OperationView, View},
+};
 use proc_macro2::TokenStream;
 use quote::{ToTokens, TokenStreamExt, format_ident, quote};
 
 use super::{
     cfg::CfgFeature,
+    graph::CodegenGraph,
     inlines::CodegenInlines,
-    naming::{CargoFeature, CodegenIdent, CodegenIdentUsage},
+    naming::{CodegenIdentUsage, ResourceGroup},
     operation::CodegenOperation,
     query::CodegenQueryParameters,
 };
@@ -13,13 +17,22 @@ use super::{
 /// Generates an `impl Client` block for a feature-gated resource,
 /// with all its operations and inline types.
 pub struct CodegenResource<'a> {
-    feature: &'a CargoFeature,
+    graph: &'a CodegenGraph<'a>,
+    resource: ResourceGroup<'a>,
     ops: &'a [OperationView<'a, 'a>],
 }
 
 impl<'a> CodegenResource<'a> {
-    pub fn new(feature: &'a CargoFeature, ops: &'a [OperationView<'a, 'a>]) -> Self {
-        Self { feature, ops }
+    pub fn new(
+        graph: &'a CodegenGraph<'a>,
+        resource: ResourceGroup<'a>,
+        ops: &'a [OperationView<'a, 'a>],
+    ) -> Self {
+        Self {
+            graph,
+            resource,
+            ops,
+        }
     }
 }
 
@@ -29,16 +42,20 @@ impl ToTokens for CodegenResource<'_> {
         reason = "`filter_map` + `then` reads cleaner here"
     )]
     fn to_tokens(&self, tokens: &mut TokenStream) {
-        // Each method gets its own `#[cfg(...)]` attribute.
-        let methods = self.ops.iter().map(|view| {
-            let cfg = CfgFeature::for_operation(view);
-            let method = CodegenOperation::new(view).into_token_stream();
+        let methods = self.ops.iter().map(|op| {
+            // Each method gets its own `#[cfg(...)]` attribute.
+            let cfg = CfgFeature::for_operation(self.graph, op);
+            let method = CodegenOperation::new(self.graph, op);
             quote! {
                 #cfg
                 #method
             }
         });
-        let inlines = CodegenInlines::Resource(self.ops);
+
+        let inlines = CodegenInlines::for_resource_inlines(
+            self.graph,
+            self.ops.iter().flat_map(|op| op.inlines()).collect(),
+        );
 
         let params = self
             .ops
@@ -47,10 +64,12 @@ impl ToTokens for CodegenResource<'_> {
                 // Collect query parameter structs for operations
                 // that have at least one query parameter.
                 op.query().next().is_some().then(|| {
-                    let cfg = CfgFeature::for_operation(op);
-                    let query = CodegenQueryParameters::new(op);
-                    let op_ident = CodegenIdent::new(op.id());
-                    let mod_name = format_ident!("{}_query", CodegenIdentUsage::Module(&op_ident));
+                    let cfg = CfgFeature::for_operation(self.graph, op);
+                    let query = CodegenQueryParameters::new(self.graph, op);
+                    let mod_name = format_ident!(
+                        "{}_query",
+                        CodegenIdentUsage::Module(self.graph.ident(op.id()))
+                    );
                     quote! {
                         #cfg
                         mod #mod_name {
@@ -85,10 +104,13 @@ impl IntoCode for CodegenResource<'_> {
 
     fn into_code(self) -> Self::Code {
         (
-            format!(
-                "src/client/{}.rs",
-                CodegenIdentUsage::Module(self.feature.as_ident()).display()
-            ),
+            match self.resource {
+                ResourceGroup::Named(name) => format!(
+                    "src/client/{}.rs",
+                    CodegenIdentUsage::Module(name).display()
+                ),
+                ResourceGroup::Default => "src/client/default.rs".to_owned(),
+            },
             self.into_token_stream(),
         )
     }
@@ -107,7 +129,7 @@ mod tests {
     use pretty_assertions::assert_eq;
     use syn::parse_quote;
 
-    use crate::{graph::CodegenGraph, naming::CargoFeature};
+    use crate::graph::CodegenGraph;
 
     // MARK: Feature gating
 
@@ -152,8 +174,11 @@ mod tests {
         let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
         let ops = graph.operations().collect_vec();
-        let feature = CargoFeature::from_name("customer");
-        let resource = CodegenResource::new(&feature, &ops);
+        let [op] = &*ops else {
+            panic!("expected one operation; got `{ops:?}`");
+        };
+        let resource =
+            CodegenResource::new(&graph, graph.resource_for(op), std::slice::from_ref(op));
 
         // No `#[cfg(...)]` on the method because none of its
         // dependencies have an `x-resourceId`.
@@ -233,8 +258,11 @@ mod tests {
         let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
         let ops = graph.operations().collect_vec();
-        let feature = CargoFeature::from_name("orders");
-        let resource = CodegenResource::new(&feature, &ops);
+        let [op] = &*ops else {
+            panic!("expected one operation; got `{ops:?}`");
+        };
+        let resource =
+            CodegenResource::new(&graph, graph.resource_for(op), std::slice::from_ref(op));
 
         // `#[cfg(feature = "customer")]` because `Order` depends on
         // `Customer`, which has `x-resourceId: customer`.
@@ -304,8 +332,11 @@ mod tests {
         let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
         let ops = graph.operations().collect_vec();
-        let feature = CargoFeature::from_name("customer");
-        let resource = CodegenResource::new(&feature, &ops);
+        let [op] = &*ops else {
+            panic!("expected one operation; got `{ops:?}`");
+        };
+        let resource =
+            CodegenResource::new(&graph, graph.resource_for(op), std::slice::from_ref(op));
 
         let actual: syn::File = parse_quote!(#resource);
         let expected: syn::File = parse_quote! {
@@ -402,8 +433,12 @@ mod tests {
         let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
         let ops = graph.operations().collect_vec();
-        let feature = CargoFeature::from_name("customer");
-        let resource = CodegenResource::new(&feature, &ops);
+        let resource = ops
+            .iter()
+            .map(|op| graph.resource_for(op))
+            .all_equal_value()
+            .unwrap();
+        let resource = CodegenResource::new(&graph, resource, &ops);
 
         let actual: syn::File = parse_quote!(#resource);
         let expected: syn::File = parse_quote! {
@@ -524,8 +559,11 @@ mod tests {
         let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
         let ops = graph.operations().collect_vec();
-        let feature = CargoFeature::from_name("customer");
-        let resource = CodegenResource::new(&feature, &ops);
+        let [op] = &*ops else {
+            panic!("expected one operation; got `{ops:?}`");
+        };
+        let resource =
+            CodegenResource::new(&graph, graph.resource_for(op), std::slice::from_ref(op));
 
         let actual: syn::File = parse_quote!(#resource);
         let expected: syn::File = parse_quote! {

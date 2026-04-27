@@ -78,7 +78,7 @@ fn main() -> Result<()> {
 
             let counts = graph
                 .operations()
-                .into_grouping_map_by(|op| op.resource())
+                .into_grouping_map_by(|op| graph.resource_for(op))
                 .fold(0, |count, _, _| count + 1);
             println!(
                 "Generating {} client methods across {} resources...",

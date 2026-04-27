@@ -1,5 +1,5 @@
 use std::{
-    any::{Any, TypeId},
+    any::{Any, TypeId as StdTypeId},
     collections::VecDeque,
     fmt::Debug,
 };
@@ -12,31 +12,27 @@ use petgraph::{
     adj::UnweightedList,
     algo::{TarjanScc, tred},
     data::Build,
-    graph::{DiGraph, NodeIndex},
+    graph::{DiGraph, EdgeIndex, NodeIndex},
     stable_graph::StableDiGraph,
     visit::{
-        DfsPostOrder, EdgeFiltered, EdgeRef, IntoNeighbors, IntoNeighborsDirected,
-        IntoNodeIdentifiers, NodeCount, NodeIndexable,
+        DfsPostOrder, EdgeFiltered, EdgeRef, GraphRef, IntoEdges, IntoNeighbors,
+        IntoNeighborsDirected, IntoNodeIdentifiers, NodeCount, NodeIndexable, VisitMap, Visitable,
     },
 };
 use rustc_hash::{FxBuildHasher, FxHashMap};
 
-use crate::{
-    arena::Arena,
-    ir::{SchemaTypeInfo, UntaggedVariantMeta},
-    parse::Info,
-};
+use crate::{arena::Arena, ir::TypeView, parse::Info};
 
 use super::{
     spec::{ResolvedSpecType, Spec},
     types::{
         FieldMeta, GraphContainer, GraphInlineType, GraphOperation, GraphSchemaType, GraphStruct,
-        GraphTagged, GraphType, InlineTypePath, InlineTypePathRoot, InlineTypePathSegment,
+        GraphTagged, GraphType, InlineTypeId, InlineTypeIds, InlineTypePathRoot, OperationUsage,
         PrimitiveType, SpecInlineType, SpecSchemaType, SpecType, SpecUntaggedVariant,
-        StructFieldName, TaggedVariantMeta, VariantMeta,
+        StructFieldName, TaggedVariantMeta, UntaggedVariantMeta, VariantMeta,
         shape::{Operation, Parameter, ParameterInfo, Request, Response},
     },
-    views::{operation::OperationView, primitive::PrimitiveView, schema::SchemaTypeView},
+    views::{TypeId, operation::OperationView, primitive::PrimitiveView, schema::SchemaTypeView},
 };
 
 /// The mutable, sparse graph used for transformations.
@@ -62,6 +58,7 @@ pub struct RawGraph<'a> {
     graph: RawDiGraph<'a>,
     schemas: FxHashMap<&'a str, NodeIndex<usize>>,
     ops: &'a [&'a GraphOperation<'a>],
+    ids: InlineTypeIds<'a>,
 }
 
 impl<'a> RawGraph<'a> {
@@ -181,6 +178,7 @@ impl<'a> RawGraph<'a> {
             graph,
             schemas,
             ops,
+            ids: spec.ids,
         }
     }
 
@@ -216,17 +214,10 @@ impl<'a> RawGraph<'a> {
         for InlinableVariant { tagged, variant } in inlinables {
             // Duplicate the variant struct as an inline type,
             // with its original metadata.
+            let id = self.ids.next();
             let index = self
                 .graph
-                .add_node(GraphType::Inline(GraphInlineType::Struct(
-                    InlineTypePath {
-                        root: InlineTypePathRoot::Type(tagged.info.name),
-                        segments: self.arena.alloc_slice_copy(&[
-                            InlineTypePathSegment::TaggedVariant(variant.info.name),
-                        ]),
-                    },
-                    variant.ty,
-                )));
+                .add_node(GraphType::Inline(GraphInlineType::Struct(id, variant.ty)));
 
             // Create shadow edges to the original variant struct's fields.
             // These serve two purposes:
@@ -329,9 +320,7 @@ impl<'a> RawGraph<'a> {
         self.graph
             .node_indices()
             .filter_map(|index| match self.graph[index] {
-                GraphType::Schema(GraphSchemaType::Tagged(info, ty)) => {
-                    Some(Node { index, info, ty })
-                }
+                GraphType::Schema(GraphSchemaType::Tagged(_, ty)) => Some(Node { index, ty }),
                 _ => None,
             })
             .flat_map(move |tagged| {
@@ -339,9 +328,9 @@ impl<'a> RawGraph<'a> {
                     .edges_directed(tagged.index, Direction::Outgoing)
                     .filter(|e| matches!(e.weight(), GraphEdge::Variant(_)))
                     .filter_map(move |e| match self.graph[e.target()] {
-                        GraphType::Schema(GraphSchemaType::Struct(info, ty)) => {
+                        GraphType::Schema(GraphSchemaType::Struct(_, ty)) => {
                             let index = e.target();
-                            Some((tagged, Node { index, info, ty }))
+                            Some((tagged, Node { index, ty }))
                         }
                         _ => None,
                     })
@@ -363,8 +352,8 @@ impl<'a> RawGraph<'a> {
                     .graph
                     .neighbors_directed(variant.index, Direction::Incoming)
                     .find_map(|index| match self.graph[index] {
-                        GraphType::Schema(GraphSchemaType::Tagged(info, ty)) => {
-                            Some(Node { index, info, ty })
+                        GraphType::Schema(GraphSchemaType::Tagged(_, ty)) => {
+                            Some(Node { index, ty })
                         }
                         _ => None,
                     })?;
@@ -437,6 +426,7 @@ impl<'a> RawGraph<'a> {
 /// code generation.
 #[derive(Debug)]
 pub struct CookedGraph<'a> {
+    arena: &'a Arena,
     pub(super) graph: CookedDiGraph<'a>,
     info: &'a Info,
     schemas: FxHashMap<&'a str, NodeIndex<usize>>,
@@ -513,9 +503,10 @@ impl<'a> CookedGraph<'a> {
             })
         }));
 
-        let metadata = MetadataBuilder::new(&graph, ops).build();
+        let metadata = MetadataBuilder::new(raw.arena, &graph, ops).build();
 
         Self {
+            arena: raw.arena,
             graph,
             info: raw.spec.info,
             schemas: raw
@@ -526,6 +517,12 @@ impl<'a> CookedGraph<'a> {
             ops,
             metadata,
         }
+    }
+
+    /// Returns this graph's arena.
+    #[inline]
+    pub fn arena(&self) -> &'a Arena {
+        self.arena
     }
 
     /// Returns [`Info`] from the [`Document`][crate::parse::Document]
@@ -555,6 +552,12 @@ impl<'a> CookedGraph<'a> {
                 GraphType::Schema(ty) => Some(SchemaTypeView::new(self, index, ty)),
                 _ => None,
             })
+    }
+
+    /// Looks up and returns a type view by its identifier.
+    #[inline]
+    pub fn view(&self, id: TypeId) -> TypeView<'_, 'a> {
+        TypeView::new(self, id.0)
     }
 
     /// Returns an iterator over all primitive type nodes in this graph.
@@ -627,9 +630,9 @@ impl<'a> CookedGraph<'a> {
 /// A variant that should be inlined into its tagged union.
 struct InlinableVariant<'a> {
     /// The tagged union that owns this variant.
-    tagged: Node<'a, GraphTagged<'a>>,
+    tagged: Node<GraphTagged<'a>>,
     /// The original variant struct node.
-    variant: Node<'a, GraphStruct<'a>>,
+    variant: Node<GraphStruct<'a>>,
 }
 
 /// An edge between two types in the type graph.
@@ -674,9 +677,8 @@ pub struct OutgoingEdge<T> {
 }
 
 #[derive(Clone, Copy)]
-struct Node<'a, Ty> {
+struct Node<Ty> {
     index: NodeIndex<usize>,
-    info: SchemaTypeInfo<'a>,
     ty: Ty,
 }
 
@@ -695,6 +697,8 @@ pub(super) struct CookedGraphMetadata<'a> {
     pub used_by: Vec<Vec<GraphOperation<'a>>>,
     /// Maps each operation to the types that it uses.
     pub uses: FxHashMap<GraphOperation<'a>, FixedBitSet>,
+    /// Maps each inline type to its canonical path through the graph.
+    pub paths: FxHashMap<InlineTypeId, InlineTypePath<'a>>,
     /// Opaque extended data for each type.
     pub extensions: Vec<AtomicRefCell<ExtensionMap>>,
 }
@@ -728,7 +732,15 @@ struct Operations<'a> {
     pub used_by: Vec<Vec<GraphOperation<'a>>>,
 }
 
+/// A canonical path through the graph to an inline type.
+#[derive(Clone, Copy, Debug)]
+pub(super) struct InlineTypePath<'a> {
+    pub root: InlineTypePathRoot<'a, NodeIndex<usize>, &'a str>,
+    pub edges: &'a [EdgeIndex<usize>],
+}
+
 struct MetadataBuilder<'graph, 'a> {
+    arena: &'a Arena,
     graph: &'graph CookedDiGraph<'a>,
     ops: &'graph [&'graph GraphOperation<'a>],
     /// The full transitive closure of each type's dependencies.
@@ -736,8 +748,13 @@ struct MetadataBuilder<'graph, 'a> {
 }
 
 impl<'graph, 'a> MetadataBuilder<'graph, 'a> {
-    fn new(graph: &'graph CookedDiGraph<'a>, ops: &'graph [&'graph GraphOperation<'a>]) -> Self {
+    fn new(
+        arena: &'a Arena,
+        graph: &'graph CookedDiGraph<'a>,
+        ops: &'graph [&'graph GraphOperation<'a>],
+    ) -> Self {
         Self {
+            arena,
             graph,
             ops,
             closure: Closure::new(graph),
@@ -751,6 +768,7 @@ impl<'graph, 'a> MetadataBuilder<'graph, 'a> {
             defaultable,
         } = self.hash_default();
         let box_sccs = self.box_sccs();
+        let paths = self.paths();
         CookedGraphMetadata {
             closure: self.closure,
             box_sccs,
@@ -758,6 +776,7 @@ impl<'graph, 'a> MetadataBuilder<'graph, 'a> {
             defaultable,
             used_by: operations.used_by,
             uses: operations.uses,
+            paths,
             // `AtomicRefCell` doesn't implement `Clone`,
             // so we use this idiom instead of `vec!`.
             extensions: std::iter::repeat_with(AtomicRefCell::default)
@@ -790,6 +809,119 @@ impl<'graph, 'a> MetadataBuilder<'graph, 'a> {
         }
 
         operations
+    }
+
+    /// Precomputes canonical paths for all inline type nodes.
+    fn paths(&self) -> FxHashMap<InlineTypeId, InlineTypePath<'a>> {
+        #[derive(Clone)]
+        struct PartialPath<'a> {
+            root: InlineTypePathRoot<'a, NodeIndex<usize>, &'a str>,
+            edges: Vec<EdgeIndex<usize>>,
+        }
+
+        let filtered = EdgeFiltered::from_fn(self.graph, |e| {
+            !e.weight().shadow() && matches!(self.graph[e.target()], GraphType::Inline(_))
+        });
+
+        let mut by_node = FxHashMap::default();
+        let mut bfs = EdgeBfs::new(&filtered);
+
+        // Expand paths for each named schema root.
+        for index in self.graph.node_indices() {
+            if matches!(self.graph[index], GraphType::Schema(_)) && bfs.discover(index) {
+                by_node.insert(
+                    index,
+                    PartialPath {
+                        root: InlineTypePathRoot::Schema(index),
+                        edges: vec![],
+                    },
+                );
+            }
+            while let Some(edge) = bfs.next() {
+                let parent = &by_node[&edge.source()];
+                let mut child = parent.clone();
+                child.edges.push(edge.id());
+                by_node.insert(edge.target(), child);
+            }
+        }
+
+        // Expand paths for each operation: operations aren't part of the graph;
+        // their parameter, request, and response types are the roots.
+        for op in self.ops {
+            for param in op.params {
+                let (usage, info) = match param {
+                    Parameter::Path(info) => (OperationUsage::Path(info.name), info),
+                    Parameter::Query(info) => (OperationUsage::Query(info.name), info),
+                };
+                if matches!(self.graph[info.ty], GraphType::Inline(_)) && bfs.discover(info.ty) {
+                    by_node.insert(
+                        info.ty,
+                        PartialPath {
+                            root: InlineTypePathRoot::Operation {
+                                id: op.id,
+                                resource: op.resource,
+                                usage,
+                            },
+                            edges: vec![],
+                        },
+                    );
+                }
+            }
+            if let Some(Request::Json(index)) = op.request
+                && matches!(self.graph[index], GraphType::Inline(_))
+                && bfs.discover(index)
+            {
+                by_node.insert(
+                    index,
+                    PartialPath {
+                        root: InlineTypePathRoot::Operation {
+                            id: op.id,
+                            resource: op.resource,
+                            usage: OperationUsage::Request,
+                        },
+                        edges: vec![],
+                    },
+                );
+            }
+            if let Some(Response::Json(index)) = op.response
+                && matches!(self.graph[index], GraphType::Inline(_))
+                && bfs.discover(index)
+            {
+                by_node.insert(
+                    index,
+                    PartialPath {
+                        root: InlineTypePathRoot::Operation {
+                            id: op.id,
+                            resource: op.resource,
+                            usage: OperationUsage::Response,
+                        },
+                        edges: vec![],
+                    },
+                );
+            }
+            while let Some(edge) = bfs.next() {
+                let parent = &by_node[&edge.source()];
+                let mut child = parent.clone();
+                child.edges.push(edge.id());
+                by_node.insert(edge.target(), child);
+            }
+        }
+
+        by_node
+            .into_iter()
+            .filter_map(
+                |(index, PartialPath { root, edges })| match self.graph[index] {
+                    GraphType::Inline(ty) => Some((
+                        ty.id(),
+                        InlineTypePath {
+                            root,
+                            edges: self.arena.alloc_slice(edges),
+                        },
+                    )),
+                    _ => None,
+                },
+            )
+            .collect()
     }
 
     fn box_sccs(&self) -> Vec<usize> {
@@ -1064,7 +1196,7 @@ impl<'a> Iterator for SpecTypeVisitor<'a> {
 }
 
 /// A map that can store one value for each type.
-pub(super) type ExtensionMap = FxHashMap<TypeId, Box<dyn Extension>>;
+pub(super) type ExtensionMap = FxHashMap<StdTypeId, Box<dyn Extension>>;
 
 pub trait Extension: Any + Send + Sync {
     fn into_inner(self: Box<Self>) -> Box<dyn Any>;
@@ -1262,6 +1394,72 @@ impl<N, G> Closable<N> for G where
         + IntoNeighborsDirected<NodeId = N>
         + NodeIndexable<NodeId = N>
 {
+}
+
+/// A breadth-first search that yields discovery edges instead of nodes.
+///
+/// A standard [`Bfs`] yields each node as it's dequeued. This variant yields
+/// the edge that first discovered each target, which is the primitive we need
+/// to build inline type paths.
+///
+/// [`Bfs`]: petgraph::visit::Bfs
+struct EdgeBfs<G, N, VM> {
+    graph: G,
+    queue: VecDeque<N>,
+    discovered: VM,
+}
+
+impl<G, N, VM> EdgeBfs<G, N, VM>
+where
+    N: Copy,
+    VM: VisitMap<N>,
+{
+    /// Creates an empty traversal for the given graph.
+    fn new(graph: G) -> Self
+    where
+        G: GraphRef + Visitable<NodeId = N, Map = VM>,
+    {
+        let discovered = graph.visit_map();
+        Self {
+            graph,
+            queue: VecDeque::new(),
+            discovered,
+        }
+    }
+
+    /// Marks `node` as discovered and enqueues it for expansion.
+    /// Returns `true` if the node was newly discovered.
+    fn discover(&mut self, node: N) -> bool {
+        if self.discovered.visit(node) {
+            self.queue.push_back(node);
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Returns the next edge whose target has not been discovered.
+    ///
+    /// The traversal keeps the source node at the front of the queue until
+    /// the targets of all its outgoing edges have been discovered. Each
+    /// returned edge marks its target as discovered and enqueues it for
+    /// later expansion.
+    fn next(&mut self) -> Option<G::EdgeRef>
+    where
+        G: IntoEdges<NodeId = N>,
+    {
+        loop {
+            let &source = self.queue.front()?;
+            for edge in self.graph.edges(source) {
+                let target = edge.target();
+                if self.discovered.visit(target) {
+                    self.queue.push_back(target);
+                    return Some(edge);
+                }
+            }
+            self.queue.pop_front();
+        }
+    }
 }
 
 #[cfg(test)]

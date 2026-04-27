@@ -1,23 +1,21 @@
-use ploidy_core::ir::{EnumVariant, EnumView};
+use ploidy_core::ir::{EnumVariant, EnumView, HasTypeId};
 use proc_macro2::TokenStream;
 use quote::{ToTokens, TokenStreamExt, format_ident, quote};
-use syn::{Ident, parse_quote};
 
 use super::{
-    doc_attrs,
-    ext::EnumViewExt,
-    naming::{CodegenIdent, CodegenIdentUsage, CodegenTypeName},
+    doc_attrs, ext::EnumViewExt, graph::CodegenGraph, graph::IdentMapping,
+    naming::CodegenIdentUsage,
 };
 
 #[derive(Clone, Debug)]
 pub struct CodegenEnum<'a> {
-    name: CodegenTypeName<'a>,
+    graph: &'a CodegenGraph<'a>,
     ty: &'a EnumView<'a, 'a>,
 }
 
 impl<'a> CodegenEnum<'a> {
-    pub fn new(name: CodegenTypeName<'a>, ty: &'a EnumView<'a, 'a>) -> Self {
-        Self { name, ty }
+    pub fn new(graph: &'a CodegenGraph<'a>, ty: &'a EnumView<'a, 'a>) -> Self {
+        Self { graph, ty }
     }
 }
 
@@ -26,10 +24,7 @@ impl ToTokens for CodegenEnum<'_> {
         if !self.ty.representable() {
             // If any variant can't be represented as a Rust enum variant,
             // emit a type alias for the enum instead.
-            let type_name: Ident = {
-                let name = &self.name;
-                parse_quote!(#name)
-            };
+            let type_name = CodegenIdentUsage::Type(self.graph.ident(self.ty.id()));
             let doc_attrs = self.ty.description().map(doc_attrs);
             tokens.append_all(quote! {
                 #doc_attrs
@@ -44,8 +39,10 @@ impl ToTokens for CodegenEnum<'_> {
             for variant in self.ty.variants() {
                 match variant {
                     EnumVariant::String(name) => {
-                        let name_ident = CodegenIdent::new(name);
-                        let variant_name = CodegenIdentUsage::Variant(&name_ident);
+                        let variant_name = CodegenIdentUsage::Variant(
+                            self.graph
+                                .ident(IdentMapping::EnumVariant(self.ty.id(), name)),
+                        );
                         variants.push(quote! { #variant_name });
                         display_arms.push(quote! { Self::#variant_name => #name });
                         from_str_arms.push(quote! { #name => Self::#variant_name });
@@ -55,16 +52,13 @@ impl ToTokens for CodegenEnum<'_> {
             }
 
             // The catch-all `Other` variant comes last.
-            let type_name: Ident = {
-                let name = &self.name;
-                parse_quote!(#name)
-            };
+            let type_name = CodegenIdentUsage::Variant(self.graph.ident(self.ty.id()));
             let other_name = format_ident!("Other{}", type_name);
             variants.push(quote! { #other_name(String) });
             display_arms.push(quote! { Self::#other_name(s) => s.as_str() });
             from_str_arms.push(quote! { _ => Self::#other_name(s.to_owned()) });
 
-            let expecting = format!("a variant of `{type_name}`");
+            let expecting = format!("a variant of `{}`", type_name.display());
 
             let doc_attrs = self.ty.description().map(doc_attrs);
 
@@ -177,12 +171,11 @@ mod tests {
         let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
         let schema = graph.schema("Status").unwrap();
-        let schema @ SchemaTypeView::Enum(_, enum_view) = &schema else {
+        let SchemaTypeView::Enum(_, enum_view) = schema else {
             panic!("expected enum `Status`; got `{schema:?}`");
         };
 
-        let name = CodegenTypeName::Schema(schema);
-        let codegen = CodegenEnum::new(name, enum_view);
+        let codegen = CodegenEnum::new(&graph, &enum_view);
 
         let actual: syn::File = parse_quote!(#codegen);
         let expected: syn::File = parse_quote! {
@@ -286,12 +279,11 @@ mod tests {
         let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
         let schema = graph.schema("Priority").unwrap();
-        let schema @ SchemaTypeView::Enum(_, view) = &schema else {
+        let SchemaTypeView::Enum(_, view) = schema else {
             panic!("expected enum `Priority`; got `{schema:?}`");
         };
 
-        let name = CodegenTypeName::Schema(schema);
-        let codegen = CodegenEnum::new(name, view);
+        let codegen = CodegenEnum::new(&graph, &view);
 
         let actual: syn::Item = parse_quote!(#codegen);
         let expected: syn::Item = parse_quote! {

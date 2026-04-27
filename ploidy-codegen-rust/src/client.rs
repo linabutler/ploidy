@@ -5,33 +5,24 @@ use quote::{ToTokens, TokenStreamExt, quote};
 use super::{
     cfg::CfgFeature,
     graph::CodegenGraph,
-    naming::{CargoFeature, CodegenIdentUsage},
+    naming::{CodegenIdentUsage, ResourceGroup},
 };
 
 /// Generates the `client/mod.rs` source file.
-#[derive(Clone, Copy, Debug)]
+#[derive(Debug)]
 pub struct CodegenClientModule<'a> {
     graph: &'a CodegenGraph<'a>,
-    features: &'a [&'a CargoFeature],
+    resources: &'a [ResourceGroup<'a>],
 }
 
 impl<'a> CodegenClientModule<'a> {
-    pub fn new(graph: &'a CodegenGraph<'a>, features: &'a [&'a CargoFeature]) -> Self {
-        Self { graph, features }
+    pub fn new(graph: &'a CodegenGraph<'a>, resources: &'a [ResourceGroup<'a>]) -> Self {
+        Self { graph, resources }
     }
 }
 
 impl ToTokens for CodegenClientModule<'_> {
     fn to_tokens(&self, tokens: &mut TokenStream) {
-        let mods = self.features.iter().map(|feature| {
-            let cfg = CfgFeature::for_resource_module(feature);
-            let mod_name = CodegenIdentUsage::Module(feature.as_ident());
-            quote! {
-                #cfg
-                pub mod #mod_name;
-            }
-        });
-
         let client_doc = self.graph.info().label().map(|label| {
             let doc = match label.version {
                 Some(version) => format!("API client for {} (version {version})", label.title),
@@ -39,6 +30,8 @@ impl ToTokens for CodegenClientModule<'_> {
             };
             quote! { #[doc = #doc] }
         });
+
+        let mods = ResourceModules(self.resources);
 
         tokens.append_all(quote! {
             #client_doc
@@ -170,7 +163,7 @@ impl ToTokens for CodegenClientModule<'_> {
                 }
             }
 
-            #(#mods)*
+            #mods
         });
     }
 }
@@ -180,5 +173,57 @@ impl IntoCode for CodegenClientModule<'_> {
 
     fn into_code(self) -> Self::Code {
         ("src/client/mod.rs", self.into_token_stream())
+    }
+}
+
+#[derive(Debug)]
+struct ResourceModules<'a>(&'a [ResourceGroup<'a>]);
+
+impl ToTokens for ResourceModules<'_> {
+    fn to_tokens(&self, tokens: &mut TokenStream) {
+        tokens.append_all(self.0.iter().map(|ident| match ident {
+            ResourceGroup::Named(name) => {
+                let cfg = CfgFeature::Single(name);
+                let mod_name = CodegenIdentUsage::Module(name);
+                quote! {
+                    #cfg
+                    pub mod #mod_name;
+                }
+            }
+            ResourceGroup::Default => quote!(
+                pub mod default;
+            ),
+        }));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    use ploidy_core::arena::Arena;
+    use pretty_assertions::assert_eq;
+    use syn::parse_quote;
+
+    use crate::naming::UniqueIdents;
+
+    #[test]
+    fn test_resource_modules_gates_named_resources_and_keeps_default_ungated() {
+        let arena = Arena::new();
+        let mut scope = UniqueIdents::new(&arena);
+        let resources = [
+            ResourceGroup::Default,
+            ResourceGroup::Named(scope.ident("customer_profiles")),
+        ];
+        let modules = ResourceModules(&resources);
+
+        let actual: syn::File = parse_quote!(#modules);
+        let expected: syn::File = parse_quote! {
+            pub mod default;
+
+            #[cfg(feature = "customer-profiles")]
+            pub mod customer_profiles;
+        };
+        assert_eq!(actual, expected);
     }
 }

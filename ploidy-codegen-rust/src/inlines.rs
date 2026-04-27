@@ -1,83 +1,85 @@
 use itertools::Itertools;
-use ploidy_core::ir::{InlineTypeView, OperationView, SchemaTypeView, View};
+use ploidy_core::ir::{HasTypeId, InlineTypeView};
 use proc_macro2::TokenStream;
 use quote::{ToTokens, TokenStreamExt, quote};
 
 use super::{
-    cfg::CfgFeature,
-    enum_::CodegenEnum,
-    naming::{CodegenTypeName, CodegenTypeNameSortKey},
-    struct_::CodegenStruct,
-    tagged::CodegenTagged,
-    untagged::CodegenUntagged,
+    cfg::CfgFeature, enum_::CodegenEnum, graph::CodegenGraph, naming::CodegenIdentUsage,
+    struct_::CodegenStruct, tagged::CodegenTagged, untagged::CodegenUntagged,
 };
 
-/// Generates an inline `mod types`, with definitions for all the inline types
-/// that are reachable from a resource or schema type.
-///
-/// Inline types nested _within_ referenced schemas are excluded; those are
-/// emitted by [`CodegenSchemaType`](crate::CodegenSchemaType) instead.
-#[derive(Clone, Copy, Debug)]
-pub enum CodegenInlines<'a> {
-    Resource(&'a [OperationView<'a, 'a>]),
-    Schema(&'a SchemaTypeView<'a, 'a>),
+/// Generates a `mod types` for inline structs, enums, and unions.
+#[derive(Debug)]
+pub struct CodegenInlines<'a> {
+    graph: &'a CodegenGraph<'a>,
+    inlines: Vec<InlineTypeView<'a, 'a>>,
+    cfg: bool,
 }
 
-impl ToTokens for CodegenInlines<'_> {
-    fn to_tokens(&self, tokens: &mut TokenStream) {
-        match self {
-            Self::Resource(ops) => {
-                let items = CodegenInlineItems(IncludeCfgFeatures::Include, ops);
-                items.to_tokens(tokens);
-            }
-            &Self::Schema(ty) => {
-                let items = CodegenInlineItems(IncludeCfgFeatures::Omit, std::slice::from_ref(ty));
-                items.to_tokens(tokens);
-            }
+impl<'a> CodegenInlines<'a> {
+    /// Creates a codegen node for a schema module's inline types.
+    pub fn for_schema_inlines(
+        graph: &'a CodegenGraph<'a>,
+        inlines: Vec<InlineTypeView<'a, 'a>>,
+    ) -> Self {
+        Self {
+            graph,
+            inlines,
+            cfg: false,
+        }
+    }
+
+    /// Creates a codegen node for a resource module's inline types.
+    pub fn for_resource_inlines(
+        graph: &'a CodegenGraph<'a>,
+        inlines: Vec<InlineTypeView<'a, 'a>>,
+    ) -> Self {
+        Self {
+            graph,
+            inlines,
+            cfg: true,
         }
     }
 }
 
-#[derive(Debug)]
-struct CodegenInlineItems<'a, V>(IncludeCfgFeatures, &'a [V]);
-
-impl<'a, V> ToTokens for CodegenInlineItems<'a, V>
-where
-    V: View<'a, 'a>,
-{
+impl ToTokens for CodegenInlines<'_> {
     fn to_tokens(&self, tokens: &mut TokenStream) {
-        let mut inlines = self.1.iter().flat_map(|op| op.inlines()).collect_vec();
-        inlines.sort_by(|a, b| {
-            CodegenTypeNameSortKey::for_inline(a).cmp(&CodegenTypeNameSortKey::for_inline(b))
-        });
+        let graph = self.graph;
 
-        let mut items = inlines.into_iter().filter_map(|view| {
-            let name = CodegenTypeName::Inline(&view);
-            let ty = match &view {
-                InlineTypeView::Enum(_, view) => CodegenEnum::new(name, view).into_token_stream(),
-                InlineTypeView::Struct(_, view) => {
-                    CodegenStruct::new(name, view).into_token_stream()
-                }
-                InlineTypeView::Tagged(_, view) => {
-                    CodegenTagged::new(name, view).into_token_stream()
-                }
-                InlineTypeView::Untagged(_, view) => {
-                    CodegenUntagged::new(name, view).into_token_stream()
-                }
-                InlineTypeView::Container(..)
-                | InlineTypeView::Primitive(..)
-                | InlineTypeView::Any(..) => {
-                    // Container types, primitive types, and untyped values
-                    // are emitted directly; they don't need type aliases.
-                    return None;
-                }
-            };
-            Some(match self.0 {
-                IncludeCfgFeatures::Include => {
-                    // Wrap each type in an inner inline module, so that
-                    // the `#[cfg(...)]` applies to all items (types and `impl`s).
-                    let cfg = CfgFeature::for_inline_type(&view);
-                    let mod_name = name.into_module_name();
+        let mut items = self
+            .inlines
+            .iter()
+            .filter_map(|view| {
+                let (ident, ty) = match view {
+                    InlineTypeView::Struct(_, view) => (
+                        graph.ident(view.id()),
+                        CodegenStruct::new(graph, view).into_token_stream(),
+                    ),
+                    InlineTypeView::Enum(_, view) => (
+                        graph.ident(view.id()),
+                        CodegenEnum::new(graph, view).into_token_stream(),
+                    ),
+                    InlineTypeView::Tagged(_, view) => (
+                        graph.ident(view.id()),
+                        CodegenTagged::new(graph, view).into_token_stream(),
+                    ),
+                    InlineTypeView::Untagged(_, view) => (
+                        graph.ident(view.id()),
+                        CodegenUntagged::new(graph, view).into_token_stream(),
+                    ),
+                    InlineTypeView::Container(..)
+                    | InlineTypeView::Primitive(..)
+                    | InlineTypeView::Any(..) => {
+                        // Container types, primitive types, and untyped values
+                        // are emitted directly; they don't need type aliases.
+                        return None;
+                    }
+                };
+                let item = if self.cfg {
+                    // Wrap each type in an inner module, so that the
+                    // `#[cfg(...)]` applies to all items (types and `impl`s).
+                    let cfg = CfgFeature::for_inline_type(graph, view);
+                    let mod_name = CodegenIdentUsage::Module(ident);
                     quote! {
                         #cfg
                         mod #mod_name {
@@ -86,10 +88,15 @@ where
                         #cfg
                         pub use #mod_name::*;
                     }
-                }
-                IncludeCfgFeatures::Omit => ty,
+                } else {
+                    ty
+                };
+                Some((ident, item))
             })
-        });
+            .collect_vec();
+
+        items.sort_by_key(|&(ident, _)| ident);
+        let mut items = items.into_iter().map(|(_, item)| item);
 
         if let Some(first) = items.next() {
             tokens.append_all(quote! {
@@ -102,20 +109,13 @@ where
     }
 }
 
-#[derive(Clone, Copy, Debug)]
-enum IncludeCfgFeatures {
-    Include,
-    Omit,
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    use itertools::Itertools;
     use ploidy_core::{
         arena::Arena,
-        ir::{RawGraph, Spec},
+        ir::{RawGraph, Spec, View},
         parse::Document,
     };
     use pretty_assertions::assert_eq;
@@ -152,22 +152,163 @@ mod tests {
         let spec = Spec::from_doc(&arena, &doc).unwrap();
         let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
-        let ops = graph.operations().collect_vec();
-        let inlines = CodegenInlines::Resource(&ops);
+        let inlines = CodegenInlines::for_resource_inlines(
+            &graph,
+            graph.operations().flat_map(|op| op.inlines()).collect(),
+        );
 
         let actual: syn::File = parse_quote!(#inlines);
         let expected: syn::File = parse_quote! {
             pub mod types {
-                mod get_items_filter {
+                mod get_items_query_filter {
                     #[derive(Debug, Clone, PartialEq, Eq, Hash, Default, ::ploidy_util::serde::Serialize, ::ploidy_util::serde::Deserialize, ::ploidy_util::pointer::JsonPointee, ::ploidy_util::pointer::JsonPointerTarget)]
                     #[serde(crate = "::ploidy_util::serde")]
                     #[ploidy(pointer(crate = "::ploidy_util::pointer"))]
-                    pub struct GetItemsFilter {
+                    pub struct GetItemsQueryFilter {
                         #[serde(default, skip_serializing_if = "::ploidy_util::absent::AbsentOr::is_absent")]
                         pub status: ::ploidy_util::absent::AbsentOr<::std::string::String>,
                     }
                 }
-                pub use get_items_filter::*;
+                pub use get_items_query_filter::*;
+            }
+        };
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn test_operation_parameter_inline_type_names_do_not_collide_across_roles() {
+        let doc = Document::from_yaml(indoc::indoc! {"
+            openapi: 3.0.0
+            info:
+              title: Test API
+              version: 1.0.0
+            paths:
+              /things/{id}:
+                get:
+                  operationId: getThing
+                  parameters:
+                    - name: id
+                      in: path
+                      required: true
+                      schema:
+                        type: object
+                        properties:
+                          path_value:
+                            type: string
+                    - name: id
+                      in: query
+                      schema:
+                        type: object
+                        properties:
+                          query_value:
+                            type: string
+                    - name: request
+                      in: query
+                      schema:
+                        type: object
+                        properties:
+                          query_request_value:
+                            type: string
+                    - name: response
+                      in: query
+                      schema:
+                        type: object
+                        properties:
+                          query_response_value:
+                            type: string
+                  requestBody:
+                    content:
+                      application/json:
+                        schema:
+                          type: object
+                          properties:
+                            body_request_value:
+                              type: string
+                  responses:
+                    '200':
+                      description: OK
+                      content:
+                        application/json:
+                          schema:
+                            type: object
+                            properties:
+                              body_response_value:
+                                type: string
+        "})
+        .unwrap();
+
+        let arena = Arena::new();
+        let spec = Spec::from_doc(&arena, &doc).unwrap();
+        let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
+
+        let inlines = CodegenInlines::for_resource_inlines(
+            &graph,
+            graph.operations().flat_map(|op| op.inlines()).collect(),
+        );
+
+        let actual: syn::File = parse_quote!(#inlines);
+        let expected: syn::File = parse_quote! {
+            pub mod types {
+                mod get_thing_path_id {
+                    #[derive(Debug, Clone, PartialEq, Eq, Hash, Default, ::ploidy_util::serde::Serialize, ::ploidy_util::serde::Deserialize, ::ploidy_util::pointer::JsonPointee, ::ploidy_util::pointer::JsonPointerTarget)]
+                    #[serde(crate = "::ploidy_util::serde")]
+                    #[ploidy(pointer(crate = "::ploidy_util::pointer"))]
+                    pub struct GetThingPathId {
+                        #[serde(default, skip_serializing_if = "::ploidy_util::absent::AbsentOr::is_absent")]
+                        pub path_value: ::ploidy_util::absent::AbsentOr<::std::string::String>,
+                    }
+                }
+                pub use get_thing_path_id::*;
+                mod get_thing_query_id {
+                    #[derive(Debug, Clone, PartialEq, Eq, Hash, Default, ::ploidy_util::serde::Serialize, ::ploidy_util::serde::Deserialize, ::ploidy_util::pointer::JsonPointee, ::ploidy_util::pointer::JsonPointerTarget)]
+                    #[serde(crate = "::ploidy_util::serde")]
+                    #[ploidy(pointer(crate = "::ploidy_util::pointer"))]
+                    pub struct GetThingQueryId {
+                        #[serde(default, skip_serializing_if = "::ploidy_util::absent::AbsentOr::is_absent")]
+                        pub query_value: ::ploidy_util::absent::AbsentOr<::std::string::String>,
+                    }
+                }
+                pub use get_thing_query_id::*;
+                mod get_thing_query_request {
+                    #[derive(Debug, Clone, PartialEq, Eq, Hash, Default, ::ploidy_util::serde::Serialize, ::ploidy_util::serde::Deserialize, ::ploidy_util::pointer::JsonPointee, ::ploidy_util::pointer::JsonPointerTarget)]
+                    #[serde(crate = "::ploidy_util::serde")]
+                    #[ploidy(pointer(crate = "::ploidy_util::pointer"))]
+                    pub struct GetThingQueryRequest {
+                        #[serde(default, skip_serializing_if = "::ploidy_util::absent::AbsentOr::is_absent")]
+                        pub query_request_value: ::ploidy_util::absent::AbsentOr<::std::string::String>,
+                    }
+                }
+                pub use get_thing_query_request::*;
+                mod get_thing_query_response {
+                    #[derive(Debug, Clone, PartialEq, Eq, Hash, Default, ::ploidy_util::serde::Serialize, ::ploidy_util::serde::Deserialize, ::ploidy_util::pointer::JsonPointee, ::ploidy_util::pointer::JsonPointerTarget)]
+                    #[serde(crate = "::ploidy_util::serde")]
+                    #[ploidy(pointer(crate = "::ploidy_util::pointer"))]
+                    pub struct GetThingQueryResponse {
+                        #[serde(default, skip_serializing_if = "::ploidy_util::absent::AbsentOr::is_absent")]
+                        pub query_response_value: ::ploidy_util::absent::AbsentOr<::std::string::String>,
+                    }
+                }
+                pub use get_thing_query_response::*;
+                mod get_thing_request {
+                    #[derive(Debug, Clone, PartialEq, Eq, Hash, Default, ::ploidy_util::serde::Serialize, ::ploidy_util::serde::Deserialize, ::ploidy_util::pointer::JsonPointee, ::ploidy_util::pointer::JsonPointerTarget)]
+                    #[serde(crate = "::ploidy_util::serde")]
+                    #[ploidy(pointer(crate = "::ploidy_util::pointer"))]
+                    pub struct GetThingRequest {
+                        #[serde(default, skip_serializing_if = "::ploidy_util::absent::AbsentOr::is_absent")]
+                        pub body_request_value: ::ploidy_util::absent::AbsentOr<::std::string::String>,
+                    }
+                }
+                pub use get_thing_request::*;
+                mod get_thing_response {
+                    #[derive(Debug, Clone, PartialEq, Eq, Hash, Default, ::ploidy_util::serde::Serialize, ::ploidy_util::serde::Deserialize, ::ploidy_util::pointer::JsonPointee, ::ploidy_util::pointer::JsonPointerTarget)]
+                    #[serde(crate = "::ploidy_util::serde")]
+                    #[ploidy(pointer(crate = "::ploidy_util::pointer"))]
+                    pub struct GetThingResponse {
+                        #[serde(default, skip_serializing_if = "::ploidy_util::absent::AbsentOr::is_absent")]
+                        pub body_response_value: ::ploidy_util::absent::AbsentOr<::std::string::String>,
+                    }
+                }
+                pub use get_thing_response::*;
             }
         };
         assert_eq!(actual, expected);
@@ -211,8 +352,10 @@ mod tests {
         let spec = Spec::from_doc(&arena, &doc).unwrap();
         let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
-        let ops = graph.operations().collect_vec();
-        let inlines = CodegenInlines::Resource(&ops);
+        let inlines = CodegenInlines::for_resource_inlines(
+            &graph,
+            graph.operations().flat_map(|op| op.inlines()).collect(),
+        );
 
         // No inline types should be emitted, since the only inline (`Details`)
         // belongs to the referenced schema.
@@ -265,43 +408,45 @@ mod tests {
         let spec = Spec::from_doc(&arena, &doc).unwrap();
         let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
-        let ops = graph.operations().collect_vec();
-        let inlines = CodegenInlines::Resource(&ops);
+        let inlines = CodegenInlines::for_resource_inlines(
+            &graph,
+            graph.operations().flat_map(|op| op.inlines()).collect(),
+        );
 
         let actual: syn::File = parse_quote!(#inlines);
         // Types should be sorted: Apple, Mango, Zebra.
         let expected: syn::File = parse_quote! {
             pub mod types {
-                mod get_items_apple {
+                mod get_items_query_apple {
                     #[derive(Debug, Clone, PartialEq, Eq, Hash, Default, ::ploidy_util::serde::Serialize, ::ploidy_util::serde::Deserialize, ::ploidy_util::pointer::JsonPointee, ::ploidy_util::pointer::JsonPointerTarget)]
                     #[serde(crate = "::ploidy_util::serde")]
                     #[ploidy(pointer(crate = "::ploidy_util::pointer"))]
-                    pub struct GetItemsApple {
+                    pub struct GetItemsQueryApple {
                         #[serde(default, skip_serializing_if = "::ploidy_util::absent::AbsentOr::is_absent")]
                         pub value: ::ploidy_util::absent::AbsentOr<::std::string::String>,
                     }
                 }
-                pub use get_items_apple::*;
-                mod get_items_mango {
+                pub use get_items_query_apple::*;
+                mod get_items_query_mango {
                     #[derive(Debug, Clone, PartialEq, Eq, Hash, Default, ::ploidy_util::serde::Serialize, ::ploidy_util::serde::Deserialize, ::ploidy_util::pointer::JsonPointee, ::ploidy_util::pointer::JsonPointerTarget)]
                     #[serde(crate = "::ploidy_util::serde")]
                     #[ploidy(pointer(crate = "::ploidy_util::pointer"))]
-                    pub struct GetItemsMango {
+                    pub struct GetItemsQueryMango {
                         #[serde(default, skip_serializing_if = "::ploidy_util::absent::AbsentOr::is_absent")]
                         pub value: ::ploidy_util::absent::AbsentOr<::std::string::String>,
                     }
                 }
-                pub use get_items_mango::*;
-                mod get_items_zebra {
+                pub use get_items_query_mango::*;
+                mod get_items_query_zebra {
                     #[derive(Debug, Clone, PartialEq, Eq, Hash, Default, ::ploidy_util::serde::Serialize, ::ploidy_util::serde::Deserialize, ::ploidy_util::pointer::JsonPointee, ::ploidy_util::pointer::JsonPointerTarget)]
                     #[serde(crate = "::ploidy_util::serde")]
                     #[ploidy(pointer(crate = "::ploidy_util::pointer"))]
-                    pub struct GetItemsZebra {
+                    pub struct GetItemsQueryZebra {
                         #[serde(default, skip_serializing_if = "::ploidy_util::absent::AbsentOr::is_absent")]
                         pub value: ::ploidy_util::absent::AbsentOr<::std::string::String>,
                     }
                 }
-                pub use get_items_zebra::*;
+                pub use get_items_query_zebra::*;
             }
         };
         assert_eq!(actual, expected);
@@ -333,8 +478,10 @@ mod tests {
         let spec = Spec::from_doc(&arena, &doc).unwrap();
         let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
-        let ops = graph.operations().collect_vec();
-        let inlines = CodegenInlines::Resource(&ops);
+        let inlines = CodegenInlines::for_resource_inlines(
+            &graph,
+            graph.operations().flat_map(|op| op.inlines()).collect(),
+        );
 
         let actual: syn::File = parse_quote!(#inlines);
         let expected: syn::File = parse_quote! {};
@@ -371,22 +518,24 @@ mod tests {
         let spec = Spec::from_doc(&arena, &doc).unwrap();
         let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
-        let ops = graph.operations().collect_vec();
-        let inlines = CodegenInlines::Resource(&ops);
+        let inlines = CodegenInlines::for_resource_inlines(
+            &graph,
+            graph.operations().flat_map(|op| op.inlines()).collect(),
+        );
 
         let actual: syn::File = parse_quote!(#inlines);
         let expected: syn::File = parse_quote! {
             pub mod types {
-                mod get_items_config {
+                mod get_items_query_config {
                     #[derive(Debug, Clone, PartialEq, Eq, Hash, Default, ::ploidy_util::serde::Serialize, ::ploidy_util::serde::Deserialize, ::ploidy_util::pointer::JsonPointee, ::ploidy_util::pointer::JsonPointerTarget)]
                     #[serde(crate = "::ploidy_util::serde")]
                     #[ploidy(pointer(crate = "::ploidy_util::pointer"))]
-                    pub struct GetItemsConfig {
+                    pub struct GetItemsQueryConfig {
                         #[serde(default, skip_serializing_if = "::ploidy_util::absent::AbsentOr::is_absent")]
                         pub enabled: ::ploidy_util::absent::AbsentOr<bool>,
                     }
                 }
-                pub use get_items_config::*;
+                pub use get_items_query_config::*;
             }
         };
         assert_eq!(actual, expected);
@@ -423,22 +572,24 @@ mod tests {
         let spec = Spec::from_doc(&arena, &doc).unwrap();
         let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
-        let ops = graph.operations().collect_vec();
-        let inlines = CodegenInlines::Resource(&ops);
+        let inlines = CodegenInlines::for_resource_inlines(
+            &graph,
+            graph.operations().flat_map(|op| op.inlines()).collect(),
+        );
 
         let actual: syn::File = parse_quote!(#inlines);
         let expected: syn::File = parse_quote! {
             pub mod types {
-                mod get_items_filters_item {
+                mod get_items_query_filters_item {
                     #[derive(Debug, Clone, PartialEq, Eq, Hash, Default, ::ploidy_util::serde::Serialize, ::ploidy_util::serde::Deserialize, ::ploidy_util::pointer::JsonPointee, ::ploidy_util::pointer::JsonPointerTarget)]
                     #[serde(crate = "::ploidy_util::serde")]
                     #[ploidy(pointer(crate = "::ploidy_util::pointer"))]
-                    pub struct GetItemsFiltersItem {
+                    pub struct GetItemsQueryFiltersItem {
                         #[serde(default, skip_serializing_if = "::ploidy_util::absent::AbsentOr::is_absent")]
                         pub field: ::ploidy_util::absent::AbsentOr<::std::string::String>,
                     }
                 }
-                pub use get_items_filters_item::*;
+                pub use get_items_query_filters_item::*;
             }
         };
         assert_eq!(actual, expected);
@@ -475,22 +626,24 @@ mod tests {
         let spec = Spec::from_doc(&arena, &doc).unwrap();
         let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
-        let ops = graph.operations().collect_vec();
-        let inlines = CodegenInlines::Resource(&ops);
+        let inlines = CodegenInlines::for_resource_inlines(
+            &graph,
+            graph.operations().flat_map(|op| op.inlines()).collect(),
+        );
 
         let actual: syn::File = parse_quote!(#inlines);
         let expected: syn::File = parse_quote! {
             pub mod types {
-                mod get_items_metadata_value {
+                mod get_items_query_metadata_value {
                     #[derive(Debug, Clone, PartialEq, Eq, Hash, Default, ::ploidy_util::serde::Serialize, ::ploidy_util::serde::Deserialize, ::ploidy_util::pointer::JsonPointee, ::ploidy_util::pointer::JsonPointerTarget)]
                     #[serde(crate = "::ploidy_util::serde")]
                     #[ploidy(pointer(crate = "::ploidy_util::pointer"))]
-                    pub struct GetItemsMetadataValue {
+                    pub struct GetItemsQueryMetadataValue {
                         #[serde(default, skip_serializing_if = "::ploidy_util::absent::AbsentOr::is_absent")]
                         pub value: ::ploidy_util::absent::AbsentOr<::std::string::String>,
                     }
                 }
-                pub use get_items_metadata_value::*;
+                pub use get_items_query_metadata_value::*;
             }
         };
         assert_eq!(actual, expected);

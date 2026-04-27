@@ -1,11 +1,17 @@
 //! Language-agnostic intermediate representation types.
 
 use std::{
-    cmp::Ordering,
+    cmp::Ordering as CmpOrdering,
+    fmt::{self, Display},
     hash::{Hash, Hasher},
+    num::NonZeroUsize,
+    ops::Deref,
+    sync::atomic::{AtomicUsize, Ordering as AtomicOrdering},
 };
 
-use crate::arena::Arena;
+use ref_cast::{RefCastCustom, ref_cast_custom};
+
+use crate::{arena::Arena, ir::views::TypeId};
 
 pub use self::{graph::*, spec::*};
 
@@ -13,36 +19,8 @@ mod graph;
 pub mod shape;
 mod spec;
 
-/// Metadata about a type in the dependency graph.
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-pub enum TypeInfo<'a> {
-    Schema(SchemaTypeInfo<'a>),
-    Inline(InlineTypePath<'a>),
-}
-
-impl<'a> From<&'a str> for TypeInfo<'a> {
-    fn from(name: &'a str) -> Self {
-        Self::Schema(SchemaTypeInfo {
-            name,
-            resource: None,
-        })
-    }
-}
-
-impl<'a> From<SchemaTypeInfo<'a>> for TypeInfo<'a> {
-    fn from(info: SchemaTypeInfo<'a>) -> Self {
-        Self::Schema(info)
-    }
-}
-
-impl<'a> From<InlineTypePath<'a>> for TypeInfo<'a> {
-    fn from(path: InlineTypePath<'a>) -> Self {
-        Self::Inline(path)
-    }
-}
-
 /// Metadata for a named schema type.
-#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub struct SchemaTypeInfo<'a> {
     /// The name of the schema type.
     pub name: &'a str,
@@ -50,49 +28,104 @@ pub struct SchemaTypeInfo<'a> {
     pub resource: Option<&'a str>,
 }
 
-/// A path to an inline type.
-#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
-pub struct InlineTypePath<'a> {
-    pub root: InlineTypePathRoot<'a>,
-    pub segments: &'a [InlineTypePathSegment<'a>],
-}
+/// Generates unique opaque identities for inline types.
+#[derive(Clone, Copy, Debug)]
+pub struct InlineTypeIds<'a>(&'a AtomicUsize);
 
-impl<'a> InlineTypePath<'a> {
-    /// Returns a new path with the suffix appended to the segments.
-    pub fn join(
-        self,
-        arena: &'a Arena,
-        suffix: &[InlineTypePathSegment<'a>],
-    ) -> InlineTypePath<'a> {
-        match suffix {
-            [] => self,
-            suffix => InlineTypePath {
-                root: self.root,
-                segments: arena.alloc_slice(self.segments.iter().chain(suffix).copied()),
-            },
-        }
+impl<'a> InlineTypeIds<'a> {
+    #[inline]
+    pub fn new(arena: &'a Arena) -> Self {
+        Self(arena.alloc_atomic(0))
+    }
+
+    #[inline]
+    pub fn next(&self) -> InlineTypeId {
+        InlineTypeId(self.0.fetch_add(1, AtomicOrdering::Relaxed))
     }
 }
 
+/// Opaque identity for an inline type.
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
-pub enum InlineTypePathRoot<'a> {
-    Resource(Option<&'a str>),
-    Type(&'a str),
+pub struct InlineTypeId(usize);
+
+/// An `operationId` from the OpenAPI spec.
+#[derive(Debug, Eq, Hash, Ord, PartialEq, PartialOrd, RefCastCustom)]
+#[repr(transparent)]
+pub struct OperationId(str);
+
+impl OperationId {
+    #[ref_cast_custom]
+    #[inline]
+    pub(in crate::ir) fn new(s: &str) -> &Self;
 }
 
-/// A segment of an inline type path.
+impl Deref for OperationId {
+    type Target = str;
+
+    #[inline]
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl PartialEq<str> for OperationId {
+    #[inline]
+    fn eq(&self, other: &str) -> bool {
+        self.0 == *other
+    }
+}
+
+impl Display for OperationId {
+    #[inline]
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+/// The root of an inline type path.
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub enum InlineTypePathRoot<'a, S, O> {
+    Schema(S),
+    Operation {
+        resource: Option<&'a str>,
+        id: O,
+        usage: OperationUsage<'a>,
+    },
+}
+
+/// How an operation uses an inline type.
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
-pub enum InlineTypePathSegment<'a> {
-    Operation(&'a str),
-    Parameter(&'a str),
+pub enum OperationUsage<'a> {
+    /// A path parameter with the given name.
+    Path(&'a str),
+    /// A query parameter with the given name.
+    Query(&'a str),
+    /// The request body.
     Request,
+    /// The response body.
     Response,
-    Field(StructFieldName<'a>),
-    MapValue,
+}
+
+/// A segment in an inline type path.
+///
+/// Segments that name fields or variants also carry the parent type,
+/// because those names are scoped to that parent.
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub enum InlineTypePathSegment<'a> {
+    /// Enters an inline type declared as a struct field.
+    Field(TypeId, StructFieldName<'a>),
+    /// Enters an inline type declared as a tagged union variant.
+    TaggedVariant(TypeId, &'a str),
+    /// Enters the nth untagged union variant, counted from 1 in declaration order.
+    UntaggedVariant(NonZeroUsize),
+    /// Enters the item type of an array.
     ArrayItem,
-    Variant(usize),
-    Parent(usize),
-    TaggedVariant(&'a str),
+    /// Enters the value type of a map.
+    MapValue,
+    /// Enters the inner type of an optional container.
+    Optional,
+    /// Enters the nth inherited parent, counted from 1 in declaration order.
+    Inherits(NonZeroUsize),
 }
 
 /// A primitive type in the dependency graph.
@@ -216,7 +249,7 @@ impl Hash for JsonF64 {
 
 impl Ord for JsonF64 {
     #[inline]
-    fn cmp(&self, other: &Self) -> Ordering {
+    fn cmp(&self, other: &Self) -> CmpOrdering {
         // JSON numbers can't be `NaN`, so `unwrap()` is OK.
         self.0.partial_cmp(&other.0).unwrap()
     }
@@ -231,7 +264,7 @@ impl PartialEq for JsonF64 {
 
 impl PartialOrd for JsonF64 {
     #[inline]
-    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+    fn partial_cmp(&self, other: &Self) -> Option<CmpOrdering> {
         Some(self.cmp(other))
     }
 }

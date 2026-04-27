@@ -3,15 +3,29 @@
 use crate::{
     arena::Arena,
     ir::{
-        Enum, EnumVariant, InlineTypePath, InlineTypePathRoot, InlineTypePathSegment,
-        PrimitiveType, SchemaTypeInfo, SpecContainer, SpecInlineType, SpecInner, SpecSchemaType,
-        SpecStruct, SpecStructField, SpecTagged, SpecTaggedVariant, SpecType, SpecUntagged,
-        SpecUntaggedVariant, StructFieldName, StructFieldNameHint, UntaggedVariantNameHint,
-        transform::transform,
+        Enum, EnumVariant, InlineTypeIds, PrimitiveType, SchemaTypeInfo, SpecContainer,
+        SpecInlineType, SpecInner, SpecSchemaType, SpecStruct, SpecStructField, SpecTagged,
+        SpecTaggedVariant, SpecType, SpecUntagged, SpecUntaggedVariant, StructFieldName,
+        StructFieldNameHint, UntaggedVariantNameHint,
+        transform::{TransformContext, TypeInfo, transform_with_context},
     },
     parse::{Document, Schema},
     tests::assert_matches,
 };
+
+fn transform<'a>(
+    arena: &'a Arena,
+    doc: &'a Document,
+    name: &'a str,
+    schema: &'a Schema,
+) -> SpecType<'a> {
+    let context = TransformContext::new(arena, doc, InlineTypeIds::new(arena));
+    let info = TypeInfo::Schema(SchemaTypeInfo {
+        name,
+        resource: None,
+    });
+    transform_with_context(&context, info, schema)
+}
 
 // MARK: Enums
 
@@ -614,25 +628,9 @@ fn test_struct_with_additional_properties_inline() {
                         flattened: true,
                         required: true,
                         ty: SpecType::Inline(SpecInlineType::Container(
-                            InlineTypePath {
-                                root: InlineTypePathRoot::Type("Config"),
-                                segments: [InlineTypePathSegment::Field(StructFieldName::Hint(
-                                    StructFieldNameHint::AdditionalProperties,
-                                ))],
-                            },
+                            _,
                             SpecContainer::Map(SpecInner {
-                                ty: SpecType::Inline(SpecInlineType::Struct(
-                                    InlineTypePath {
-                                        root: InlineTypePathRoot::Type("Config"),
-                                        segments: [
-                                            InlineTypePathSegment::Field(StructFieldName::Hint(
-                                                StructFieldNameHint::AdditionalProperties,
-                                            )),
-                                            InlineTypePathSegment::MapValue,
-                                        ],
-                                    },
-                                    _,
-                                )),
+                                ty: SpecType::Inline(SpecInlineType::Struct(_, _)),
                                 ..
                             }),
                         )),
@@ -1045,10 +1043,7 @@ fn test_struct_inline_all_of_becomes_parent() {
                 // The inline `allOf` schemas become inline parent types.
                 parents: [
                     SpecType::Inline(SpecInlineType::Struct(
-                        InlineTypePath {
-                            root: InlineTypePathRoot::Type("Person"),
-                            segments: [InlineTypePathSegment::Parent(1)],
-                        },
+                        _,
                         SpecStruct {
                             fields: [SpecStructField {
                                 name: StructFieldName::Name("name"),
@@ -1058,10 +1053,7 @@ fn test_struct_inline_all_of_becomes_parent() {
                         },
                     )),
                     SpecType::Inline(SpecInlineType::Struct(
-                        InlineTypePath {
-                            root: InlineTypePathRoot::Type("Person"),
-                            segments: [InlineTypePathSegment::Parent(2)],
-                        },
+                        _,
                         SpecStruct {
                             fields: [SpecStructField {
                                 name: StructFieldName::Name("age"),
@@ -1117,10 +1109,7 @@ fn test_struct_mixed_all_of_ref_and_inline() {
                 parents: [
                     SpecType::Ref(r),
                     SpecType::Inline(SpecInlineType::Struct(
-                        InlineTypePath {
-                            root: InlineTypePathRoot::Type("Child"),
-                            segments: [InlineTypePathSegment::Parent(2)],
-                        },
+                        _,
                         SpecStruct {
                             fields: [SpecStructField {
                                 name: StructFieldName::Name("name"),
@@ -2540,23 +2529,10 @@ fn test_deeply_nested_inline_types() {
                 fields: [SpecStructField {
                     name: StructFieldName::Name("items"),
                     ty: SpecType::Inline(SpecInlineType::Container(
-                        InlineTypePath {
-                            root: InlineTypePathRoot::Type("Outer"),
-                            segments: [InlineTypePathSegment::Field(StructFieldName::Name(
-                                "items",
-                            ))],
-                        },
+                        _,
                         SpecContainer::Array(SpecInner {
                             ty: SpecType::Inline(SpecInlineType::Struct(
-                                InlineTypePath {
-                                    root: InlineTypePathRoot::Type("Outer"),
-                                    segments: [
-                                        InlineTypePathSegment::Field(StructFieldName::Name(
-                                            "items",
-                                        )),
-                                        InlineTypePathSegment::ArrayItem,
-                                    ],
-                                },
+                                _,
                                 SpecStruct {
                                     fields: [SpecStructField {
                                         name: StructFieldName::Name("field"),
@@ -2685,13 +2661,7 @@ fn test_array_inline_path_construction() {
                 ..
             },
             SpecContainer::Array(SpecInner {
-                ty: SpecType::Inline(SpecInlineType::Struct(
-                    InlineTypePath {
-                        root: InlineTypePathRoot::Type("Container"),
-                        segments: [InlineTypePathSegment::ArrayItem],
-                    },
-                    _,
-                )),
+                ty: SpecType::Inline(SpecInlineType::Struct(_, _)),
                 ..
             }),
         )),
@@ -2728,13 +2698,7 @@ fn test_map_inline_path_construction() {
                 ..
             },
             SpecContainer::Map(SpecInner {
-                ty: SpecType::Inline(SpecInlineType::Struct(
-                    InlineTypePath {
-                        root: InlineTypePathRoot::Type("Dictionary"),
-                        segments: [InlineTypePathSegment::MapValue],
-                    },
-                    _,
-                )),
+                ty: SpecType::Inline(SpecInlineType::Struct(_, _)),
                 ..
             }),
         )),
@@ -2772,15 +2736,7 @@ fn test_struct_inline_path_construction() {
             SpecStruct {
                 fields: [SpecStructField {
                     name: StructFieldName::Name("nested"),
-                    ty: SpecType::Inline(SpecInlineType::Struct(
-                        InlineTypePath {
-                            root: InlineTypePathRoot::Type("Outer"),
-                            segments: [InlineTypePathSegment::Field(StructFieldName::Name(
-                                "nested",
-                            ))],
-                        },
-                        _,
-                    )),
+                    ty: SpecType::Inline(SpecInlineType::Struct(_, _)),
                     ..
                 }],
                 ..
@@ -2842,12 +2798,7 @@ fn test_inline_tagged_union_in_struct_field() {
                 fields: [SpecStructField {
                     name: StructFieldName::Name("animal"),
                     ty: SpecType::Inline(SpecInlineType::Tagged(
-                        InlineTypePath {
-                            root: InlineTypePathRoot::Type("Container"),
-                            segments: [InlineTypePathSegment::Field(StructFieldName::Name(
-                                "animal",
-                            ))],
-                        },
+                        _,
                         SpecTagged {
                             tag: "kind",
                             variants: [

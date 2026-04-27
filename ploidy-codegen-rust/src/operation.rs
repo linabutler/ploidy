@@ -1,7 +1,6 @@
 use itertools::Itertools;
 use ploidy_core::{
-    codegen::UniqueNames,
-    ir::{OperationView, ParameterView, PathParameter, RequestView, ResponseView},
+    ir::{OperationView, RequestView, ResponseView},
     parse::{Method, path::PathFragment},
 };
 use proc_macro2::{Span, TokenStream};
@@ -10,26 +9,25 @@ use syn::Ident;
 
 use super::{
     doc_attrs,
-    naming::{CodegenIdent, CodegenIdentScope, CodegenIdentUsage},
+    graph::{CodegenGraph, IdentMapping},
+    naming::CodegenIdentUsage,
     ref_::CodegenRef,
 };
 
 /// Generates a single client method for an API operation.
 pub struct CodegenOperation<'a> {
+    graph: &'a CodegenGraph<'a>,
     op: &'a OperationView<'a, 'a>,
 }
 
 impl<'a> CodegenOperation<'a> {
-    pub fn new(op: &'a OperationView<'a, 'a>) -> Self {
-        Self { op }
+    pub fn new(graph: &'a CodegenGraph<'a>, op: &'a OperationView<'a, 'a>) -> Self {
+        Self { graph, op }
     }
 
     /// Generates code to build and interpolate path parameters into
     /// the request URL.
-    fn url(
-        &self,
-        params: &[(CodegenIdent, ParameterView<'_, '_, '_, PathParameter>)],
-    ) -> TokenStream {
+    fn url(&self) -> TokenStream {
         let segments = self
             .op
             .path()
@@ -38,12 +36,10 @@ impl<'a> CodegenOperation<'a> {
                 [] => quote! { "" },
                 [PathFragment::Literal(text)] => quote! { #text },
                 [PathFragment::Param(name)] => {
-                    let (ident, _) = params
-                        .iter()
-                        .find(|(_, param)| param.name() == *name)
-                        .unwrap();
-                    let usage = CodegenIdentUsage::Param(ident);
-                    quote!(#usage)
+                    let param = CodegenIdentUsage::Param(
+                        self.graph.ident(IdentMapping::Path(self.op.id(), name)),
+                    );
+                    quote!(#param)
                 }
                 fragments => {
                     // Build a format string, with placeholders for parameter fragments.
@@ -66,11 +62,10 @@ impl<'a> CodegenOperation<'a> {
                             // `url::PathSegmentsMut::push` percent-encodes the
                             // full segment, so we can interpolate fragments
                             // directly.
-                            let (ident, _) = params
-                                .iter()
-                                .find(|(_, param)| param.name() == *name)
-                                .unwrap();
-                            CodegenIdentUsage::Param(ident)
+                            let param = CodegenIdentUsage::Param(
+                                self.graph.ident(IdentMapping::Path(self.op.id(), name)),
+                            );
+                            quote!(#param)
                         });
                     quote! { &format!(#format, #(#args),*) }
                 }
@@ -110,8 +105,10 @@ impl<'a> CodegenOperation<'a> {
     /// Generates code to serialize query parameters into the URL.
     fn query(&self) -> Option<TokenStream> {
         self.op.query().next().is_some().then(|| {
-            let op_ident = CodegenIdent::new(self.op.id());
-            let query_name = format_ident!("{}Query", CodegenIdentUsage::Type(&op_ident));
+            let query_name = format_ident!(
+                "{}Query",
+                CodegenIdentUsage::Type(self.graph.ident(self.op.id()))
+            );
             quote! {
                 let url = ::ploidy_util::serde::Serialize::serialize(
                     query,
@@ -127,41 +124,31 @@ impl<'a> CodegenOperation<'a> {
 
 impl ToTokens for CodegenOperation<'_> {
     fn to_tokens(&self, tokens: &mut TokenStream) {
-        let operation_id = CodegenIdent::new(self.op.id());
-        let method_name = CodegenIdentUsage::Method(&operation_id);
-
-        let unique = UniqueNames::new();
-        let mut scope = CodegenIdentScope::with_reserved(
-            &unique,
-            // `query`, `request`, and `form` are argument names;
-            // `url` and `response` are local variables.
-            &["query", "request", "form", "url", "response"],
-        );
         let mut params = vec![];
 
-        let paths = self
-            .op
-            .path()
-            .params()
-            .map(|param| (scope.uniquify(param.name()), param))
-            .collect_vec();
-        for (ident, _) in &paths {
-            let usage = CodegenIdentUsage::Param(ident);
-            params.push(quote! { #usage: &str });
+        let paths = self.op.path().params().collect_vec();
+        for param in &paths {
+            let param = CodegenIdentUsage::Param(
+                self.graph
+                    .ident(IdentMapping::Path(self.op.id(), param.name())),
+            );
+            params.push(quote! { #param: &str });
         }
 
         if self.op.query().next().is_some() {
             // Include the `query` argument if we have
             // at least one query parameter.
-            let op_ident = CodegenIdent::new(self.op.id());
-            let query_type_name = format_ident!("{}Query", CodegenIdentUsage::Type(&op_ident));
+            let query_type_name = format_ident!(
+                "{}Query",
+                CodegenIdentUsage::Type(self.graph.ident(self.op.id()))
+            );
             params.push(quote! { query: &parameters::#query_type_name });
         }
 
         if let Some(request) = self.op.request() {
             match request {
                 RequestView::Json(view) => {
-                    let param_type = CodegenRef::new(&view);
+                    let param_type = CodegenRef::new(self.graph, &view);
                     params.push(quote! { request: impl Into<#param_type> });
                 }
                 RequestView::Multipart => {
@@ -172,12 +159,12 @@ impl ToTokens for CodegenOperation<'_> {
 
         let return_type = match self.op.response() {
             Some(response) => match response {
-                ResponseView::Json(view) => CodegenRef::new(&view).into_token_stream(),
+                ResponseView::Json(view) => CodegenRef::new(self.graph, &view).into_token_stream(),
             },
             None => quote! { () },
         };
 
-        let build_url = self.url(&paths);
+        let build_url = self.url();
 
         let build_query = self.query();
 
@@ -227,6 +214,7 @@ impl ToTokens for CodegenOperation<'_> {
             }
         };
 
+        let method_name = CodegenIdentUsage::Method(self.graph.ident(self.op.id()));
         let doc = self.op.description().map(doc_attrs);
 
         tokens.append_all(quote! {
@@ -307,7 +295,7 @@ mod tests {
         let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
         let op = graph.operations().next().unwrap();
-        let codegen = CodegenOperation::new(&op);
+        let codegen = CodegenOperation::new(&graph, &op);
 
         let actual: syn::ImplItemFn = parse_quote!(#codegen);
         let expected: syn::ImplItemFn = parse_quote! {
@@ -376,7 +364,7 @@ mod tests {
         let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
         let op = graph.operations().next().unwrap();
-        let codegen = CodegenOperation::new(&op);
+        let codegen = CodegenOperation::new(&graph, &op);
 
         let actual: syn::ImplItemFn = parse_quote!(#codegen);
         let expected: syn::ImplItemFn = parse_quote! {
@@ -448,7 +436,7 @@ mod tests {
         let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
         let op = graph.operations().next().unwrap();
-        let codegen = CodegenOperation::new(&op);
+        let codegen = CodegenOperation::new(&graph, &op);
 
         let actual: syn::ImplItemFn = parse_quote!(#codegen);
         let expected: syn::ImplItemFn = parse_quote! {
@@ -539,7 +527,7 @@ mod tests {
         let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
         let op = graph.operations().next().unwrap();
-        let codegen = CodegenOperation::new(&op);
+        let codegen = CodegenOperation::new(&graph, &op);
 
         let actual: syn::ImplItemFn = parse_quote!(#codegen);
         let expected: syn::ImplItemFn = parse_quote! {
@@ -615,7 +603,7 @@ mod tests {
         let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
         let op = graph.operations().next().unwrap();
-        let codegen = CodegenOperation::new(&op);
+        let codegen = CodegenOperation::new(&graph, &op);
 
         let actual: syn::ImplItemFn = parse_quote!(#codegen);
         let expected: syn::ImplItemFn = parse_quote! {
@@ -672,7 +660,7 @@ mod tests {
         let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
         let op = graph.operations().next().unwrap();
-        let codegen = CodegenOperation::new(&op);
+        let codegen = CodegenOperation::new(&graph, &op);
 
         let actual: syn::ImplItemFn = parse_quote!(#codegen);
         let expected: syn::ImplItemFn = parse_quote! {
@@ -745,7 +733,7 @@ mod tests {
         let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
         let op = graph.operations().next().unwrap();
-        let codegen = CodegenOperation::new(&op);
+        let codegen = CodegenOperation::new(&graph, &op);
 
         let actual: syn::ImplItemFn = parse_quote!(#codegen);
         let expected: syn::ImplItemFn = parse_quote! {
@@ -829,7 +817,7 @@ mod tests {
         let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
         let op = graph.operations().next().unwrap();
-        let codegen = CodegenOperation::new(&op);
+        let codegen = CodegenOperation::new(&graph, &op);
 
         let actual: syn::ImplItemFn = parse_quote!(#codegen);
         let expected: syn::ImplItemFn = parse_quote! {
@@ -919,7 +907,7 @@ mod tests {
         let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
 
         let op = graph.operations().next().unwrap();
-        let codegen = CodegenOperation::new(&op);
+        let codegen = CodegenOperation::new(&graph, &op);
 
         let actual: syn::ImplItemFn = parse_quote!(#codegen);
         let expected: syn::ImplItemFn = parse_quote! {
