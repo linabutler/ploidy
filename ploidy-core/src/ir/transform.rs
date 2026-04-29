@@ -337,21 +337,28 @@ impl<'context, 'a> IrTransformer<'context, 'a> {
         let Some(values) = &self.schema.variants else {
             return Err(self);
         };
-        let variants = self.arena().alloc_slice(values.iter().filter_map(|value| {
-            if let Some(s) = value.as_str() {
-                Some(EnumVariant::String(s))
-            } else if let Some(n) = value.as_number() {
-                if let Some(n) = n.as_i64() {
-                    Some(EnumVariant::I64(n))
-                } else if let Some(n) = n.as_u64() {
-                    Some(EnumVariant::U64(n))
-                } else {
-                    n.as_f64().map(|f| EnumVariant::F64(JsonF64::new(f)))
-                }
-            } else {
-                value.as_bool().map(EnumVariant::Bool)
-            }
-        }));
+        // JSON Schema Validation (draft-bhutton-json-schema-validation-01)
+        // recommends unique enum values, but specs in the wild repeat values.
+        let variants = self.arena().alloc_slice(
+            values
+                .iter()
+                .filter_map(|value| {
+                    if let Some(s) = value.as_str() {
+                        Some(EnumVariant::String(s))
+                    } else if let Some(n) = value.as_number() {
+                        if let Some(n) = n.as_i64() {
+                            Some(EnumVariant::I64(n))
+                        } else if let Some(n) = n.as_u64() {
+                            Some(EnumVariant::U64(n))
+                        } else {
+                            n.as_f64().map(|f| EnumVariant::F64(JsonF64::new(f)))
+                        }
+                    } else {
+                        value.as_bool().map(EnumVariant::Bool)
+                    }
+                })
+                .unique(),
+        );
         let ty = Enum {
             description: self.schema.description.as_deref(),
             variants,

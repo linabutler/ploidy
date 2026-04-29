@@ -150,6 +150,40 @@ fn test_enum_mixed_types() {
     );
 }
 
+#[test]
+fn test_enum_deduplicates_variants() {
+    let doc = Document::from_yaml(indoc::indoc! {"
+        openapi: 3.0.0
+        info:
+          title: Test
+          version: 1.0.0
+    "})
+    .unwrap();
+    let schema: Schema = serde_saphyr::from_str(indoc::indoc! {"
+        type: string
+        enum: [active, inactive, active, pending, inactive]
+    "})
+    .unwrap();
+
+    let arena = Arena::new();
+    let result = transform(&arena, &doc, "Status", &schema);
+
+    assert_matches!(
+        result,
+        SpecType::Schema(SpecSchemaType::Enum(
+            SchemaTypeInfo { name: "Status", .. },
+            Enum {
+                variants: [
+                    EnumVariant::String("active"),
+                    EnumVariant::String("inactive"),
+                    EnumVariant::String("pending"),
+                ],
+                ..
+            },
+        )),
+    );
+}
+
 // MARK: Primitives
 
 #[test]
