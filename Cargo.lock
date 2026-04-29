@@ -1103,7 +1103,7 @@ checksum = "8b870d8c151b6f2fb93e84a13146138f05d02ed11c7e7c54f8826aaaf7c9f184"
 
 [[package]]
 name = "ploidy"
-version = "0.12.1"
+version = "0.12.2"
 dependencies = [
  "clap",
  "indoc",
@@ -1118,7 +1118,7 @@ dependencies = [
 
 [[package]]
 name = "ploidy-codegen-rust"
-version = "0.12.1"
+version = "0.12.2"
 dependencies = [
  "heck",
  "indoc",
@@ -1141,7 +1141,7 @@ dependencies = [
 
 [[package]]
 name = "ploidy-core"
-version = "0.12.1"
+version = "0.12.2"
 dependencies = [
  "atomic_refcell",
  "bumpalo",
@@ -1172,7 +1172,7 @@ dependencies = [
 
 [[package]]
 name = "ploidy-pointer"
-version = "0.12.1"
+version = "0.12.2"
 dependencies = [
  "chrono",
  "indexmap",
@@ -1188,7 +1188,7 @@ dependencies = [
 
 [[package]]
 name = "ploidy-pointer-derive"
-version = "0.12.1"
+version = "0.12.2"
 dependencies = [
  "heck",
  "itertools",
@@ -1200,7 +1200,7 @@ dependencies = [
 
 [[package]]
 name = "ploidy-util"
-version = "0.12.1"
+version = "0.12.2"
 dependencies = [
  "base64",
  "chrono",
