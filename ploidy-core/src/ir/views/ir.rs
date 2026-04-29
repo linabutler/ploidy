@@ -10,7 +10,10 @@ use petgraph::graph::NodeIndex;
 
 use crate::ir::{graph::CookedGraph, types::GraphType};
 
-use super::{View, container::ContainerView, inline::InlineTypeView, schema::SchemaTypeView};
+use super::{
+    View, composition::CompositionView, container::ContainerView, inline::InlineTypeView,
+    schema::SchemaTypeView,
+};
 
 /// A graph-aware view of a [schema][crate::ir::GraphSchemaType] or
 /// an [inline][crate::ir::GraphInlineType] type.
@@ -49,6 +52,17 @@ impl<'graph, 'a> TypeView<'graph, 'a> {
         match self {
             Self::Schema(SchemaTypeView::Container(_, view)) => Some(view),
             Self::Inline(InlineTypeView::Container(_, view)) => Some(view),
+            _ => None,
+        }
+    }
+
+    /// If this is a view of a named or inline composition type,
+    /// returns the composition view.
+    #[inline]
+    pub fn as_composition(&self) -> Option<&CompositionView<'graph, 'a>> {
+        match self {
+            Self::Schema(SchemaTypeView::Composition(_, view)) => Some(view),
+            Self::Inline(InlineTypeView::Composition(_, view)) => Some(view),
             _ => None,
         }
     }

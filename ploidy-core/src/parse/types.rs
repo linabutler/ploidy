@@ -272,16 +272,18 @@ pub enum RefOr<T> {
 }
 
 /// Either a reference or an inline schema definition.
-///
-/// [`RefOrSchema::deserialize`] desugars OpenAPI 3.1-style schemas like
-/// `{ "$ref": "...", "description": "..." }` into the semantically equivalent
-/// `{ "allOf": [{ "$ref": "..." }], "description": "..." }`.
 #[derive(Clone, Debug, JsonPointee, JsonPointerTarget)]
 #[ploidy(pointer(untagged))]
 pub enum RefOrSchema {
     /// A reference to another schema.
     #[ploidy(pointer(skip))]
     Ref(ComponentRef),
+    /// A reference with adjacent schema keywords.
+    RefWithSiblings {
+        #[ploidy(pointer(skip))]
+        ref_: ComponentRef,
+        schema: Box<Schema>,
+    },
     /// An inline schema definition.
     Inline(Box<Schema>),
 }
@@ -292,13 +294,12 @@ impl<'de> Deserialize<'de> for RefOrSchema {
             RefOr::Other(schema) => Ok(Self::Inline(schema)),
             RefOr::Ref(r) if r.rest.is_empty() => Ok(Self::Ref(r.ref_)),
             RefOr::Ref(r) => {
-                let mut schema: Schema =
+                let schema: Schema =
                     serde_json::from_value(r.rest.into()).map_err(serde::de::Error::custom)?;
-                schema
-                    .all_of
-                    .get_or_insert_default()
-                    .insert(0, Self::Ref(r.ref_));
-                Ok(Self::Inline(schema.into()))
+                Ok(Self::RefWithSiblings {
+                    ref_: r.ref_,
+                    schema: schema.into(),
+                })
             }
         }
     }
@@ -563,27 +564,23 @@ mod tests {
     // MARK: `RefOrSchema`
 
     #[test]
-    fn test_schema_ref_desugars_adjacent_keywords_into_all_of() {
+    fn test_schema_ref_preserves_adjacent_keywords() {
         let json = serde_json::json!({
             "$ref": "#/components/schemas/Pet",
             "description": "A very good pet",
         });
 
         let schema_ref: RefOrSchema = serde_json::from_value(json).unwrap();
-        let RefOrSchema::Inline(schema) = &schema_ref else {
-            panic!("expected `Inline` schema; got `{schema_ref:?}`");
+        let RefOrSchema::RefWithSiblings { ref_, schema } = &schema_ref else {
+            panic!("expected `RefWithSiblings` schema; got `{schema_ref:?}`");
         };
+        assert_eq!(ref_.name(), "Pet");
         assert_eq!(schema.description.as_deref(), Some("A very good pet"));
-
-        let all_of = schema.all_of.as_ref().unwrap();
-        let [RefOrSchema::Ref(r)] = &**all_of else {
-            panic!("expected one `allOf` schema; got {all_of:?}");
-        };
-        assert_eq!(r.name(), "Pet");
+        assert!(schema.all_of.is_none());
     }
 
     #[test]
-    fn test_schema_ref_desugars_adjacent_keywords_merges_existing_all_of() {
+    fn test_schema_ref_preserves_adjacent_existing_all_of() {
         let json = serde_json::json!({
             "$ref": "#/components/schemas/Pet",
             "description": "A very good pet",
@@ -591,17 +588,17 @@ mod tests {
         });
 
         let schema_ref: RefOrSchema = serde_json::from_value(json).unwrap();
-        let RefOrSchema::Inline(schema) = &schema_ref else {
-            panic!("expected `Inline` schema; got `{schema_ref:?}`");
+        let RefOrSchema::RefWithSiblings { ref_, schema } = &schema_ref else {
+            panic!("expected `RefWithSiblings` schema; got `{schema_ref:?}`");
         };
+        assert_eq!(ref_.name(), "Pet");
         assert_eq!(schema.description.as_deref(), Some("A very good pet"));
 
         let all_of = schema.all_of.as_ref().unwrap();
-        let [RefOrSchema::Ref(first), RefOrSchema::Ref(second)] = &**all_of else {
-            panic!("expected two `allOf` schemas; got {all_of:?}");
+        let [RefOrSchema::Ref(r)] = &**all_of else {
+            panic!("expected one `allOf` schema; got {all_of:?}");
         };
-        assert_eq!(first.name(), "Pet");
-        assert_eq!(second.name(), "Named");
+        assert_eq!(r.name(), "Named");
     }
 
     #[test]

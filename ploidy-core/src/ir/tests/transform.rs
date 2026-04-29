@@ -4,10 +4,10 @@ use crate::{
     arena::Arena,
     ir::{
         Enum, EnumVariant, InlineTypePath, InlineTypePathRoot, InlineTypePathSegment,
-        PrimitiveType, SchemaTypeInfo, SpecContainer, SpecInlineType, SpecInner, SpecSchemaType,
-        SpecStruct, SpecStructField, SpecTagged, SpecTaggedVariant, SpecType, SpecUntagged,
-        SpecUntaggedVariant, StructFieldName, StructFieldNameHint, UntaggedVariantNameHint,
-        transform::transform,
+        PrimitiveType, SchemaTypeInfo, SpecComposition, SpecContainer, SpecInlineType, SpecInner,
+        SpecSchemaType, SpecStruct, SpecStructField, SpecTagged, SpecTaggedVariant, SpecType,
+        SpecUntagged, SpecUntaggedVariant, StructFieldName, StructFieldNameHint,
+        UntaggedVariantNameHint, transform::transform,
     },
     parse::{Document, Schema},
     tests::assert_matches,
@@ -1111,9 +1111,7 @@ fn test_struct_mixed_all_of_ref_and_inline() {
         SpecType::Schema(SpecSchemaType::Struct(
             SchemaTypeInfo { name: "Child", .. },
             SpecStruct {
-                // No own fields; all fields come from parents.
                 fields: [],
-                // Parents include both the named and inline schemas.
                 parents: [
                     SpecType::Ref(r),
                     SpecType::Inline(SpecInlineType::Struct(
@@ -1133,6 +1131,93 @@ fn test_struct_mixed_all_of_ref_and_inline() {
                 ..
             },
         )) if r.name() == "Base",
+    );
+}
+
+#[test]
+fn test_struct_field_ref_sibling_to_tagged_union_becomes_composition() {
+    let doc = Document::from_yaml(indoc::indoc! {"
+        openapi: 3.1.0
+        info:
+          title: Test
+          version: 1.0.0
+        paths: {}
+        components:
+          schemas:
+            Cat:
+              type: object
+              properties:
+                kind:
+                  type: string
+                meow:
+                  type: string
+            Dog:
+              type: object
+              properties:
+                kind:
+                  type: string
+                bark:
+                  type: string
+            Pet:
+              oneOf:
+                - $ref: '#/components/schemas/Cat'
+                - $ref: '#/components/schemas/Dog'
+              discriminator:
+                propertyName: kind
+                mapping:
+                  cat: '#/components/schemas/Cat'
+                  dog: '#/components/schemas/Dog'
+              properties:
+                kind:
+                  type: string
+            Owner:
+              type: object
+              properties:
+                pet:
+                  $ref: '#/components/schemas/Pet'
+                  description: The owner's pet.
+              required:
+                - pet
+    "})
+    .unwrap();
+
+    let schema = &doc.components.as_ref().unwrap().schemas["Owner"];
+    let arena = Arena::new();
+    let result = transform(&arena, &doc, "Owner", schema);
+
+    assert_matches!(
+        result,
+        SpecType::Schema(SpecSchemaType::Struct(
+            SchemaTypeInfo { name: "Owner", .. },
+            SpecStruct {
+                fields: [SpecStructField {
+                    name: StructFieldName::Name("pet"),
+                    description: Some("The owner's pet."),
+                    ty: SpecType::Inline(SpecInlineType::Composition(
+                        InlineTypePath {
+                            root: InlineTypePathRoot::Type("Owner"),
+                            segments: [InlineTypePathSegment::Field(StructFieldName::Name("pet"))],
+                        },
+                        SpecComposition {
+                            all_of: [
+                                SpecType::Ref(r),
+                                SpecType::Inline(SpecInlineType::Any(InlineTypePath {
+                                    root: InlineTypePathRoot::Type("Owner"),
+                                    segments: [
+                                        InlineTypePathSegment::Field(StructFieldName::Name("pet")),
+                                        InlineTypePathSegment::Parent(2),
+                                    ],
+                                })),
+                            ],
+                            ..
+                        },
+                    )),
+                    required: true,
+                    ..
+                }],
+                ..
+            },
+        )) if r.name() == "Pet",
     );
 }
 

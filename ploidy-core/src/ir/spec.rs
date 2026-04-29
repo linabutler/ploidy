@@ -150,6 +150,9 @@ impl<'a> Spec<'a> {
                         Source::Declared(param) => {
                             let ty: &_ = match &param.schema {
                                 Some(RefOrSchema::Ref(r)) => arena.alloc(SpecType::Ref(r)),
+                                Some(RefOrSchema::RefWithSiblings { ref_, .. }) => {
+                                    arena.alloc(SpecType::Ref(ref_))
+                                }
                                 Some(RefOrSchema::Inline(schema)) => arena.alloc(transform(
                                     arena,
                                     doc,
@@ -261,6 +264,9 @@ impl<'a> Spec<'a> {
                         RequestContent::Json(RefOrSchema::Ref(r)) => {
                             SpecRequest::Json(arena.alloc(SpecType::Ref(r)))
                         }
+                        RequestContent::Json(RefOrSchema::RefWithSiblings { ref_, .. }) => {
+                            SpecRequest::Json(arena.alloc(SpecType::Ref(ref_)))
+                        }
                         RequestContent::Json(RefOrSchema::Inline(schema)) => {
                             SpecRequest::Json(arena.alloc(transform(
                                 arena,
@@ -332,6 +338,9 @@ impl<'a> Spec<'a> {
                             ResponseContent::Json(RefOrSchema::Ref(r)) => {
                                 SpecResponse::Json(arena.alloc(SpecType::Ref(r)))
                             }
+                            ResponseContent::Json(RefOrSchema::RefWithSiblings {
+                                ref_, ..
+                            }) => SpecResponse::Json(arena.alloc(SpecType::Ref(ref_))),
                             ResponseContent::Json(RefOrSchema::Inline(schema)) => {
                                 SpecResponse::Json(arena.alloc(transform(
                                     arena,

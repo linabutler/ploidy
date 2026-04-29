@@ -1,5 +1,5 @@
 use ploidy_core::ir::{
-    ContainerView, ExtendableView, InlineTypePathRoot, InlineTypeView, TypeView,
+    ContainerView, ExtendableView, InlineTypePathRoot, InlineTypeView, SchemaTypeView, TypeView,
 };
 use proc_macro2::TokenStream;
 use quote::{ToTokens, TokenStreamExt, quote};
@@ -49,6 +49,18 @@ impl ToTokens for CodegenRef<'_> {
             TypeView::Inline(InlineTypeView::Any(_, _)) => {
                 quote! { ::ploidy_util::serde_json::Value }
             }
+            TypeView::Inline(InlineTypeView::Composition(_, view)) => {
+                let mut all_of = view.all_of().filter(|ty| !is_any(ty));
+                let Some(ty) = all_of.next() else {
+                    return tokens.append_all(quote! { ::ploidy_util::serde_json::Value });
+                };
+                assert!(
+                    all_of.next().is_none(),
+                    "Rust codegen only supports single-parent inline compositions"
+                );
+                let ref_ = CodegenRef::new(&ty);
+                quote! { #ref_ }
+            }
             TypeView::Inline(ty) => {
                 let path = ty.path();
                 let root: syn::Path = match path.root {
@@ -74,6 +86,13 @@ impl ToTokens for CodegenRef<'_> {
             }
         })
     }
+}
+
+fn is_any(ty: &TypeView<'_, '_>) -> bool {
+    matches!(
+        ty,
+        TypeView::Schema(SchemaTypeView::Any(..)) | TypeView::Inline(InlineTypeView::Any(..))
+    )
 }
 
 #[cfg(test)]

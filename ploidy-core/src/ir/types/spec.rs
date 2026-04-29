@@ -36,6 +36,8 @@ impl<'a> From<SpecInlineType<'a>> for SpecType<'a> {
 pub enum SpecSchemaType<'a> {
     /// An enum with named variants.
     Enum(SchemaTypeInfo<'a>, Enum<'a>),
+    /// A composition of other schemas.
+    Composition(SchemaTypeInfo<'a>, SpecComposition<'a>),
     /// A struct with fields.
     Struct(SchemaTypeInfo<'a>, SpecStruct<'a>),
     /// A tagged union.
@@ -54,6 +56,7 @@ impl<'a> SpecSchemaType<'a> {
     #[inline]
     pub fn name(&self) -> &'a str {
         let (Self::Enum(info, ..)
+        | Self::Composition(info, ..)
         | Self::Struct(info, ..)
         | Self::Tagged(info, ..)
         | Self::Untagged(info, ..)
@@ -66,6 +69,7 @@ impl<'a> SpecSchemaType<'a> {
     #[inline]
     pub fn resource(&self) -> Option<&'a str> {
         let (Self::Enum(info, ..)
+        | Self::Composition(info, ..)
         | Self::Struct(info, ..)
         | Self::Tagged(info, ..)
         | Self::Untagged(info, ..)
@@ -79,6 +83,7 @@ impl<'a> SpecSchemaType<'a> {
 /// An inline schema type with [`SpecType`] references.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub enum SpecInlineType<'a> {
+    Composition(InlineTypePath<'a>, SpecComposition<'a>),
     Enum(InlineTypePath<'a>, Enum<'a>),
     Struct(InlineTypePath<'a>, SpecStruct<'a>),
     Tagged(InlineTypePath<'a>, SpecTagged<'a>),
@@ -91,7 +96,8 @@ pub enum SpecInlineType<'a> {
 impl<'a> SpecInlineType<'a> {
     #[inline]
     pub fn path(&self) -> &InlineTypePath<'a> {
-        let (Self::Enum(path, _)
+        let (Self::Composition(path, _)
+        | Self::Enum(path, _)
         | Self::Struct(path, _)
         | Self::Tagged(path, _)
         | Self::Untagged(path, _)
@@ -100,6 +106,13 @@ impl<'a> SpecInlineType<'a> {
         | Self::Any(path)) = self;
         path
     }
+}
+
+/// A schema composition with `allOf` semantics.
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub struct SpecComposition<'a> {
+    pub description: Option<&'a str>,
+    pub all_of: &'a [&'a SpecType<'a>],
 }
 
 /// A struct, created from a schema with named properties.

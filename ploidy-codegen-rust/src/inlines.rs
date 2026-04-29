@@ -64,11 +64,12 @@ where
                 InlineTypeView::Untagged(_, view) => {
                     CodegenUntagged::new(name, view).into_token_stream()
                 }
-                InlineTypeView::Container(..)
+                InlineTypeView::Composition(..)
+                | InlineTypeView::Container(..)
                 | InlineTypeView::Primitive(..)
                 | InlineTypeView::Any(..) => {
-                    // Container types, primitive types, and untyped values
-                    // are emitted directly; they don't need type aliases.
+                    // Inline compositions, containers, primitive types, and
+                    // untyped values are emitted directly.
                     return None;
                 }
             };

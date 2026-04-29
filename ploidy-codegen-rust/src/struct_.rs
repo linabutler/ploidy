@@ -1962,10 +1962,9 @@ mod tests {
                 Corgi:
                   allOf:
                     - $ref: '#/components/schemas/Animal'
-                    - type: object
-                      properties:
-                        name:
-                          type: string
+                  properties:
+                    name:
+                      type: string
         "})
         .unwrap();
 
@@ -2043,10 +2042,9 @@ mod tests {
                 Child:
                   allOf:
                     - $ref: '#/components/schemas/Base'
-                    - type: object
-                      properties:
-                        name:
-                          type: string
+                  properties:
+                    name:
+                      type: string
         "})
         .unwrap();
 

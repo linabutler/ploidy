@@ -35,6 +35,6 @@ pub use spec::Spec;
 pub use types::*;
 
 pub use views::{
-    ExtendableView, View, any::*, container::*, enum_::*, inline::*, ir::*, operation::*,
-    primitive::*, schema::*, struct_::*, tagged::*, untagged::*,
+    ExtendableView, View, any::*, composition::*, container::*, enum_::*, inline::*, ir::*,
+    operation::*, primitive::*, schema::*, struct_::*, tagged::*, untagged::*,
 };

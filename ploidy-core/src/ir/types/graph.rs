@@ -5,7 +5,7 @@ use petgraph::graph::NodeIndex;
 use super::{
     Enum, InlineTypePath, PrimitiveType, SchemaTypeInfo, StructFieldName, UntaggedVariantNameHint,
     shape::{Operation, Parameter, ParameterInfo, Request, Response},
-    spec::{SpecContainer, SpecInlineType, SpecSchemaType},
+    spec::{SpecComposition, SpecContainer, SpecInlineType, SpecSchemaType},
 };
 
 /// A type in the dependency graph.
@@ -20,6 +20,8 @@ pub enum GraphType<'a> {
 pub enum GraphSchemaType<'a> {
     /// An enum with named variants.
     Enum(SchemaTypeInfo<'a>, Enum<'a>),
+    /// A composition of other schemas.
+    Composition(SchemaTypeInfo<'a>, GraphComposition<'a>),
     /// A struct with fields.
     Struct(SchemaTypeInfo<'a>, GraphStruct<'a>),
     /// A tagged union.
@@ -38,6 +40,7 @@ impl<'a> GraphSchemaType<'a> {
     #[inline]
     pub fn name(&self) -> &'a str {
         let (Self::Enum(info, ..)
+        | Self::Composition(info, ..)
         | Self::Struct(info, ..)
         | Self::Tagged(info, ..)
         | Self::Untagged(info, ..)
@@ -50,6 +53,7 @@ impl<'a> GraphSchemaType<'a> {
     #[inline]
     pub fn resource(&self) -> Option<&'a str> {
         let (Self::Enum(info, ..)
+        | Self::Composition(info, ..)
         | Self::Struct(info, ..)
         | Self::Tagged(info, ..)
         | Self::Untagged(info, ..)
@@ -63,6 +67,7 @@ impl<'a> GraphSchemaType<'a> {
 impl<'a> From<SpecSchemaType<'a>> for GraphSchemaType<'a> {
     fn from(spec: SpecSchemaType<'a>) -> Self {
         match spec {
+            SpecSchemaType::Composition(info, c) => Self::Composition(info, c.into()),
             SpecSchemaType::Enum(info, e) => Self::Enum(info, e),
             SpecSchemaType::Struct(info, s) => Self::Struct(
                 info,
@@ -93,6 +98,7 @@ impl<'a> From<SpecSchemaType<'a>> for GraphSchemaType<'a> {
 /// An inline type in the graph.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub enum GraphInlineType<'a> {
+    Composition(InlineTypePath<'a>, GraphComposition<'a>),
     Enum(InlineTypePath<'a>, Enum<'a>),
     Struct(InlineTypePath<'a>, GraphStruct<'a>),
     Tagged(InlineTypePath<'a>, GraphTagged<'a>),
@@ -105,7 +111,8 @@ pub enum GraphInlineType<'a> {
 impl<'a> GraphInlineType<'a> {
     #[inline]
     pub fn path(&self) -> &InlineTypePath<'a> {
-        let (Self::Enum(path, _)
+        let (Self::Composition(path, _)
+        | Self::Enum(path, _)
         | Self::Struct(path, _)
         | Self::Tagged(path, _)
         | Self::Untagged(path, _)
@@ -119,6 +126,7 @@ impl<'a> GraphInlineType<'a> {
 impl<'a> From<SpecInlineType<'a>> for GraphInlineType<'a> {
     fn from(spec: SpecInlineType<'a>) -> Self {
         match spec {
+            SpecInlineType::Composition(path, c) => Self::Composition(path, c.into()),
             SpecInlineType::Enum(path, e) => Self::Enum(path, e),
             SpecInlineType::Struct(path, s) => Self::Struct(
                 path,
@@ -142,6 +150,20 @@ impl<'a> From<SpecInlineType<'a>> for GraphInlineType<'a> {
             SpecInlineType::Container(path, c) => Self::Container(path, c.into()),
             SpecInlineType::Primitive(path, p) => Self::Primitive(path, p),
             SpecInlineType::Any(path) => Self::Any(path),
+        }
+    }
+}
+
+/// A composition in the graph.
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub struct GraphComposition<'a> {
+    pub description: Option<&'a str>,
+}
+
+impl<'a> From<SpecComposition<'a>> for GraphComposition<'a> {
+    fn from(spec: SpecComposition<'a>) -> Self {
+        Self {
+            description: spec.description,
         }
     }
 }

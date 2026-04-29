@@ -1,8 +1,8 @@
-//! Struct types: object schemas and `allOf` composition.
+//! Struct types: object schemas and authored `allOf` composition.
 //!
 //! In OpenAPI, a `type: object` schema with `properties` describes a record
-//! with named fields. A schema can also inherit fields from other schemas via
-//! `allOf`, which is how OpenAPI models composition and inheritance:
+//! with named fields. Such a schema can also inherit fields from other schemas
+//! via `allOf`:
 //!
 //! ```yaml
 //! components:
@@ -18,15 +18,15 @@
 //!     Office:
 //!       allOf:
 //!         - $ref: '#/components/schemas/Address'
-//!         - type: object
-//!           required: [floor]
-//!           properties:
-//!             floor:
-//!               type: integer
+//!       required: [floor]
+//!       properties:
+//!         floor:
+//!           type: integer
 //! ```
 //!
-//! Ploidy represents both cases as a [`StructView`]. A struct has
-//! its own fields plus fields inherited from its `allOf` parents.
+//! Ploidy represents object records and authored object composition as
+//! [`StructView`] values. A struct has its own fields plus fields inherited
+//! from its `allOf` parents.
 //! Each field carries properties that guide codegen:
 //!
 //! * **Required vs. optional.** A field listed in `required` is

@@ -29,13 +29,15 @@ use petgraph::graph::NodeIndex;
 use crate::ir::{InlineTypePath, graph::CookedGraph, types::GraphInlineType};
 
 use super::{
-    ViewNode, any::AnyView, container::ContainerView, enum_::EnumView, primitive::PrimitiveView,
-    struct_::StructView, tagged::TaggedView, untagged::UntaggedView,
+    ViewNode, any::AnyView, composition::CompositionView, container::ContainerView,
+    enum_::EnumView, primitive::PrimitiveView, struct_::StructView, tagged::TaggedView,
+    untagged::UntaggedView,
 };
 
 /// A graph-aware view of an [inline type][GraphInlineType].
 #[derive(Debug)]
 pub enum InlineTypeView<'graph, 'a> {
+    Composition(InlineTypePath<'a>, CompositionView<'graph, 'a>),
     Enum(InlineTypePath<'a>, EnumView<'graph, 'a>),
     Struct(InlineTypePath<'a>, StructView<'graph, 'a>),
     Tagged(InlineTypePath<'a>, TaggedView<'graph, 'a>),
@@ -53,6 +55,9 @@ impl<'graph, 'a> InlineTypeView<'graph, 'a> {
         ty: GraphInlineType<'a>,
     ) -> Self {
         match ty {
+            GraphInlineType::Composition(path, ty) => {
+                Self::Composition(path, CompositionView::new(cooked, index, ty))
+            }
             GraphInlineType::Enum(path, ty) => Self::Enum(path, EnumView::new(cooked, index, ty)),
             GraphInlineType::Struct(path, ty) => {
                 Self::Struct(path, StructView::new(cooked, index, ty))
@@ -77,7 +82,8 @@ impl<'graph, 'a> InlineTypeView<'graph, 'a> {
     /// in the spec.
     #[inline]
     pub fn path(&self) -> InlineTypePath<'a> {
-        let (Self::Enum(path, _)
+        let (Self::Composition(path, _)
+        | Self::Enum(path, _)
         | Self::Struct(path, _)
         | Self::Tagged(path, _)
         | Self::Untagged(path, _)
@@ -92,6 +98,7 @@ impl<'graph, 'a> ViewNode<'graph, 'a> for InlineTypeView<'graph, 'a> {
     #[inline]
     fn cooked(&self) -> &'graph CookedGraph<'a> {
         match self {
+            Self::Composition(_, view) => view.cooked(),
             Self::Enum(_, view) => view.cooked(),
             Self::Struct(_, view) => view.cooked(),
             Self::Tagged(_, view) => view.cooked(),
@@ -105,6 +112,7 @@ impl<'graph, 'a> ViewNode<'graph, 'a> for InlineTypeView<'graph, 'a> {
     #[inline]
     fn index(&self) -> NodeIndex<usize> {
         match self {
+            Self::Composition(_, view) => view.index(),
             Self::Enum(_, view) => view.index(),
             Self::Struct(_, view) => view.index(),
             Self::Tagged(_, view) => view.index(),

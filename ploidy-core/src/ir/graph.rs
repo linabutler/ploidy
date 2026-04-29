@@ -637,6 +637,8 @@ struct InlinableVariant<'a> {
 /// Edges describe the relationship between their source and target types.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub enum GraphEdge<'a> {
+    /// The source type is an `allOf` composition with the target type.
+    Composes,
     /// The source type inherits from the target type.
     Inherits { shadow: bool },
     /// The source struct, tagged union, or untagged union
@@ -797,6 +799,7 @@ impl<'graph, 'a> MetadataBuilder<'graph, 'a> {
             // Inheritance edges don't contribute to cycles;
             // a type can't inherit from itself.
             GraphEdge::Inherits { .. } => false,
+            GraphEdge::Composes => true,
             GraphEdge::Contains => match self.graph[e.source()] {
                 GraphType::Schema(GraphSchemaType::Container(_, c))
                 | GraphType::Inline(GraphInlineType::Container(_, c)) => {
@@ -859,7 +862,7 @@ impl<'graph, 'a> MetadataBuilder<'graph, 'a> {
             for edge in self.graph.edges_directed(node, Direction::Incoming) {
                 let source = edge.source();
                 match edge.weight() {
-                    GraphEdge::Contains | GraphEdge::Variant(_) => {
+                    GraphEdge::Composes | GraphEdge::Contains | GraphEdge::Variant(_) => {
                         if !unhashable.put(source.index()) {
                             queue.push_back(source);
                         }
@@ -890,25 +893,30 @@ impl<'graph, 'a> MetadataBuilder<'graph, 'a> {
         let mut queue: VecDeque<_> = undefaultable.ones().map(NodeIndex::new).collect();
         while let Some(node) = queue.pop_front() {
             for edge in self.graph.edges_directed(node, Direction::Incoming) {
-                if !matches!(
-                    edge.weight(),
-                    GraphEdge::Field { meta, .. } if meta.required
-                ) {
-                    // Optional fields become `AbsentOr<T>`,
-                    // which is always `Default`.
-                    continue;
-                }
                 let source = edge.source();
-                if !undefaultable.put(source.index()) {
-                    queue.push_back(source);
-                }
-                // Every type that inherits from `source` also
-                // inherits this undefaultable field, so mark all
-                // descendants of `source` as undefaultable.
-                for desc in inherits.dependents_of(source).filter(|&d| d != source) {
-                    if !undefaultable.put(desc.index()) {
-                        queue.push_back(desc);
+                match edge.weight() {
+                    GraphEdge::Composes => {
+                        if !undefaultable.put(source.index()) {
+                            queue.push_back(source);
+                        }
                     }
+                    GraphEdge::Field { meta, .. } if meta.required => {
+                        if !undefaultable.put(source.index()) {
+                            queue.push_back(source);
+                        }
+                        // Every type that inherits from `source` also
+                        // inherits this undefaultable field, so mark all
+                        // descendants of `source` as undefaultable.
+                        for desc in inherits.dependents_of(source).filter(|&d| d != source) {
+                            if !undefaultable.put(desc.index()) {
+                                queue.push_back(desc);
+                            }
+                        }
+                    }
+                    // Optional fields become `AbsentOr<T>`, which is
+                    // always `Default`. Arrays and maps are also defaultable
+                    // regardless of their contents.
+                    _ => {}
                 }
             }
         }
@@ -959,6 +967,15 @@ impl<'a> Iterator for SpecTypeVisitor<'a> {
             return Some((parent, top));
         }
         match top {
+            SpecType::Schema(SpecSchemaType::Composition(_, ty))
+            | SpecType::Inline(SpecInlineType::Composition(_, ty)) => {
+                self.stack.extend(
+                    ty.all_of
+                        .iter()
+                        .map(|ty| (Some((top, GraphEdge::Composes)), *ty))
+                        .rev(),
+                );
+            }
             SpecType::Schema(SpecSchemaType::Struct(_, ty))
             | SpecType::Inline(SpecInlineType::Struct(_, ty)) => {
                 self.stack.extend(

@@ -25,6 +25,20 @@ impl ToTokens for CodegenSchemaType<'_> {
     fn to_tokens(&self, tokens: &mut TokenStream) {
         let name = CodegenTypeName::Schema(self.ty);
         let ty = match self.ty {
+            SchemaTypeView::Composition(_, view) => {
+                let doc_attrs = view.description().map(doc_attrs);
+                let mut all_of = view.all_of();
+                let inner_ty = all_of.next().unwrap();
+                assert!(
+                    all_of.next().is_none(),
+                    "Rust codegen only supports single-parent schema compositions"
+                );
+                let inner_ref = CodegenRef::new(&inner_ty);
+                quote! {
+                    #doc_attrs
+                    pub type #name = #inner_ref;
+                }
+            }
             SchemaTypeView::Struct(_, view) => CodegenStruct::new(name, view).into_token_stream(),
             SchemaTypeView::Enum(_, view) => CodegenEnum::new(name, view).into_token_stream(),
             SchemaTypeView::Tagged(_, view) => CodegenTagged::new(name, view).into_token_stream(),
@@ -186,6 +200,77 @@ mod tests {
                     #[serde(default, skip_serializing_if = "::ploidy_util::absent::AbsentOr::is_absent")]
                     pub name: ::ploidy_util::absent::AbsentOr<::std::string::String>,
                 }
+            }
+        };
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn test_ref_sibling_to_tagged_union_uses_schema_ref() {
+        let doc = Document::from_yaml(indoc::indoc! {"
+            openapi: 3.1.0
+            info:
+              title: Test API
+              version: 1.0.0
+            paths: {}
+            components:
+              schemas:
+                Cat:
+                  type: object
+                  properties:
+                    kind:
+                      type: string
+                    meow:
+                      type: string
+                Dog:
+                  type: object
+                  properties:
+                    kind:
+                      type: string
+                    bark:
+                      type: string
+                Pet:
+                  oneOf:
+                    - $ref: '#/components/schemas/Cat'
+                    - $ref: '#/components/schemas/Dog'
+                  discriminator:
+                    propertyName: kind
+                    mapping:
+                      cat: '#/components/schemas/Cat'
+                      dog: '#/components/schemas/Dog'
+                  properties:
+                    kind:
+                      type: string
+                Owner:
+                  type: object
+                  properties:
+                    pet:
+                      $ref: '#/components/schemas/Pet'
+                      description: The pet.
+                  required:
+                    - pet
+        "})
+        .unwrap();
+
+        let arena = Arena::new();
+        let spec = Spec::from_doc(&arena, &doc).unwrap();
+        let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
+
+        let schema = graph.schema("Owner").unwrap();
+        let schema @ SchemaTypeView::Struct(_, _) = &schema else {
+            panic!("expected struct `Owner`; got `{schema:?}`");
+        };
+
+        let codegen = CodegenSchemaType::new(schema);
+
+        let actual: syn::File = parse_quote!(#codegen);
+        let expected: syn::File = parse_quote! {
+            #[derive(Debug, Clone, PartialEq, Eq, Hash, ::ploidy_util::serde::Serialize, ::ploidy_util::serde::Deserialize, ::ploidy_util::pointer::JsonPointee, ::ploidy_util::pointer::JsonPointerTarget)]
+            #[serde(crate = "::ploidy_util::serde")]
+            #[ploidy(pointer(crate = "::ploidy_util::pointer"))]
+            pub struct Owner {
+                #[doc = "The pet."]
+                pub pet: crate::types::Pet,
             }
         };
         assert_eq!(actual, expected);

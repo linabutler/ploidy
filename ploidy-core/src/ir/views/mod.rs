@@ -43,6 +43,7 @@ use super::{
 };
 
 pub mod any;
+pub mod composition;
 pub mod container;
 pub mod enum_;
 pub mod inline;
