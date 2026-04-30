@@ -54,7 +54,10 @@ use rustc_hash::FxHashSet;
 
 use crate::ir::{
     graph::{CookedGraph, GraphEdge},
-    types::{FieldMeta, GraphInlineType, GraphSchemaType, GraphStruct, GraphType, StructFieldName},
+    types::{
+        FieldMeta, GraphInlineType, GraphSchemaType, GraphStruct, GraphType, StructFieldName,
+        VariantMeta,
+    },
 };
 
 use super::{ViewNode, container::ContainerView, ir::TypeView};
@@ -172,6 +175,35 @@ impl<'graph, 'a> StructView<'graph, 'a> {
             .inherits(self.index)
             .map(|info| TypeView::new(self.cooked, info.target))
     }
+
+    /// Returns the fixed discriminator value for this struct, if it is a
+    /// tagged union variant.
+    #[inline]
+    pub fn fixed_tag(&self) -> Option<StructTag<'a>> {
+        self.cooked
+            .graph
+            .edges_directed(self.index, Direction::Incoming)
+            .find_map(|e| {
+                let GraphEdge::Variant(meta) = e.weight() else {
+                    return None;
+                };
+                let (GraphType::Schema(GraphSchemaType::Tagged(_, tagged))
+                | GraphType::Inline(GraphInlineType::Tagged(_, tagged))) =
+                    self.cooked.graph[e.source()]
+                else {
+                    return None;
+                };
+                let VariantMeta::Tagged(meta) = meta else {
+                    return None;
+                };
+                let value = meta.aliases.first().copied().unwrap_or(meta.name);
+                Some(StructTag {
+                    name: tagged.tag,
+                    value,
+                    aliases: meta.aliases,
+                })
+            })
+    }
 }
 
 impl<'graph, 'a> ViewNode<'graph, 'a> for StructView<'graph, 'a> {
@@ -188,6 +220,17 @@ impl<'graph, 'a> ViewNode<'graph, 'a> for StructView<'graph, 'a> {
 
 /// A graph-aware view of a struct field.
 pub type StructFieldView<'view, 'graph, 'a> = FieldView<'view, 'a, StructView<'graph, 'a>>;
+
+/// A discriminator value fixed by a tagged union variant.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct StructTag<'a> {
+    /// The discriminator field name.
+    pub name: &'a str,
+    /// The discriminator value emitted when serializing this struct.
+    pub value: &'a str,
+    /// The discriminator values accepted when deserializing this struct.
+    pub aliases: &'a [&'a str],
+}
 
 /// A graph-aware view of a struct or union field.
 #[derive(Debug)]
@@ -283,6 +326,9 @@ impl<'view, 'graph, 'a> FieldView<'view, 'a, StructView<'graph, 'a>> {
         let StructFieldName::Name(name) = self.meta.name else {
             return false;
         };
+        if self.parent.fixed_tag().is_some_and(|tag| tag.name == name) {
+            return true;
+        }
         let cooked = self.parent.cooked();
         cooked
             .graph

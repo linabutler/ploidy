@@ -1,7 +1,7 @@
 use itertools::Itertools;
 use ploidy_core::{
     codegen::UniqueNames,
-    ir::{Required, StructFieldName, StructFieldView, StructView, View},
+    ir::{Required, StructFieldName, StructFieldView, StructTag, StructView, View},
 };
 use proc_macro2::TokenStream;
 use quote::{ToTokens, TokenStreamExt, quote};
@@ -10,7 +10,9 @@ use super::{
     derives::ExtraDerive,
     doc_attrs,
     ext::FieldViewExt,
-    naming::{CodegenIdentRef, CodegenIdentScope, CodegenIdentUsage, CodegenTypeName},
+    naming::{
+        CodegenIdent, CodegenIdentRef, CodegenIdentScope, CodegenIdentUsage, CodegenTypeName,
+    },
     ref_::CodegenRef,
 };
 
@@ -30,12 +32,14 @@ impl ToTokens for CodegenStruct<'_> {
     fn to_tokens(&self, tokens: &mut TokenStream) {
         let unique = UniqueNames::new();
         let mut scope = CodegenIdentScope::new(&unique);
+        let fixed_tag = self.ty.fixed_tag();
+        let derive_serde = fixed_tag.is_none();
         let fields = self
             .ty
             .fields()
-            .filter(|field| !field.tag())
             .map(|field| {
                 let doc_attrs = field.description().map(doc_attrs);
+                let tag = field.tag();
 
                 let name = match field.name() {
                     StructFieldName::Name(n) => scope.uniquify(n),
@@ -44,13 +48,37 @@ impl ToTokens for CodegenStruct<'_> {
                     }
                 };
                 let field_name = CodegenIdentUsage::Field(&name);
-                let field_attrs = StructFieldAttrs::new(field_name, &field);
+                let field_attrs = StructFieldAttrs::new(field_name, &field, derive_serde);
                 let ty = CodegenField::new(&field);
 
-                quote! {
+                let public = quote! {
                     #doc_attrs
                     #field_attrs
                     pub #field_name: #ty,
+                };
+                let serialize_attrs =
+                    StructSerdeFieldAttrs::new(field_name, &field, SerdeFieldMode::Serialize);
+                let deserialize_attrs =
+                    StructSerdeFieldAttrs::new(field_name, &field, SerdeFieldMode::Deserialize);
+                let serialize_field = quote! {
+                    #serialize_attrs
+                    #field_name: #ty,
+                };
+                let deserialize_field = quote! {
+                    #deserialize_attrs
+                    #field_name: #ty,
+                };
+                let serialize_value = quote! { #field_name: self.#field_name.clone(), };
+                let deserialize_value = quote! { #field_name: value.#field_name, };
+
+                CodegenStructField {
+                    tag,
+                    field_name: name,
+                    public,
+                    serialize_field,
+                    deserialize_field,
+                    serialize_value,
+                    deserialize_value,
                 }
             })
             .collect_vec();
@@ -71,14 +99,177 @@ impl ToTokens for CodegenStruct<'_> {
 
         let type_name = &self.name;
         let doc_attrs = self.ty.description().map(doc_attrs);
+        let serde_derives = if fixed_tag.is_some() {
+            quote! {}
+        } else {
+            quote! {
+                ::ploidy_util::serde::Serialize,
+                ::ploidy_util::serde::Deserialize,
+            }
+        };
+        let serde_attr = if fixed_tag.is_some() {
+            quote! {}
+        } else {
+            quote! { #[serde(crate = "::ploidy_util::serde")] }
+        };
+        let public_fields = fields
+            .iter()
+            .filter(|field| !field.tag)
+            .map(|field| &field.public);
+        let fixed_tag_field_name = fields
+            .iter()
+            .find(|field| field.tag)
+            .map(|field| field.field_name.clone());
+        let fixed_tag_serde = fixed_tag
+            .zip(fixed_tag_field_name)
+            .map(|(tag, field_name)| FixedTagSerde::new(type_name, tag, field_name, &fields));
 
         tokens.append_all(quote! {
             #doc_attrs
-            #[derive(Debug, Clone, PartialEq, #(#extra_derives,)* ::ploidy_util::serde::Serialize, ::ploidy_util::serde::Deserialize, ::ploidy_util::pointer::JsonPointee, ::ploidy_util::pointer::JsonPointerTarget)]
-            #[serde(crate = "::ploidy_util::serde")]
+            #[derive(Debug, Clone, PartialEq, #(#extra_derives,)* #serde_derives ::ploidy_util::pointer::JsonPointee, ::ploidy_util::pointer::JsonPointerTarget)]
+            #serde_attr
             #[ploidy(pointer(crate = "::ploidy_util::pointer"))]
             pub struct #type_name {
-                #(#fields)*
+                #(#public_fields)*
+            }
+
+            #fixed_tag_serde
+        });
+    }
+}
+
+/// Generated fields for a struct and its serde helper types.
+#[derive(Debug)]
+struct CodegenStructField {
+    tag: bool,
+    field_name: CodegenIdent,
+    public: TokenStream,
+    serialize_field: TokenStream,
+    deserialize_field: TokenStream,
+    serialize_value: TokenStream,
+    deserialize_value: TokenStream,
+}
+
+/// Generates serde implementations for a struct with a fixed discriminator.
+#[derive(Debug)]
+struct FixedTagSerde<'a> {
+    type_name: &'a CodegenTypeName<'a>,
+    tag: StructTag<'a>,
+    tag_field_name: CodegenIdent,
+    fields: &'a [CodegenStructField],
+}
+
+impl<'a> FixedTagSerde<'a> {
+    fn new(
+        type_name: &'a CodegenTypeName<'a>,
+        tag: StructTag<'a>,
+        tag_field_name: CodegenIdent,
+        fields: &'a [CodegenStructField],
+    ) -> Self {
+        Self {
+            type_name,
+            tag,
+            tag_field_name,
+            fields,
+        }
+    }
+}
+
+impl ToTokens for FixedTagSerde<'_> {
+    fn to_tokens(&self, tokens: &mut TokenStream) {
+        let type_name = self.type_name;
+        let tag_name = self.tag.name;
+        let tag_field_name = CodegenIdentUsage::Field(self.tag_field_name.as_ref());
+        let tag_attr = if tag_field_name.display().to_string() == tag_name {
+            quote! {}
+        } else {
+            quote! { #[serde(rename = #tag_name)] }
+        };
+        let tag_value = self.tag.value;
+        let aliases = self
+            .tag
+            .aliases
+            .iter()
+            .copied()
+            .filter(|&alias| alias != tag_value);
+        let expected = format!("expected discriminator `{tag_name}` to be `{tag_value}`");
+        let serialize_fields = self
+            .fields
+            .iter()
+            .filter(|field| !field.tag)
+            .map(|field| &field.serialize_field);
+        let deserialize_fields = self
+            .fields
+            .iter()
+            .filter(|field| !field.tag)
+            .map(|field| &field.deserialize_field);
+        let serialize_values = self
+            .fields
+            .iter()
+            .filter(|field| !field.tag)
+            .map(|field| &field.serialize_value);
+        let deserialize_values = self
+            .fields
+            .iter()
+            .filter(|field| !field.tag)
+            .map(|field| &field.deserialize_value);
+
+        tokens.append_all(quote! {
+            impl ::ploidy_util::serde::Serialize for #type_name {
+                fn serialize<S>(&self, serializer: S) -> ::std::result::Result<S::Ok, S::Error>
+                where
+                    S: ::ploidy_util::serde::Serializer,
+                {
+                    #[derive(::ploidy_util::serde::Serialize)]
+                    #[serde(crate = "::ploidy_util::serde")]
+                    struct Wire {
+                        #tag_attr
+                        #tag_field_name: &'static str,
+                        #(#serialize_fields)*
+                    }
+
+                    let value = Wire {
+                        #tag_field_name: #tag_value,
+                        #(#serialize_values)*
+                    };
+                    ::ploidy_util::serde::Serialize::serialize(&value, serializer)
+                }
+            }
+
+            impl<'de> ::ploidy_util::serde::Deserialize<'de> for #type_name {
+                fn deserialize<D>(deserializer: D) -> ::std::result::Result<Self, D::Error>
+                where
+                    D: ::ploidy_util::serde::Deserializer<'de>,
+                {
+                    #[derive(::ploidy_util::serde::Deserialize)]
+                    #[serde(crate = "::ploidy_util::serde")]
+                    struct Wire {
+                        #tag_attr
+                        #tag_field_name: ::std::string::String,
+                        #(#deserialize_fields)*
+                    }
+
+                    let value = <Wire as ::ploidy_util::serde::Deserialize>::deserialize(
+                        deserializer,
+                    )?;
+                    match value.#tag_field_name.as_str() {
+                        #tag_value #( | #aliases )* => {}
+                        actual => {
+                            return ::std::result::Result::Err(
+                                <D::Error as ::ploidy_util::serde::de::Error>::custom(
+                                    ::std::format!(
+                                        "{}; got `{}`",
+                                        #expected,
+                                        actual,
+                                    ),
+                                ),
+                            );
+                        }
+                    }
+                    ::std::result::Result::Ok(Self {
+                        #(#deserialize_values)*
+                    })
+                }
             }
         });
     }
@@ -120,43 +311,34 @@ impl ToTokens for CodegenField<'_, '_> {
 struct StructFieldAttrs<'view, 'a> {
     field_name: CodegenIdentUsage<'a>,
     field: &'a StructFieldView<'view, 'a, 'a>,
+    include_serde: bool,
 }
 
 impl<'view, 'a> StructFieldAttrs<'view, 'a> {
-    fn new(field_name: CodegenIdentUsage<'a>, field: &'a StructFieldView<'view, 'a, 'a>) -> Self {
-        Self { field_name, field }
+    fn new(
+        field_name: CodegenIdentUsage<'a>,
+        field: &'a StructFieldView<'view, 'a, 'a>,
+        include_serde: bool,
+    ) -> Self {
+        Self {
+            field_name,
+            field,
+            include_serde,
+        }
     }
 }
 
 impl ToTokens for StructFieldAttrs<'_, '_> {
     fn to_tokens(&self, tokens: &mut TokenStream) {
-        let serde = {
-            let mut meta = vec![];
-
-            // Add `flatten` xor `rename` (specifying both on the same field
-            // isn't meaningful).
-            if self.field.flattened() {
-                meta.push(quote! { flatten });
-            } else if let &StructFieldName::Name(name) = &self.field.name() {
-                // `rename` if the OpenAPI field name doesn't match
-                // the Rust identifier.
-                if self.field_name.display().to_string() != name {
-                    meta.push(quote! { rename = #name });
-                }
-            }
-
-            if matches!(self.field.required(), Required::Optional) {
-                meta.push(quote! { default });
-                meta.push(
-                    quote! { skip_serializing_if = "::ploidy_util::absent::AbsentOr::is_absent" },
-                );
-            }
-
-            if meta.is_empty() {
-                quote! {}
-            } else {
-                quote! { #[serde(#(#meta),*)] }
-            }
+        let serde = if self.include_serde {
+            let attrs = StructSerdeFieldAttrs::new(
+                self.field_name,
+                self.field,
+                SerdeFieldMode::SerializeDeserialize,
+            );
+            quote! { #attrs }
+        } else {
+            quote! {}
         };
 
         let pointer = {
@@ -179,6 +361,73 @@ impl ToTokens for StructFieldAttrs<'_, '_> {
 
         tokens.append_all(serde);
         tokens.append_all(pointer);
+    }
+}
+
+/// Which serde helper derives a generated field attribute supports.
+#[derive(Clone, Copy, Debug)]
+enum SerdeFieldMode {
+    Serialize,
+    Deserialize,
+    SerializeDeserialize,
+}
+
+/// Generates `#[serde(...)]` for a struct field.
+#[derive(Debug)]
+struct StructSerdeFieldAttrs<'view, 'a> {
+    field_name: CodegenIdentUsage<'a>,
+    field: &'a StructFieldView<'view, 'a, 'a>,
+    mode: SerdeFieldMode,
+}
+
+impl<'view, 'a> StructSerdeFieldAttrs<'view, 'a> {
+    fn new(
+        field_name: CodegenIdentUsage<'a>,
+        field: &'a StructFieldView<'view, 'a, 'a>,
+        mode: SerdeFieldMode,
+    ) -> Self {
+        Self {
+            field_name,
+            field,
+            mode,
+        }
+    }
+}
+
+impl ToTokens for StructSerdeFieldAttrs<'_, '_> {
+    fn to_tokens(&self, tokens: &mut TokenStream) {
+        let mut meta = vec![];
+
+        // Add `flatten` xor `rename` (specifying both on the same field
+        // isn't meaningful).
+        if self.field.flattened() {
+            meta.push(quote! { flatten });
+        } else if let &StructFieldName::Name(name) = &self.field.name()
+            && self.field_name.display().to_string() != name
+        {
+            meta.push(quote! { rename = #name });
+        }
+
+        if matches!(self.field.required(), Required::Optional) {
+            if matches!(
+                self.mode,
+                SerdeFieldMode::Deserialize | SerdeFieldMode::SerializeDeserialize
+            ) {
+                meta.push(quote! { default });
+            }
+            if matches!(
+                self.mode,
+                SerdeFieldMode::Serialize | SerdeFieldMode::SerializeDeserialize
+            ) {
+                meta.push(
+                    quote! { skip_serializing_if = "::ploidy_util::absent::AbsentOr::is_absent" },
+                );
+            }
+        }
+
+        if !meta.is_empty() {
+            tokens.append_all(quote! { #[serde(#(#meta),*)] });
+        }
     }
 }
 
@@ -291,18 +540,94 @@ mod tests {
         let name = CodegenTypeName::Schema(schema);
         let codegen = CodegenStruct::new(name, struct_view);
 
-        let actual: syn::ItemStruct = parse_quote!(#codegen);
+        let actual_file: syn::File = parse_quote!(#codegen);
+        let syn::Item::Struct(actual) = &actual_file.items[0] else {
+            panic!(
+                "expected struct item; got `{}`",
+                actual_file.items[0].to_token_stream()
+            );
+        };
         // `name` is a required string field, which implements `Default`,
         // so the struct can derive `Default`. The tag field is excluded.
         let expected: syn::ItemStruct = parse_quote! {
-            #[derive(Debug, Clone, PartialEq, Eq, Hash, Default, ::ploidy_util::serde::Serialize, ::ploidy_util::serde::Deserialize, ::ploidy_util::pointer::JsonPointee, ::ploidy_util::pointer::JsonPointerTarget)]
-            #[serde(crate = "::ploidy_util::serde")]
+            #[derive(Debug, Clone, PartialEq, Eq, Hash, Default, ::ploidy_util::pointer::JsonPointee, ::ploidy_util::pointer::JsonPointerTarget)]
             #[ploidy(pointer(crate = "::ploidy_util::pointer"))]
             pub struct Animal {
                 pub name: ::std::string::String,
             }
         };
-        assert_eq!(actual, expected);
+        assert_eq!(actual, &expected);
+
+        assert_eq!(actual_file.items.len(), 3);
+        let syn::Item::Impl(actual) = &actual_file.items[1] else {
+            panic!(
+                "expected impl item; got `{}`",
+                actual_file.items[1].to_token_stream()
+            );
+        };
+        let expected: syn::ItemImpl = parse_quote! {
+            impl ::ploidy_util::serde::Serialize for Animal {
+                fn serialize<S>(&self, serializer: S) -> ::std::result::Result<S::Ok, S::Error>
+                where
+                    S: ::ploidy_util::serde::Serializer,
+                {
+                    #[derive(::ploidy_util::serde::Serialize)]
+                    #[serde(crate = "::ploidy_util::serde")]
+                    struct Wire {
+                        r#type: &'static str,
+                        name: ::std::string::String,
+                    }
+
+                    let value = Wire {
+                        r#type: "animal",
+                        name: self.name.clone(),
+                    };
+                    ::ploidy_util::serde::Serialize::serialize(&value, serializer)
+                }
+            }
+        };
+        assert_eq!(actual, &expected);
+
+        let syn::Item::Impl(actual) = &actual_file.items[2] else {
+            panic!(
+                "expected impl item; got `{}`",
+                actual_file.items[2].to_token_stream()
+            );
+        };
+        let expected: syn::ItemImpl = parse_quote! {
+            impl<'de> ::ploidy_util::serde::Deserialize<'de> for Animal {
+                fn deserialize<D>(deserializer: D) -> ::std::result::Result<Self, D::Error>
+                where
+                    D: ::ploidy_util::serde::Deserializer<'de>,
+                {
+                    #[derive(::ploidy_util::serde::Deserialize)]
+                    #[serde(crate = "::ploidy_util::serde")]
+                    struct Wire {
+                        r#type: ::std::string::String,
+                        name: ::std::string::String,
+                    }
+
+                    let value =
+                        <Wire as ::ploidy_util::serde::Deserialize>::deserialize(deserializer,)?;
+                    match value.r#type.as_str() {
+                        "animal" => {}
+                        actual => {
+                            return ::std::result::Result::Err(
+                                <D::Error as ::ploidy_util::serde::de::Error>::custom(
+                                    ::std::format!(
+                                        "{}; got `{}`",
+                                        "expected discriminator `type` to be `animal`",
+                                        actual,
+                                    ),
+                                ),
+                            );
+                        }
+                    }
+                    ::std::result::Result::Ok(Self { name: value.name, })
+                }
+            }
+        };
+        assert_eq!(actual, &expected);
     }
 
     #[test]
@@ -673,16 +998,21 @@ mod tests {
         let name = CodegenTypeName::Schema(schema);
         let codegen = CodegenStruct::new(name, struct_view);
 
-        let actual: syn::ItemStruct = parse_quote!(#codegen);
+        let actual_file: syn::File = parse_quote!(#codegen);
+        let syn::Item::Struct(actual) = &actual_file.items[0] else {
+            panic!(
+                "expected struct item; got `{}`",
+                actual_file.items[0].to_token_stream()
+            );
+        };
         let expected: syn::ItemStruct = parse_quote! {
-            #[derive(Debug, Clone, PartialEq, Eq, Hash, Default, ::ploidy_util::serde::Serialize, ::ploidy_util::serde::Deserialize, ::ploidy_util::pointer::JsonPointee, ::ploidy_util::pointer::JsonPointerTarget)]
-            #[serde(crate = "::ploidy_util::serde")]
+            #[derive(Debug, Clone, PartialEq, Eq, Hash, Default, ::ploidy_util::pointer::JsonPointee, ::ploidy_util::pointer::JsonPointerTarget)]
             #[ploidy(pointer(crate = "::ploidy_util::pointer"))]
             pub struct TextAction {
                 pub label: ::std::string::String,
             }
         };
-        assert_eq!(actual, expected);
+        assert_eq!(actual, &expected);
     }
 
     #[test]
@@ -808,17 +1138,22 @@ mod tests {
         let name = CodegenTypeName::Schema(schema);
         let codegen = CodegenStruct::new(name, struct_view);
 
-        let actual: syn::ItemStruct = parse_quote!(#codegen);
+        let actual_file: syn::File = parse_quote!(#codegen);
+        let syn::Item::Struct(actual) = &actual_file.items[0] else {
+            panic!(
+                "expected struct item; got `{}`",
+                actual_file.items[0].to_token_stream()
+            );
+        };
         let expected: syn::ItemStruct = parse_quote! {
-            #[derive(Debug, Clone, PartialEq, Default, ::ploidy_util::serde::Serialize, ::ploidy_util::serde::Deserialize, ::ploidy_util::pointer::JsonPointee, ::ploidy_util::pointer::JsonPointerTarget)]
-            #[serde(crate = "::ploidy_util::serde")]
+            #[derive(Debug, Clone, PartialEq, Default, ::ploidy_util::pointer::JsonPointee, ::ploidy_util::pointer::JsonPointerTarget)]
             #[ploidy(pointer(crate = "::ploidy_util::pointer"))]
             pub struct TextAction {
                 pub score: f64,
                 pub label: ::std::string::String,
             }
         };
-        assert_eq!(actual, expected);
+        assert_eq!(actual, &expected);
     }
 
     #[test]
@@ -978,17 +1313,22 @@ mod tests {
         let name = CodegenTypeName::Schema(schema);
         let codegen = CodegenStruct::new(name, struct_view);
 
-        let actual: syn::ItemStruct = parse_quote!(#codegen);
+        let actual_file: syn::File = parse_quote!(#codegen);
+        let syn::Item::Struct(actual) = &actual_file.items[0] else {
+            panic!(
+                "expected struct item; got `{}`",
+                actual_file.items[0].to_token_stream()
+            );
+        };
         let expected: syn::ItemStruct = parse_quote! {
-            #[derive(Debug, Clone, PartialEq, Eq, Hash, Default, ::ploidy_util::serde::Serialize, ::ploidy_util::serde::Deserialize, ::ploidy_util::pointer::JsonPointee, ::ploidy_util::pointer::JsonPointerTarget)]
-            #[serde(crate = "::ploidy_util::serde")]
+            #[derive(Debug, Clone, PartialEq, Eq, Hash, Default, ::ploidy_util::pointer::JsonPointee, ::ploidy_util::pointer::JsonPointerTarget)]
             #[ploidy(pointer(crate = "::ploidy_util::pointer"))]
             pub struct TextAction {
                 pub metadata: crate::types::ActionMetadata,
                 pub label: ::std::string::String,
             }
         };
-        assert_eq!(actual, expected);
+        assert_eq!(actual, &expected);
     }
 
     #[test]
@@ -2131,17 +2471,21 @@ mod tests {
         let name = CodegenTypeName::Schema(schema);
         let codegen = CodegenStruct::new(name, struct_view);
 
-        let actual: syn::ItemStruct = parse_quote!(#codegen);
+        let actual_file: syn::File = parse_quote!(#codegen);
+        let syn::Item::Struct(actual) = &actual_file.items[0] else {
+            panic!(
+                "expected struct item; got `{}`",
+                actual_file.items[0].to_token_stream()
+            );
+        };
         let expected: syn::ItemStruct = parse_quote! {
-            #[derive(Debug, Clone, PartialEq, Eq, Hash, Default, ::ploidy_util::serde::Serialize, ::ploidy_util::serde::Deserialize, ::ploidy_util::pointer::JsonPointee, ::ploidy_util::pointer::JsonPointerTarget)]
-            #[serde(crate = "::ploidy_util::serde")]
+            #[derive(Debug, Clone, PartialEq, Eq, Hash, Default, ::ploidy_util::pointer::JsonPointee, ::ploidy_util::pointer::JsonPointerTarget)]
             #[ploidy(pointer(crate = "::ploidy_util::pointer"))]
             pub struct TextAction {
-                #[serde(default, skip_serializing_if = "::ploidy_util::absent::AbsentOr::is_absent")]
                 pub label: ::ploidy_util::absent::AbsentOr<::std::string::String>,
             }
         };
-        assert_eq!(actual, expected);
+        assert_eq!(actual, &expected);
     }
 
     #[test]
