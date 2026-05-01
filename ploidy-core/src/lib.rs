@@ -22,6 +22,7 @@
 //! let arena = Arena::new();
 //! let spec = Spec::from_doc(&arena, &doc)?;
 //! let mut raw = RawGraph::new(&arena, &spec);
+//! raw.simplify();
 //! raw.inline_tagged_variants();
 //! let graph = raw.cook();
 //!

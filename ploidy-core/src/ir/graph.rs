@@ -15,8 +15,9 @@ use petgraph::{
     graph::{DiGraph, EdgeReference, NodeIndex},
     stable_graph::StableDiGraph,
     visit::{
-        DfsPostOrder, EdgeFiltered, EdgeRef, GraphRef, IntoEdges, IntoNeighbors,
-        IntoNeighborsDirected, IntoNodeIdentifiers, NodeCount, NodeIndexable, VisitMap, Visitable,
+        DfsPostOrder, EdgeFiltered, EdgeRef, GraphRef, IntoEdgeReferences, IntoEdges,
+        IntoNeighbors, IntoNeighborsDirected, IntoNodeIdentifiers, NodeCount, NodeIndexable,
+        VisitMap, Visitable,
     },
 };
 use rustc_hash::{FxBuildHasher, FxHashMap};
@@ -283,6 +284,102 @@ impl<'a> RawGraph<'a> {
             }
         }
 
+        self
+    }
+
+    /// Simplifies trivial `allOf` compositions in place.
+    ///
+    /// Applies two rules to a fixpoint. First, drops inheritance edges whose
+    /// target is an `Any` node, since `Any` contributes no structural
+    /// constraint. Second, collapses each inline composite (struct, tagged
+    /// union, or untagged union) that has no own fields or variants and a
+    /// single inheritance parent: incoming edges are retargeted to the parent,
+    /// and the inline node is removed.
+    ///
+    /// This is how `$ref` with metadata-only siblings (the OpenAPI 3.1 form
+    /// `{ "$ref": "...", "description": "..." }`) collapses to a plain
+    /// reference: the parser desugars it into an `allOf` whose sibling lowers
+    /// to `Any`, and this pass removes both the `Any` parent and the
+    /// now-trivial wrapper. Named schemas are preserved even when they become
+    /// trivial, because user code refers to them by name.
+    pub fn simplify(&mut self) -> &mut Self {
+        loop {
+            let mut changed = false;
+
+            // Rule 1: drop `Inherits` edges to `Any` nodes.
+            let inherits_to_any = self
+                .graph
+                .edge_references()
+                .filter(|e| {
+                    matches!(e.weight(), GraphEdge::Inherits { shadow: false })
+                        && matches!(
+                            self.graph[e.target()],
+                            GraphType::Schema(GraphSchemaType::Any(_))
+                                | GraphType::Inline(GraphInlineType::Any(_))
+                        )
+                })
+                .map(|e| e.id())
+                .collect_vec();
+            for id in inherits_to_any {
+                self.graph.remove_edge(id);
+                changed = true;
+            }
+
+            // Rule 2: collapse inline composites with no own content and
+            // a single `Inherits` parent.
+            let collapsible = self
+                .graph
+                .node_indices()
+                .filter_map(|node| {
+                    if !matches!(
+                        self.graph[node],
+                        GraphType::Inline(
+                            GraphInlineType::Struct(..)
+                                | GraphInlineType::Tagged(..)
+                                | GraphInlineType::Untagged(..)
+                        )
+                    ) {
+                        return None;
+                    }
+                    let mut parent = None;
+                    for edge in self.graph.edges_directed(node, Direction::Outgoing) {
+                        match edge.weight() {
+                            GraphEdge::Field { shadow: false, .. } | GraphEdge::Variant(_) => {
+                                return None;
+                            }
+                            GraphEdge::Inherits { shadow: false } if edge.target() != node => {
+                                if parent.replace(edge.target()).is_some() {
+                                    return None;
+                                }
+                            }
+                            _ => {}
+                        }
+                    }
+                    parent.map(|target| (node, target))
+                })
+                .collect_vec();
+            for (node, target) in collapsible {
+                let incoming = self
+                    .graph
+                    .edges_directed(node, Direction::Incoming)
+                    .map(|e| (e.id(), *e.weight(), e.source()))
+                    .collect_vec();
+                for &(id, ..) in &incoming {
+                    self.graph.remove_edge(id);
+                }
+                // Re-add edges in their original order. `edges_directed` yields
+                // edges in reverse order of addition.
+                for (_, weight, source) in incoming.into_iter().rev() {
+                    self.graph.add_edge(source, target, weight);
+                }
+                self.graph.remove_node(node);
+                changed = true;
+            }
+
+            if !changed {
+                break;
+            }
+        }
         self
     }
 
@@ -1191,6 +1288,9 @@ impl<'a> Iterator for SpecTypeVisitor<'a> {
                                 (GraphEdge::Variant(UntaggedVariantMeta::Null.into()), top)
                             }
                         }),
+                        ty.parents
+                            .iter()
+                            .map(|parent| (GraphEdge::Inherits { shadow: false }, *parent)),
                     )
                     .map(|(edge, ty)| (Some((top, edge)), ty))
                     .rev(),
@@ -1222,6 +1322,9 @@ impl<'a> Iterator for SpecTypeVisitor<'a> {
                             ),
                             variant.ty
                         )),
+                        ty.parents
+                            .iter()
+                            .map(|parent| (GraphEdge::Inherits { shadow: false }, *parent)),
                     )
                     .map(|(edge, ty)| (Some((top, edge)), ty))
                     .rev(),

@@ -43,6 +43,7 @@ fn main() -> Result<()> {
             let arena = Arena::new();
             let spec = Spec::from_doc(&arena, &doc).into_diagnostic()?;
             let mut raw = RawGraph::new(&arena, &spec);
+            raw.simplify();
             raw.inline_tagged_variants();
 
             let config = language

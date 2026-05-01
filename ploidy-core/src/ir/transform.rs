@@ -141,6 +141,7 @@ impl<'context, 'a> IrTransformer<'context, 'a> {
             tag: discriminator.property_name.as_str(),
             variants: self.arena().alloc_slice_copy(&variants),
             fields: self.arena().alloc_slice(self.properties()),
+            parents: self.arena().alloc_slice(self.parents()),
         };
 
         Ok(match self.name {
@@ -238,6 +239,7 @@ impl<'context, 'a> IrTransformer<'context, 'a> {
                     description: self.schema.description.as_deref(),
                     variants: self.arena().alloc_slice_copy(variants),
                     fields: self.arena().alloc_slice(self.properties()),
+                    parents: self.arena().alloc_slice(self.parents()),
                 };
                 match self.name {
                     TypeInfo::Schema(info) => SpecSchemaType::Untagged(info, untagged).into(),
@@ -570,6 +572,7 @@ impl<'context, 'a> IrTransformer<'context, 'a> {
                     description: self.schema.description.as_deref(),
                     variants: self.arena().alloc_slice_copy(&variants),
                     fields: &[],
+                    parents: self.arena().alloc_slice(self.parents()),
                 };
                 match self.name {
                     TypeInfo::Schema(info) => SpecSchemaType::Untagged(info, untagged).into(),

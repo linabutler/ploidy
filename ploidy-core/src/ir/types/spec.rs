@@ -131,6 +131,8 @@ pub struct SpecTagged<'a> {
     pub variants: &'a [SpecTaggedVariant<'a>],
     /// Own fields that the union declares as `properties`.
     pub fields: &'a [SpecStructField<'a>],
+    /// Immediate parent types from `allOf`, in declaration order.
+    pub parents: &'a [&'a SpecType<'a>],
 }
 
 /// A variant of a tagged union.
@@ -150,6 +152,8 @@ pub struct SpecUntagged<'a> {
     pub variants: &'a [SpecUntaggedVariant<'a>],
     /// Own fields that the union declares as `properties`.
     pub fields: &'a [SpecStructField<'a>],
+    /// Immediate parent types from `allOf`, in declaration order.
+    pub parents: &'a [&'a SpecType<'a>],
 }
 
 /// A variant of an untagged union.

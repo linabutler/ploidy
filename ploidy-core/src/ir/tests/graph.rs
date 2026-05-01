@@ -2248,3 +2248,243 @@ fn test_needs_box_through_inlined_tagged_variant() {
         .unwrap();
     assert!(parent_field.needs_box());
 }
+
+// MARK: Simplification
+
+#[test]
+fn test_simplify_inline_ref_with_description_collapses_to_ref() {
+    // OpenAPI 3.1 allows `$ref` siblings; the parser desugars
+    // `{ "$ref": "...", "description": "..." }` into
+    // `{ "allOf": [{ "$ref": "..." }], "description": "..." }`.
+    // For a metadata-only sibling, the inline wrapper carries no
+    // structural information and should collapse to a plain reference.
+    let doc = Document::from_yaml(indoc::indoc! {"
+        openapi: 3.1.0
+        info:
+          title: Test
+          version: 1.0.0
+        components:
+          schemas:
+            Pet:
+              type: object
+              properties:
+                name:
+                  type: string
+            Owner:
+              type: object
+              properties:
+                pet:
+                  $ref: '#/components/schemas/Pet'
+                  description: The owner's pet.
+              required:
+                - pet
+    "})
+    .unwrap();
+
+    let arena = Arena::new();
+    let spec = Spec::from_doc(&arena, &doc).unwrap();
+    let mut raw = RawGraph::new(&arena, &spec);
+    raw.simplify();
+    let graph = raw.cook();
+
+    let owner = graph.schema("Owner").unwrap();
+    let owner_struct = match owner {
+        SchemaTypeView::Struct(_, view) => view,
+        other => panic!("expected struct `Owner`; got `{other:?}`"),
+    };
+    let pet_field = owner_struct
+        .fields()
+        .find(|f| matches!(f.name(), StructFieldName::Name("pet")))
+        .unwrap();
+
+    // The field should resolve directly to the `Pet` schema, not
+    // an inline struct that inherits from it.
+    let target = match pet_field.ty() {
+        TypeView::Schema(SchemaTypeView::Struct(info, _)) => info.name,
+        other => panic!("expected struct view of `Pet`; got `{other:?}`"),
+    };
+    assert_eq!(target, "Pet");
+}
+
+#[test]
+fn test_simplify_inherits_from_any_drops_edge() {
+    // A schema that inherits from another that's effectively `Any`
+    // (e.g. an empty schema) shouldn't carry the trivial parent
+    // through to the cooked graph.
+    let doc = Document::from_yaml(indoc::indoc! {"
+        openapi: 3.0.0
+        info:
+          title: Test
+          version: 1.0.0
+        components:
+          schemas:
+            Anything: {}
+            Thing:
+              allOf:
+                - $ref: '#/components/schemas/Anything'
+              properties:
+                name:
+                  type: string
+    "})
+    .unwrap();
+
+    let arena = Arena::new();
+    let spec = Spec::from_doc(&arena, &doc).unwrap();
+    let mut raw = RawGraph::new(&arena, &spec);
+    raw.simplify();
+    let graph = raw.cook();
+
+    let thing = graph.schema("Thing").unwrap();
+    let thing_struct = match thing {
+        SchemaTypeView::Struct(_, view) => view,
+        other => panic!("expected struct `Thing`; got `{other:?}`"),
+    };
+
+    // After simplification, `Thing` has no parents.
+    let parents = thing_struct.parents().collect_vec();
+    assert!(parents.is_empty(), "expected no parents; got `{parents:?}`");
+}
+
+#[test]
+fn test_simplify_named_schema_with_ref_sibling_preserves_name() {
+    // A named schema whose entire body is `$ref + description` becomes
+    // a single-parent struct with no own fields. The inline-collapse rule
+    // must not remove the named node, since user code refers to it by name.
+    let doc = Document::from_yaml(indoc::indoc! {"
+        openapi: 3.1.0
+        info:
+          title: Test
+          version: 1.0.0
+        components:
+          schemas:
+            Pet:
+              type: object
+              properties:
+                name:
+                  type: string
+            Owner:
+              $ref: '#/components/schemas/Pet'
+              description: A pet's owner.
+    "})
+    .unwrap();
+
+    let arena = Arena::new();
+    let spec = Spec::from_doc(&arena, &doc).unwrap();
+    let mut raw = RawGraph::new(&arena, &spec);
+    raw.simplify();
+    let graph = raw.cook();
+
+    let mut schema_names = graph.schemas().map(|s| s.name()).collect_vec();
+    schema_names.sort();
+    assert_matches!(&*schema_names, ["Owner", "Pet"]);
+}
+
+#[test]
+fn test_simplify_preserves_ref_with_one_of_sibling() {
+    // A `$ref` with a structural sibling like `oneOf` carries real
+    // information; simplification mustn't collapse it.
+    let doc = Document::from_yaml(indoc::indoc! {"
+        openapi: 3.1.0
+        info:
+          title: Test
+          version: 1.0.0
+        components:
+          schemas:
+            Cat:
+              type: object
+              properties:
+                meow:
+                  type: string
+            Dog:
+              type: object
+              properties:
+                bark:
+                  type: string
+            Pet:
+              type: object
+              properties:
+                name:
+                  type: string
+            Owner:
+              type: object
+              properties:
+                pet:
+                  $ref: '#/components/schemas/Pet'
+                  oneOf:
+                    - $ref: '#/components/schemas/Cat'
+                    - $ref: '#/components/schemas/Dog'
+              required:
+                - pet
+    "})
+    .unwrap();
+
+    let arena = Arena::new();
+    let spec = Spec::from_doc(&arena, &doc).unwrap();
+    let mut raw = RawGraph::new(&arena, &spec);
+    raw.simplify();
+    let graph = raw.cook();
+
+    let owner = graph.schema("Owner").unwrap();
+    let owner_struct = match owner {
+        SchemaTypeView::Struct(_, view) => view,
+        other => panic!("expected struct `Owner`; got `{other:?}`"),
+    };
+    let pet_field = owner_struct
+        .fields()
+        .find(|f| matches!(f.name(), StructFieldName::Name("pet")))
+        .unwrap();
+
+    // The field should resolve to an inline untagged union, not
+    // collapse to the `Pet` ref. Simplification mustn't fire because
+    // the inline node carries structural variants.
+    assert_matches!(
+        pet_field.ty(),
+        TypeView::Inline(InlineTypeView::Untagged(..))
+    );
+}
+
+#[test]
+fn test_simplify_is_idempotent() {
+    // Running simplify twice should not change the graph.
+    let doc = Document::from_yaml(indoc::indoc! {"
+        openapi: 3.1.0
+        info:
+          title: Test
+          version: 1.0.0
+        components:
+          schemas:
+            Pet:
+              type: object
+              properties:
+                name:
+                  type: string
+            Owner:
+              type: object
+              properties:
+                pet:
+                  $ref: '#/components/schemas/Pet'
+                  description: The pet.
+              required:
+                - pet
+    "})
+    .unwrap();
+
+    let arena = Arena::new();
+    let spec = Spec::from_doc(&arena, &doc).unwrap();
+
+    let cooked_once = {
+        let mut raw = RawGraph::new(&arena, &spec);
+        raw.simplify();
+        raw.cook()
+    };
+    let cooked_twice = {
+        let mut raw = RawGraph::new(&arena, &spec);
+        raw.simplify();
+        raw.simplify();
+        raw.cook()
+    };
+
+    let names_once = cooked_once.schemas().map(|s| s.name()).collect_vec();
+    let names_twice = cooked_twice.schemas().map(|s| s.name()).collect_vec();
+    assert_eq!(names_once, names_twice);
+}
