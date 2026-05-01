@@ -324,41 +324,40 @@ impl<'a> RawGraph<'a> {
         }
 
         // Phase 2: identify each inline composite that has no own content
-        // and exactly one non-shadow `Inherits` parent. The map is keyed
-        // by the collapsible node and stores its direct parent.
-        let mut direct_parent: FxHashMap<NodeIndex<usize>, NodeIndex<usize>> = FxHashMap::default();
-        for node in self.graph.node_indices() {
-            if !matches!(
-                self.graph[node],
-                GraphType::Inline(
-                    GraphInlineType::Struct(..)
-                        | GraphInlineType::Tagged(..)
-                        | GraphInlineType::Untagged(..)
-                )
-            ) {
-                continue;
-            }
-            let mut parent = None;
-            let mut disqualified = false;
-            for edge in self.graph.edges_directed(node, Direction::Outgoing) {
-                match edge.weight() {
-                    GraphEdge::Field { shadow: false, .. } | GraphEdge::Variant(_) => {
-                        disqualified = true;
-                        break;
-                    }
-                    GraphEdge::Inherits { shadow: false } if edge.target() != node => {
-                        if parent.replace(edge.target()).is_some() {
-                            disqualified = true;
-                            break;
-                        }
-                    }
-                    _ => {}
+        // and exactly one non-shadow `Inherits` parent.
+        let collapsibles: FixedBitSet = self
+            .graph
+            .node_indices()
+            .filter(|&node| {
+                if !matches!(
+                    self.graph[node],
+                    GraphType::Inline(
+                        GraphInlineType::Struct(..)
+                            | GraphInlineType::Tagged(..)
+                            | GraphInlineType::Untagged(..)
+                    )
+                ) {
+                    return false;
                 }
-            }
-            if !disqualified && let Some(target) = parent {
-                direct_parent.insert(node, target);
-            }
-        }
+                let mut inherits = 0;
+                for edge in self.graph.edges_directed(node, Direction::Outgoing) {
+                    match edge.weight() {
+                        GraphEdge::Field { shadow: false, .. } | GraphEdge::Variant(_) => {
+                            return false;
+                        }
+                        GraphEdge::Inherits { shadow: false } if edge.target() != node => {
+                            inherits += 1;
+                            if inherits > 1 {
+                                return false;
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+                inherits == 1
+            })
+            .map(|node| node.index())
+            .collect();
 
         // Phase 3: compute the transitive closure over the `Inherits`
         // subgraph rooted at collapsibles, then look up each collapsible's
@@ -368,15 +367,16 @@ impl<'a> RawGraph<'a> {
         // entirely within the collapsible set (no target).
         let collapsible_chain = EdgeFiltered::from_fn(&self.graph, |e| {
             matches!(e.weight(), GraphEdge::Inherits { shadow: false })
-                && direct_parent.contains_key(&e.source())
+                && collapsibles.contains(e.source().index())
         });
         let closure = Closure::new(&collapsible_chain);
-        let ultimate: FxHashMap<NodeIndex<usize>, Option<NodeIndex<usize>>> = direct_parent
-            .keys()
-            .map(|&node| {
+        let ultimate: FxHashMap<NodeIndex<usize>, Option<NodeIndex<usize>>> = collapsibles
+            .ones()
+            .map(NodeIndex::new)
+            .map(|node| {
                 let target = closure
                     .dependencies_of(node)
-                    .find(|n| !direct_parent.contains_key(n));
+                    .find(|n| !collapsibles.contains(n.index()));
                 (node, target)
             })
             .collect();
