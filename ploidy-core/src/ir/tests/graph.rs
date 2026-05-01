@@ -2488,3 +2488,55 @@ fn test_simplify_is_idempotent() {
     let names_twice = cooked_twice.schemas().map(|s| s.name()).collect_vec();
     assert_eq!(names_once, names_twice);
 }
+
+#[test]
+fn test_simplify_collapses_inline_chain() {
+    // Nested `allOf` produces a chain of trivial inline wrappers, each
+    // inheriting from the next. The whole chain must collapse in a single
+    // pass to the named target at the end.
+    let doc = Document::from_yaml(indoc::indoc! {"
+        openapi: 3.0.0
+        info:
+          title: Test
+          version: 1.0.0
+        components:
+          schemas:
+            Pet:
+              type: object
+              properties:
+                name:
+                  type: string
+            Owner:
+              type: object
+              properties:
+                pet:
+                  allOf:
+                    - allOf:
+                        - $ref: '#/components/schemas/Pet'
+              required:
+                - pet
+    "})
+    .unwrap();
+
+    let arena = Arena::new();
+    let spec = Spec::from_doc(&arena, &doc).unwrap();
+    let mut raw = RawGraph::new(&arena, &spec);
+    raw.simplify();
+    let graph = raw.cook();
+
+    let owner = graph.schema("Owner").unwrap();
+    let owner_struct = match owner {
+        SchemaTypeView::Struct(_, view) => view,
+        other => panic!("expected struct `Owner`; got `{other:?}`"),
+    };
+    let pet_field = owner_struct
+        .fields()
+        .find(|f| matches!(f.name(), StructFieldName::Name("pet")))
+        .unwrap();
+
+    let target = match pet_field.ty() {
+        TypeView::Schema(SchemaTypeView::Struct(info, _)) => info.name,
+        other => panic!("expected struct view of `Pet`; got `{other:?}`"),
+    };
+    assert_eq!(target, "Pet");
+}

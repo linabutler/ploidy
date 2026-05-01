@@ -15,7 +15,7 @@ use petgraph::{
     graph::{DiGraph, EdgeReference, NodeIndex},
     stable_graph::StableDiGraph,
     visit::{
-        DfsPostOrder, EdgeFiltered, EdgeRef, GraphRef, IntoEdgeReferences, IntoEdges,
+        Dfs, DfsPostOrder, EdgeFiltered, EdgeRef, GraphRef, IntoEdgeReferences, IntoEdges,
         IntoNeighbors, IntoNeighborsDirected, IntoNodeIdentifiers, NodeCount, NodeIndexable,
         VisitMap, Visitable,
     },
@@ -289,12 +289,14 @@ impl<'a> RawGraph<'a> {
 
     /// Simplifies trivial `allOf` compositions in place.
     ///
-    /// Applies two rules to a fixpoint. First, drops inheritance edges whose
-    /// target is an `Any` node, since `Any` contributes no structural
-    /// constraint. Second, collapses each inline composite (struct, tagged
-    /// union, or untagged union) that has no own fields or variants and a
-    /// single inheritance parent: incoming edges are retargeted to the parent,
-    /// and the inline node is removed.
+    /// Drops inheritance edges whose target is an `Any` node, since `Any`
+    /// contributes no structural constraint. Then collapses each inline
+    /// composite (struct, tagged union, or untagged union) that has no own
+    /// fields or variants and a single inheritance parent: incoming edges
+    /// are retargeted to the parent, and the inline node is removed.
+    /// Chains of collapsible nodes are followed to the first non-collapsible
+    /// target in a single pass; cycles entirely within the collapsible set
+    /// are left untouched.
     ///
     /// This is how `$ref` with metadata-only siblings (the OpenAPI 3.1 form
     /// `{ "$ref": "...", "description": "..." }`) collapses to a plain
@@ -303,83 +305,127 @@ impl<'a> RawGraph<'a> {
     /// now-trivial wrapper. Named schemas are preserved even when they become
     /// trivial, because user code refers to them by name.
     pub fn simplify(&mut self) -> &mut Self {
-        loop {
-            let mut changed = false;
+        // Phase 1: drop `Inherits` edges to `Any` nodes.
+        let inherits_to_any = self
+            .graph
+            .edge_references()
+            .filter(|e| {
+                matches!(e.weight(), GraphEdge::Inherits { shadow: false })
+                    && matches!(
+                        self.graph[e.target()],
+                        GraphType::Schema(GraphSchemaType::Any(_))
+                            | GraphType::Inline(GraphInlineType::Any(_))
+                    )
+            })
+            .map(|e| e.id())
+            .collect_vec();
+        for id in inherits_to_any {
+            self.graph.remove_edge(id);
+        }
 
-            // Rule 1: drop `Inherits` edges to `Any` nodes.
-            let inherits_to_any = self
-                .graph
-                .edge_references()
-                .filter(|e| {
-                    matches!(e.weight(), GraphEdge::Inherits { shadow: false })
-                        && matches!(
-                            self.graph[e.target()],
-                            GraphType::Schema(GraphSchemaType::Any(_))
-                                | GraphType::Inline(GraphInlineType::Any(_))
-                        )
-                })
-                .map(|e| e.id())
-                .collect_vec();
-            for id in inherits_to_any {
-                self.graph.remove_edge(id);
-                changed = true;
+        // Phase 2: identify each inline composite that has no own content
+        // and exactly one non-shadow `Inherits` parent. The map is keyed
+        // by the collapsible node and stores its direct parent.
+        let mut direct_parent: FxHashMap<NodeIndex<usize>, NodeIndex<usize>> = FxHashMap::default();
+        for node in self.graph.node_indices() {
+            if !matches!(
+                self.graph[node],
+                GraphType::Inline(
+                    GraphInlineType::Struct(..)
+                        | GraphInlineType::Tagged(..)
+                        | GraphInlineType::Untagged(..)
+                )
+            ) {
+                continue;
             }
-
-            // Rule 2: collapse inline composites with no own content and
-            // a single `Inherits` parent.
-            let collapsible = self
-                .graph
-                .node_indices()
-                .filter_map(|node| {
-                    if !matches!(
-                        self.graph[node],
-                        GraphType::Inline(
-                            GraphInlineType::Struct(..)
-                                | GraphInlineType::Tagged(..)
-                                | GraphInlineType::Untagged(..)
-                        )
-                    ) {
-                        return None;
+            let mut parent = None;
+            let mut disqualified = false;
+            for edge in self.graph.edges_directed(node, Direction::Outgoing) {
+                match edge.weight() {
+                    GraphEdge::Field { shadow: false, .. } | GraphEdge::Variant(_) => {
+                        disqualified = true;
+                        break;
                     }
-                    let mut parent = None;
-                    for edge in self.graph.edges_directed(node, Direction::Outgoing) {
-                        match edge.weight() {
-                            GraphEdge::Field { shadow: false, .. } | GraphEdge::Variant(_) => {
-                                return None;
-                            }
-                            GraphEdge::Inherits { shadow: false } if edge.target() != node => {
-                                if parent.replace(edge.target()).is_some() {
-                                    return None;
-                                }
-                            }
-                            _ => {}
+                    GraphEdge::Inherits { shadow: false } if edge.target() != node => {
+                        if parent.replace(edge.target()).is_some() {
+                            disqualified = true;
+                            break;
                         }
                     }
-                    parent.map(|target| (node, target))
-                })
-                .collect_vec();
-            for (node, target) in collapsible {
-                let incoming = self
-                    .graph
-                    .edges_directed(node, Direction::Incoming)
-                    .map(|e| (e.id(), *e.weight(), e.source()))
-                    .collect_vec();
-                for &(id, ..) in &incoming {
-                    self.graph.remove_edge(id);
+                    _ => {}
                 }
-                // Re-add edges in their original order. `edges_directed` yields
-                // edges in reverse order of addition.
-                for (_, weight, source) in incoming.into_iter().rev() {
-                    self.graph.add_edge(source, target, weight);
-                }
-                self.graph.remove_node(node);
-                changed = true;
             }
-
-            if !changed {
-                break;
+            if !disqualified && let Some(target) = parent {
+                direct_parent.insert(node, target);
             }
         }
+
+        // Phase 3: for each collapsible node, find its ultimate target by
+        // walking outward through `Inherits` edges that originate from
+        // collapsibles. The first non-collapsible node reached is the
+        // target; cycles entirely within the collapsible set yield `None`.
+        // Use DFS over the filtered subgraph for cycle-safe traversal,
+        // and memoize so each chain is walked once.
+        let collapsible_chain = EdgeFiltered::from_fn(&self.graph, |e| {
+            matches!(e.weight(), GraphEdge::Inherits { shadow: false })
+                && direct_parent.contains_key(&e.source())
+        });
+        let mut ultimate: FxHashMap<NodeIndex<usize>, Option<NodeIndex<usize>>> =
+            FxHashMap::default();
+        for &start in direct_parent.keys() {
+            if ultimate.contains_key(&start) {
+                continue;
+            }
+            let mut chain = Vec::new();
+            let mut target = None;
+            let mut dfs = Dfs::new(&collapsible_chain, start);
+            while let Some(node) = dfs.next(&collapsible_chain) {
+                if let Some(&memoized) = ultimate.get(&node) {
+                    target = memoized;
+                    break;
+                }
+                if direct_parent.contains_key(&node) {
+                    chain.push(node);
+                } else {
+                    target = Some(node);
+                    break;
+                }
+            }
+            for node in chain {
+                ultimate.insert(node, target);
+            }
+        }
+
+        // Phase 4: redirect every incoming edge of a collapsible node to
+        // its ultimate target. Skip edges whose source is itself collapsible
+        // and resolves; those endpoints will be removed in Phase 5.
+        let to_redirect = self
+            .graph
+            .edge_references()
+            .filter_map(|e| {
+                let target = match ultimate.get(&e.target()) {
+                    Some(Some(t)) => *t,
+                    _ => return None,
+                };
+                if matches!(ultimate.get(&e.source()), Some(Some(_))) {
+                    return None;
+                }
+                Some((e.id(), e.source(), *e.weight(), target))
+            })
+            .collect_vec();
+        for (edge_id, source, weight, new_target) in to_redirect {
+            self.graph.remove_edge(edge_id);
+            self.graph.add_edge(source, new_target, weight);
+        }
+
+        // Phase 5: remove every collapsed node. Petgraph removes incident
+        // edges, including those between two collapsibles in a chain.
+        for (node, target) in ultimate {
+            if target.is_some() {
+                self.graph.remove_node(node);
+            }
+        }
+
         self
     }
 
