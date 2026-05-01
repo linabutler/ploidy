@@ -15,7 +15,7 @@ use petgraph::{
     graph::{DiGraph, EdgeReference, NodeIndex},
     stable_graph::StableDiGraph,
     visit::{
-        Dfs, DfsPostOrder, EdgeFiltered, EdgeRef, GraphRef, IntoEdgeReferences, IntoEdges,
+        DfsPostOrder, EdgeFiltered, EdgeRef, GraphRef, IntoEdgeReferences, IntoEdges,
         IntoNeighbors, IntoNeighborsDirected, IntoNodeIdentifiers, NodeCount, NodeIndexable,
         VisitMap, Visitable,
     },
@@ -360,41 +360,26 @@ impl<'a> RawGraph<'a> {
             }
         }
 
-        // Phase 3: for each collapsible node, find its ultimate target by
-        // walking outward through `Inherits` edges that originate from
-        // collapsibles. The first non-collapsible node reached is the
-        // target; cycles entirely within the collapsible set yield `None`.
-        // Use DFS over the filtered subgraph for cycle-safe traversal,
-        // and memoize so each chain is walked once.
+        // Phase 3: compute the transitive closure over the `Inherits`
+        // subgraph rooted at collapsibles, then look up each collapsible's
+        // ultimate non-collapsible target. Each collapsible has exactly one
+        // outgoing edge in this subgraph, so its dependency set is a linear
+        // chain ending in either a non-collapsible (the target) or a cycle
+        // entirely within the collapsible set (no target).
         let collapsible_chain = EdgeFiltered::from_fn(&self.graph, |e| {
             matches!(e.weight(), GraphEdge::Inherits { shadow: false })
                 && direct_parent.contains_key(&e.source())
         });
-        let mut ultimate: FxHashMap<NodeIndex<usize>, Option<NodeIndex<usize>>> =
-            FxHashMap::default();
-        for &start in direct_parent.keys() {
-            if ultimate.contains_key(&start) {
-                continue;
-            }
-            let mut chain = Vec::new();
-            let mut target = None;
-            let mut dfs = Dfs::new(&collapsible_chain, start);
-            while let Some(node) = dfs.next(&collapsible_chain) {
-                if let Some(&memoized) = ultimate.get(&node) {
-                    target = memoized;
-                    break;
-                }
-                if direct_parent.contains_key(&node) {
-                    chain.push(node);
-                } else {
-                    target = Some(node);
-                    break;
-                }
-            }
-            for node in chain {
-                ultimate.insert(node, target);
-            }
-        }
+        let closure = Closure::new(&collapsible_chain);
+        let ultimate: FxHashMap<NodeIndex<usize>, Option<NodeIndex<usize>>> = direct_parent
+            .keys()
+            .map(|&node| {
+                let target = closure
+                    .dependencies_of(node)
+                    .find(|n| !direct_parent.contains_key(n));
+                (node, target)
+            })
+            .collect();
 
         // Phase 4: redirect every incoming edge of a collapsible node to
         // its ultimate target. Skip edges whose source is itself collapsible
