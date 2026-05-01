@@ -128,6 +128,16 @@ impl<'a> CodegenGraph<'a> {
                     }
                 }
                 Uniquifiable::Tagged(info, view) => {
+                    {
+                        let mut scope = UniqueIdents::new(cooked.arena());
+                        for field in view.fields() {
+                            let ident = match field.name() {
+                                StructFieldName::Name(n) => scope.ident(n),
+                                StructFieldName::Hint(hint) => scope.field_name_hint(hint),
+                            };
+                            idents.insert(IdentMappingKey::StructField(info, field.name()), ident);
+                        }
+                    }
                     let mut scope = UniqueIdents::new(cooked.arena());
                     for variant in view.variants() {
                         let ident = scope.ident(variant.name());
