@@ -45,6 +45,7 @@ fn main() -> Result<()> {
             let mut raw = RawGraph::new(&arena, &spec);
             raw.collapse_trivial_inlines();
             raw.inline_tagged_variants();
+            raw.inline_untagged_variants();
 
             let config = language
                 .manifest

@@ -24,6 +24,7 @@
 //! let mut raw = RawGraph::new(&arena, &spec);
 //! raw.collapse_trivial_inlines();
 //! raw.inline_tagged_variants();
+//! raw.inline_untagged_variants();
 //! let graph = raw.cook();
 //!
 //! for view in graph.schemas() { /* ... */ }

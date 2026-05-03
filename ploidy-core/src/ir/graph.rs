@@ -29,8 +29,8 @@ use super::{
     spec::{ResolvedSpecType, Spec},
     types::{
         FieldMeta, GraphContainer, GraphInlineType, GraphOperation, GraphSchemaType, GraphStruct,
-        GraphTagged, GraphType, InlineTypeId, InlineTypeIds, InlineTypePathRoot, OperationUsage,
-        PrimitiveType, SpecInlineType, SpecSchemaType, SpecType, StructFieldName,
+        GraphTagged, GraphType, GraphUntagged, InlineTypeId, InlineTypeIds, InlineTypePathRoot,
+        OperationUsage, PrimitiveType, SpecInlineType, SpecSchemaType, SpecType, StructFieldName,
         TaggedVariantMeta, UntaggedVariantMeta, VariantMeta,
         shape::{Operation, Parameter, ParameterInfo, Request, Response},
     },
@@ -47,9 +47,8 @@ type CookedDiGraph<'a> = DiGraph<GraphType<'a>, GraphEdge<'a>, usize>;
 /// backed by a sparse [`StableDiGraph`].
 ///
 /// This graph is constructed directly from a [`Spec`], and represents
-/// type relationships as they exist in the spec. Transformations like
-/// [`inline_tagged_variants`][Self::inline_tagged_variants] rewrite this graph
-/// in place.
+/// type relationships as they exist in the spec. Transformation methods
+/// rewrite this graph in place.
 ///
 /// After applying all transformations, call [`cook`][Self::cook] to
 /// turn this graph into a [`CookedGraph`] that's ready for code generation.
@@ -184,8 +183,8 @@ impl<'a> RawGraph<'a> {
         }
     }
 
-    /// Inlines schema types used as variants of multiple tagged unions
-    /// with different tags.
+    /// Inlines struct variants that are variants of multiple tagged unions
+    /// with different tags, or that inherit their tagged union's own fields.
     ///
     /// In OpenAPI's model of tagged unions, the tag always references a field
     /// that's defined on each variant struct. This model works well for Python
@@ -261,6 +260,81 @@ impl<'a> RawGraph<'a> {
             .map(|&(tagged, _)| tagged.index())
             .collect();
         for index in taggeds.ones().map(NodeIndex::new) {
+            let old_edges = self
+                .graph
+                .edges_directed(index, Direction::Outgoing)
+                .filter(|e| matches!(e.weight(), GraphEdge::Variant(_)))
+                .map(|e| (e.id(), *e.weight(), e.target()))
+                .collect_vec();
+            for &(id, _, _) in &old_edges {
+                self.graph.remove_edge(id);
+            }
+            // Re-add edges. `edges_directed` yields edges in reverse order
+            // of addition; reversing them adds edges in their original order.
+            for (_, weight, target) in old_edges.into_iter().rev() {
+                let new_target = retargets.get(&(index, target)).copied().unwrap_or(target);
+                self.graph.add_edge(index, new_target, weight);
+            }
+        }
+
+        self
+    }
+
+    /// Inlines struct variants of untagged unions where the union declares
+    /// own `properties`, but the struct doesn't inherit them via `allOf`.
+    ///
+    /// [`inline_tagged_variants`]: Self::inline_tagged_variants
+    pub fn inline_untagged_variants(&mut self) -> &mut Self {
+        let inlinables = self.inlinable_untagged_variants().collect_vec();
+
+        let mut retargets = FxHashMap::default();
+        retargets.reserve(inlinables.len());
+
+        for InlinableUntaggedVariant { untagged, variant } in inlinables {
+            match variant {
+                VariantStruct::Schema(variant) => {
+                    let id = self.ids.next();
+                    let index = self
+                        .graph
+                        .add_node(GraphType::Inline(GraphInlineType::Struct(id, variant.ty)));
+
+                    let original_field_edges = self.fields(variant.index).collect_vec();
+                    for edge in original_field_edges.into_iter().rev() {
+                        self.graph.add_edge(
+                            index,
+                            edge.target,
+                            GraphEdge::Field {
+                                meta: edge.meta,
+                                shadow: true,
+                            },
+                        );
+                    }
+
+                    self.graph.add_edge(
+                        index,
+                        untagged.index,
+                        GraphEdge::Inherits { shadow: true },
+                    );
+                    self.graph
+                        .add_edge(index, variant.index, GraphEdge::Inherits { shadow: true });
+
+                    retargets.insert((untagged.index, variant.index), index);
+                }
+                VariantStruct::Inline(variant) => {
+                    self.graph.add_edge(
+                        variant,
+                        untagged.index,
+                        GraphEdge::Inherits { shadow: true },
+                    );
+                }
+            }
+        }
+
+        let untaggeds: FixedBitSet = retargets
+            .keys()
+            .map(|&(untagged, _)| untagged.index())
+            .collect();
+        for index in untaggeds.ones().map(NodeIndex::new) {
             let old_edges = self
                 .graph
                 .edges_directed(index, Direction::Outgoing)
@@ -512,23 +586,12 @@ impl<'a> RawGraph<'a> {
             .map(|index| index.index())
             .collect();
 
-        self.graph
-            .node_indices()
-            .filter_map(|index| match self.graph[index] {
-                GraphType::Schema(GraphSchemaType::Tagged(_, ty)) => Some(Node { index, ty }),
+        self.inlinable_variants()
+            .filter_map(|variant| match variant {
+                InlinableUnionVariant::Tagged(tagged, VariantStruct::Schema(variant)) => {
+                    Some((tagged, variant))
+                }
                 _ => None,
-            })
-            .flat_map(move |tagged| {
-                self.graph
-                    .edges_directed(tagged.index, Direction::Outgoing)
-                    .filter(|e| matches!(e.weight(), GraphEdge::Variant(_)))
-                    .filter_map(move |e| match self.graph[e.target()] {
-                        GraphType::Schema(GraphSchemaType::Struct(_, ty)) => {
-                            let index = e.target();
-                            Some((tagged, Node { index, ty }))
-                        }
-                        _ => None,
-                    })
             })
             .filter_map(move |(tagged, variant)| {
                 // A variant struct only needs inlining if it has multiple
@@ -610,6 +673,79 @@ impl<'a> RawGraph<'a> {
                 self.fields(tagged.index).next()?;
 
                 Some(InlinableVariant { tagged, variant })
+            })
+    }
+
+    /// Returns an iterator over all the untagged union variant structs
+    /// that should be inlined.
+    fn inlinable_untagged_variants(&self) -> impl Iterator<Item = InlinableUntaggedVariant<'a>> {
+        self.inlinable_variants()
+            .filter_map(|variant| {
+                let InlinableUnionVariant::Untagged(untagged, meta, variant) = variant else {
+                    return None;
+                };
+                self.fields(untagged.index).next()?;
+                if meta.null {
+                    return None;
+                }
+                Some((untagged, variant))
+            })
+            .filter_map(|(untagged, variant)| {
+                let ancestors = EdgeFiltered::from_fn(&self.graph, |e| {
+                    matches!(e.weight(), GraphEdge::Inherits { .. })
+                });
+                let mut dfs = DfsPostOrder::new(&ancestors, variant.index());
+                while dfs.next(&ancestors).is_some() {}
+                if dfs.discovered[untagged.index.index()] {
+                    return None;
+                }
+
+                Some(InlinableUntaggedVariant { untagged, variant })
+            })
+    }
+
+    /// Returns an iterator over the struct variants of
+    /// tagged and untagged unions.
+    fn inlinable_variants(&self) -> impl Iterator<Item = InlinableUnionVariant<'a>> {
+        self.graph
+            .node_indices()
+            .filter(|&index| {
+                matches!(
+                    self.graph[index],
+                    GraphType::Schema(GraphSchemaType::Tagged(..) | GraphSchemaType::Untagged(..))
+                )
+            })
+            .flat_map(move |index| {
+                self.graph
+                    .edges_directed(index, Direction::Outgoing)
+                    .filter_map(move |edge| {
+                        let &GraphEdge::Variant(meta) = edge.weight() else {
+                            return None;
+                        };
+                        let variant = {
+                            let index = edge.target();
+                            match self.graph[index] {
+                                GraphType::Schema(GraphSchemaType::Struct(_, ty)) => {
+                                    VariantStruct::Schema(Node { index, ty })
+                                }
+                                GraphType::Inline(GraphInlineType::Struct(..)) => {
+                                    VariantStruct::Inline(index)
+                                }
+                                _ => return None,
+                            }
+                        };
+                        Some(match (self.graph[index], meta) {
+                            (
+                                GraphType::Schema(GraphSchemaType::Tagged(_, ty)),
+                                VariantMeta::Tagged(_),
+                            ) => InlinableUnionVariant::Tagged(Node { index, ty }, variant),
+                            (
+                                GraphType::Schema(GraphSchemaType::Untagged(_, ty)),
+                                VariantMeta::Untagged(meta),
+                            ) => InlinableUnionVariant::Untagged(Node { index, ty }, meta, variant),
+                            _ => unreachable!(),
+                        })
+                    })
             })
     }
 }
@@ -828,6 +964,41 @@ struct InlinableVariant<'a> {
     tagged: Node<GraphTagged<'a>>,
     /// The original variant struct node.
     variant: Node<GraphStruct<'a>>,
+}
+
+/// A variant that should be inlined into its untagged union.
+struct InlinableUntaggedVariant<'a> {
+    /// The untagged union that owns this variant.
+    untagged: Node<GraphUntagged<'a>>,
+    /// The variant struct node.
+    variant: VariantStruct<'a>,
+}
+
+/// A named or inline struct used as a union variant.
+#[derive(Clone, Copy)]
+enum VariantStruct<'a> {
+    Schema(Node<GraphStruct<'a>>),
+    Inline(NodeIndex<usize>),
+}
+
+impl VariantStruct<'_> {
+    #[inline]
+    fn index(&self) -> NodeIndex<usize> {
+        match self {
+            Self::Schema(node) => node.index,
+            &Self::Inline(index) => index,
+        }
+    }
+}
+
+/// A struct variant of a tagged or untagged union.
+enum InlinableUnionVariant<'a> {
+    Tagged(Node<GraphTagged<'a>>, VariantStruct<'a>),
+    Untagged(
+        Node<GraphUntagged<'a>>,
+        UntaggedVariantMeta,
+        VariantStruct<'a>,
+    ),
 }
 
 /// An edge between two types in the type graph.
