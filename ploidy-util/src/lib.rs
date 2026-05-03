@@ -4,7 +4,7 @@ pub mod date_time;
 pub mod error;
 pub mod query;
 
-pub use absent::{AbsentError, AbsentOr, FieldAbsentError};
+pub use absent::{AbsentError, AbsentOr, AbsentOrExt, FieldAbsentError};
 pub use binary::{Base64, Base64Error};
 pub use date_time::{
     TryFromTimestampError, UnixMicroseconds, UnixMilliseconds, UnixNanoseconds, UnixSeconds,

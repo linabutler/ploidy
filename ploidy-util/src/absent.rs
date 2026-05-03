@@ -15,6 +15,35 @@ pub enum AbsentOr<T> {
     Present(T),
 }
 
+/// Converts optional values into [`AbsentOr`].
+pub trait AbsentOrExt<T> {
+    /// Converts this value into an [`AbsentOr`], mapping absence to
+    /// [`AbsentOr::Absent`].
+    fn or_absent(self) -> AbsentOr<T>;
+
+    /// Converts this value into an [`AbsentOr`], mapping absence to
+    /// [`AbsentOr::Null`].
+    fn or_null(self) -> AbsentOr<T>;
+}
+
+impl<T> AbsentOrExt<T> for Option<T> {
+    #[inline]
+    fn or_absent(self) -> AbsentOr<T> {
+        match self {
+            Some(value) => AbsentOr::Present(value),
+            None => AbsentOr::Absent,
+        }
+    }
+
+    #[inline]
+    fn or_null(self) -> AbsentOr<T> {
+        match self {
+            Some(value) => AbsentOr::Present(value),
+            None => AbsentOr::Null,
+        }
+    }
+}
+
 impl<T> AbsentOr<T> {
     /// Returns `true` if the value is [`Absent`](Self::Absent).
     #[inline]
@@ -365,5 +394,26 @@ mod tests {
         // `AbsentOr::Absent` behaves the same as `Null`.
         let result = response.pointer::<&ResponseError>("/error");
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_absent_or_ext_option_some_is_present() {
+        let value = Some("value").or_absent();
+        assert_eq!(value, AbsentOr::Present("value"));
+
+        let value = Some("value").or_null();
+        assert_eq!(value, AbsentOr::Present("value"));
+    }
+
+    #[test]
+    fn test_absent_or_ext_option_none_or_absent_is_absent() {
+        let value: AbsentOr<&str> = None.or_absent();
+        assert_eq!(value, AbsentOr::Absent);
+    }
+
+    #[test]
+    fn test_absent_or_ext_option_none_or_null_is_null() {
+        let value: AbsentOr<&str> = None.or_null();
+        assert_eq!(value, AbsentOr::Null);
     }
 }
