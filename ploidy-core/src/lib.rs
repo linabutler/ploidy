@@ -23,6 +23,7 @@
 //! let spec = Spec::from_doc(&arena, &doc)?;
 //! let mut raw = RawGraph::new(&arena, &spec);
 //! raw.inline_tagged_variants();
+//! raw.inline_untagged_variants();
 //! let graph = raw.cook();
 //!
 //! for view in graph.schemas() { /* ... */ }

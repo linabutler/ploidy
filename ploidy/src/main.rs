@@ -44,6 +44,7 @@ fn main() -> Result<()> {
             let spec = Spec::from_doc(&arena, &doc).into_diagnostic()?;
             let mut raw = RawGraph::new(&arena, &spec);
             raw.inline_tagged_variants();
+            raw.inline_untagged_variants();
 
             let config = language
                 .manifest

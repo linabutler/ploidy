@@ -31,9 +31,10 @@ use super::{
     spec::{ResolvedSpecType, Spec},
     types::{
         FieldMeta, GraphContainer, GraphInlineType, GraphOperation, GraphSchemaType, GraphStruct,
-        GraphTagged, GraphType, InlineTypePath, InlineTypePathRoot, InlineTypePathSegment,
-        PrimitiveType, SpecInlineType, SpecSchemaType, SpecType, SpecUntaggedVariant,
-        StructFieldName, TaggedVariantMeta, VariantMeta,
+        GraphTagged, GraphType, GraphUntagged, InlineTypePath, InlineTypePathRoot,
+        InlineTypePathSegment, PrimitiveType, SpecInlineType, SpecSchemaType, SpecType,
+        SpecUntaggedVariant, StructFieldName, TaggedVariantMeta, UntaggedVariantNameHint,
+        VariantMeta,
         shape::{Operation, Parameter, ParameterInfo, Request, Response},
     },
     views::{operation::OperationView, primitive::PrimitiveView, schema::SchemaTypeView},
@@ -50,8 +51,9 @@ type CookedDiGraph<'a> = DiGraph<GraphType<'a>, GraphEdge<'a>, usize>;
 ///
 /// This graph is constructed directly from a [`Spec`], and represents
 /// type relationships as they exist in the spec. Transformations like
-/// [`inline_tagged_variants`][Self::inline_tagged_variants] rewrite this graph
-/// in place.
+/// [`inline_tagged_variants`][Self::inline_tagged_variants] and
+/// [`inline_untagged_variants`][Self::inline_untagged_variants] rewrite this
+/// graph in place.
 ///
 /// After applying all transformations, call [`cook`][Self::cook] to
 /// turn this graph into a [`CookedGraph`] that's ready for code generation.
@@ -288,6 +290,79 @@ impl<'a> RawGraph<'a> {
         self
     }
 
+    /// Inlines struct variants of untagged unions with common fields.
+    ///
+    /// OpenAPI allows `oneOf` schemas to declare sibling `properties`.
+    /// Ploidy stores those as fields on the union, and structs that inherit
+    /// from the union through `allOf` already see them. Struct variants that
+    /// only appear through `oneOf` need an inline copy so that the union's
+    /// fields apply in that variant context without changing the original
+    /// schema type.
+    pub fn inline_untagged_variants(&mut self) -> &mut Self {
+        let inlinables = self.inlinable_untagged_variants().collect_vec();
+
+        let mut retargets = FxHashMap::default();
+        retargets.reserve(inlinables.len());
+
+        for InlinableUntaggedVariant {
+            untagged,
+            variant,
+            segment,
+        } in inlinables
+        {
+            let index = self
+                .graph
+                .add_node(GraphType::Inline(GraphInlineType::Struct(
+                    InlineTypePath {
+                        root: InlineTypePathRoot::Type(untagged.info.name),
+                        segments: self.arena.alloc_slice_copy(&[segment]),
+                    },
+                    variant.ty,
+                )));
+
+            let original_field_edges = self.fields(variant.index).collect_vec();
+            for edge in original_field_edges.into_iter().rev() {
+                self.graph.add_edge(
+                    index,
+                    edge.target,
+                    GraphEdge::Field {
+                        meta: edge.meta,
+                        shadow: true,
+                    },
+                );
+            }
+
+            self.graph
+                .add_edge(index, untagged.index, GraphEdge::Inherits { shadow: true });
+            self.graph
+                .add_edge(index, variant.index, GraphEdge::Inherits { shadow: true });
+
+            retargets.insert((untagged.index, variant.index), index);
+        }
+
+        let untaggeds: FixedBitSet = retargets
+            .keys()
+            .map(|&(untagged, _)| untagged.index())
+            .collect();
+        for index in untaggeds.ones().map(NodeIndex::new) {
+            let old_edges = self
+                .graph
+                .edges_directed(index, Direction::Outgoing)
+                .filter(|e| matches!(e.weight(), GraphEdge::Variant(_)))
+                .map(|e| (e.id(), *e.weight(), e.target()))
+                .collect_vec();
+            for &(id, _, _) in &old_edges {
+                self.graph.remove_edge(id);
+            }
+            for (_, weight, target) in old_edges.into_iter().rev() {
+                let new_target = retargets.get(&(index, target)).copied().unwrap_or(target);
+                self.graph.add_edge(index, new_target, weight);
+            }
+        }
+
+        self
+    }
+
     /// Builds an immutable [`CookedGraph`] from this mutable raw graph.
     #[inline]
     pub fn cook(&self) -> CookedGraph<'a> {
@@ -426,6 +501,57 @@ impl<'a> RawGraph<'a> {
                 self.fields(tagged.index).next()?;
 
                 Some(InlinableVariant { tagged, variant })
+            })
+    }
+
+    /// Returns an iterator over all the untagged union variant structs
+    /// that should be inlined.
+    fn inlinable_untagged_variants(&self) -> impl Iterator<Item = InlinableUntaggedVariant<'a>> {
+        self.graph
+            .node_indices()
+            .filter_map(|index| match self.graph[index] {
+                GraphType::Schema(GraphSchemaType::Untagged(info, ty)) => {
+                    Some(Node { index, info, ty })
+                }
+                _ => None,
+            })
+            .filter(|untagged| self.fields(untagged.index).next().is_some())
+            .flat_map(move |untagged| {
+                self.graph
+                    .edges_directed(untagged.index, Direction::Outgoing)
+                    .filter_map(move |e| {
+                        let segment = match e.weight() {
+                            GraphEdge::Variant(VariantMeta::Untagged(
+                                UntaggedVariantMeta::Type {
+                                    hint: UntaggedVariantNameHint::Index(index),
+                                },
+                            )) => InlineTypePathSegment::Variant(*index),
+                            _ => return None,
+                        };
+                        match self.graph[e.target()] {
+                            GraphType::Schema(GraphSchemaType::Struct(info, ty)) => {
+                                let index = e.target();
+                                Some((untagged, Node { index, info, ty }, segment))
+                            }
+                            _ => None,
+                        }
+                    })
+            })
+            .filter_map(|(untagged, variant, segment)| {
+                let ancestors = EdgeFiltered::from_fn(&self.graph, |e| {
+                    matches!(e.weight(), GraphEdge::Inherits { .. })
+                });
+                let mut dfs = DfsPostOrder::new(&ancestors, variant.index);
+                while dfs.next(&ancestors).is_some() {}
+                if dfs.discovered[untagged.index.index()] {
+                    return None;
+                }
+
+                Some(InlinableUntaggedVariant {
+                    untagged,
+                    variant,
+                    segment,
+                })
             })
     }
 }
@@ -630,6 +756,16 @@ struct InlinableVariant<'a> {
     tagged: Node<'a, GraphTagged<'a>>,
     /// The original variant struct node.
     variant: Node<'a, GraphStruct<'a>>,
+}
+
+/// A variant that should be inlined into its untagged union.
+struct InlinableUntaggedVariant<'a> {
+    /// The untagged union that owns this variant.
+    untagged: Node<'a, GraphUntagged<'a>>,
+    /// The original variant struct node.
+    variant: Node<'a, GraphStruct<'a>>,
+    /// The inline path segment for the copied variant struct.
+    segment: InlineTypePathSegment<'a>,
 }
 
 /// An edge between two types in the type graph.
