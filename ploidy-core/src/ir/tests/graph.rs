@@ -2149,6 +2149,189 @@ fn test_untagged_union_with_properties() {
 }
 
 #[test]
+fn test_untagged_union_inlines_variants_with_fields() {
+    let doc = Document::from_yaml(indoc::indoc! {"
+        openapi: 3.0.0
+        info:
+          title: Test
+          version: 1.0.0
+        components:
+          schemas:
+            Animal:
+              oneOf:
+                - $ref: '#/components/schemas/Dog'
+                - $ref: '#/components/schemas/Cat'
+              properties:
+                name:
+                  type: string
+            Dog:
+              type: object
+              properties:
+                bark:
+                  type: string
+            Cat:
+              type: object
+              properties:
+                meow:
+                  type: string
+            Owner:
+              type: object
+              properties:
+                dog:
+                  $ref: '#/components/schemas/Dog'
+    "})
+    .unwrap();
+
+    let arena = Arena::new();
+    let spec = Spec::from_doc(&arena, &doc).unwrap();
+    let mut raw = RawGraph::new(&arena, &spec);
+    raw.inline_untagged_variants();
+    let graph = raw.cook();
+
+    let animal = graph.schema("Animal").unwrap();
+    let untagged = match animal {
+        SchemaTypeView::Untagged(_, view) => view,
+        other => panic!("expected untagged `Animal`; got {other:?}"),
+    };
+
+    let variant = untagged.variants().next().unwrap();
+    let variant_struct = match variant.ty().unwrap().view {
+        TypeView::Inline(InlineTypeView::Struct(_, view)) => view,
+        other => panic!("expected inline struct variant; got {other:?}"),
+    };
+    let field_names = variant_struct.fields().map(|f| f.name()).collect_vec();
+    assert_matches!(
+        &*field_names,
+        [StructFieldName::Name("name"), StructFieldName::Name("bark")]
+    );
+
+    let dog = graph.schema("Dog").unwrap();
+    let dog_struct = match dog {
+        SchemaTypeView::Struct(_, view) => view,
+        other => panic!("expected struct `Dog`; got {other:?}"),
+    };
+    let dog_field_names = dog_struct.fields().map(|f| f.name()).collect_vec();
+    assert_matches!(&*dog_field_names, [StructFieldName::Name("bark")]);
+}
+
+#[test]
+fn test_untagged_union_skips_variant_that_already_inherits_fields() {
+    let doc = Document::from_yaml(indoc::indoc! {"
+        openapi: 3.0.0
+        info:
+          title: Test
+          version: 1.0.0
+        components:
+          schemas:
+            Animal:
+              oneOf:
+                - $ref: '#/components/schemas/Dog'
+                - $ref: '#/components/schemas/Cat'
+              properties:
+                name:
+                  type: string
+            Dog:
+              allOf:
+                - $ref: '#/components/schemas/Animal'
+              properties:
+                bark:
+                  type: string
+            Cat:
+              allOf:
+                - $ref: '#/components/schemas/Animal'
+              properties:
+                meow:
+                  type: string
+    "})
+    .unwrap();
+
+    let arena = Arena::new();
+    let spec = Spec::from_doc(&arena, &doc).unwrap();
+    let mut raw = RawGraph::new(&arena, &spec);
+    raw.inline_untagged_variants();
+    let graph = raw.cook();
+
+    let animal = graph.schema("Animal").unwrap();
+    let untagged = match animal {
+        SchemaTypeView::Untagged(_, view) => view,
+        other => panic!("expected untagged `Animal`; got {other:?}"),
+    };
+
+    let variant = untagged.variants().next().unwrap();
+    assert_matches!(
+        variant.ty().unwrap().view,
+        TypeView::Schema(SchemaTypeView::Struct(..))
+    );
+
+    let dog = graph.schema("Dog").unwrap();
+    let dog_struct = match dog {
+        SchemaTypeView::Struct(_, view) => view,
+        other => panic!("expected struct `Dog`; got {other:?}"),
+    };
+    let field_names = dog_struct.fields().map(|f| f.name()).collect_vec();
+    assert_matches!(
+        &*field_names,
+        [StructFieldName::Name("name"), StructFieldName::Name("bark")]
+    );
+}
+
+#[test]
+fn test_untagged_union_inlining_preserves_field_type_edges() {
+    let doc = Document::from_yaml(indoc::indoc! {"
+        openapi: 3.0.0
+        info:
+          title: Test
+          version: 1.0.0
+        components:
+          schemas:
+            Animal:
+              oneOf:
+                - $ref: '#/components/schemas/Dog'
+                - $ref: '#/components/schemas/Cat'
+              required:
+                - severity
+              properties:
+                severity:
+                  type: string
+                  enum: [low, high]
+            Dog:
+              type: object
+              properties:
+                bark:
+                  type: string
+            Cat:
+              type: object
+              properties:
+                meow:
+                  type: string
+    "})
+    .unwrap();
+
+    let arena = Arena::new();
+    let spec = Spec::from_doc(&arena, &doc).unwrap();
+    let mut raw = RawGraph::new(&arena, &spec);
+    raw.inline_untagged_variants();
+    let graph = raw.cook();
+
+    let animal = graph.schema("Animal").unwrap();
+    let untagged = match animal {
+        SchemaTypeView::Untagged(_, view) => view,
+        other => panic!("expected untagged `Animal`; got {other:?}"),
+    };
+
+    let variant = untagged.variants().next().unwrap();
+    let variant_struct = match variant.ty().unwrap().view {
+        TypeView::Inline(InlineTypeView::Struct(_, view)) => view,
+        other => panic!("expected inline struct variant; got {other:?}"),
+    };
+    let severity = variant_struct
+        .fields()
+        .find(|f| matches!(f.name(), StructFieldName::Name("severity")))
+        .unwrap();
+    assert_matches!(severity.ty(), TypeView::Inline(InlineTypeView::Enum(..)));
+}
+
+#[test]
 fn test_tagged_union_inlines_include_field_types() {
     // A tagged union with an own inline enum property should
     // include that enum in its `inlines()`.

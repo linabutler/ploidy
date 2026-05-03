@@ -82,7 +82,7 @@ mod tests {
     use pretty_assertions::assert_eq;
     use syn::parse_quote;
 
-    use crate::CodegenGraph;
+    use crate::{CodegenGraph, CodegenSchemaType};
 
     #[test]
     fn test_untagged_union_serde_untagged_attr() {
@@ -215,6 +215,84 @@ mod tests {
             pub enum Animal {
                 V1(crate::types::Dog),
                 V2(crate::types::Cat)
+            }
+        };
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn test_untagged_union_inlined_variant_wraps_inline_type() {
+        let doc = Document::from_yaml(indoc::indoc! {"
+            openapi: 3.0.0
+            info:
+              title: Test API
+              version: 1.0.0
+            paths: {}
+            components:
+              schemas:
+                Animal:
+                  oneOf:
+                    - $ref: '#/components/schemas/Dog'
+                    - $ref: '#/components/schemas/Cat'
+                  required:
+                    - name
+                  properties:
+                    name:
+                      type: string
+                Dog:
+                  type: object
+                  required:
+                    - bark
+                  properties:
+                    bark:
+                      type: string
+                Cat:
+                  type: object
+                  required:
+                    - meow
+                  properties:
+                    meow:
+                      type: string
+        "})
+        .unwrap();
+
+        let arena = Arena::new();
+        let spec = Spec::from_doc(&arena, &doc).unwrap();
+        let mut raw = RawGraph::new(&arena, &spec);
+        raw.inline_untagged_variants();
+        let graph = CodegenGraph::new(raw.cook());
+
+        let schema = graph.schema("Animal").unwrap();
+        let schema @ SchemaTypeView::Untagged(_, _) = &schema else {
+            panic!("expected untagged union `Animal`; got `{schema:?}`");
+        };
+
+        let codegen = CodegenSchemaType::new(schema);
+
+        let actual: syn::File = parse_quote!(#codegen);
+        let expected: syn::File = parse_quote! {
+            #[derive(Debug, Clone, PartialEq, Eq, Hash, ::ploidy_util::serde::Serialize, ::ploidy_util::serde::Deserialize, ::ploidy_util::pointer::JsonPointee, ::ploidy_util::pointer::JsonPointerTarget)]
+            #[serde(crate = "::ploidy_util::serde", untagged)]
+            #[ploidy(pointer(crate = "::ploidy_util::pointer", untagged))]
+            pub enum Animal {
+                V1(crate::types::animal::types::V1),
+                V2(crate::types::animal::types::V2)
+            }
+            pub mod types {
+                #[derive(Debug, Clone, PartialEq, Eq, Hash, Default, ::ploidy_util::serde::Serialize, ::ploidy_util::serde::Deserialize, ::ploidy_util::pointer::JsonPointee, ::ploidy_util::pointer::JsonPointerTarget)]
+                #[serde(crate = "::ploidy_util::serde")]
+                #[ploidy(pointer(crate = "::ploidy_util::pointer"))]
+                pub struct V1 {
+                    pub name: ::std::string::String,
+                    pub bark: ::std::string::String,
+                }
+                #[derive(Debug, Clone, PartialEq, Eq, Hash, Default, ::ploidy_util::serde::Serialize, ::ploidy_util::serde::Deserialize, ::ploidy_util::pointer::JsonPointee, ::ploidy_util::pointer::JsonPointerTarget)]
+                #[serde(crate = "::ploidy_util::serde")]
+                #[ploidy(pointer(crate = "::ploidy_util::pointer"))]
+                pub struct V2 {
+                    pub name: ::std::string::String,
+                    pub meow: ::std::string::String,
+                }
             }
         };
         assert_eq!(actual, expected);
