@@ -324,6 +324,7 @@ impl_pointee_for!(
     #[cfg(feature = "chrono")] chrono::DateTime<chrono::Utc>,
     #[cfg(feature = "chrono")] chrono::NaiveDate,
     #[cfg(feature = "url")] url::Url,
+    #[cfg(feature = "uuid")] uuid::Uuid,
     #[cfg(feature = "serde_bytes")] serde_bytes::ByteBuf,
 );
 
@@ -353,6 +354,7 @@ impl_copied_pointer_target_for!(
     i8, u8, i16, u16, i32, u32, i64, u64, i128, u128, isize, usize, f32, f64, bool,
     #[cfg(feature = "chrono")] chrono::DateTime<chrono::Utc>,
     #[cfg(feature = "chrono")] chrono::NaiveDate,
+    #[cfg(feature = "uuid")] uuid::Uuid,
 );
 
 #[cfg(feature = "serde_bytes")]

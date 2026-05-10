@@ -31,6 +31,12 @@ default-features = false
 features = []
 optional = true
 
+[dependencies.uuid]
+version = "1"
+default-features = false
+features = []
+optional = true
+
 [features]
 default = ["derive"]
 full = [
@@ -42,6 +48,7 @@ full = [
     "serde_bytes",
     "serde_json",
     "url",
+    "uuid",
 ]
 chrono = ["dep:chrono"]
 derive = ["dep:ploidy-pointer-derive"]
@@ -51,3 +58,4 @@ serde = ["dep:serde"]
 serde_bytes = ["dep:serde_bytes"]
 serde_json = ["dep:serde_json"]
 url = ["dep:url"]
+uuid = ["dep:uuid"]

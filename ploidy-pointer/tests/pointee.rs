@@ -465,6 +465,23 @@ fn test_pointer_to_url() {
 }
 
 #[test]
+#[cfg(feature = "uuid")]
+fn test_pointer_to_uuid() {
+    use uuid::Uuid;
+
+    let id = Uuid::nil();
+
+    // Empty pointer should return the UUID itself.
+    let pointer = JsonPointer::parse("").unwrap();
+    let result = id.resolve(pointer).unwrap() as &dyn Any;
+    assert_eq!(result.downcast_ref::<Uuid>(), Some(&id));
+
+    // Non-empty pointer should fail.
+    let pointer = JsonPointer::parse("/foo").unwrap();
+    assert!(id.resolve(pointer).is_err());
+}
+
+#[test]
 #[cfg(feature = "serde_json")]
 fn test_pointer_to_serde_json() {
     use serde_json::json;

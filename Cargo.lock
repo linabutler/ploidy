@@ -1184,6 +1184,7 @@ dependencies = [
  "strsim",
  "thiserror 2.0.18",
  "url",
+ "uuid",
 ]
 
 [[package]]

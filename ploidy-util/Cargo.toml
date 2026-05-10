@@ -22,6 +22,7 @@ ploidy-pointer = { workspace = true, features = [
     "serde_bytes",
     "serde_json",
     "url",
+    "uuid",
 ] }
 reqwest = { version = "0.13", default-features = false, features = [
     "form",
