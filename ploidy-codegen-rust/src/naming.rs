@@ -192,11 +192,7 @@ impl<'a> UniqueIdents<'a> {
     pub fn with_reserved(arena: &'a Arena, reserved: &[&str]) -> Self {
         Self(UniqueNames::with_reserved(
             arena,
-            itertools::chain!(
-                reserved.iter().copied(),
-                KEYWORDS.iter().copied(),
-                std::iter::once("")
-            ),
+            reserved.iter().chain(KEYWORDS).copied(),
         ))
     }
 
@@ -260,7 +256,7 @@ impl<'a> UniqueIdents<'a> {
 #[inline]
 fn clean(s: &str) -> String {
     WordSegments::new(s)
-        .flat_map(|s| s.split(|c| !unicode_ident::is_xid_continue(c)))
+        .flat_map(|(_, s)| s.split(|c| !unicode_ident::is_xid_continue(c)))
         .join("_")
 }
 
@@ -399,7 +395,7 @@ mod tests {
         let mut scope = UniqueIdents::new(&arena);
 
         let ident = scope.variant_name_hint(UntaggedVariantNameHint::Index(0));
-        assert_eq!(&ident.0, "V0");
+        assert_eq!(&ident.0, "V");
 
         let ident = scope.variant_name_hint(UntaggedVariantNameHint::Index(42));
         assert_eq!(&ident.0, "V42");
@@ -414,13 +410,13 @@ mod tests {
         let ident0 = scope.field_name_hint(StructFieldNameHint::Index(0));
         let usage = CodegenIdentUsage::Field(ident0);
         let actual: syn::Ident = parse_quote!(#usage);
-        let expected: syn::Ident = parse_quote!(variant_0);
+        let expected: syn::Ident = parse_quote!(variant);
         assert_eq!(actual, expected);
 
         let ident5 = scope.field_name_hint(StructFieldNameHint::Index(5));
         let usage = CodegenIdentUsage::Field(ident5);
         let actual: syn::Ident = parse_quote!(#usage);
-        let expected: syn::Ident = parse_quote!(variant_5);
+        let expected: syn::Ident = parse_quote!(variant5);
         assert_eq!(actual, expected);
     }
 
@@ -448,7 +444,7 @@ mod tests {
 
         assert_eq!(clean("foo_bar"), "foo_bar");
         assert_eq!(clean("FooBar"), "Foo_Bar");
-        assert_eq!(clean("foo123"), "foo123");
+        assert_eq!(clean("foo123"), "foo_123");
         assert_eq!(clean("_foo"), "foo");
 
         assert_eq!(clean("_foo"), "foo");
@@ -478,12 +474,48 @@ mod tests {
 
         let usage = CodegenIdentUsage::Field(ident);
         let actual: syn::Ident = parse_quote!(#usage);
-        let expected: syn::Ident = parse_quote!(_2);
+        let expected: syn::Ident = parse_quote!(_1);
         assert_eq!(actual, expected);
 
         let usage = CodegenIdentUsage::Type(ident);
         let actual: syn::Ident = parse_quote!(#usage);
+        let expected: syn::Ident = parse_quote!(_1);
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn test_codegen_ident_scope_handles_numeric_names() {
+        let arena = Arena::new();
+        let mut scope = UniqueIdents::new(&arena);
+
+        let ident = scope.ident("0");
+        let usage = CodegenIdentUsage::Field(ident);
+        let actual: syn::Ident = parse_quote!(#usage);
+        let expected: syn::Ident = parse_quote!(_1);
+        assert_eq!(actual, expected);
+
+        let ident = scope.ident("1");
+        let usage = CodegenIdentUsage::Type(ident);
+        let actual: syn::Ident = parse_quote!(#usage);
         let expected: syn::Ident = parse_quote!(_2);
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn test_codegen_ident_scope_handles_reserved_suffixes() {
+        let arena = Arena::new();
+        let mut scope = UniqueIdents::new(&arena);
+
+        let ident = scope.ident("crate");
+        let usage = CodegenIdentUsage::Method(ident);
+        let actual: syn::Ident = parse_quote!(#usage);
+        let expected: syn::Ident = parse_quote!(crate2);
+        assert_eq!(actual, expected);
+
+        let ident = scope.ident("crate2");
+        let usage = CodegenIdentUsage::Method(ident);
+        let actual: syn::Ident = parse_quote!(#usage);
+        let expected: syn::Ident = parse_quote!(crate3);
         assert_eq!(actual, expected);
     }
 }
