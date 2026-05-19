@@ -47,7 +47,8 @@ impl<'a> CodegenCargoManifest<'a> {
                     schema
                         .dependencies()
                         .filter_map(|ty| ty.into_schema().right())
-                        .filter_map(|schema| self.graph.resource_for(&schema).name()),
+                        .filter_map(|schema| self.graph.resource_for(&schema).name())
+                        .filter(|dep| *dep != resource),
                 );
             }
 
@@ -62,7 +63,8 @@ impl<'a> CodegenCargoManifest<'a> {
                 entry.extend(
                     op.dependencies()
                         .filter_map(|ty| ty.into_schema().right())
-                        .filter_map(|schema| self.graph.resource_for(&schema).name()),
+                        .filter_map(|schema| self.graph.resource_for(&schema).name())
+                        .filter(|dep| *dep != resource),
                 );
             }
 
@@ -841,8 +843,8 @@ mod tests {
         let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
         let manifest = CodegenCargoManifest::new(&graph, &default_manifest()).to_manifest();
 
-        // `Order` → `Customer` → `BillingInfo`, so `order` should
-        // depend on both `customer` and `billing`.
+        // `Order` -> `Customer` -> `BillingInfo`, so `orders` depends on
+        // both `customer` and `billing`.
         let features = manifest.features();
         assert_eq!(features["orders"], ["billing", "customer"]);
     }
@@ -910,6 +912,40 @@ mod tests {
         // Self-referential schemas should not create self-dependencies.
         let features = manifest.features();
         assert_matches!(&*features["nodes"], []);
+    }
+
+    #[test]
+    fn test_schema_dependency_on_own_resource_does_not_create_feature_dependency() {
+        let doc = Document::from_yaml(indoc::indoc! {"
+            openapi: 3.0.0
+            info:
+              title: Test
+              version: 1.0.0
+            components:
+              schemas:
+                Default:
+                  type: object
+                  x-resourceId: default
+                  properties:
+                    child:
+                      $ref: '#/components/schemas/DefaultChild'
+                DefaultChild:
+                  type: object
+                  x-resourceId: default
+                  properties:
+                    id:
+                      type: string
+        "})
+        .unwrap();
+
+        let arena = Arena::new();
+        let spec = Spec::from_doc(&arena, &doc).unwrap();
+        let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
+        let manifest = CodegenCargoManifest::new(&graph, &default_manifest()).to_manifest();
+
+        let features = manifest.features();
+        assert_matches!(&*features["default2"], []);
+        assert_matches!(&*features["default"], ["default2"]);
     }
 
     // MARK: Operation feature dependencies
@@ -1009,6 +1045,48 @@ mod tests {
         assert_matches!(&*features["customer"], []);
     }
 
+    #[test]
+    fn test_operation_dependency_on_own_resource_does_not_create_feature_dependency() {
+        let doc = Document::from_yaml(indoc::indoc! {"
+            openapi: 3.0.0
+            info:
+              title: Test
+              version: 1.0.0
+            paths:
+              /defaults:
+                get:
+                  operationId: listDefaults
+                  x-resource-name: default
+                  responses:
+                    '200':
+                      description: OK
+                      content:
+                        application/json:
+                          schema:
+                            type: array
+                            items:
+                              $ref: '#/components/schemas/Default'
+            components:
+              schemas:
+                Default:
+                  type: object
+                  x-resourceId: default
+                  properties:
+                    id:
+                      type: string
+        "})
+        .unwrap();
+
+        let arena = Arena::new();
+        let spec = Spec::from_doc(&arena, &doc).unwrap();
+        let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
+        let manifest = CodegenCargoManifest::new(&graph, &default_manifest()).to_manifest();
+
+        let features = manifest.features();
+        assert_matches!(&*features["default2"], []);
+        assert_matches!(&*features["default"], ["default2"]);
+    }
+
     // MARK: Diamond dependencies
 
     #[test]
@@ -1058,8 +1136,8 @@ mod tests {
 
         let features = manifest.features();
 
-        // `a` depends directly on `b`, `c`;
-        // transitively on `d` though `b` and `c`.
+        // `a` depends directly on `b` and `c`, and
+        // transitively on `d` through both.
         assert_eq!(features["a"], ["b", "c", "d"]);
 
         // `b` and `c` each depend on `d`.
@@ -1123,9 +1201,9 @@ mod tests {
     }
 
     #[test]
-    fn test_cycle_with_all_named_resources_creates_mutual_dependencies() {
+    fn test_cycle_with_all_named_resources_preserves_feature_members() {
         // Type A (resource `a`) -> Type B (resource `b`) -> Type C (resource `c`) -> Type A.
-        // Each feature should depend on the others in the cycle.
+        // Each feature needs every other cycle member to compile.
         let doc = Document::from_yaml(indoc::indoc! {"
             openapi: 3.0.0
             info:

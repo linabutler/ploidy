@@ -24,11 +24,14 @@
 
 use petgraph::graph::NodeIndex;
 
-use crate::ir::{InlineTypeId, graph::CookedGraph, types::GraphInlineType};
+use crate::ir::{
+    GraphType, InlineTypeId, InlineTypePathRoot, graph::CookedGraph, types::GraphInlineType,
+};
 
 use super::{
-    ViewNode, any::AnyView, container::ContainerView, enum_::EnumView, path::InlineTypePathView,
-    primitive::PrimitiveView, struct_::StructView, tagged::TaggedView, untagged::UntaggedView,
+    HasResource, ViewNode, any::AnyView, container::ContainerView, enum_::EnumView,
+    path::InlineTypePathView, primitive::PrimitiveView, struct_::StructView, tagged::TaggedView,
+    untagged::UntaggedView,
 };
 
 /// A graph-aware view of an [inline type][GraphInlineType].
@@ -70,14 +73,35 @@ impl<'graph, 'a> InlineTypeView<'graph, 'a> {
     /// Returns the path to this inline type.
     #[inline]
     pub fn path(&self) -> InlineTypePathView<'graph, 'a> {
-        let (Self::Enum(id, _)
+        InlineTypePathView::new(self.cooked(), self.id())
+    }
+
+    #[inline]
+    fn id(&self) -> InlineTypeId {
+        let &(Self::Enum(id, _)
         | Self::Struct(id, _)
         | Self::Tagged(id, _)
         | Self::Untagged(id, _)
         | Self::Container(id, _)
         | Self::Primitive(id, _)
         | Self::Any(id, _)) = self;
-        InlineTypePathView::new(self.cooked(), *id)
+        id
+    }
+}
+
+impl<'a> HasResource<'a> for InlineTypeView<'_, 'a> {
+    /// Returns the name of the resource that this inline type belongs to.
+    #[inline]
+    fn resource(&self) -> Option<&'a str> {
+        let cooked = self.cooked();
+        let id = self.id();
+        match cooked.metadata.paths[&id].root {
+            InlineTypePathRoot::Schema(index) => match cooked.graph[index] {
+                GraphType::Schema(schema) => schema.info().resource,
+                GraphType::Inline(_) => unreachable!(),
+            },
+            InlineTypePathRoot::Operation { resource, .. } => resource,
+        }
     }
 }
 
