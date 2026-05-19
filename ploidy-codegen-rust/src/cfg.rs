@@ -57,19 +57,15 @@ impl<'a> CfgFeature<'a> {
         graph: &CodegenGraph<'a>,
         view: &SchemaTypeView<'_, 'a>,
     ) -> Option<Self> {
-        // If this type has any transitive ungated root dependents,
-        // it can't have a feature gate. An "ungated root" type
-        // has no `x-resourceId`, _and_ isn't used by any operation with
-        // `x-resource-name`. Because it's ungated, none of its
-        // transitive dependencies can be gated, either.
-        let has_ungated_root_dependent = view
-            .dependents()
-            .filter_map(|v| v.into_schema().right())
-            .any(|s| {
-                graph.resource_for(&s).is_default()
-                    && s.used_by().all(|op| graph.resource_for(&op).is_default())
-            });
-        if has_ungated_root_dependent {
+        // Types in the default resource group aren't feature-gated.
+        // If this type is in the default group, or is depended on by a type
+        // in that group, then it can't have a feature gate, either.
+        if in_default_resource_group(graph, view)
+            || view
+                .dependents()
+                .filter_map(|ty| ty.into_schema().right())
+                .any(|schema| in_default_resource_group(graph, &schema))
+        {
             return None;
         }
 
@@ -81,9 +77,11 @@ impl<'a> CfgFeature<'a> {
 
         match (graph.resource_for(view), used_by_resources.is_empty()) {
             // Type has own resource, _and_ is used by operations.
-            (ResourceGroup::Named(name), false) => Self::own_and_used_by(name, used_by_resources),
+            (ResourceGroup::Named(own), false) => {
+                Some(Self::own_and_used_by(own, used_by_resources))
+            }
             // Type has own resource only (Stripe-style; no resources on operations).
-            (ResourceGroup::Named(name), true) => Some(Self::Single(name)),
+            (ResourceGroup::Named(own), true) => Some(Self::Single(own)),
             // Type has no own resource, but is used by operations
             // (resource annotation-style; no resources on types).
             (ResourceGroup::Default, false) => Self::any_of(used_by_resources),
@@ -97,25 +95,32 @@ impl<'a> CfgFeature<'a> {
         graph: &CodegenGraph<'a>,
         view: &InlineTypeView<'_, 'a>,
     ) -> Option<Self> {
-        // Inline types depended on by ungated root types can't be gated, either.
-        // See `for_schema_type` for the definition of an "ungated root".
-        let has_ungated_root_dependent = view
+        // If this type is depended on by a type in the default resource group,
+        // then it can't have a feature gate.
+        if view
             .dependents()
-            .filter_map(|v| v.into_schema().right())
-            .any(|s| s.resource().is_none() && s.used_by().all(|op| op.resource().is_none()));
-        if has_ungated_root_dependent {
+            .filter_map(|ty| ty.into_schema().right())
+            .any(|schema| in_default_resource_group(graph, &schema))
+        {
             return None;
         }
 
         let used_by_resources: BTreeSet<_> = view
             .used_by()
-            .filter_map(|op| graph.resource_for(&op).name())
+            .filter_map(|op| {
+                use ResourceGroup::*;
+                match (graph.resource_for(view), graph.resource_for(&op)) {
+                    (Default, Named(resource)) => Some(resource),
+                    (Named(own), Named(resource)) if own != resource => Some(resource),
+                    _ => None,
+                }
+            })
             .collect();
 
         if used_by_resources.is_empty() {
             // No operations use this inline type directly, so use its
             // transitive dependencies for gating.
-            Self::all_of(reduce_transitive_features(graph, view))
+            Self::for_transitive_dependencies(graph, view)
         } else {
             // Some operations use this inline type; use those operations for gating.
             Self::any_of(used_by_resources)
@@ -124,7 +129,52 @@ impl<'a> CfgFeature<'a> {
 
     /// Builds a `#[cfg(...)]` attribute for a client method.
     pub fn for_operation(graph: &CodegenGraph<'a>, view: &OperationView<'_, 'a>) -> Option<Self> {
-        Self::all_of(reduce_transitive_features(graph, view))
+        Self::for_transitive_dependencies(graph, view)
+    }
+
+    /// Builds a `#[cfg(...)]` attribute from a view's resource dependencies.
+    ///
+    /// Reduces the set of resource features in a view's dependencies by
+    /// removing features that are transitively implied by other features.
+    /// If feature A's type depends on feature B's type, then enabling A
+    /// in `Cargo.toml` already enables B, so B is redundant.
+    fn for_transitive_dependencies<'graph>(
+        graph: &'graph CodegenGraph<'a>,
+        view: &(impl HasResource<'a> + View<'graph, 'a>),
+    ) -> Option<Self> {
+        Self::all_of(
+            view.dependencies()
+                .filter_map(|ty| {
+                    let schema = ty.into_schema().right()?;
+                    // Filter out dependencies without a resource name,
+                    // because these aren't feature-gated.
+                    let resource = graph.resource_for(&schema).name()?;
+                    // Keep our resource feature unless the other schema
+                    // depends on it, meaning that the other feature already
+                    // enables ours. If this schema and the other schema
+                    // depend on each other, the lexicographically lower
+                    // resource feature breaks the tie.
+                    let implied = view
+                        .dependencies()
+                        .filter_map(|ty| ty.into_schema().right())
+                        .any(|other_schema| {
+                            let ResourceGroup::Named(other_resource) =
+                                graph.resource_for(&other_schema)
+                            else {
+                                return false;
+                            };
+                            other_schema.depends_on(&schema)
+                                && (!schema.depends_on(&other_schema) || other_resource < resource)
+                        });
+                    (!implied).then_some(resource)
+                })
+                .filter(|&resource| match graph.resource_for(view) {
+                    ResourceGroup::Default => true,
+                    ResourceGroup::Named(own) if own != resource => true,
+                    _ => false,
+                })
+                .collect(),
+        )
     }
 
     /// Builds a `#[cfg(any(...))]` predicate, simplifying if possible.
@@ -152,22 +202,23 @@ impl<'a> CfgFeature<'a> {
     }
 
     /// Builds a `#[cfg(all(own, any(...)))]` predicate, simplifying if possible.
-    fn own_and_used_by(
-        own: &'a UniqueIdent,
-        mut used_by: BTreeSet<&'a UniqueIdent>,
-    ) -> Option<Self> {
+    fn own_and_used_by(own: &'a UniqueIdent, mut used_by: BTreeSet<&'a UniqueIdent>) -> Self {
+        if used_by.contains(own) {
+            // Simplify `all(own, any(own, ...))` to `own`.
+            return Self::Single(own);
+        }
         let Some(first) = used_by.pop_first() else {
-            // No `used_by`; simplify to `own`.
-            return Some(Self::Single(own));
+            // Simplify `all(own)` to `own`.
+            return Self::Single(own);
         };
-        Some(if used_by.is_empty() {
+        if used_by.is_empty() {
             // Simplify `all(own, any(first))` to `all(own, first)`.
             Self::AllOf(BTreeSet::from_iter([own, first]))
         } else {
             // Keep `all(own, any(first, used_by...))`.
             used_by.insert(first);
             Self::OwnAndUsedBy { own, used_by }
-        })
+        }
     }
 }
 
@@ -205,39 +256,13 @@ impl ToTokens for CfgFeature<'_> {
     }
 }
 
-/// Reduces the set of resource features in a view's dependencies by
-/// removing features that are transitively implied by other features.
-/// If feature A's type depends on feature B's type, then enabling A
-/// in `Cargo.toml` already enables B, so B is redundant.
-fn reduce_transitive_features<'graph, 'a: 'graph>(
-    graph: &CodegenGraph<'a>,
-    view: &impl View<'graph, 'a>,
-) -> BTreeSet<&'a UniqueIdent> {
-    view.dependencies()
-        .filter_map(|v| {
-            let ty = v.into_schema().right()?;
-            // Filter out dependencies without a resource name,
-            // because these aren't gated.
-            let feature = graph.resource_for(&ty).name()?;
-            // Keep our `feature` unless some `other_ty` depends on it,
-            // meaning that `other_feature` already enables ours.
-            // If this `ty` and `other_ty` depend on each other, the
-            // lexicographically lower feature name breaks the tie.
-            let implied = view
-                .dependencies()
-                .filter_map(|v| v.into_schema().right())
-                .any(|other_ty| {
-                    if let ResourceGroup::Named(other_feature) = graph.resource_for(&other_ty)
-                        && other_ty.depends_on(&ty)
-                    {
-                        !ty.depends_on(&other_ty) || other_feature < feature
-                    } else {
-                        false
-                    }
-                });
-            (!implied).then_some(feature)
-        })
-        .collect()
+fn in_default_resource_group<'graph, 'a>(
+    graph: &'graph CodegenGraph<'a>,
+    view: &(impl View<'graph, 'a> + HasResource<'a>),
+) -> bool {
+    let mut used_by = view.used_by().map(|op| graph.resource_for(&op)).peekable();
+    graph.resource_for(view).is_default()
+        && (used_by.peek().is_none() || used_by.any(|resource| resource.is_default()))
 }
 
 #[cfg(test)]
@@ -357,10 +382,7 @@ mod tests {
         let other = scope.ident("other");
         // `OwnedAndUsedBy` with one `used_by` feature should simplify to `AllOf`.
         let cfg = CfgFeature::own_and_used_by(own, BTreeSet::from_iter([other]));
-        assert_eq!(
-            cfg,
-            Some(CfgFeature::AllOf(BTreeSet::from_iter([other, own])))
-        );
+        assert_eq!(cfg, CfgFeature::AllOf(BTreeSet::from_iter([other, own])),);
     }
 
     #[test]
@@ -370,7 +392,17 @@ mod tests {
         let own = scope.ident("own");
         // `OwnedAndUsedBy` with no `used_by` features should simplify to `Single`.
         let cfg = CfgFeature::own_and_used_by(own, BTreeSet::new());
-        assert_eq!(cfg, Some(CfgFeature::Single(own)));
+        assert_eq!(cfg, CfgFeature::Single(own));
+    }
+
+    #[test]
+    fn test_own_and_used_by_simplifies_own_used_by_to_single() {
+        let arena = Arena::new();
+        let mut scope = UniqueIdents::new(&arena);
+        let own = scope.ident("own");
+        let other = scope.ident("other");
+        let cfg = CfgFeature::own_and_used_by(own, BTreeSet::from_iter([own, other]));
+        assert_eq!(cfg, CfgFeature::Single(own));
     }
 
     // MARK: Schema types
@@ -658,6 +690,101 @@ mod tests {
     }
 
     #[test]
+    fn test_for_schema_type_with_own_and_same_used_by_uses_single_feature() {
+        let doc = Document::from_yaml(indoc::indoc! {"
+            openapi: 3.0.0
+            info:
+              title: Test
+              version: 1.0.0
+            paths:
+              /defaults:
+                get:
+                  operationId: listDefaults
+                  x-resource-name: default
+                  responses:
+                    '200':
+                      description: OK
+                      content:
+                        application/json:
+                          schema:
+                            $ref: '#/components/schemas/Default'
+            components:
+              schemas:
+                Default:
+                  type: object
+                  x-resourceId: default
+                  properties:
+                    id:
+                      type: string
+        "})
+        .unwrap();
+
+        let arena = Arena::new();
+        let spec = Spec::from_doc(&arena, &doc).unwrap();
+        let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
+
+        let default_type = graph.schema("Default").unwrap();
+        let cfg = CfgFeature::for_schema_type(&graph, &default_type);
+
+        let actual: syn::Attribute = parse_quote!(#cfg);
+        let expected: syn::Attribute = parse_quote!(#[cfg(feature = "default2")]);
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn test_for_schema_type_with_own_same_and_other_used_by_uses_single_feature() {
+        let doc = Document::from_yaml(indoc::indoc! {"
+            openapi: 3.0.0
+            info:
+              title: Test
+              version: 1.0.0
+            paths:
+              /customer:
+                get:
+                  operationId: getCustomer
+                  x-resource-name: customer
+                  responses:
+                    '200':
+                      description: OK
+                      content:
+                        application/json:
+                          schema:
+                            $ref: '#/components/schemas/Customer'
+              /billing:
+                get:
+                  operationId: getBilling
+                  x-resource-name: billing
+                  responses:
+                    '200':
+                      description: OK
+                      content:
+                        application/json:
+                          schema:
+                            $ref: '#/components/schemas/Customer'
+            components:
+              schemas:
+                Customer:
+                  type: object
+                  x-resourceId: customer
+                  properties:
+                    id:
+                      type: string
+        "})
+        .unwrap();
+
+        let arena = Arena::new();
+        let spec = Spec::from_doc(&arena, &doc).unwrap();
+        let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
+
+        let customer = graph.schema("Customer").unwrap();
+        let cfg = CfgFeature::for_schema_type(&graph, &customer);
+
+        let actual: syn::Attribute = parse_quote!(#cfg);
+        let expected: syn::Attribute = parse_quote!(#[cfg(feature = "customer")]);
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
     fn test_for_schema_type_with_own_and_multiple_used_by() {
         let doc = Document::from_yaml(indoc::indoc! {"
             openapi: 3.0.0
@@ -876,6 +1003,57 @@ mod tests {
         assert_eq!(cfg, None);
     }
 
+    #[test]
+    fn test_for_schema_type_used_by_resourced_and_unresourced_operations() {
+        // `Status` is used by both an unresourced operation and a resourced
+        // operation. It must stay ungated for the unresourced operation.
+        let doc = Document::from_yaml(indoc::indoc! {"
+            openapi: 3.0.0
+            info:
+              title: Test
+              version: 1.0.0
+            paths:
+              /health:
+                get:
+                  operationId: getHealth
+                  responses:
+                    '200':
+                      description: OK
+                      content:
+                        application/json:
+                          schema:
+                            $ref: '#/components/schemas/Status'
+              /billing/status:
+                get:
+                  operationId: getBillingStatus
+                  x-resource-name: billing
+                  responses:
+                    '200':
+                      description: OK
+                      content:
+                        application/json:
+                          schema:
+                            $ref: '#/components/schemas/Status'
+            components:
+              schemas:
+                Status:
+                  type: object
+                  properties:
+                    ok:
+                      type: boolean
+        "})
+        .unwrap();
+
+        let arena = Arena::new();
+        let spec = Spec::from_doc(&arena, &doc).unwrap();
+        let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
+
+        let status = graph.schema("Status").unwrap();
+        let cfg = CfgFeature::for_schema_type(&graph, &status);
+
+        assert_eq!(cfg, None);
+    }
+
     // MARK: Cycles with mixed resources
 
     #[test]
@@ -1024,6 +1202,51 @@ mod tests {
         assert!(!inlines.is_empty());
 
         // Shouldn't generate any feature gates for graph without named resources.
+        let cfg = CfgFeature::for_inline_type(&graph, &inlines[0]);
+        assert_eq!(cfg, None);
+    }
+
+    #[test]
+    fn test_for_inline_type_used_by_own_resource_has_no_cfg() {
+        let doc = Document::from_yaml(indoc::indoc! {"
+            openapi: 3.0.0
+            info:
+              title: Test
+              version: 1.0.0
+            paths:
+              /defaults:
+                get:
+                  operationId: listDefaults
+                  x-resource-name: default
+                  responses:
+                    '200':
+                      description: OK
+                      content:
+                        application/json:
+                          schema:
+                            type: object
+                            properties:
+                              value:
+                                $ref: '#/components/schemas/Default'
+            components:
+              schemas:
+                Default:
+                  type: object
+                  x-resourceId: default
+                  properties:
+                    id:
+                      type: string
+        "})
+        .unwrap();
+
+        let arena = Arena::new();
+        let spec = Spec::from_doc(&arena, &doc).unwrap();
+        let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
+
+        let ops = graph.operations().collect_vec();
+        let inlines = ops.iter().flat_map(|op| op.inlines()).collect_vec();
+        assert!(!inlines.is_empty());
+
         let cfg = CfgFeature::for_inline_type(&graph, &inlines[0]);
         assert_eq!(cfg, None);
     }
