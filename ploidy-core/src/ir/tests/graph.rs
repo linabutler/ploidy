@@ -40,11 +40,8 @@ fn test_graph_basic_construction() {
     let spec = Spec::from_doc(&arena, &doc).unwrap();
     let graph = RawGraph::new(&arena, &spec).cook();
 
-    // Should be able to iterate over schemas.
-    // The order of iteration isn't guaranteed.
-    let mut schema_names = graph.schemas().map(|s| s.name()).collect_vec();
-    schema_names.sort();
-    assert_matches!(&*schema_names, ["Company", "Person"]);
+    let schema_names = graph.schemas().map(|s| s.name()).collect_vec();
+    assert_matches!(&*schema_names, ["Person", "Company"]);
 }
 
 #[test]
@@ -79,9 +76,8 @@ fn test_graph_deduplication() {
     let graph = RawGraph::new(&arena, &spec).cook();
 
     // Should have all 3 schemas, with `Shared` appearing only once.
-    let mut schema_names = graph.schemas().map(|s| s.name()).collect_vec();
-    schema_names.sort();
-    assert_matches!(&*schema_names, ["Container1", "Container2", "Shared"]);
+    let schema_names = graph.schemas().map(|s| s.name()).collect_vec();
+    assert_matches!(&*schema_names, ["Shared", "Container1", "Container2"]);
 }
 
 #[test]
@@ -111,9 +107,8 @@ fn test_graph_struct_field_edges() {
     let graph = RawGraph::new(&arena, &spec).cook();
 
     // Both schemas should be present.
-    let mut schema_names = graph.schemas().map(|s| s.name()).collect_vec();
-    schema_names.sort();
-    assert_matches!(&*schema_names, ["Container", "FieldType"]);
+    let schema_names = graph.schemas().map(|s| s.name()).collect_vec();
+    assert_matches!(&*schema_names, ["FieldType", "Container"]);
 }
 
 #[test]
@@ -152,9 +147,8 @@ fn test_graph_tagged_variant_edges() {
     let graph = RawGraph::new(&arena, &spec).cook();
 
     // Should have all schemas.
-    let mut schema_names = graph.schemas().map(|s| s.name()).collect_vec();
-    schema_names.sort();
-    assert_matches!(&*schema_names, ["Animal", "Cat", "Dog"]);
+    let schema_names = graph.schemas().map(|s| s.name()).collect_vec();
+    assert_matches!(&*schema_names, ["Dog", "Cat", "Animal"]);
 }
 
 #[test]
@@ -188,9 +182,8 @@ fn test_graph_untagged_variant_edges() {
     let graph = RawGraph::new(&arena, &spec).cook();
 
     // Should have all schemas.
-    let mut schema_names = graph.schemas().map(|s| s.name()).collect_vec();
-    schema_names.sort();
-    assert_matches!(&*schema_names, ["AOrB", "TypeA", "TypeB"]);
+    let schema_names = graph.schemas().map(|s| s.name()).collect_vec();
+    assert_matches!(&*schema_names, ["TypeA", "TypeB", "AOrB"]);
 }
 
 #[test]
@@ -222,8 +215,7 @@ fn test_graph_array_edge() {
     let graph = RawGraph::new(&arena, &spec).cook();
 
     // Should have both schemas.
-    let mut schema_names = graph.schemas().map(|s| s.name()).collect_vec();
-    schema_names.sort();
+    let schema_names = graph.schemas().map(|s| s.name()).collect_vec();
     assert_matches!(&*schema_names, ["Item", "Items"]);
 }
 
@@ -256,9 +248,8 @@ fn test_graph_map_edge() {
     let graph = RawGraph::new(&arena, &spec).cook();
 
     // Should have both schemas.
-    let mut schema_names = graph.schemas().map(|s| s.name()).collect_vec();
-    schema_names.sort();
-    assert_matches!(&*schema_names, ["Dictionary", "Value"]);
+    let schema_names = graph.schemas().map(|s| s.name()).collect_vec();
+    assert_matches!(&*schema_names, ["Value", "Dictionary"]);
 }
 
 #[test]
@@ -289,9 +280,8 @@ fn test_graph_nullable_edge() {
     let graph = RawGraph::new(&arena, &spec).cook();
 
     // Should have both schemas.
-    let mut schema_names = graph.schemas().map(|s| s.name()).collect_vec();
-    schema_names.sort();
-    assert_matches!(&*schema_names, ["Container", "NullableType"]);
+    let schema_names = graph.schemas().map(|s| s.name()).collect_vec();
+    assert_matches!(&*schema_names, ["NullableType", "Container"]);
 }
 
 #[test]
@@ -323,8 +313,7 @@ fn test_graph_ref_resolution() {
     let graph = RawGraph::new(&arena, &spec).cook();
 
     // Should have both `Parent` and `Child` schemas.
-    let mut schema_names = graph.schemas().map(|s| s.name()).collect_vec();
-    schema_names.sort();
+    let schema_names = graph.schemas().map(|s| s.name()).collect_vec();
     assert_matches!(&*schema_names, ["Child", "Parent"]);
 }
 
