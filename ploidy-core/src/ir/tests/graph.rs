@@ -2189,6 +2189,12 @@ fn test_untagged_union_inlines_variants_with_fields() {
     let graph = raw.cook();
 
     let animal = graph.schema("Animal").unwrap();
+    let inline_struct_count = animal
+        .inlines()
+        .filter(|inline| matches!(inline, InlineTypeView::Struct(..)))
+        .count();
+    assert_eq!(inline_struct_count, 2);
+
     let untagged = match animal {
         SchemaTypeView::Untagged(_, view) => view,
         other => panic!("expected untagged `Animal`; got {other:?}"),
@@ -2212,6 +2218,76 @@ fn test_untagged_union_inlines_variants_with_fields() {
     };
     let dog_field_names = dog_struct.fields().map(|f| f.name()).collect_vec();
     assert_matches!(&*dog_field_names, [StructFieldName::Name("bark")]);
+}
+
+#[test]
+fn test_untagged_union_adds_fields_to_inline_variants() {
+    let doc = Document::from_yaml(indoc::indoc! {"
+        openapi: 3.0.0
+        info:
+          title: Test
+          version: 1.0.0
+        components:
+          schemas:
+            Animal:
+              oneOf:
+                - type: object
+                  properties:
+                    bark:
+                      type: string
+                - type: object
+                  properties:
+                    meow:
+                      type: string
+              properties:
+                name:
+                  type: string
+    "})
+    .unwrap();
+
+    let arena = Arena::new();
+    let spec = Spec::from_doc(&arena, &doc).unwrap();
+    let mut raw = RawGraph::new(&arena, &spec);
+    raw.inline_untagged_variants();
+    let graph = raw.cook();
+
+    let animal = graph.schema("Animal").unwrap();
+    let inline_struct_count = animal
+        .inlines()
+        .filter(|inline| matches!(inline, InlineTypeView::Struct(..)))
+        .count();
+    assert_eq!(inline_struct_count, 2);
+
+    let untagged = match animal {
+        SchemaTypeView::Untagged(_, view) => view,
+        other => panic!("expected untagged `Animal`; got {other:?}"),
+    };
+
+    let field_names = untagged
+        .variants()
+        .map(|variant| {
+            let variant = variant.ty().unwrap();
+            let view = match variant.view {
+                TypeView::Inline(InlineTypeView::Struct(_, view)) => view,
+                other => panic!("expected inline struct variant; got `{other:?}`"),
+            };
+            view.fields().map(|f| f.name()).collect_vec()
+        })
+        .collect_vec();
+
+    assert_matches!(
+        &*field_names,
+        [
+            dog,
+            cat,
+        ] if matches!(
+            &**dog,
+            [StructFieldName::Name("name"), StructFieldName::Name("bark")]
+        ) && matches!(
+            &**cat,
+            [StructFieldName::Name("name"), StructFieldName::Name("meow")]
+        )
+    );
 }
 
 #[test]
