@@ -15,8 +15,9 @@ use petgraph::{
     graph::{DiGraph, EdgeIndex, NodeIndex},
     stable_graph::StableDiGraph,
     visit::{
-        DfsPostOrder, EdgeFiltered, EdgeRef, GraphRef, IntoEdges, IntoNeighbors,
-        IntoNeighborsDirected, IntoNodeIdentifiers, NodeCount, NodeIndexable, VisitMap, Visitable,
+        DfsPostOrder, EdgeFiltered, EdgeRef, GraphRef, IntoEdgeReferences, IntoEdges,
+        IntoNeighbors, IntoNeighborsDirected, IntoNodeIdentifiers, NodeCount, NodeIndexable,
+        VisitMap, Visitable,
     },
 };
 use rustc_hash::{FxBuildHasher, FxHashMap};
@@ -274,6 +275,199 @@ impl<'a> RawGraph<'a> {
                 let new_target = retargets.get(&(index, target)).copied().unwrap_or(target);
                 self.graph.add_edge(index, new_target, weight);
             }
+        }
+
+        self
+    }
+
+    /// Simplifies trivial `allOf` compositions.
+    ///
+    /// Drops inheritance edges from `Any`, and collapses inline structs and
+    /// unions with a single parent and without own fields or variants,
+    /// to that parent. Trivial named schemas are preserved, so that user code
+    /// can refer to them by name.
+    ///
+    /// This transformation simplifies OpenAPI 3.1 `$ref` schemas with adjacent
+    /// keywords. A schema like `{ "$ref": "...", "description": "..." }` is
+    /// sugar for an inline `allOf` schema with two subschemas: a reference and
+    /// an inline with just a `description`. The latter doesn't contribute any
+    /// type constraints, so the inline `allOf` is redundant.
+    pub fn collapse_trivial_inlines(&mut self) -> &mut Self {
+        // `Any` doesn't contribute any members, and dropping `Inherits` edges
+        // to it here simplifies the logic to find collapsible inlines and
+        // their new targets.
+        let inherits_to_any = self
+            .graph
+            .edge_references()
+            .filter(|edge| {
+                matches!(edge.weight(), GraphEdge::Inherits { .. })
+                    && matches!(
+                        self.graph[edge.target()],
+                        GraphType::Schema(GraphSchemaType::Any(_))
+                            | GraphType::Inline(GraphInlineType::Any(_))
+                    )
+            })
+            .map(|edge| edge.id())
+            .collect_vec();
+        for id in inherits_to_any {
+            self.graph.remove_edge(id);
+        }
+
+        // Find all inlines with no own members (i.e., no fields or variants)
+        // and exactly one parent.
+        let collapsibles: FixedBitSet = self
+            .graph
+            .node_indices()
+            .filter(|&node| {
+                matches!(
+                    self.graph[node],
+                    GraphType::Inline(
+                        GraphInlineType::Struct(..)
+                            | GraphInlineType::Tagged(..)
+                            | GraphInlineType::Untagged(..)
+                    )
+                )
+            })
+            .filter(|&node| {
+                self.graph
+                    .edges_directed(node, Direction::Outgoing)
+                    .all(|edge| {
+                        !matches!(
+                            edge.weight(),
+                            GraphEdge::Field { .. } | GraphEdge::Variant(_)
+                        )
+                    })
+                    && self
+                        .graph
+                        .edges_directed(node, Direction::Outgoing)
+                        .filter(|edge| {
+                            matches!(edge.weight(), GraphEdge::Inherits { .. })
+                                && edge.target() != node
+                        })
+                        .exactly_one()
+                        .is_ok()
+            })
+            .map(|node| node.index())
+            .collect();
+
+        // Compute the transitive closure over the inheritance subgraph
+        // rooted at the collapsible set, then map each collapsible node to its
+        // non-collapsible target. Each collapsible has exactly one
+        // outgoing edge in this subgraph, so its dependency set is a linear
+        // chain ending in either the target or a cycle entirely within the
+        // collapsible set. Only chains with a target are recorded.
+        let closure = Closure::new(&EdgeFiltered::from_fn(&self.graph, |edge| {
+            matches!(edge.weight(), GraphEdge::Inherits { .. })
+                && collapsibles.contains(edge.source().index())
+        }));
+        let collapsed_to: FxHashMap<_, _> = collapsibles
+            .ones()
+            .map(NodeIndex::new)
+            .flat_map(|node| {
+                closure
+                    .dependencies_of(node)
+                    .find(|target| !collapsibles.contains(target.index()))
+                    .map(|target| (node, target))
+            })
+            .collect();
+        if collapsed_to.is_empty() {
+            return self;
+        }
+
+        // Redirect every incoming edge of a collapsible to its target.
+        // Skip edges whose source is also collapsible; we'll remove those last.
+        let sources_to_redirect: FixedBitSet = self
+            .graph
+            .edge_references()
+            .filter(|edge| {
+                collapsed_to.contains_key(&edge.target())
+                    && !collapsed_to.contains_key(&edge.source())
+            })
+            .map(|edge| edge.source().index())
+            .collect();
+        for source in sources_to_redirect.ones().map(NodeIndex::new) {
+            let old_edges = self
+                .graph
+                .edges_directed(source, Direction::Outgoing)
+                .map(|edge| {
+                    let old_target = edge.target();
+                    let new_target = collapsed_to.get(&old_target).copied().unwrap_or(old_target);
+                    (edge.id(), *edge.weight(), new_target)
+                })
+                .collect_vec();
+            for &(id, _, _) in &old_edges {
+                self.graph.remove_edge(id);
+            }
+            // Re-add edges. `edges_directed` yields edges in reverse order
+            // of addition; reversing them adds edges in their original order.
+            // Since edge order matters, we need to remove and re-add them all.
+            for (_, weight, target) in old_edges.into_iter().rev() {
+                self.graph.add_edge(source, target, weight);
+            }
+        }
+
+        // Redirect operation roots, which don't have graph edges.
+        let ops = self
+            .ops
+            .iter()
+            .map(|&op| {
+                let params = op
+                    .params
+                    .iter()
+                    .map(|&param| {
+                        let rewrite = match param {
+                            Parameter::Path(info) => collapsed_to
+                                .get(&info.ty)
+                                .map(|&ty| Parameter::Path(ParameterInfo { ty, ..info })),
+                            Parameter::Query(info) => collapsed_to
+                                .get(&info.ty)
+                                .map(|&ty| Parameter::Query(ParameterInfo { ty, ..info })),
+                        };
+                        rewrite.unwrap_or(param)
+                    })
+                    .collect_vec();
+
+                let request = op
+                    .request
+                    .and_then(|request| match request {
+                        Request::Json(ty) => {
+                            let &ty = collapsed_to.get(&ty)?;
+                            Some(Request::Json(ty))
+                        }
+                        Request::Multipart => None,
+                    })
+                    .or(op.request);
+
+                let response = op
+                    .response
+                    .and_then(|response| match response {
+                        Response::Json(ty) => {
+                            let &ty = collapsed_to.get(&ty)?;
+                            Some(Response::Json(ty))
+                        }
+                    })
+                    .or(op.response);
+
+                if params == op.params && request == op.request && response == op.response {
+                    op
+                } else {
+                    self.arena.alloc(Operation {
+                        params: self.arena.alloc_slice_copy(&params),
+                        request,
+                        response,
+                        ..*op
+                    })
+                }
+            })
+            .collect_vec();
+        if ops != self.ops {
+            self.ops = self.arena.alloc_slice_copy(&ops);
+        }
+
+        // Remove every collapsed node. `remove_node` removes incident edges,
+        // including those between two collapsibles in a chain.
+        for (node, _) in collapsed_to {
+            self.graph.remove_node(node);
         }
 
         self
@@ -1142,6 +1336,9 @@ impl<'a> Iterator for SpecTypeVisitor<'a> {
                                 (GraphEdge::Variant(UntaggedVariantMeta::Null.into()), top)
                             }
                         }),
+                        ty.parents
+                            .iter()
+                            .map(|parent| (GraphEdge::Inherits { shadow: false }, *parent)),
                     )
                     .map(|(edge, ty)| (Some((top, edge)), ty))
                     .rev(),
@@ -1173,6 +1370,9 @@ impl<'a> Iterator for SpecTypeVisitor<'a> {
                             ),
                             variant.ty
                         )),
+                        ty.parents
+                            .iter()
+                            .map(|parent| (GraphEdge::Inherits { shadow: false }, *parent)),
                     )
                     .map(|(edge, ty)| (Some((top, edge)), ty))
                     .rev(),

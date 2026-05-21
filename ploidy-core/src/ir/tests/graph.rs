@@ -5,8 +5,8 @@ use itertools::Itertools;
 use crate::{
     arena::Arena,
     ir::{
-        HasResource, InlineTypeView, RawGraph, SchemaTypeView, Spec, StructFieldName, TypeView,
-        View,
+        ContainerView, HasResource, InlineTypeView, RawGraph, RequestView, ResponseView,
+        SchemaTypeView, Spec, StructFieldName, TypeView, View,
     },
     parse::Document,
     tests::assert_matches,
@@ -2239,4 +2239,675 @@ fn test_needs_box_through_inlined_tagged_variant() {
         .find(|f| matches!(f.name(), StructFieldName::Name("parent")))
         .unwrap();
     assert!(parent_field.needs_box());
+}
+
+// MARK: Collapsing trivial inlines
+
+#[test]
+fn test_inline_ref_with_description_collapses_to_ref() {
+    // OpenAPI 3.1 supports adjacent keywords on `$ref` schemas,
+    // which desugar to `allOf`: `{ "$ref": "...", "description": "..." }`
+    // becomes `{ "allOf": [{ "$ref": "..." }], "description": "..." }`.
+    // For a subschema without any type constraints, the inline `allOf`
+    // carries no structural information, and collapses to a plain reference.
+    let doc = Document::from_yaml(indoc::indoc! {"
+        openapi: 3.1.0
+        info:
+          title: Test
+          version: 1.0.0
+        components:
+          schemas:
+            Pet:
+              type: object
+              properties:
+                name:
+                  type: string
+            Owner:
+              type: object
+              properties:
+                pet:
+                  $ref: '#/components/schemas/Pet'
+                  description: The owner's pet.
+              required:
+                - pet
+    "})
+    .unwrap();
+
+    let arena = Arena::new();
+    let spec = Spec::from_doc(&arena, &doc).unwrap();
+    let mut raw = RawGraph::new(&arena, &spec);
+    raw.collapse_trivial_inlines();
+    let graph = raw.cook();
+
+    let owner = graph.schema("Owner").unwrap();
+    let owner_struct = match owner {
+        SchemaTypeView::Struct(_, view) => view,
+        other => panic!("expected struct `Owner`; got `{other:?}`"),
+    };
+    let pet_field = owner_struct
+        .fields()
+        .find(|f| matches!(f.name(), StructFieldName::Name("pet")))
+        .unwrap();
+
+    // The field should resolve directly to the `Pet` schema, not
+    // an inline struct that inherits from it.
+    let target = match pet_field.ty() {
+        TypeView::Schema(SchemaTypeView::Struct(info, _)) => info.name,
+        other => panic!("expected struct view of `Pet`; got `{other:?}`"),
+    };
+    assert_eq!(target, "Pet");
+}
+
+#[test]
+fn test_container_inner_refs_with_description_collapse_to_refs() {
+    // Container edges should be retargeted when their inner type is a
+    // collapsed inline `allOf` wrapper.
+    let doc = Document::from_yaml(indoc::indoc! {"
+        openapi: 3.1.0
+        info:
+          title: Test
+          version: 1.0.0
+        components:
+          schemas:
+            Pet:
+              type: object
+              properties:
+                name:
+                  type: string
+            Owner:
+              type: object
+              properties:
+                pets:
+                  type: array
+                  items:
+                    $ref: '#/components/schemas/Pet'
+                    description: The pet.
+                pets_by_name:
+                  type: object
+                  additionalProperties:
+                    $ref: '#/components/schemas/Pet'
+                    description: The pet.
+              required:
+                - pets
+                - pets_by_name
+    "})
+    .unwrap();
+
+    let arena = Arena::new();
+    let spec = Spec::from_doc(&arena, &doc).unwrap();
+    let mut raw = RawGraph::new(&arena, &spec);
+    raw.collapse_trivial_inlines();
+    let graph = raw.cook();
+
+    let owner = graph.schema("Owner").unwrap();
+    let owner_struct = match owner {
+        SchemaTypeView::Struct(_, view) => view,
+        other => panic!("expected struct `Owner`; got `{other:?}`"),
+    };
+
+    let pets_field = owner_struct
+        .fields()
+        .find(|f| matches!(f.name(), StructFieldName::Name("pets")))
+        .unwrap();
+    let pets_target = match pets_field.ty() {
+        TypeView::Inline(InlineTypeView::Container(_, ContainerView::Array(inner))) => {
+            match inner.ty() {
+                TypeView::Schema(SchemaTypeView::Struct(info, _)) => info.name,
+                other => panic!("expected array item schema view of `Pet`; got `{other:?}`"),
+            }
+        }
+        other => panic!("expected array container; got `{other:?}`"),
+    };
+    assert_eq!(pets_target, "Pet");
+
+    let pets_by_name_field = owner_struct
+        .fields()
+        .find(|f| matches!(f.name(), StructFieldName::Name("pets_by_name")))
+        .unwrap();
+    let pets_by_name_target = match pets_by_name_field.ty() {
+        TypeView::Inline(InlineTypeView::Container(_, ContainerView::Map(inner))) => {
+            match inner.ty() {
+                TypeView::Schema(SchemaTypeView::Struct(info, _)) => info.name,
+                other => panic!("expected map value schema view of `Pet`; got `{other:?}`"),
+            }
+        }
+        other => panic!("expected map container; got `{other:?}`"),
+    };
+    assert_eq!(pets_by_name_target, "Pet");
+}
+
+#[test]
+fn test_operation_response_ref_with_description_collapses_to_ref() {
+    // Operations aren't part of the graph, so their roots don't have any
+    // incoming graph edges, but they still need to be retargeted before
+    // removing collapsed inline `allOf`s.
+    let doc = Document::from_yaml(indoc::indoc! {"
+        openapi: 3.1.0
+        info:
+          title: Test
+          version: 1.0.0
+        paths:
+          /pet:
+            get:
+              operationId: getPet
+              responses:
+                '200':
+                  description: OK
+                  content:
+                    application/json:
+                      schema:
+                        $ref: '#/components/schemas/Pet'
+                        description: The pet.
+        components:
+          schemas:
+            Pet:
+              type: object
+              properties:
+                name:
+                  type: string
+    "})
+    .unwrap();
+
+    let arena = Arena::new();
+    let spec = Spec::from_doc(&arena, &doc).unwrap();
+    let mut raw = RawGraph::new(&arena, &spec);
+    raw.collapse_trivial_inlines();
+    let graph = raw.cook();
+
+    let operation = graph.operations().next().unwrap();
+    let target = match operation.response() {
+        Some(ResponseView::Json(TypeView::Schema(SchemaTypeView::Struct(info, _)))) => info.name,
+        other => panic!("expected response struct view of `Pet`; got `{other:?}`"),
+    };
+    assert_eq!(target, "Pet");
+}
+
+#[test]
+fn test_operation_request_ref_with_description_collapses_to_ref() {
+    // Operations aren't part of the graph, so request roots need the same
+    // retargeting as response roots before removing collapsed inline `allOf`s.
+    let doc = Document::from_yaml(indoc::indoc! {"
+        openapi: 3.1.0
+        info:
+          title: Test
+          version: 1.0.0
+        paths:
+          /pet:
+            post:
+              operationId: createPet
+              requestBody:
+                content:
+                  application/json:
+                    schema:
+                      $ref: '#/components/schemas/Pet'
+                      description: The pet.
+              responses:
+                '201':
+                  description: Created
+        components:
+          schemas:
+            Pet:
+              type: object
+              properties:
+                name:
+                  type: string
+    "})
+    .unwrap();
+
+    let arena = Arena::new();
+    let spec = Spec::from_doc(&arena, &doc).unwrap();
+    let mut raw = RawGraph::new(&arena, &spec);
+    raw.collapse_trivial_inlines();
+    let graph = raw.cook();
+
+    let operation = graph.operations().next().unwrap();
+    let target = match operation.request() {
+        Some(RequestView::Json(TypeView::Schema(SchemaTypeView::Struct(info, _)))) => info.name,
+        other => panic!("expected request struct view of `Pet`; got `{other:?}`"),
+    };
+    assert_eq!(target, "Pet");
+}
+
+#[test]
+fn test_operation_parameter_refs_with_description_collapse_to_refs() {
+    // Operation parameters aren't part of the graph, so path and query roots
+    // need to be retargeted before removing collapsed inline `allOf`s.
+    let doc = Document::from_yaml(indoc::indoc! {"
+        openapi: 3.1.0
+        info:
+          title: Test
+          version: 1.0.0
+        paths:
+          /pets/{pet_id}:
+            get:
+              operationId: getPet
+              parameters:
+                - name: pet_id
+                  in: path
+                  required: true
+                  schema:
+                    $ref: '#/components/schemas/PetId'
+                    description: The pet ID.
+                - name: filter
+                  in: query
+                  schema:
+                    $ref: '#/components/schemas/PetFilter'
+                    description: The pet filter.
+              responses:
+                '200':
+                  description: OK
+        components:
+          schemas:
+            PetId:
+              type: string
+            PetFilter:
+              type: object
+              properties:
+                status:
+                  type: string
+    "})
+    .unwrap();
+
+    let arena = Arena::new();
+    let spec = Spec::from_doc(&arena, &doc).unwrap();
+    let mut raw = RawGraph::new(&arena, &spec);
+    raw.collapse_trivial_inlines();
+    let graph = raw.cook();
+
+    let operation = graph.operations().next().unwrap();
+
+    let path_param = operation.path().params().next().unwrap();
+    let path_target = match path_param.ty() {
+        TypeView::Schema(SchemaTypeView::Primitive(info, _)) => info.name,
+        other => panic!("expected primitive schema view of `PetId`; got `{other:?}`"),
+    };
+    assert_eq!(path_target, "PetId");
+
+    let query_param = operation.query().next().unwrap();
+    let query_target = match query_param.ty() {
+        TypeView::Schema(SchemaTypeView::Struct(info, _)) => info.name,
+        other => panic!("expected struct schema view of `PetFilter`; got `{other:?}`"),
+    };
+    assert_eq!(query_target, "PetFilter");
+}
+
+#[test]
+fn test_parent_ref_with_description_collapses_to_ref() {
+    // Inheritance edges should be retargeted when their parent is a
+    // collapsed inline `allOf` wrapper.
+    let doc = Document::from_yaml(indoc::indoc! {"
+        openapi: 3.1.0
+        info:
+          title: Test
+          version: 1.0.0
+        components:
+          schemas:
+            Pet:
+              type: object
+              properties:
+                name:
+                  type: string
+            OwnedPet:
+              allOf:
+                - $ref: '#/components/schemas/Pet'
+                  description: The pet.
+              properties:
+                owner:
+                  type: string
+              required:
+                - owner
+    "})
+    .unwrap();
+
+    let arena = Arena::new();
+    let spec = Spec::from_doc(&arena, &doc).unwrap();
+    let mut raw = RawGraph::new(&arena, &spec);
+    raw.collapse_trivial_inlines();
+    let graph = raw.cook();
+
+    let owned_pet = graph.schema("OwnedPet").unwrap();
+    let owned_pet_struct = match owned_pet {
+        SchemaTypeView::Struct(_, view) => view,
+        other => panic!("expected struct `OwnedPet`; got `{other:?}`"),
+    };
+
+    let parents = owned_pet_struct.parents().collect_vec();
+    assert_matches!(
+        &*parents,
+        [TypeView::Schema(SchemaTypeView::Struct(info, _))] if info.name == "Pet"
+    );
+}
+
+#[test]
+fn test_collapse_trivial_inlines_drops_inherits_edge_from_any() {
+    // A schema that inherits from another that's effectively `Any`
+    // (e.g., an empty schema) should drop that inheritance edge.
+    let doc = Document::from_yaml(indoc::indoc! {"
+        openapi: 3.0.0
+        info:
+          title: Test
+          version: 1.0.0
+        components:
+          schemas:
+            Anything: {}
+            Thing:
+              allOf:
+                - $ref: '#/components/schemas/Anything'
+              properties:
+                name:
+                  type: string
+    "})
+    .unwrap();
+
+    let arena = Arena::new();
+    let spec = Spec::from_doc(&arena, &doc).unwrap();
+    let mut raw = RawGraph::new(&arena, &spec);
+    raw.collapse_trivial_inlines();
+    let graph = raw.cook();
+
+    let thing = graph.schema("Thing").unwrap();
+    let thing_struct = match thing {
+        SchemaTypeView::Struct(_, view) => view,
+        other => panic!("expected struct `Thing`; got `{other:?}`"),
+    };
+
+    // Without the `Any` inheritance edge, `Thing` has no parents.
+    let parents = thing_struct.parents().collect_vec();
+    assert_matches!(&*parents, []);
+}
+
+#[test]
+fn test_collapse_trivial_inlines_drops_any_parent_before_collapsing_inline() {
+    // Dropping `Any` parents first should allow an otherwise trivial inline
+    // `allOf` wrapper to collapse to its remaining parent.
+    let doc = Document::from_yaml(indoc::indoc! {"
+        openapi: 3.0.0
+        info:
+          title: Test
+          version: 1.0.0
+        components:
+          schemas:
+            Pet:
+              type: object
+              properties:
+                name:
+                  type: string
+            Owner:
+              type: object
+              properties:
+                pet:
+                  allOf:
+                    - {}
+                    - $ref: '#/components/schemas/Pet'
+              required:
+                - pet
+    "})
+    .unwrap();
+
+    let arena = Arena::new();
+    let spec = Spec::from_doc(&arena, &doc).unwrap();
+    let mut raw = RawGraph::new(&arena, &spec);
+    raw.collapse_trivial_inlines();
+    let graph = raw.cook();
+
+    let owner = graph.schema("Owner").unwrap();
+    let owner_struct = match owner {
+        SchemaTypeView::Struct(_, view) => view,
+        other => panic!("expected struct `Owner`; got `{other:?}`"),
+    };
+    let pet_field = owner_struct
+        .fields()
+        .find(|f| matches!(f.name(), StructFieldName::Name("pet")))
+        .unwrap();
+
+    let target = match pet_field.ty() {
+        TypeView::Schema(SchemaTypeView::Struct(info, _)) => info.name,
+        other => panic!("expected struct view of `Pet`; got `{other:?}`"),
+    };
+    assert_eq!(target, "Pet");
+}
+
+#[test]
+fn test_named_schema_ref_sibling_does_not_collapse() {
+    // A named schema with just `$ref` and `description` becomes a
+    // single-parent struct with no own fields; it's not collapsed so that
+    // user code can refer to it by name.
+    let doc = Document::from_yaml(indoc::indoc! {"
+        openapi: 3.1.0
+        info:
+          title: Test
+          version: 1.0.0
+        components:
+          schemas:
+            Pet:
+              type: object
+              properties:
+                name:
+                  type: string
+            Owner:
+              $ref: '#/components/schemas/Pet'
+              description: A pet's owner.
+    "})
+    .unwrap();
+
+    let arena = Arena::new();
+    let spec = Spec::from_doc(&arena, &doc).unwrap();
+    let mut raw = RawGraph::new(&arena, &spec);
+    raw.collapse_trivial_inlines();
+    let graph = raw.cook();
+
+    let schema_names = graph.schemas().map(|s| s.name()).collect_vec();
+    assert_matches!(&*schema_names, ["Pet", "Owner"]);
+}
+
+#[test]
+fn test_collapsing_wrapper_preserves_variant_order() {
+    // The order of untagged union variants is significant (`#[serde(untagged)]`
+    // relies on it, for example), so collapsing must preserve it.
+    let doc = Document::from_yaml(indoc::indoc! {"
+        openapi: 3.1.0
+        info:
+          title: Test
+          version: 1.0.0
+        components:
+          schemas:
+            A:
+              type: object
+              properties:
+                value:
+                  type: string
+            B:
+              type: object
+              properties:
+                value:
+                  type: integer
+            Choice:
+              oneOf:
+                - $ref: '#/components/schemas/A'
+                  description: Metadata only.
+                - $ref: '#/components/schemas/B'
+    "})
+    .unwrap();
+
+    let arena = Arena::new();
+    let spec = Spec::from_doc(&arena, &doc).unwrap();
+    let mut raw = RawGraph::new(&arena, &spec);
+    raw.collapse_trivial_inlines();
+    let graph = raw.cook();
+
+    let choice = graph.schema("Choice").unwrap();
+    let choice = match choice {
+        SchemaTypeView::Untagged(_, view) => view,
+        other => panic!("expected untagged `Choice`; got `{other:?}`"),
+    };
+    let variant_names = choice
+        .variants()
+        .map(|variant| match variant.ty().unwrap().view {
+            TypeView::Schema(schema) => schema.name(),
+            other => panic!("expected schema variant; got `{other:?}`"),
+        })
+        .collect_vec();
+
+    assert_matches!(&*variant_names, ["A", "B"]);
+}
+
+#[test]
+fn test_collapse_trivial_inlines_preserves_ref_with_one_of_sibling() {
+    // A `$ref` with an adjacent structural keyword like `oneOf` shouldn't be
+    // collapsed, because those keywords carry real type constraints.
+    let doc = Document::from_yaml(indoc::indoc! {"
+        openapi: 3.1.0
+        info:
+          title: Test
+          version: 1.0.0
+        components:
+          schemas:
+            Cat:
+              type: object
+              properties:
+                meow:
+                  type: string
+            Dog:
+              type: object
+              properties:
+                bark:
+                  type: string
+            Pet:
+              type: object
+              properties:
+                name:
+                  type: string
+            Owner:
+              type: object
+              properties:
+                pet:
+                  $ref: '#/components/schemas/Pet'
+                  oneOf:
+                    - $ref: '#/components/schemas/Cat'
+                    - $ref: '#/components/schemas/Dog'
+              required:
+                - pet
+    "})
+    .unwrap();
+
+    let arena = Arena::new();
+    let spec = Spec::from_doc(&arena, &doc).unwrap();
+    let mut raw = RawGraph::new(&arena, &spec);
+    raw.collapse_trivial_inlines();
+    let graph = raw.cook();
+
+    let owner = graph.schema("Owner").unwrap();
+    let owner_struct = match owner {
+        SchemaTypeView::Struct(_, view) => view,
+        other => panic!("expected struct `Owner`; got `{other:?}`"),
+    };
+    let pet_field = owner_struct
+        .fields()
+        .find(|f| matches!(f.name(), StructFieldName::Name("pet")))
+        .unwrap();
+
+    // The field should resolve to an inline untagged union,
+    // not collapse to `Pet`.
+    assert_matches!(
+        pet_field.ty(),
+        TypeView::Inline(InlineTypeView::Untagged(..))
+    );
+}
+
+#[test]
+fn test_collapse_trivial_inlines_is_idempotent() {
+    // Collapsing inlines twice shouldn't change the graph.
+    let doc = Document::from_yaml(indoc::indoc! {"
+        openapi: 3.1.0
+        info:
+          title: Test
+          version: 1.0.0
+        components:
+          schemas:
+            Pet:
+              type: object
+              properties:
+                name:
+                  type: string
+            Owner:
+              type: object
+              properties:
+                pet:
+                  $ref: '#/components/schemas/Pet'
+                  description: The pet.
+              required:
+                - pet
+    "})
+    .unwrap();
+
+    let arena = Arena::new();
+    let spec = Spec::from_doc(&arena, &doc).unwrap();
+
+    let cooked_once = {
+        let mut raw = RawGraph::new(&arena, &spec);
+        raw.collapse_trivial_inlines();
+        raw.cook()
+    };
+    let cooked_twice = {
+        let mut raw = RawGraph::new(&arena, &spec);
+        raw.collapse_trivial_inlines();
+        raw.collapse_trivial_inlines();
+        raw.cook()
+    };
+
+    let names_once = cooked_once.schemas().map(|s| s.name()).collect_vec();
+    let names_twice = cooked_twice.schemas().map(|s| s.name()).collect_vec();
+    assert_eq!(names_once, names_twice);
+}
+
+#[test]
+fn test_collapse_trivial_inline_chain_to_ref() {
+    // Nested inline `allOf`s produce a chain of trivial inline wrappers,
+    // each inheriting from its parent. The whole chain should collapse to
+    // the innermost named schema reference.
+    let doc = Document::from_yaml(indoc::indoc! {"
+        openapi: 3.0.0
+        info:
+          title: Test
+          version: 1.0.0
+        components:
+          schemas:
+            Pet:
+              type: object
+              properties:
+                name:
+                  type: string
+            Owner:
+              type: object
+              properties:
+                pet:
+                  allOf:
+                    - allOf:
+                        - $ref: '#/components/schemas/Pet'
+              required:
+                - pet
+    "})
+    .unwrap();
+
+    let arena = Arena::new();
+    let spec = Spec::from_doc(&arena, &doc).unwrap();
+    let mut raw = RawGraph::new(&arena, &spec);
+    raw.collapse_trivial_inlines();
+    let graph = raw.cook();
+
+    let owner = graph.schema("Owner").unwrap();
+    let owner_struct = match owner {
+        SchemaTypeView::Struct(_, view) => view,
+        other => panic!("expected struct `Owner`; got `{other:?}`"),
+    };
+    let pet_field = owner_struct
+        .fields()
+        .find(|f| matches!(f.name(), StructFieldName::Name("pet")))
+        .unwrap();
+
+    let target = match pet_field.ty() {
+        TypeView::Schema(SchemaTypeView::Struct(info, _)) => info.name,
+        other => panic!("expected struct view of `Pet`; got `{other:?}`"),
+    };
+    assert_eq!(target, "Pet");
 }
