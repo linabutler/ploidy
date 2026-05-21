@@ -3336,3 +3336,249 @@ fn test_optional_field_container_description_is_not_parent_schema() {
         )),
     );
 }
+
+#[test]
+fn test_object_with_pattern_properties_widens_value_type() {
+    let doc = Document::from_yaml(indoc::indoc! {"
+        openapi: 3.0.0
+        info:
+          title: Test API
+          version: 1.0.0
+    "})
+    .unwrap();
+    let schema: Schema = serde_saphyr::from_str(indoc::indoc! {"
+        type: object
+        additionalProperties:
+          type: string
+        patternProperties:
+          '^S_': 
+            type: number
+    "})
+    .unwrap();
+
+    let arena = Arena::new();
+    let result = transform(&arena, &doc, "PatternObj", &schema);
+
+    assert_matches!(
+        result,
+        SpecType::Schema(SpecSchemaType::Struct(
+            SchemaTypeInfo {
+                name: "PatternObj",
+                ..
+            },
+            SpecStruct {
+                fields: [SpecStructField {
+                    name: StructFieldName::Hint(StructFieldNameHint::AdditionalProperties),
+                    ty: SpecType::Inline(SpecInlineType::Container(
+                        _,
+                        SpecContainer::Map(SpecInner {
+                            ty: SpecType::Schema(SpecSchemaType::Untagged(
+                                _,
+                                SpecUntagged { variants: _, .. }
+                            )),
+                            ..
+                        }),
+                    )),
+                    ..
+                }],
+                ..
+            },
+        )),
+    );
+}
+
+#[test]
+fn test_object_with_unevaluated_properties_widens_value_type() {
+    let doc = Document::from_yaml(indoc::indoc! {"
+        openapi: 3.0.0
+        info:
+          title: Test API
+          version: 1.0.0
+    "})
+    .unwrap();
+    let schema: Schema = serde_saphyr::from_str(indoc::indoc! {"
+        type: object
+        additionalProperties:
+          type: string
+        unevaluatedProperties:
+          type: object
+    "})
+    .unwrap();
+
+    let arena = Arena::new();
+    let result = transform(&arena, &doc, "UnevalObj", &schema);
+
+    assert_matches!(
+        result,
+        SpecType::Schema(SpecSchemaType::Struct(
+            SchemaTypeInfo {
+                name: "UnevalObj",
+                ..
+            },
+            SpecStruct {
+                fields: [SpecStructField {
+                    name: StructFieldName::Hint(StructFieldNameHint::AdditionalProperties),
+                    ty: SpecType::Inline(SpecInlineType::Container(
+                        _,
+                        SpecContainer::Map(SpecInner {
+                            ty: SpecType::Schema(SpecSchemaType::Untagged(
+                                _,
+                                SpecUntagged { variants: _, .. }
+                            )),
+                            ..
+                        }),
+                    )),
+                    ..
+                }],
+                ..
+            },
+        )),
+    );
+}
+
+#[test]
+fn test_object_with_unevaluated_properties_true_no_widening() {
+    let doc = Document::from_yaml(indoc::indoc! {"
+        openapi: 3.0.0
+        info:
+          title: Test API
+          version: 1.0.0
+    "})
+    .unwrap();
+    let schema: Schema = serde_saphyr::from_str(indoc::indoc! {"
+        type: object
+        additionalProperties:
+          type: string
+        unevaluatedProperties: true
+    "})
+    .unwrap();
+
+    let arena = Arena::new();
+    let result = transform(&arena, &doc, "UnevalTrue", &schema);
+
+    assert_matches!(
+        result,
+        SpecType::Schema(SpecSchemaType::Struct(
+            SchemaTypeInfo {
+                name: "UnevalTrue",
+                ..
+            },
+            SpecStruct {
+                fields: [SpecStructField {
+                    name: StructFieldName::Hint(StructFieldNameHint::AdditionalProperties),
+                    ty: SpecType::Inline(SpecInlineType::Container(
+                        _,
+                        SpecContainer::Map(SpecInner {
+                            ty: SpecType::Inline(SpecInlineType::Any(_)),
+                            ..
+                        }),
+                    )),
+                    ..
+                }],
+                ..
+            },
+        )),
+    );
+}
+
+#[test]
+fn test_object_with_pattern_properties_only() {
+    let doc = Document::from_yaml(indoc::indoc! {"
+        openapi: 3.0.0
+        info:
+          title: Test API
+          version: 1.0.0
+    "})
+    .unwrap();
+    let schema: Schema = serde_saphyr::from_str(indoc::indoc! {"
+        type: object
+        patternProperties:
+          '^num_':
+            type: number
+          '^str_':
+            type: string
+    "})
+    .unwrap();
+
+    let arena = Arena::new();
+    let result = transform(&arena, &doc, "PatternOnly", &schema);
+
+    assert_matches!(
+        result,
+        SpecType::Schema(SpecSchemaType::Struct(
+            SchemaTypeInfo {
+                name: "PatternOnly",
+                ..
+            },
+            SpecStruct {
+                fields: [SpecStructField {
+                    name: StructFieldName::Hint(StructFieldNameHint::AdditionalProperties),
+                    ty: SpecType::Inline(SpecInlineType::Container(
+                        _,
+                        SpecContainer::Map(SpecInner {
+                            ty: SpecType::Schema(SpecSchemaType::Untagged(
+                                _,
+                                SpecUntagged { variants: _, .. }
+                            )),
+                            ..
+                        }),
+                    )),
+                    ..
+                }],
+                ..
+            },
+        )),
+    );
+}
+
+#[test]
+fn test_object_with_all_property_keywords() {
+    let doc = Document::from_yaml(indoc::indoc! {"
+        openapi: 3.0.0
+        info:
+          title: Test API
+          version: 1.0.0
+    "})
+    .unwrap();
+    let schema: Schema = serde_saphyr::from_str(indoc::indoc! {"
+        type: object
+        additionalProperties:
+          type: string
+        patternProperties:
+          '^num_':
+            type: number
+        unevaluatedProperties:
+          type: boolean
+    "})
+    .unwrap();
+
+    let arena = Arena::new();
+    let result = transform(&arena, &doc, "AllKeywords", &schema);
+
+    assert_matches!(
+        result,
+        SpecType::Schema(SpecSchemaType::Struct(
+            SchemaTypeInfo {
+                name: "AllKeywords",
+                ..
+            },
+            SpecStruct {
+                fields: [SpecStructField {
+                    name: StructFieldName::Hint(StructFieldNameHint::AdditionalProperties),
+                    ty: SpecType::Inline(SpecInlineType::Container(
+                        _,
+                        SpecContainer::Map(SpecInner {
+                            ty: SpecType::Schema(SpecSchemaType::Untagged(
+                                _,
+                                SpecUntagged { variants: _, .. }
+                            )),
+                            ..
+                        }),
+                    )),
+                    ..
+                }],
+                ..
+            },
+        )),
+    );
+}

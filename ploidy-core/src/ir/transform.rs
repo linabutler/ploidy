@@ -352,7 +352,15 @@ impl<'context, 'a> IrTransformer<'context, 'a> {
     }
 
     fn try_struct(self) -> Result<SpecType<'a>, Self> {
-        if self.schema.properties.is_none() && self.schema.all_of.is_none() {
+        let has_pattern_properties = self.schema.pattern_properties.is_some()
+            && !self.schema.pattern_properties.as_ref().unwrap().is_empty();
+        let has_unevaluated_properties = self.schema.unevaluated_properties.is_some();
+
+        if self.schema.properties.is_none()
+            && self.schema.all_of.is_none()
+            && !has_pattern_properties
+            && !has_unevaluated_properties
+        {
             return Err(self);
         }
 
@@ -623,30 +631,192 @@ impl<'context, 'a> IrTransformer<'context, 'a> {
     fn additional_properties(&self) -> Option<SpecStructField<'a>> {
         let name = StructFieldName::Hint(StructFieldNameHint::AdditionalProperties);
 
-        let inner = match &self.schema.additional_properties {
-            Some(AdditionalProperties::RefOrSchema(RefOrSchema::Ref(r))) => SpecInner {
-                description: self.schema.description.as_deref(),
-                ty: self.arena().alloc(SpecType::Ref(r)),
-            },
+        // Check if we need to widen the value type due to patternProperties or unevaluatedProperties.
+        let has_pattern_properties = self.schema.pattern_properties.is_some()
+            && !self.schema.pattern_properties.as_ref().unwrap().is_empty();
+        let has_unevaluated_properties = self.schema.unevaluated_properties.is_some();
+
+        // If none of the widening keywords are present, use original logic.
+        if !has_pattern_properties && !has_unevaluated_properties {
+            let inner = match &self.schema.additional_properties {
+                Some(AdditionalProperties::RefOrSchema(RefOrSchema::Ref(r))) => SpecInner {
+                    description: self.schema.description.as_deref(),
+                    ty: self.arena().alloc(SpecType::Ref(r)),
+                },
+                Some(AdditionalProperties::RefOrSchema(RefOrSchema::Inline(schema))) => {
+                    let id = self.context.ids.next();
+                    SpecInner {
+                        description: self.schema.description.as_deref(),
+                        ty: self
+                            .arena()
+                            .alloc(transform_with_context(self.context, id, schema)),
+                    }
+                }
+                Some(AdditionalProperties::Bool(true)) => {
+                    let id = self.context.ids.next();
+                    SpecInner {
+                        description: self.schema.description.as_deref(),
+                        ty: self
+                            .arena()
+                            .alloc(SpecType::Inline(SpecInlineType::Any(id))),
+                    }
+                }
+                _ => return None,
+            };
+
+            let map_id = self.context.ids.next();
+            let ty: &_ = self.arena().alloc(SpecType::from(SpecInlineType::Container(
+                map_id,
+                SpecContainer::Map(inner),
+            )));
+
+            return Some(SpecStructField {
+                name,
+                ty,
+                required: true,
+                description: None,
+                flattened: true,
+            });
+        }
+
+        // Widening keywords are present. Collect all possible value types.
+        let mut value_types: Vec<SpecType<'a>> = Vec::new();
+        let mut has_any = false;
+
+        // Add additionalProperties schema.
+        match &self.schema.additional_properties {
+            Some(AdditionalProperties::RefOrSchema(RefOrSchema::Ref(r))) => {
+                value_types.push(SpecType::Ref(r));
+            }
             Some(AdditionalProperties::RefOrSchema(RefOrSchema::Inline(schema))) => {
                 let id = self.context.ids.next();
-                SpecInner {
-                    description: self.schema.description.as_deref(),
-                    ty: self
-                        .arena()
-                        .alloc(transform_with_context(self.context, id, schema)),
-                }
+                value_types.push(transform_with_context(self.context, id, schema));
             }
             Some(AdditionalProperties::Bool(true)) => {
-                let id = self.context.ids.next();
-                SpecInner {
-                    description: self.schema.description.as_deref(),
-                    ty: self
-                        .arena()
-                        .alloc(SpecType::Inline(SpecInlineType::Any(id))),
-                }
+                has_any = true;
             }
-            _ => return None,
+            _ => {}
+        }
+
+        // Add patternProperties schemas.
+        if let Some(pattern_props) = &self.schema.pattern_properties {
+            for (_pattern, schema) in pattern_props {
+                let ty = match schema {
+                    RefOrSchema::Ref(r) => SpecType::Ref(r),
+                    RefOrSchema::Inline(s) => {
+                        let id = self.context.ids.next();
+                        transform_with_context(self.context, id, s)
+                    }
+                };
+                value_types.push(ty);
+            }
+        }
+
+        // Add unevaluatedProperties.
+        match &self.schema.unevaluated_properties {
+            Some(crate::parse::UnevaluatedProperties::Bool(true)) => {
+                has_any = true;
+            }
+            Some(crate::parse::UnevaluatedProperties::RefOrSchema(RefOrSchema::Ref(r))) => {
+                value_types.push(SpecType::Ref(r));
+            }
+            Some(crate::parse::UnevaluatedProperties::RefOrSchema(RefOrSchema::Inline(schema))) => {
+                let id = self.context.ids.next();
+                value_types.push(transform_with_context(self.context, id, schema));
+            }
+            _ => {}
+        }
+
+        // If any keyword is `true`, use Any type.
+        if has_any {
+            let id = self.context.ids.next();
+            let inner = SpecInner {
+                description: self.schema.description.as_deref(),
+                ty: self
+                    .arena()
+                    .alloc(SpecType::Inline(SpecInlineType::Any(id))),
+            };
+            let map_id = self.context.ids.next();
+            let ty: &_ = self.arena().alloc(SpecType::from(SpecInlineType::Container(
+                map_id,
+                SpecContainer::Map(inner),
+            )));
+            return Some(SpecStructField {
+                name,
+                ty,
+                required: true,
+                description: None,
+                flattened: true,
+            });
+        }
+
+        // No value types collected means no additional properties are allowed.
+        if value_types.is_empty() {
+            return None;
+        }
+
+        // Deduplicate types.
+        let mut seen = std::collections::HashSet::new();
+        let mut unique_types = Vec::new();
+        for ty in value_types {
+            let key = format!("{:?}", ty);
+            if seen.insert(key) {
+                unique_types.push(ty);
+            }
+        }
+
+        // Create the value type: single type or union of types.
+        let value_type = if unique_types.len() == 1 {
+            unique_types.into_iter().next().unwrap()
+        } else {
+            let variants =
+                unique_types
+                    .into_iter()
+                    .enumerate()
+                    .map(|(index, ty)| {
+                        let hint = match ty {
+                            SpecType::Schema(SpecSchemaType::Primitive(_, p))
+                            | SpecType::Inline(SpecInlineType::Primitive(_, p)) => {
+                                UntaggedVariantNameHint::Primitive(p)
+                            }
+                            SpecType::Schema(SpecSchemaType::Container(
+                                _,
+                                SpecContainer::Array(_),
+                            ))
+                            | SpecType::Inline(SpecInlineType::Container(
+                                _,
+                                SpecContainer::Array(_),
+                            )) => UntaggedVariantNameHint::Array,
+                            SpecType::Schema(SpecSchemaType::Container(
+                                _,
+                                SpecContainer::Map(_),
+                            ))
+                            | SpecType::Inline(SpecInlineType::Container(
+                                _,
+                                SpecContainer::Map(_),
+                            )) => UntaggedVariantNameHint::Map,
+                            _ => UntaggedVariantNameHint::Index(index + 1),
+                        };
+                        SpecUntaggedVariant::Some(hint, self.arena().alloc(ty))
+                    })
+                    .collect_vec();
+
+            let untagged = SpecUntagged {
+                description: self.schema.description.as_deref(),
+                variants: self.arena().alloc_slice_copy(&variants),
+                fields: self
+                    .arena()
+                    .alloc_slice(std::iter::empty::<SpecStructField<'a>>()),
+            };
+            match self.name {
+                TypeInfo::Schema(info) => SpecSchemaType::Untagged(info, untagged).into(),
+                TypeInfo::Inline(id) => SpecInlineType::Untagged(id, untagged).into(),
+            }
+        };
+
+        let inner = SpecInner {
+            description: self.schema.description.as_deref(),
+            ty: self.arena().alloc(value_type),
         };
 
         let map_id = self.context.ids.next();
