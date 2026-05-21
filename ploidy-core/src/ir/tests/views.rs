@@ -50,15 +50,14 @@ fn test_struct_view_fields_iterator() {
     };
 
     // `fields()` should iterate over all struct fields.
-    let mut field_names = person_struct
+    let field_names = person_struct
         .fields()
         .map(|f| match f.name() {
             StructFieldName::Name(n) => n,
             other => panic!("expected explicit struct field name; got {other:?}"),
         })
         .collect_vec();
-    field_names.sort();
-    assert_matches!(&*field_names, ["age", "email", "name"]);
+    assert_matches!(&*field_names, ["name", "age", "email"]);
 }
 
 #[test]
