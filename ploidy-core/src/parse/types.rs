@@ -1,8 +1,13 @@
 use std::{borrow::Cow, str::FromStr};
 
 use indexmap::IndexMap;
+use itertools::Itertools;
 use ploidy_pointer::{JsonPointee, JsonPointer, JsonPointerBuf, JsonPointerTarget};
-use serde::{Deserialize, Deserializer};
+use serde::{
+    Deserialize, Deserializer,
+    de::{DeserializeOwned, Error as DeserializeError},
+};
+use serde_json::Value as JsonValue;
 
 use crate::error::SerdeError;
 
@@ -118,7 +123,7 @@ pub struct Operation {
     #[serde(default)]
     pub responses: IndexMap<String, RefOrResponse>,
     #[serde(flatten)]
-    pub extensions: IndexMap<String, serde_json::Value>,
+    pub extensions: IndexMap<String, JsonValue>,
 }
 
 impl Operation {
@@ -193,35 +198,35 @@ pub struct Response {
 #[derive(Debug, Deserialize, JsonPointee, JsonPointerTarget)]
 pub struct Example {
     #[serde(flatten)]
-    pub extensions: IndexMap<String, serde_json::Value>,
+    pub extensions: IndexMap<String, JsonValue>,
 }
 
 /// Header definition (placeholder).
 #[derive(Debug, Deserialize, JsonPointee, JsonPointerTarget)]
 pub struct Header {
     #[serde(flatten)]
-    pub extensions: IndexMap<String, serde_json::Value>,
+    pub extensions: IndexMap<String, JsonValue>,
 }
 
 /// Security scheme definition (placeholder).
 #[derive(Debug, Deserialize, JsonPointee, JsonPointerTarget)]
 pub struct SecurityScheme {
     #[serde(flatten)]
-    pub extensions: IndexMap<String, serde_json::Value>,
+    pub extensions: IndexMap<String, JsonValue>,
 }
 
 /// Link definition (placeholder).
 #[derive(Debug, Deserialize, JsonPointee, JsonPointerTarget)]
 pub struct Link {
     #[serde(flatten)]
-    pub extensions: IndexMap<String, serde_json::Value>,
+    pub extensions: IndexMap<String, JsonValue>,
 }
 
 /// Callback definition (placeholder).
 #[derive(Debug, Deserialize, JsonPointee, JsonPointerTarget)]
 pub struct Callback {
     #[serde(flatten)]
-    pub extensions: IndexMap<String, serde_json::Value>,
+    pub extensions: IndexMap<String, JsonValue>,
 }
 
 /// Media type content.
@@ -256,19 +261,32 @@ pub struct Components {
     pub callbacks: IndexMap<String, Callback>,
 }
 
-/// Either a reference to a component or an inline component definition.
-///
-/// [`RefOr::Ref`] holds a JSON Pointer to a component definition in the
-/// `#/components/*` section; [`RefOr::Other`] holds an inline definition.
-#[derive(Clone, Debug, Deserialize, JsonPointee, JsonPointerTarget)]
-#[serde(untagged)]
+/// Either a reference or an inline definition.
+#[derive(Clone, Debug, JsonPointee, JsonPointerTarget)]
 #[ploidy(pointer(untagged))]
-pub enum RefOr<T> {
-    /// A reference to a component definition via `$ref`.
+pub enum RefOr<R, T> {
     #[ploidy(pointer(skip))]
-    Ref(Ref),
-    /// An inline component definition.
+    Ref(Ref<R>),
     Other(T),
+}
+
+impl<'de, R, T> Deserialize<'de> for RefOr<R, T>
+where
+    R: DeserializeOwned,
+    T: DeserializeOwned,
+{
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        match JsonValue::deserialize(deserializer)? {
+            JsonValue::Object(object) if object.contains_key("$ref") => {
+                serde_json::from_value(object.into())
+                    .map(Self::Ref)
+                    .map_err(DeserializeError::custom)
+            }
+            value => serde_json::from_value(value)
+                .map(Self::Other)
+                .map_err(DeserializeError::custom),
+        }
+    }
 }
 
 /// Either a reference or an inline schema definition.
@@ -281,7 +299,7 @@ pub enum RefOr<T> {
 pub enum RefOrSchema {
     /// A reference to another schema.
     #[ploidy(pointer(skip))]
-    Ref(ComponentRef),
+    Ref(SchemaRef),
     /// An inline schema definition.
     Inline(Box<Schema>),
 }
@@ -293,7 +311,7 @@ impl<'de> Deserialize<'de> for RefOrSchema {
             RefOr::Ref(r) if r.rest.is_empty() => Ok(Self::Ref(r.ref_)),
             RefOr::Ref(r) => {
                 let mut schema: Schema =
-                    serde_json::from_value(r.rest.into()).map_err(serde::de::Error::custom)?;
+                    serde_json::from_value(r.rest.into()).map_err(DeserializeError::custom)?;
                 schema
                     .all_of
                     .get_or_insert_default()
@@ -305,21 +323,21 @@ impl<'de> Deserialize<'de> for RefOrSchema {
 }
 
 /// Either a reference or a parameter definition.
-pub type RefOrParameter = RefOr<Parameter>;
+pub type RefOrParameter = RefOr<ComponentRef, Parameter>;
 
 /// Either a reference or a request body definition.
-pub type RefOrRequestBody = RefOr<RequestBody>;
+pub type RefOrRequestBody = RefOr<ComponentRef, RequestBody>;
 
 /// Either a reference or a response definition.
-pub type RefOrResponse = RefOr<Response>;
+pub type RefOrResponse = RefOr<ComponentRef, Response>;
 
-/// A reference to another component.
-#[derive(Debug, Clone, Deserialize)]
-pub struct Ref {
+/// A reference to another definition.
+#[derive(Clone, Debug, Deserialize)]
+pub struct Ref<R> {
     #[serde(rename = "$ref")]
-    pub ref_: ComponentRef,
+    pub ref_: R,
     #[serde(flatten)]
-    pub rest: serde_json::Map<String, serde_json::Value>,
+    pub rest: serde_json::Map<String, JsonValue>,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, JsonPointee, JsonPointerTarget)]
@@ -399,7 +417,7 @@ pub struct Schema {
 
     // Enum variants.
     #[serde(rename = "enum", default)]
-    pub variants: Option<Vec<serde_json::Value>>,
+    pub variants: Option<Vec<JsonValue>>,
 
     // Composition.
     #[serde(default)]
@@ -413,7 +431,7 @@ pub struct Schema {
 
     // Extensions.
     #[serde(flatten)]
-    pub extensions: IndexMap<String, serde_json::Value>,
+    pub extensions: IndexMap<String, JsonValue>,
 }
 
 impl Schema {
@@ -430,7 +448,62 @@ impl Schema {
 pub struct Discriminator {
     pub property_name: String,
     #[serde(default)]
-    pub mapping: IndexMap<String, ComponentRef>,
+    pub mapping: IndexMap<String, SchemaRef>,
+}
+
+/// A JSON Pointer reference to a schema.
+#[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, JsonPointee, JsonPointerTarget)]
+pub struct SchemaRef {
+    #[ploidy(pointer(skip))]
+    pointer: JsonPointerBuf,
+}
+
+impl SchemaRef {
+    /// Returns a reference to the pointer.
+    #[inline]
+    pub fn pointer(&self) -> &JsonPointer {
+        &self.pointer
+    }
+
+    /// Returns the schema name.
+    #[inline]
+    pub fn name(&self) -> Cow<'_, str> {
+        // `SchemaRef::from_str()` validates that the pointer has exactly
+        // three segments: `components`, `schemas`, and the schema name.
+        self.pointer.segments().next_back().unwrap().to_str()
+    }
+}
+
+impl FromStr for SchemaRef {
+    type Err = BadRef;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let ComponentRef { pointer } = ComponentRef::from_str(s)?;
+        let Some((components, schemas, name)) = pointer.segments().collect_tuple() else {
+            return Err(BadRef::NotSchema);
+        };
+        if components == "components" && schemas == "schemas" && !name.is_empty() {
+            Ok(Self { pointer })
+        } else {
+            Err(BadRef::NotSchema)
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for SchemaRef {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        struct Visitor;
+        impl<'de> serde::de::Visitor<'de> for Visitor {
+            type Value = SchemaRef;
+            fn expecting(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                f.write_str("a schema reference")
+            }
+            fn visit_str<E: DeserializeError>(self, s: &str) -> Result<Self::Value, E> {
+                s.parse().map_err(E::custom)
+            }
+        }
+        deserializer.deserialize_str(Visitor)
+    }
 }
 
 /// A JSON Pointer reference to a component in the current document.
@@ -457,7 +530,7 @@ impl ComponentRef {
 }
 
 impl FromStr for ComponentRef {
-    type Err = BadComponentRef;
+    type Err = BadRef;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         let Some(s) = s
@@ -465,11 +538,11 @@ impl FromStr for ComponentRef {
             .strip_prefix('#')
             .map(|rest| &rest[..rest.find(['\t', '\n', '\r']).unwrap_or(rest.len())])
         else {
-            return Err(BadComponentRef::NotSameDocument);
+            return Err(BadRef::NotSameDocument);
         };
-        let pointer = JsonPointer::parse(s).map_err(BadComponentRef::Syntax)?;
+        let pointer = JsonPointer::parse(s).map_err(BadRef::Syntax)?;
         if pointer.is_empty() {
-            return Err(BadComponentRef::Empty);
+            return Err(BadRef::Empty);
         }
         Ok(Self {
             pointer: pointer.into(),
@@ -482,10 +555,10 @@ impl<'de> Deserialize<'de> for ComponentRef {
         struct Visitor;
         impl<'de> serde::de::Visitor<'de> for Visitor {
             type Value = ComponentRef;
-            fn expecting(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+            fn expecting(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
                 f.write_str("a component reference")
             }
-            fn visit_str<E: ::serde::de::Error>(self, s: &str) -> Result<Self::Value, E> {
+            fn visit_str<E: DeserializeError>(self, s: &str) -> Result<Self::Value, E> {
                 s.parse().map_err(E::custom)
             }
         }
@@ -509,21 +582,23 @@ fn deserialize_type<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Vec<Ty
 }
 
 #[derive(Debug, thiserror::Error)]
-pub enum BadComponentRef {
+pub enum BadRef {
     #[error("references must start with `#`; external references aren't supported")]
     NotSameDocument,
     #[error("invalid JSON Pointer syntax: {0}")]
     Syntax(#[from] ploidy_pointer::JsonPointerSyntaxError),
+    #[error("schema references must point to `#/components/schemas/{{name}}`")]
+    NotSchema,
     #[error("reference can't be empty")]
     Empty,
 }
 
 pub trait FromExtension<'a>: Sized {
-    fn from_extension(value: &'a serde_json::Value) -> Option<Self>;
+    fn from_extension(value: &'a JsonValue) -> Option<Self>;
 }
 
 impl<'a> FromExtension<'a> for &'a str {
-    fn from_extension(value: &'a serde_json::Value) -> Option<&'a str> {
+    fn from_extension(value: &'a JsonValue) -> Option<&'a str> {
         value.as_str()
     }
 }
@@ -551,13 +626,33 @@ mod tests {
     #[test]
     fn test_component_ref_rejects_external_ref() {
         let err = "other.yaml#/components/schemas/Pet".parse::<ComponentRef>();
-        assert_matches!(err, Err(BadComponentRef::NotSameDocument));
+        assert_matches!(err, Err(BadRef::NotSameDocument));
     }
 
     #[test]
     fn test_component_ref_rejects_empty() {
         let err = "#".parse::<ComponentRef>();
-        assert_matches!(err, Err(BadComponentRef::Empty));
+        assert_matches!(err, Err(BadRef::Empty));
+    }
+
+    // MARK: `SchemaRef`
+
+    #[test]
+    fn test_schema_ref_name() {
+        let r: SchemaRef = "#/components/schemas/Pet".parse().unwrap();
+        assert_eq!(r.name(), "Pet");
+    }
+
+    #[test]
+    fn test_schema_ref_rejects_nested_ref() {
+        let err = "#/components/schemas/Pet/$defs/Name".parse::<SchemaRef>();
+        assert_matches!(err, Err(BadRef::NotSchema));
+    }
+
+    #[test]
+    fn test_schema_ref_rejects_non_schema_ref() {
+        let err = "#/components/responses/Pet".parse::<SchemaRef>();
+        assert_matches!(err, Err(BadRef::NotSchema));
     }
 
     // MARK: `RefOrSchema`
@@ -615,5 +710,21 @@ mod tests {
             panic!("expected schema `Ref`; got `{schema_ref:?}`");
         };
         assert_eq!(r.name(), "Pet");
+    }
+
+    #[test]
+    fn test_schema_ref_rejects_nested_component_ref() {
+        let json = serde_json::json!({
+            "$ref": "#/components/schemas/Pet/$defs/Name"
+        });
+        assert_matches!(serde_json::from_value::<RefOrSchema>(json), Err(_));
+    }
+
+    #[test]
+    fn test_schema_ref_rejects_non_schema_component_ref() {
+        let json = serde_json::json!({
+            "$ref": "#/components/responses/Pet"
+        });
+        assert_matches!(serde_json::from_value::<RefOrSchema>(json), Err(_));
     }
 }

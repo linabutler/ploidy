@@ -1,7 +1,7 @@
 //! IR types in a [`Spec`][crate::ir::Spec], where type references are
 //! [`&SpecType`][SpecType] pointers.
 
-use crate::parse::ComponentRef;
+use crate::parse::SchemaRef;
 
 use super::{
     Enum, InlineTypeId, PrimitiveType, SchemaTypeInfo, StructFieldName, UntaggedVariantNameHint,
@@ -12,7 +12,7 @@ use super::{
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub enum SpecType<'a> {
     /// A reference to another named schema type.
-    Ref(&'a ComponentRef),
+    Ref(&'a SchemaRef),
     /// A named schema type.
     Schema(SpecSchemaType<'a>),
     /// An inline type defined within a schema.
