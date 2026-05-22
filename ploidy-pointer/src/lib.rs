@@ -238,6 +238,12 @@ impl JsonPointerSegment {
             _ => None,
         }
     }
+
+    /// Returns `true` if this segment is empty.
+    #[inline]
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
 }
 
 impl PartialEq<str> for JsonPointerSegment {
