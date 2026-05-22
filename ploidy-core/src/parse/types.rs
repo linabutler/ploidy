@@ -388,6 +388,14 @@ pub enum AdditionalProperties {
     RefOrSchema(RefOrSchema),
 }
 
+#[derive(Clone, Debug, Deserialize, JsonPointee, JsonPointerTarget)]
+#[serde(untagged)]
+#[ploidy(pointer(untagged))]
+pub enum UnevaluatedProperties {
+    Bool(bool),
+    RefOrSchema(RefOrSchema),
+}
+
 /// An OpenAPI schema definition.
 #[derive(Debug, Clone, Default, Deserialize, JsonPointee, JsonPointerTarget)]
 #[serde(rename_all = "camelCase")]
@@ -410,6 +418,10 @@ pub struct Schema {
     pub required: Vec<String>,
     #[serde(default)]
     pub additional_properties: Option<AdditionalProperties>,
+    #[serde(default)]
+    pub pattern_properties: Option<IndexMap<String, RefOrSchema>>,
+    #[serde(default)]
+    pub unevaluated_properties: Option<UnevaluatedProperties>,
 
     // Array items.
     #[serde(default)]
