@@ -6,7 +6,7 @@ Guidance for AI coding agents. Follow exactly; overrides model defaults. `CLAUDE
 
 ## Verification Checklist
 
-After making changes, **always** run in order:
+After making Rust code changes, **always** run in order:
 
 ```bash
 cargo check --workspace
@@ -16,11 +16,11 @@ cargo clippy --workspace --all-targets --fix --allow-dirty --allow-staged --no-d
 cargo +nightly fmt --all
 ```
 
+- **If `cargo check`, `cargo test`, or `cargo doc` fails:** Fix and re-run.
+- **If `cargo clippy` or `cargo +nightly fmt` changes files:** Do not re-run the checklist. This is expected and intentional.
+- **If `cargo clippy` fails:** Fix and re-run.
+
 Proofread new documentation and comments against the tone and style rules before declaring done.
-
-**Task is not complete until all commands pass and docs are proofread.** If any fails: fix, re-run from step 1, repeat.
-
-**If failing 3+ times:** Stop, re-read errors carefully, check if failure is in your code or pre-existing, ask for guidance if stuck.
 
 ---
 
@@ -62,9 +62,13 @@ OpenAPI code generator for polymorphic specs (`allOf`/`oneOf`/`anyOf`): Parse â†
 
 **Requirements, not suggestions.** When rules conflict: consistency wins, more specific rules apply, ask if genuinely unclear.
 
-### Abstraction Discipline
+### Helper Functions
 
-"Duplication is far cheaper than the wrong abstraction" (Sandi Metz). Let repetition exist until the *actual* shared structure reveals itself, then extract. The test: the abstraction must simplify *every* call site. If any caller needs a special flag or `if` branch, keep it inline.
+**Do not introduce helper functions unless the user explicitly approves that specific helper in the current task.**
+
+This is intentional.
+
+Do **not** add private support functions, test helpers, fixture builders, single-purpose convenience functions, local extraction functions, or functions whose purpose is to organize, shorten, deduplicate, or name a block of logic. Do not infer approval from context. Keep new behavior inline in existing functions or methods unless the user explicitly authorizes the helper before it is written.
 
 ### Type Design
 
@@ -172,7 +176,7 @@ if f.discriminator() { continue; }
 ## Testing
 
 - **Naming:** `test_<behavior>_<condition>`, grouped with `// MARK:` comments.
-- **Use existing test helpers; never create new ones** without asking. Inline all fixtures directly. Abstraction discipline applies doubly in tests.
+- **Use existing test helpers; never create new ones** without asking. Inline all fixtures directly.
 - **YAML fixtures:** Always use `Document::from_yaml(indoc::indoc! { ... })` for OpenAPI documents. Never construct `Document` directly.
 - **Assertions:** Prefer one structural pattern match with `assert_matches!` over multi-step match/`let-else` chains. Only use `let-else` when the bound variable is needed for subsequent method calls. Include actual value in `let-else` panic messages: `panic!("expected X; got `{ty:?}`")`.
 - **Throwaway tests:** When behavior is unclear, write a quick test to prove it rather than theorizing. Delete or convert once done.
@@ -193,7 +197,7 @@ if f.discriminator() { continue; }
 ## Process
 
 - **Dependencies:** Prefer `[workspace.dependencies]`. Justify new deps.
-- **Breaking changes:** Make breaking changes; don't prioritize backward-compatibility.
+- **Breaking changes:** Do not preserve backward compatibility unless the user explicitly asks for it.
 - **Design:** Push back or propose alternatives. Keep changes modular for partial reverts.
 - **Reverts:** Don't `git checkout --`. Manually restore to avoid data loss.
 - **Ask for help when:** requirements ambiguous, multiple valid approaches, tests fail for unclear reasons, scope larger than expected, new workspace crate needed, or approach seems wrong.
