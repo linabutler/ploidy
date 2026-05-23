@@ -4,7 +4,7 @@
 use crate::parse::SchemaRef;
 
 use super::{
-    Enum, InlineTypeId, PrimitiveType, SchemaTypeInfo, StructFieldName, UntaggedVariantNameHint,
+    Enum, InlineTypeId, PrimitiveType, SchemaTypeInfo, StructFieldName,
     shape::{Operation, Parameter, ParameterInfo, Request, Response},
 };
 
@@ -143,24 +143,17 @@ pub struct SpecTaggedVariant<'a> {
     pub ty: &'a SpecType<'a>,
 }
 
-/// An untagged union, created from a `oneOf` schema
-/// without a discriminator, or an OpenAPI 3.1 schema
-/// with multiple types in its `type` field.
+/// An untagged union, created from a `oneOf` schema without a discriminator,
+/// or an OpenAPI 3.1 schema with multiple types in its `type` field.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub struct SpecUntagged<'a> {
     pub description: Option<&'a str>,
-    pub variants: &'a [SpecUntaggedVariant<'a>],
+    /// Variants in declaration order. `None` represents a `null` variant.
+    pub variants: &'a [Option<&'a SpecType<'a>>],
     /// Own fields that the union declares as `properties`.
     pub fields: &'a [SpecStructField<'a>],
     /// Immediate parent types from `allOf`, in declaration order.
     pub parents: &'a [&'a SpecType<'a>],
-}
-
-/// A variant of an untagged union.
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-pub enum SpecUntaggedVariant<'a> {
-    Some(UntaggedVariantNameHint, &'a SpecType<'a>),
-    Null,
 }
 
 /// An array, map, or optional type with [`SpecType`] references.

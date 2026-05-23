@@ -75,15 +75,8 @@ impl<'graph, 'a> InlineTypePathView<'graph, 'a> {
                     GraphEdge::Variant(VariantMeta::Tagged(m)) => {
                         InlineTypePathSegment::TaggedVariant(TypeId(from), m.name)
                     }
-                    GraphEdge::Variant(VariantMeta::Untagged(_)) => {
-                        let (index, _) = cooked
-                            .graph
-                            .edges(from)
-                            .filter(|e| matches!(e.weight(), GraphEdge::Variant(_)))
-                            .find_position(|e| e.target() == to)?;
-                        InlineTypePathSegment::UntaggedVariant(
-                            NonZeroUsize::new(index + 1).unwrap(),
-                        )
+                    GraphEdge::Variant(VariantMeta::Untagged(m)) => {
+                        InlineTypePathSegment::UntaggedVariant(TypeId(from), m.ordinal)
                     }
                     GraphEdge::Inherits { .. } => {
                         let (index, _) = cooked
@@ -91,7 +84,10 @@ impl<'graph, 'a> InlineTypePathView<'graph, 'a> {
                             .edges(from)
                             .filter(|e| matches!(e.weight(), GraphEdge::Inherits { .. }))
                             .find_position(|e| e.target() == to)?;
-                        InlineTypePathSegment::Inherits(NonZeroUsize::new(index + 1).unwrap())
+                        InlineTypePathSegment::Inherits(
+                            TypeId(from),
+                            NonZeroUsize::new(index + 1).unwrap(),
+                        )
                     }
                 })
             })

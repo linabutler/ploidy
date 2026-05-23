@@ -407,12 +407,12 @@ mod tests {
         let codegen = CodegenSchemaType::new(&graph, &schema);
         let actual: syn::File = parse_quote!(#codegen);
         let expected: syn::File = parse_quote! {
-            pub type NullableOneOf = ::std::option::Option<crate::types::nullable_one_of::types::Value>;
+            pub type NullableOneOf = ::std::option::Option<crate::types::nullable_one_of::types::NullableOneOf>;
             pub mod types {
                 #[derive(Debug, Clone, PartialEq, Eq, Hash, Default, ::ploidy_util::serde::Serialize, ::ploidy_util::serde::Deserialize, ::ploidy_util::pointer::JsonPointee, ::ploidy_util::pointer::JsonPointerTarget)]
                 #[serde(crate = "::ploidy_util::serde")]
                 #[ploidy(pointer(crate = "::ploidy_util::pointer"))]
-                pub struct Value {
+                pub struct NullableOneOf {
                     #[serde(default, skip_serializing_if = "::ploidy_util::absent::AbsentOr::is_absent")]
                     pub value: ::ploidy_util::absent::AbsentOr<::std::string::String>,
                 }
@@ -457,21 +457,151 @@ mod tests {
 
         let actual: syn::File = parse_quote!(#codegen);
         let expected: syn::File = parse_quote! {
-            pub type NullableThing = ::std::option::Option<crate::types::nullable_thing::types::Value>;
+            pub type NullableThing = ::std::option::Option<crate::types::nullable_thing::types::NullableThing>;
             pub mod types {
+                #[derive(Debug, Clone, PartialEq, Eq, Hash, Default, ::ploidy_util::serde::Serialize, ::ploidy_util::serde::Deserialize, ::ploidy_util::pointer::JsonPointee, ::ploidy_util::pointer::JsonPointerTarget)]
+                #[serde(crate = "::ploidy_util::serde")]
+                #[ploidy(pointer(crate = "::ploidy_util::pointer"))]
+                pub struct NullableThing {
+                    #[serde(default, skip_serializing_if = "::ploidy_util::absent::AbsentOr::is_absent")]
+                    pub value: ::ploidy_util::absent::AbsentOr<crate::types::nullable_thing::types::Value>,
+                }
                 #[derive(Debug, Clone, PartialEq, Eq, Hash, Default, ::ploidy_util::serde::Serialize, ::ploidy_util::serde::Deserialize, ::ploidy_util::pointer::JsonPointee, ::ploidy_util::pointer::JsonPointerTarget)]
                 #[serde(crate = "::ploidy_util::serde")]
                 #[ploidy(pointer(crate = "::ploidy_util::pointer"))]
                 pub struct Value {
                     #[serde(default, skip_serializing_if = "::ploidy_util::absent::AbsentOr::is_absent")]
-                    pub value: ::ploidy_util::absent::AbsentOr<crate::types::nullable_thing::types::Value2>,
+                    pub id: ::ploidy_util::absent::AbsentOr<::std::string::String>,
+                }
+            }
+        };
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn test_untagged_inline_variants_use_parent_name() {
+        let doc = Document::from_yaml(indoc::indoc! {"
+            openapi: 3.0.0
+            info:
+              title: Test API
+              version: 1.0.0
+            paths: {}
+            components:
+              schemas:
+                Pet:
+                  oneOf:
+                    - type: object
+                      properties:
+                        bark:
+                          type: string
+                    - type: object
+                      properties:
+                        meow:
+                          type: string
+        "})
+        .unwrap();
+
+        let arena = Arena::new();
+        let spec = Spec::from_doc(&arena, &doc).unwrap();
+        let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
+
+        let schema = graph.schema("Pet").unwrap();
+        let SchemaTypeView::Untagged(_, _) = &schema else {
+            panic!("expected untagged `Pet`; got `{schema:?}`");
+        };
+
+        let codegen = CodegenSchemaType::new(&graph, &schema);
+
+        let actual: syn::File = parse_quote!(#codegen);
+        let expected: syn::File = parse_quote! {
+            #[derive(Debug, Clone, PartialEq, Eq, Hash, ::ploidy_util::serde::Serialize, ::ploidy_util::serde::Deserialize, ::ploidy_util::pointer::JsonPointee, ::ploidy_util::pointer::JsonPointerTarget)]
+            #[serde(crate = "::ploidy_util::serde", untagged)]
+            #[ploidy(pointer(crate = "::ploidy_util::pointer", untagged))]
+            pub enum Pet {
+                Pet1(crate::types::pet::types::Pet1),
+                Pet2(crate::types::pet::types::Pet2)
+            }
+            pub mod types {
+                #[derive(Debug, Clone, PartialEq, Eq, Hash, Default, ::ploidy_util::serde::Serialize, ::ploidy_util::serde::Deserialize, ::ploidy_util::pointer::JsonPointee, ::ploidy_util::pointer::JsonPointerTarget)]
+                #[serde(crate = "::ploidy_util::serde")]
+                #[ploidy(pointer(crate = "::ploidy_util::pointer"))]
+                pub struct Pet1 {
+                    #[serde(default, skip_serializing_if = "::ploidy_util::absent::AbsentOr::is_absent")]
+                    pub bark: ::ploidy_util::absent::AbsentOr<::std::string::String>,
                 }
                 #[derive(Debug, Clone, PartialEq, Eq, Hash, Default, ::ploidy_util::serde::Serialize, ::ploidy_util::serde::Deserialize, ::ploidy_util::pointer::JsonPointee, ::ploidy_util::pointer::JsonPointerTarget)]
                 #[serde(crate = "::ploidy_util::serde")]
                 #[ploidy(pointer(crate = "::ploidy_util::pointer"))]
-                pub struct Value2 {
+                pub struct Pet2 {
                     #[serde(default, skip_serializing_if = "::ploidy_util::absent::AbsentOr::is_absent")]
-                    pub id: ::ploidy_util::absent::AbsentOr<::std::string::String>,
+                    pub meow: ::ploidy_util::absent::AbsentOr<::std::string::String>,
+                }
+            }
+        };
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn test_any_of_inline_fields_use_parent_name() {
+        let doc = Document::from_yaml(indoc::indoc! {"
+            openapi: 3.0.0
+            info:
+              title: Test API
+              version: 1.0.0
+            paths: {}
+            components:
+              schemas:
+                Pet:
+                  anyOf:
+                    - type: object
+                      properties:
+                        bark:
+                          type: string
+                    - type: object
+                      properties:
+                        meow:
+                          type: string
+        "})
+        .unwrap();
+
+        let arena = Arena::new();
+        let spec = Spec::from_doc(&arena, &doc).unwrap();
+        let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
+
+        let schema = graph.schema("Pet").unwrap();
+        let SchemaTypeView::Struct(_, _) = &schema else {
+            panic!("expected struct `Pet`; got `{schema:?}`");
+        };
+
+        let codegen = CodegenSchemaType::new(&graph, &schema);
+
+        let actual: syn::File = parse_quote!(#codegen);
+        let expected: syn::File = parse_quote! {
+            #[derive(Debug, Clone, PartialEq, Eq, Hash, Default, ::ploidy_util::serde::Serialize, ::ploidy_util::serde::Deserialize, ::ploidy_util::pointer::JsonPointee, ::ploidy_util::pointer::JsonPointerTarget)]
+            #[serde(crate = "::ploidy_util::serde")]
+            #[ploidy(pointer(crate = "::ploidy_util::pointer"))]
+            pub struct Pet {
+                #[serde(flatten, default, skip_serializing_if = "::ploidy_util::absent::AbsentOr::is_absent")]
+                #[ploidy(pointer(flatten))]
+                pub pet_1: ::ploidy_util::absent::AbsentOr<crate::types::pet::types::Pet1>,
+                #[serde(flatten, default, skip_serializing_if = "::ploidy_util::absent::AbsentOr::is_absent")]
+                #[ploidy(pointer(flatten))]
+                pub pet_2: ::ploidy_util::absent::AbsentOr<crate::types::pet::types::Pet2>,
+            }
+            pub mod types {
+                #[derive(Debug, Clone, PartialEq, Eq, Hash, Default, ::ploidy_util::serde::Serialize, ::ploidy_util::serde::Deserialize, ::ploidy_util::pointer::JsonPointee, ::ploidy_util::pointer::JsonPointerTarget)]
+                #[serde(crate = "::ploidy_util::serde")]
+                #[ploidy(pointer(crate = "::ploidy_util::pointer"))]
+                pub struct Pet1 {
+                    #[serde(default, skip_serializing_if = "::ploidy_util::absent::AbsentOr::is_absent")]
+                    pub bark: ::ploidy_util::absent::AbsentOr<::std::string::String>,
+                }
+                #[derive(Debug, Clone, PartialEq, Eq, Hash, Default, ::ploidy_util::serde::Serialize, ::ploidy_util::serde::Deserialize, ::ploidy_util::pointer::JsonPointee, ::ploidy_util::pointer::JsonPointerTarget)]
+                #[serde(crate = "::ploidy_util::serde")]
+                #[ploidy(pointer(crate = "::ploidy_util::pointer"))]
+                pub struct Pet2 {
+                    #[serde(default, skip_serializing_if = "::ploidy_util::absent::AbsentOr::is_absent")]
+                    pub meow: ::ploidy_util::absent::AbsentOr<::std::string::String>,
                 }
             }
         };

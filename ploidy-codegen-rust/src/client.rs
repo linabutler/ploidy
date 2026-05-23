@@ -213,7 +213,7 @@ mod tests {
         let mut scope = UniqueIdents::new(&arena);
         let resources = [
             ResourceGroup::Default,
-            ResourceGroup::Named(scope.ident("customer_profiles")),
+            ResourceGroup::Named(scope.reserve("customer_profiles")),
         ];
         let modules = ResourceModules(&resources);
 

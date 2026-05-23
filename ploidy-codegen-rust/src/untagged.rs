@@ -24,14 +24,13 @@ impl<'a> CodegenUntagged<'a> {
 
 impl ToTokens for CodegenUntagged<'_> {
     fn to_tokens(&self, tokens: &mut TokenStream) {
-        let variants = self.ty.variants().enumerate().map(|(index, variant)| {
-            let variant_name = CodegenIdentUsage::Variant(
-                self.graph
-                    .ident(IdentMapping::UntaggedVariant(self.ty.id(), index)),
-            );
+        let variants = self.ty.variants().map(|variant| {
+            let variant_name = CodegenIdentUsage::Variant(self.graph.ident(
+                IdentMapping::UntaggedVariant(self.ty.id(), variant.ordinal()),
+            ));
             match variant.ty() {
                 Some(variant) => {
-                    let rust_type = CodegenRef::new(self.graph, &variant.view);
+                    let rust_type = CodegenRef::new(self.graph, &variant);
                     quote! { #variant_name(#rust_type) }
                 }
                 None => quote! { #variant_name },
@@ -201,8 +200,8 @@ mod tests {
             #[serde(crate = "::ploidy_util::serde", untagged)]
             #[ploidy(pointer(crate = "::ploidy_util::pointer", untagged))]
             pub enum Animal {
-                V1(crate::types::Dog),
-                V2(crate::types::Cat)
+                Dog(crate::types::Dog),
+                Cat(crate::types::Cat)
             }
         };
         assert_eq!(actual, expected);
@@ -382,7 +381,7 @@ mod tests {
             pub enum Input {
                 String(::std::string::String),
                 Array(::std::vec::Vec<::std::string::String>),
-                Array2(::std::vec::Vec<crate::types::input::types::V3Item>)
+                Array2(::std::vec::Vec<crate::types::input::types::Array2Item>)
             }
         };
         assert_eq!(actual, expected);

@@ -1,7 +1,5 @@
 //! Tests for the IR view layer, indirection, and extension system.
 
-use std::num::NonZeroUsize;
-
 use itertools::Itertools;
 
 use crate::{
@@ -9,8 +7,8 @@ use crate::{
     ir::{
         ContainerView, EnumVariant, ExtendableView, HasResource, HasTypeId, InlineTypePathRoot,
         InlineTypePathSegment, InlineTypeView, OperationUsage, ParameterStyle, PrimitiveType,
-        RawGraph, RequestView, Required, ResponseView, SchemaTypeInfo, SchemaTypeView,
-        SomeUntaggedVariant, Spec, StructFieldName, TypeView, View,
+        RawGraph, RequestView, Required, ResponseView, SchemaTypeInfo, SchemaTypeView, Spec,
+        StructFieldName, TypeView, View,
     },
     parse::{Document, Method, path::PathFragment},
     tests::assert_matches,
@@ -915,7 +913,7 @@ fn test_inlines_discovers_nested_inline_all_of_parents() {
 #[test]
 fn test_inlines_multiple_inline_all_of_parents_have_distinct_paths() {
     // When a struct has multiple inline `allOf` parents, each parent's path
-    // must carry a distinct `Inherits(n)` segment, so that codegen can
+    // must carry a distinct `Inherits(parent, n)` segment, so that codegen can
     // produce unique names.
     let doc = Document::from_yaml(indoc::indoc! {"
         openapi: 3.0.0
@@ -950,7 +948,7 @@ fn test_inlines_multiple_inline_all_of_parents_have_distinct_paths() {
         other => panic!("expected struct `Combined`; got {other:?}"),
     };
     // Each inline parent struct should have a path with a single
-    // `Inherits(n)` segment.
+    // `Inherits(parent, n)` segment.
     let paths = combined
         .parents()
         .map(|parent| match parent {
@@ -959,19 +957,18 @@ fn test_inlines_multiple_inline_all_of_parents_have_distinct_paths() {
         })
         .collect_vec();
     let paths = paths.iter().map(|path| path.as_slice()).collect_vec();
-    assert_eq!(
+    assert_matches!(
         &*paths,
         [
-            [InlineTypePathSegment::Inherits(
-                NonZeroUsize::new(1).unwrap()
-            )],
-            [InlineTypePathSegment::Inherits(
-                NonZeroUsize::new(2).unwrap()
-            )],
-            [InlineTypePathSegment::Inherits(
-                NonZeroUsize::new(3).unwrap()
-            )],
-        ]
+            [InlineTypePathSegment::Inherits(parent1, index1)],
+            [InlineTypePathSegment::Inherits(parent2, index2)],
+            [InlineTypePathSegment::Inherits(parent3, index3)],
+        ] if *parent1 == combined.id()
+            && index1.get() == 1
+            && *parent2 == combined.id()
+            && index2.get() == 2
+            && *parent3 == combined.id()
+            && index3.get() == 3
     );
 }
 
@@ -1038,13 +1035,13 @@ fn test_nested_type_array_inline_paths_are_distinct() {
         string.path().root(),
         InlineTypePathRoot::Schema(schema.id())
     );
-    assert_eq!(
+    assert_matches!(
         &*string.path().segments().collect_vec(),
         [
             InlineTypePathSegment::Optional,
             InlineTypePathSegment::ArrayItem,
-            InlineTypePathSegment::UntaggedVariant(NonZeroUsize::new(1).unwrap()),
-        ],
+            InlineTypePathSegment::UntaggedVariant(parent, index),
+        ] if *parent == untagged.id() && index.get() == 1,
     );
 
     let integer = schema
@@ -1057,13 +1054,13 @@ fn test_nested_type_array_inline_paths_are_distinct() {
         integer.path().root(),
         InlineTypePathRoot::Schema(schema.id()),
     );
-    assert_eq!(
+    assert_matches!(
         &*integer.path().segments().collect_vec(),
         [
             InlineTypePathSegment::Optional,
             InlineTypePathSegment::ArrayItem,
-            InlineTypePathSegment::UntaggedVariant(NonZeroUsize::new(2).unwrap()),
-        ]
+            InlineTypePathSegment::UntaggedVariant(parent, index),
+        ] if *parent == untagged.id() && index.get() == 2
     );
 }
 
@@ -1276,8 +1273,12 @@ fn test_untagged_variant_iteration() {
         _ => panic!("`Animal` should be an untagged union"),
     };
 
-    // Untagged variants contain `Cat` and `Dog` schema references.
-    assert_eq!(untagged_view.variants().count(), 2);
+    let variants = untagged_view.variants().collect_vec();
+    assert_eq!(variants.len(), 2);
+    assert_matches!(variants[0].ty(), Some(TypeView::Schema(view)) if view.name() == "Cat");
+    assert_matches!(variants[1].ty(), Some(TypeView::Schema(view)) if view.name() == "Dog");
+    assert_eq!(variants[0].ordinal().get(), 1);
+    assert_eq!(variants[1].ordinal().get(), 2);
 }
 
 // MARK: Container views
@@ -1756,24 +1757,57 @@ fn test_untagged_variant_with_null_type() {
     let cat_variant = &variants[0];
     assert_matches!(
         cat_variant.ty(),
-        Some(SomeUntaggedVariant {
-            view: TypeView::Schema(view),
-            ..
-        }) if view.name() == "Cat",
+        Some(TypeView::Schema(view)) if view.name() == "Cat",
     );
 
     let dog_variant = &variants[1];
     assert_matches!(
         dog_variant.ty(),
-        Some(SomeUntaggedVariant {
-            view: TypeView::Schema(view),
-            ..
-        }) if view.name() == "Dog",
+        Some(TypeView::Schema(view)) if view.name() == "Dog",
     );
 
     // The third variant should be `null`, returning `None`.
     let null_variant = &variants[2];
     assert!(null_variant.ty().is_none());
+}
+
+#[test]
+fn test_untagged_self_variant_preserves_type() {
+    let doc = Document::from_yaml(indoc::indoc! {"
+        openapi: 3.0.0
+        info:
+          title: Test
+          version: 1.0
+        components:
+          schemas:
+            Node:
+              oneOf:
+                - $ref: '#/components/schemas/Node'
+                - type: object
+                  properties:
+                    value:
+                      type: string
+                - type: 'null'
+    "})
+    .unwrap();
+
+    let arena = Arena::new();
+    let spec = Spec::from_doc(&arena, &doc).unwrap();
+    let graph = RawGraph::new(&arena, &spec).cook();
+
+    let node_schema = graph.schema("Node").unwrap();
+    let untagged_view = match node_schema {
+        SchemaTypeView::Untagged(_, view) => view,
+        other => panic!("expected untagged union `Node`; got {other:?}"),
+    };
+
+    let variants = untagged_view.variants().collect_vec();
+    assert_eq!(variants.len(), 3);
+    assert_matches!(
+        variants[0].ty(),
+        Some(TypeView::Schema(view)) if view.name() == "Node",
+    );
+    assert!(variants[2].ty().is_none());
 }
 
 #[test]
@@ -1831,17 +1865,11 @@ fn test_null_variant_demotes_tagged_to_untagged() {
 
     assert_matches!(
         variants[0].ty(),
-        Some(SomeUntaggedVariant {
-            view: TypeView::Schema(view),
-            ..
-        }) if view.name() == "Cat",
+        Some(TypeView::Schema(view)) if view.name() == "Cat",
     );
     assert_matches!(
         variants[1].ty(),
-        Some(SomeUntaggedVariant {
-            view: TypeView::Schema(view),
-            ..
-        }) if view.name() == "Dog",
+        Some(TypeView::Schema(view)) if view.name() == "Dog",
     );
     assert!(variants[2].ty().is_none());
 }
