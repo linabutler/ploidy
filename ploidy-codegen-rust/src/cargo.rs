@@ -944,8 +944,8 @@ mod tests {
         let manifest = CodegenCargoManifest::new(&graph, &default_manifest()).to_manifest();
 
         let features = manifest.features();
-        assert_matches!(&*features["default2"], []);
-        assert_matches!(&*features["default"], ["default2"]);
+        assert_matches!(&*features["default-2"], []);
+        assert_matches!(&*features["default"], ["default-2"]);
     }
 
     // MARK: Operation feature dependencies
@@ -1083,8 +1083,8 @@ mod tests {
         let manifest = CodegenCargoManifest::new(&graph, &default_manifest()).to_manifest();
 
         let features = manifest.features();
-        assert_matches!(&*features["default2"], []);
-        assert_matches!(&*features["default"], ["default2"]);
+        assert_matches!(&*features["default-2"], []);
+        assert_matches!(&*features["default"], ["default-2"]);
     }
 
     // MARK: Diamond dependencies

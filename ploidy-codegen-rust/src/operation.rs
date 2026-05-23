@@ -442,7 +442,7 @@ mod tests {
         let expected: syn::ImplItemFn = parse_quote! {
             pub async fn search(
                 &self,
-                query2: &str,
+                query_2: &str,
                 query: &parameters::SearchQuery
             ) -> Result<(), crate::error::Error> {
                 let url = {
@@ -452,7 +452,7 @@ mod tests {
                         .map(|mut segments| {
                             segments.pop_if_empty()
                                 .push("search")
-                                .push(query2);
+                                .push(query_2);
                         });
                     url
                 };

@@ -335,6 +335,23 @@ mod tests {
         assert_eq!(actual, expected);
     }
 
+    #[test]
+    fn test_codegen_ident_method_preserves_numeric_boundary() {
+        let arena = Arena::new();
+        let mut scope = UniqueIdents::new(&arena);
+        let ident = scope.ident("get_fees1");
+
+        let usage = CodegenIdentUsage::Method(ident);
+        let actual: syn::Ident = parse_quote!(#usage);
+        let expected: syn::Ident = parse_quote!(get_fees_1);
+        assert_eq!(actual, expected);
+
+        let usage = CodegenIdentUsage::Type(ident);
+        let actual: syn::Ident = parse_quote!(#usage);
+        let expected: syn::Ident = parse_quote!(GetFees1);
+        assert_eq!(actual, expected);
+    }
+
     // MARK: Special characters
 
     #[test]
@@ -398,7 +415,7 @@ mod tests {
         assert_eq!(&ident.0, "V");
 
         let ident = scope.variant_name_hint(UntaggedVariantNameHint::Index(42));
-        assert_eq!(&ident.0, "V42");
+        assert_eq!(&ident.0, "V_42");
     }
 
     // MARK: Struct field names
@@ -416,7 +433,7 @@ mod tests {
         let ident5 = scope.field_name_hint(StructFieldNameHint::Index(5));
         let usage = CodegenIdentUsage::Field(ident5);
         let actual: syn::Ident = parse_quote!(#usage);
-        let expected: syn::Ident = parse_quote!(variant5);
+        let expected: syn::Ident = parse_quote!(variant_5);
         assert_eq!(actual, expected);
     }
 
@@ -509,13 +526,13 @@ mod tests {
         let ident = scope.ident("crate");
         let usage = CodegenIdentUsage::Method(ident);
         let actual: syn::Ident = parse_quote!(#usage);
-        let expected: syn::Ident = parse_quote!(crate2);
+        let expected: syn::Ident = parse_quote!(crate_2);
         assert_eq!(actual, expected);
 
         let ident = scope.ident("crate2");
         let usage = CodegenIdentUsage::Method(ident);
         let actual: syn::Ident = parse_quote!(#usage);
-        let expected: syn::Ident = parse_quote!(crate3);
+        let expected: syn::Ident = parse_quote!(crate_3);
         assert_eq!(actual, expected);
     }
 }

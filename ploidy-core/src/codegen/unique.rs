@@ -43,9 +43,9 @@ impl<'a> UniqueNames<'a> {
     /// let arena = Arena::new();
     /// let mut names = UniqueNames::new(&arena);
     /// assert_eq!(names.uniquify("HTTPResponse"), "HTTPResponse");
-    /// assert_eq!(names.uniquify("HTTP_Response"), "HTTP_Response2");
-    /// assert_eq!(names.uniquify("httpResponse"), "httpResponse3");
-    /// assert_eq!(names.uniquify("http_response_2"), "http_response4");
+    /// assert_eq!(names.uniquify("HTTP_Response"), "HTTP_Response_2");
+    /// assert_eq!(names.uniquify("httpResponse"), "httpResponse_3");
+    /// assert_eq!(names.uniquify("http_response_2"), "http_response_4");
     /// ```
     pub fn uniquify(&mut self, name: &str) -> &'a str {
         let parsed = ParsedName::parse(name);
@@ -70,7 +70,7 @@ impl<'a> UniqueNames<'a> {
         match parsed {
             ParsedName::Empty | ParsedName::Numeric(_) => self.arena.alloc_str(&suffix.to_string()),
             ParsedName::Stemmed { stem, .. } if suffix > 0 => {
-                self.arena.alloc_str(&format!("{stem}{suffix}"))
+                self.arena.alloc_str(&format!("{stem}_{suffix}"))
             }
             ParsedName::Stemmed { stem, .. } => self.arena.alloc_str(stem),
         }
@@ -472,9 +472,9 @@ mod tests {
         let mut names = UniqueNames::new(&arena);
 
         assert_eq!(names.uniquify("HTTPResponse"), "HTTPResponse");
-        assert_eq!(names.uniquify("HTTP_Response"), "HTTP_Response2");
-        assert_eq!(names.uniquify("httpResponse"), "httpResponse3");
-        assert_eq!(names.uniquify("http_response"), "http_response4");
+        assert_eq!(names.uniquify("HTTP_Response"), "HTTP_Response_2");
+        assert_eq!(names.uniquify("httpResponse"), "httpResponse_3");
+        assert_eq!(names.uniquify("http_response"), "http_response_4");
         // `HTTPRESPONSE` isn't a collision; it's a single word.
         assert_eq!(names.uniquify("HTTPRESPONSE"), "HTTPRESPONSE");
     }
@@ -485,8 +485,8 @@ mod tests {
         let mut names = UniqueNames::new(&arena);
 
         assert_eq!(names.uniquify("XMLHttpRequest"), "XMLHttpRequest");
-        assert_eq!(names.uniquify("xml_http_request"), "xml_http_request2");
-        assert_eq!(names.uniquify("XmlHttpRequest"), "XmlHttpRequest3");
+        assert_eq!(names.uniquify("xml_http_request"), "xml_http_request_2");
+        assert_eq!(names.uniquify("XmlHttpRequest"), "XmlHttpRequest_3");
     }
 
     #[test]
@@ -495,7 +495,7 @@ mod tests {
         let mut names = UniqueNames::new(&arena);
 
         assert_eq!(names.uniquify("HTTP_Response"), "HTTP_Response");
-        assert_eq!(names.uniquify("httpResponse"), "httpResponse2");
+        assert_eq!(names.uniquify("httpResponse"), "httpResponse_2");
     }
 
     #[test]
@@ -513,22 +513,22 @@ mod tests {
         let arena = Arena::new();
         let mut names = UniqueNames::new(&arena);
 
-        assert_eq!(names.uniquify("Response2"), "Response2");
-        assert_eq!(names.uniquify("response_2"), "response3");
+        assert_eq!(names.uniquify("Response2"), "Response_2");
+        assert_eq!(names.uniquify("response_2"), "response_3");
 
         // `0` becomes the bare stem.
         assert_eq!(names.uniquify("Response0"), "Response");
-        assert_eq!(names.uniquify("response"), "response4");
+        assert_eq!(names.uniquify("response"), "response_4");
 
         // Digit-to-uppercase collisions.
         assert_eq!(names.uniquify("1099KStatus"), "1099KStatus");
-        assert_eq!(names.uniquify("1099K_Status"), "1099K_Status2");
-        assert_eq!(names.uniquify("1099KStatus"), "1099KStatus3");
-        assert_eq!(names.uniquify("1099_K_Status"), "1099_K_Status4");
+        assert_eq!(names.uniquify("1099K_Status"), "1099K_Status_2");
+        assert_eq!(names.uniquify("1099KStatus"), "1099KStatus_3");
+        assert_eq!(names.uniquify("1099_K_Status"), "1099_K_Status_4");
 
         // Digit-to-lowercase collisions.
         assert_eq!(names.uniquify("123abc"), "123abc");
-        assert_eq!(names.uniquify("123_abc"), "123_abc2");
+        assert_eq!(names.uniquify("123_abc"), "123_abc_2");
     }
 
     #[test]
@@ -536,10 +536,10 @@ mod tests {
         let arena = Arena::new();
         let mut names = UniqueNames::new(&arena);
 
-        assert_eq!(names.uniquify("OAuth2"), "OAuth2");
-        assert_eq!(names.uniquify("OAuth_2"), "OAuth3");
+        assert_eq!(names.uniquify("OAuth2"), "OAuth_2");
+        assert_eq!(names.uniquify("OAuth_2"), "OAuth_3");
         assert_eq!(names.uniquify("OAuth"), "OAuth");
-        assert_eq!(names.uniquify("OAuth0"), "OAuth4");
+        assert_eq!(names.uniquify("OAuth0"), "OAuth_4");
     }
 
     #[test]
@@ -601,7 +601,7 @@ mod tests {
         let mut names = UniqueNames::with_reserved(&arena, ["_", "reserved"]);
 
         assert_eq!(names.uniquify("_"), "1");
-        assert_eq!(names.uniquify("reserved"), "reserved2");
+        assert_eq!(names.uniquify("reserved"), "reserved_2");
         assert_eq!(names.uniquify("other"), "other");
     }
 
@@ -610,7 +610,7 @@ mod tests {
         let arena = Arena::new();
         let mut names = UniqueNames::with_reserved(&arena, ["crate"]);
 
-        assert_eq!(names.uniquify("crate"), "crate2");
-        assert_eq!(names.uniquify("crate2"), "crate3");
+        assert_eq!(names.uniquify("crate"), "crate_2");
+        assert_eq!(names.uniquify("crate2"), "crate_3");
     }
 }

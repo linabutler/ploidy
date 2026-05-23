@@ -570,7 +570,7 @@ mod tests {
                 pub foo_bar: ::ploidy_util::absent::AbsentOr<::std::vec::Vec<crate::types::qux::types::FooBarItem>>,
                 #[serde(rename = "foo_bar", default, skip_serializing_if = "::ploidy_util::absent::AbsentOr::is_absent")]
                 #[ploidy(pointer(rename = "foo_bar"))]
-                pub foo_bar2: ::ploidy_util::absent::AbsentOr<::std::vec::Vec<crate::types::qux::types::FooBar2Item>>,
+                pub foo_bar_2: ::ploidy_util::absent::AbsentOr<::std::vec::Vec<crate::types::qux::types::FooBar2Item>>,
             }
             pub mod types {
                 #[derive(Debug, Clone, PartialEq, Eq, Hash, Default, ::ploidy_util::serde::Serialize, ::ploidy_util::serde::Deserialize, ::ploidy_util::pointer::JsonPointee, ::ploidy_util::pointer::JsonPointerTarget)]

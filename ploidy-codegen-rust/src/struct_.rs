@@ -2812,7 +2812,7 @@ mod tests {
                 pub additional_properties: ::ploidy_util::absent::AbsentOr<bool>,
                 #[serde(flatten)]
                 #[ploidy(pointer(flatten))]
-                pub additional_properties2: ::std::collections::BTreeMap<::std::string::String, ::std::string::String>,
+                pub additional_properties_2: ::std::collections::BTreeMap<::std::string::String, ::std::string::String>,
             }
         };
         assert_eq!(actual, expected);
