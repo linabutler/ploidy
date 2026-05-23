@@ -1,3 +1,5 @@
+use std::num::NonZeroUsize;
+
 use itertools::Itertools;
 use rustc_hash::FxHashMap;
 
@@ -10,8 +12,7 @@ use crate::{
 use super::types::{
     Enum, EnumVariant, InlineTypeId, InlineTypeIds, PrimitiveType, SpecContainer, SpecInlineType,
     SpecInner, SpecSchemaType, SpecStruct, SpecStructField, SpecTagged, SpecTaggedVariant,
-    SpecType, SpecUntagged, SpecUntaggedVariant, StructFieldName, StructFieldNameHint,
-    UntaggedVariantNameHint,
+    SpecType, SpecUntagged, StructFieldName,
 };
 
 /// Metadata about a type in the dependency graph.
@@ -168,9 +169,7 @@ impl<'context, 'a> IrTransformer<'context, 'a> {
             }
             variants => variants
                 .iter()
-                .enumerate()
-                .map(|(index, schema)| (index + 1, schema))
-                .map(|(index, schema)| {
+                .map(|schema| {
                     let ty = match schema {
                         RefOrSchema::Ref(r) => Some(SpecType::Ref(r)),
                         RefOrSchema::Inline(s) if matches!(&*s.ty, [Ty::Null]) => None,
@@ -179,33 +178,7 @@ impl<'context, 'a> IrTransformer<'context, 'a> {
                             Some(transform_with_context(self.context, id, schema))
                         }
                     };
-                    ty.map(|ty| {
-                        let hint = match ty {
-                            SpecType::Schema(SpecSchemaType::Primitive(_, p))
-                            | SpecType::Inline(SpecInlineType::Primitive(_, p)) => {
-                                UntaggedVariantNameHint::Primitive(p)
-                            }
-                            SpecType::Schema(SpecSchemaType::Container(
-                                _,
-                                SpecContainer::Array(_),
-                            ))
-                            | SpecType::Inline(SpecInlineType::Container(
-                                _,
-                                SpecContainer::Array(_),
-                            )) => UntaggedVariantNameHint::Array,
-                            SpecType::Schema(SpecSchemaType::Container(
-                                _,
-                                SpecContainer::Map(_),
-                            ))
-                            | SpecType::Inline(SpecInlineType::Container(
-                                _,
-                                SpecContainer::Map(_),
-                            )) => UntaggedVariantNameHint::Map,
-                            _ => UntaggedVariantNameHint::Index(index),
-                        };
-                        SpecUntaggedVariant::Some(hint, self.arena().alloc(ty))
-                    })
-                    .unwrap_or(SpecUntaggedVariant::Null)
+                    ty.map(|ty| &*self.arena().alloc(ty))
                 })
                 .collect_vec(),
         };
@@ -213,8 +186,7 @@ impl<'context, 'a> IrTransformer<'context, 'a> {
         Ok(match &*variants {
             // Simplify two-variant untagged unions, where one is a type
             // and the other is `null`, into optionals.
-            [SpecUntaggedVariant::Some(_, ty), SpecUntaggedVariant::Null]
-            | [SpecUntaggedVariant::Null, SpecUntaggedVariant::Some(_, ty)] => {
+            [Some(ty), None] | [None, Some(ty)] => {
                 let container = SpecContainer::Optional(SpecInner {
                     description: self.schema.description.as_deref(),
                     ty,
@@ -259,6 +231,7 @@ impl<'context, 'a> IrTransformer<'context, 'a> {
             .iter()
             .enumerate()
             .map(|(index, schema)| {
+                let ordinal = NonZeroUsize::new(index + 1).unwrap();
                 let (field_name, ty, description) = match schema {
                     RefOrSchema::Ref(r) => {
                         let name = StructFieldName::Name(self.arena().alloc_str(&r.name()));
@@ -271,7 +244,7 @@ impl<'context, 'a> IrTransformer<'context, 'a> {
                         (name, ty, desc)
                     }
                     RefOrSchema::Inline(schema) => {
-                        let name = StructFieldName::Hint(StructFieldNameHint::Index(index + 1));
+                        let name = StructFieldName::Ordinal(ordinal);
                         let id = self.context.ids.next();
                         let ty: &_ =
                             self.arena()
@@ -516,20 +489,16 @@ impl<'context, 'a> IrTransformer<'context, 'a> {
             (many, nullable) => {
                 let mut variants = many
                     .iter()
-                    .enumerate()
-                    .map(|(index, variant)| (index + 1, variant))
-                    .map(|(index, variant)| {
-                        SpecUntaggedVariant::Some(
-                            variant
-                                .hint()
-                                .unwrap_or(UntaggedVariantNameHint::Index(index)),
-                            self.arena()
+                    .map(|variant| {
+                        Some(
+                            &*self
+                                .arena()
                                 .alloc(variant.to_inline_type(self.context.ids.next()).into()),
                         )
                     })
                     .collect_vec();
                 if nullable {
-                    variants.push(SpecUntaggedVariant::Null);
+                    variants.push(None);
                 }
                 let untagged = SpecUntagged {
                     description: self.schema.description.as_deref(),
@@ -624,8 +593,6 @@ impl<'context, 'a> IrTransformer<'context, 'a> {
     /// Lowers `additionalProperties` into a struct field definition,
     /// if the schema specifies them.
     fn additional_properties(&self) -> Option<SpecStructField<'a>> {
-        let name = StructFieldName::Hint(StructFieldNameHint::AdditionalProperties);
-
         let inner = match &self.schema.additional_properties {
             Some(AdditionalProperties::RefOrSchema(RefOrSchema::Ref(r))) => SpecInner {
                 description: self.schema.description.as_deref(),
@@ -659,7 +626,7 @@ impl<'context, 'a> IrTransformer<'context, 'a> {
         )));
 
         Some(SpecStructField {
-            name,
+            name: StructFieldName::AdditionalProperties,
             ty,
             required: true,
             description: None,
@@ -685,16 +652,6 @@ enum OtherVariant<'a> {
 }
 
 impl<'a> OtherVariant<'a> {
-    /// Returns the name hint for this variant when used in an untagged union.
-    fn hint(self) -> Option<UntaggedVariantNameHint> {
-        Some(match self {
-            Self::Primitive(p) => UntaggedVariantNameHint::Primitive(p),
-            Self::Array(..) => UntaggedVariantNameHint::Array,
-            Self::Map(..) => UntaggedVariantNameHint::Map,
-            Self::Any => return None,
-        })
-    }
-
     /// Converts this variant to a [`SpecSchemaType`].
     fn to_schema_type(self, info: SchemaTypeInfo<'a>) -> SpecSchemaType<'a> {
         match self {

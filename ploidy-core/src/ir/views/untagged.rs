@@ -18,17 +18,13 @@
 //! ```
 //!
 //! Ploidy represents this as an [`UntaggedView`] with a list of variants.
-//! Each variant is either a typed value or `null`, modeled as
-//! [`Option<SomeUntaggedVariant>`]. The typed case pairs an
-//! [`UntaggedVariantNameHint`] with a [`TypeView`]; the hint helps codegen
-//! produce readable variant names when the schema has no explicit name.
-//!
-//! [`Option<SomeUntaggedVariant>`]: SomeUntaggedVariant
+
+use std::num::NonZeroUsize;
 
 use petgraph::graph::NodeIndex;
 
 use crate::ir::{
-    UntaggedVariantMeta, UntaggedVariantNameHint,
+    UntaggedVariantMeta,
     graph::CookedGraph,
     types::{GraphUntagged, VariantMeta},
 };
@@ -69,13 +65,17 @@ impl<'graph, 'a> UntaggedView<'graph, 'a> {
     }
 
     /// Returns an iterator over this untagged union's variants.
+    #[inline]
     pub fn variants(&self) -> impl Iterator<Item = UntaggedVariantView<'_, 'graph, 'a>> {
         self.cooked
             .variants(self.index)
-            .map(|info| UntaggedVariantView {
-                parent: self,
-                meta: info.meta,
-                index: info.target,
+            .map(|info| match info.meta {
+                VariantMeta::Untagged(meta) => UntaggedVariantView {
+                    parent: self,
+                    meta,
+                    index: info.target,
+                },
+                VariantMeta::Tagged(_) => unreachable!(),
             })
     }
 }
@@ -99,34 +99,20 @@ pub type UntaggedFieldView<'view, 'graph, 'a> = FieldView<'view, 'a, UntaggedVie
 #[derive(Debug)]
 pub struct UntaggedVariantView<'view, 'graph, 'a> {
     parent: &'view UntaggedView<'graph, 'a>,
-    meta: VariantMeta<'a>,
-    /// The node index of this variant's type (from the `Variant` edge).
+    meta: UntaggedVariantMeta,
     index: NodeIndex<usize>,
 }
 
 impl<'view, 'graph, 'a> UntaggedVariantView<'view, 'graph, 'a> {
-    /// Returns a view of this variant's type, if it's not a unit
-    /// variant.
+    /// Returns a view of this variant's type, if it's not a null variant.
     #[inline]
-    pub fn ty(&self) -> Option<SomeUntaggedVariant<'graph, 'a>> {
-        match self.meta {
-            VariantMeta::Untagged(UntaggedVariantMeta::Type { hint }) => {
-                Some(SomeUntaggedVariant {
-                    hint,
-                    view: TypeView::new(self.parent.cooked, self.index),
-                })
-            }
-            _ => None,
-        }
+    pub fn ty(&self) -> Option<TypeView<'graph, 'a>> {
+        (!self.meta.null).then(|| TypeView::new(self.parent.cooked, self.index))
     }
-}
 
-/// A non-unit variant of an untagged union, pairing a name hint
-/// with the variant's type.
-#[derive(Debug)]
-pub struct SomeUntaggedVariant<'graph, 'a> {
-    /// A hint for generating a readable variant name.
-    pub hint: UntaggedVariantNameHint,
-    /// A view of this variant's type.
-    pub view: TypeView<'graph, 'a>,
+    /// Returns this variant's position in declaration order, counted from 1.
+    #[inline]
+    pub fn ordinal(&self) -> NonZeroUsize {
+        self.meta.ordinal
+    }
 }

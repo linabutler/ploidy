@@ -2,6 +2,7 @@ use std::{
     any::{Any, TypeId as StdTypeId},
     collections::VecDeque,
     fmt::Debug,
+    num::NonZeroUsize,
 };
 
 use atomic_refcell::AtomicRefCell;
@@ -29,8 +30,8 @@ use super::{
     types::{
         FieldMeta, GraphContainer, GraphInlineType, GraphOperation, GraphSchemaType, GraphStruct,
         GraphTagged, GraphType, InlineTypeId, InlineTypeIds, InlineTypePathRoot, OperationUsage,
-        PrimitiveType, SpecInlineType, SpecSchemaType, SpecType, SpecUntaggedVariant,
-        StructFieldName, TaggedVariantMeta, UntaggedVariantMeta, VariantMeta,
+        PrimitiveType, SpecInlineType, SpecSchemaType, SpecType, StructFieldName,
+        TaggedVariantMeta, UntaggedVariantMeta, VariantMeta,
         shape::{Operation, Parameter, ParameterInfo, Request, Response},
     },
     views::{TypeId, operation::OperationView, primitive::PrimitiveView, schema::SchemaTypeView},
@@ -1273,15 +1274,9 @@ impl<'a> Iterator for SpecTypeVisitor<'a> {
 
     fn next(&mut self) -> Option<Self::Item> {
         let (parent, top) = self.stack.pop()?;
-        if matches!(
-            parent,
-            Some((
-                _,
-                GraphEdge::Variant(VariantMeta::Untagged(UntaggedVariantMeta::Null))
-            ))
-        ) {
-            // Unit variants form self-edges; skip them
-            // to avoid an infinite loop.
+        if matches!(parent, Some((parent, _)) if parent == top) {
+            // Self-edges have no unvisited target; skip them to avoid an
+            // infinite loop.
             return Some((parent, top));
         }
         match top {
@@ -1325,15 +1320,31 @@ impl<'a> Iterator for SpecTypeVisitor<'a> {
                             },
                             field.ty
                         )),
-                        ty.variants.iter().map(|variant| match variant {
-                            &SpecUntaggedVariant::Some(hint, ty) => {
-                                let meta = UntaggedVariantMeta::Type { hint };
-                                (GraphEdge::Variant(meta.into()), ty)
-                            }
-                            // `null` variants have no target type;
-                            // we represent these variants as self-edges.
-                            SpecUntaggedVariant::Null => {
-                                (GraphEdge::Variant(UntaggedVariantMeta::Null.into()), top)
+                        ty.variants.iter().enumerate().map(|(index, variant)| {
+                            let ordinal = NonZeroUsize::new(index + 1).unwrap();
+                            match variant {
+                                &Some(ty) => (
+                                    GraphEdge::Variant(
+                                        UntaggedVariantMeta {
+                                            ordinal,
+                                            null: false,
+                                        }
+                                        .into(),
+                                    ),
+                                    ty,
+                                ),
+                                // `null` variants have no target type;
+                                // we represent these variants as self-edges.
+                                None => (
+                                    GraphEdge::Variant(
+                                        UntaggedVariantMeta {
+                                            ordinal,
+                                            null: true,
+                                        }
+                                        .into(),
+                                    ),
+                                    top,
+                                ),
                             }
                         }),
                         ty.parents

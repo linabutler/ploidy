@@ -1,9 +1,11 @@
 //! IR types with graph node references.
 
+use std::num::NonZeroUsize;
+
 use petgraph::graph::NodeIndex;
 
 use super::{
-    Enum, InlineTypeId, PrimitiveType, SchemaTypeInfo, StructFieldName, UntaggedVariantNameHint,
+    Enum, InlineTypeId, PrimitiveType, SchemaTypeInfo, StructFieldName,
     shape::{Operation, Parameter, ParameterInfo, Request, Response},
     spec::{SpecContainer, SpecInlineType, SpecSchemaType},
 };
@@ -218,9 +220,9 @@ pub struct TaggedVariantMeta<'a> {
 
 /// Metadata for an untagged union variant.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-pub enum UntaggedVariantMeta {
-    Type { hint: UntaggedVariantNameHint },
-    Null,
+pub struct UntaggedVariantMeta {
+    pub ordinal: NonZeroUsize,
+    pub null: bool,
 }
 
 /// An operation with graph node references.

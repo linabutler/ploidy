@@ -108,8 +108,7 @@ pub enum OperationUsage<'a> {
 
 /// A segment in an inline type path.
 ///
-/// Segments that name fields or variants also carry the parent type,
-/// because those names are scoped to that parent.
+/// Segments scoped to a parent type carry that parent type.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub enum InlineTypePathSegment<'a> {
     /// Enters an inline type declared as a struct field.
@@ -117,7 +116,7 @@ pub enum InlineTypePathSegment<'a> {
     /// Enters an inline type declared as a tagged union variant.
     TaggedVariant(TypeId, &'a str),
     /// Enters the nth untagged union variant, counted from 1 in declaration order.
-    UntaggedVariant(NonZeroUsize),
+    UntaggedVariant(TypeId, NonZeroUsize),
     /// Enters the item type of an array.
     ArrayItem,
     /// Enters the value type of a map.
@@ -125,7 +124,7 @@ pub enum InlineTypePathSegment<'a> {
     /// Enters the inner type of an optional container.
     Optional,
     /// Enters the nth inherited parent, counted from 1 in declaration order.
-    Inherits(NonZeroUsize),
+    Inherits(TypeId, NonZeroUsize),
 }
 
 /// A primitive type in the dependency graph.
@@ -169,32 +168,14 @@ pub enum EnumVariant<'a> {
     Bool(bool),
 }
 
-/// A hint that's used to generate a more descriptive name
-/// for an untagged union variant. These are emitted for
-/// `oneOf` schemas without a discriminator.
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-pub enum UntaggedVariantNameHint {
-    Primitive(PrimitiveType),
-    Array,
-    Map,
-    Index(usize),
-}
-
-/// A struct field name, either explicit or generated from a hint.
+/// A struct field name.
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub enum StructFieldName<'a> {
-    /// Explicit name from a schema or reference.
+    /// A name declared by a property or schema reference.
     Name(&'a str),
-    /// Generated name, deferred until generation time.
-    Hint(StructFieldNameHint),
-}
-
-/// A hint that's used to generate a name for a struct field.
-/// These are emitted for inline `anyOf` schemas and
-/// additional properties fields.
-#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
-pub enum StructFieldNameHint {
-    Index(usize),
+    /// A synthetic name, counted from 1 in declaration order.
+    Ordinal(NonZeroUsize),
+    /// The synthetic field for additional properties.
     AdditionalProperties,
 }
 

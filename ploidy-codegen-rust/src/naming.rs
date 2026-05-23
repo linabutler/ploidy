@@ -8,12 +8,40 @@ use itertools::Itertools;
 use ploidy_core::{
     arena::Arena,
     codegen::{UniqueNames, unique::WordSegments},
-    ir::{PrimitiveType, StructFieldNameHint, UntaggedVariantNameHint},
 };
 
 use proc_macro2::{Ident, Span, TokenStream};
 use quote::{IdentFragment, ToTokens, TokenStreamExt};
 use ref_cast::{RefCastCustom, ref_cast_custom};
+
+/// Static identifiers for type and field names.
+pub mod idents {
+    use super::CodegenIdent;
+
+    pub const ADDITIONAL_PROPERTIES: &CodegenIdent = CodegenIdent::new("additional_properties");
+    pub const ARRAY: &CodegenIdent = CodegenIdent::new("Array");
+    pub const BINARY: &CodegenIdent = CodegenIdent::new("Binary");
+    pub const BOOL: &CodegenIdent = CodegenIdent::new("Bool");
+    pub const BYTES: &CodegenIdent = CodegenIdent::new("Bytes");
+    pub const DATE: &CodegenIdent = CodegenIdent::new("Date");
+    pub const DATE_TIME: &CodegenIdent = CodegenIdent::new("DateTime");
+    pub const F32: &CodegenIdent = CodegenIdent::new("F32");
+    pub const F64: &CodegenIdent = CodegenIdent::new("F64");
+    pub const I8: &CodegenIdent = CodegenIdent::new("I8");
+    pub const I16: &CodegenIdent = CodegenIdent::new("I16");
+    pub const I32: &CodegenIdent = CodegenIdent::new("I32");
+    pub const I64: &CodegenIdent = CodegenIdent::new("I64");
+    pub const MAP: &CodegenIdent = CodegenIdent::new("Map");
+    pub const NONE: &CodegenIdent = CodegenIdent::new("None");
+    pub const STRING: &CodegenIdent = CodegenIdent::new("String");
+    pub const U8: &CodegenIdent = CodegenIdent::new("U8");
+    pub const U16: &CodegenIdent = CodegenIdent::new("U16");
+    pub const U32: &CodegenIdent = CodegenIdent::new("U32");
+    pub const U64: &CodegenIdent = CodegenIdent::new("U64");
+    pub const UNIX_TIME: &CodegenIdent = CodegenIdent::new("UnixTime");
+    pub const URL: &CodegenIdent = CodegenIdent::new("Url");
+    pub const UUID: &CodegenIdent = CodegenIdent::new("Uuid");
+}
 
 // Keywords that can't be used as identifiers, even with `r#`.
 const KEYWORDS: &[&str] = &["crate", "self", "super", "Self"];
@@ -25,7 +53,7 @@ pub struct CodegenIdent(str);
 
 impl CodegenIdent {
     #[ref_cast_custom]
-    fn new(s: &str) -> &Self;
+    const fn new(s: &str) -> &Self;
 }
 
 /// An identifier that's unique within its [`UniqueIdents`] scope.
@@ -198,49 +226,14 @@ impl<'a> UniqueIdents<'a> {
 
     /// Cleans and uniquifies an identifier.
     #[inline]
-    pub fn ident(&mut self, name: &str) -> &'a UniqueIdent {
+    pub fn reserve(&mut self, name: &str) -> &'a UniqueIdent {
         UniqueIdent::new(self.0.uniquify(&clean(name)))
     }
 
-    /// Uniquifies a struct field name from a [`StructFieldNameHint`].
+    /// Uniquifies an already-cleaned identifier.
     #[inline]
-    pub fn field_name_hint(&mut self, hint: StructFieldNameHint) -> &'a UniqueIdent {
-        use StructFieldNameHint::*;
-        UniqueIdent::new(match hint {
-            Index(index) => self.0.uniquify(&format!("variant_{index}")),
-            AdditionalProperties => self.0.uniquify("additional_properties"),
-        })
-    }
-
-    /// Uniquifies an untagged union variant name from an
-    /// [`UntaggedVariantNameHint`].
-    #[inline]
-    pub fn variant_name_hint(&mut self, hint: UntaggedVariantNameHint) -> &'a UniqueIdent {
-        use {PrimitiveType::*, UntaggedVariantNameHint::*};
-        UniqueIdent::new(match hint {
-            Primitive(String) => self.0.uniquify("String"),
-            Primitive(I8) => self.0.uniquify("I8"),
-            Primitive(U8) => self.0.uniquify("U8"),
-            Primitive(I16) => self.0.uniquify("I16"),
-            Primitive(U16) => self.0.uniquify("U16"),
-            Primitive(I32) => self.0.uniquify("I32"),
-            Primitive(U32) => self.0.uniquify("U32"),
-            Primitive(I64) => self.0.uniquify("I64"),
-            Primitive(U64) => self.0.uniquify("U64"),
-            Primitive(F32) => self.0.uniquify("F32"),
-            Primitive(F64) => self.0.uniquify("F64"),
-            Primitive(Bool) => self.0.uniquify("Bool"),
-            Primitive(DateTime) => self.0.uniquify("DateTime"),
-            Primitive(UnixTime) => self.0.uniquify("UnixTime"),
-            Primitive(Date) => self.0.uniquify("Date"),
-            Primitive(Url) => self.0.uniquify("Url"),
-            Primitive(Uuid) => self.0.uniquify("Uuid"),
-            Primitive(Bytes) => self.0.uniquify("Bytes"),
-            Primitive(Binary) => self.0.uniquify("Binary"),
-            Array => self.0.uniquify("Array"),
-            Map => self.0.uniquify("Map"),
-            Index(index) => self.0.uniquify(&format!("V{index}")),
-        })
+    pub fn reserve_ident(&mut self, name: &CodegenIdent) -> &'a UniqueIdent {
+        UniqueIdent::new(self.0.uniquify(&name.0))
     }
 }
 
@@ -273,7 +266,7 @@ mod tests {
     fn test_codegen_ident_type() {
         let arena = Arena::new();
         let mut scope = UniqueIdents::new(&arena);
-        let ident = scope.ident("pet_store");
+        let ident = scope.reserve("pet_store");
         let usage = CodegenIdentUsage::Type(ident);
         let actual: syn::Ident = parse_quote!(#usage);
         let expected: syn::Ident = parse_quote!(PetStore);
@@ -284,7 +277,7 @@ mod tests {
     fn test_codegen_ident_field() {
         let arena = Arena::new();
         let mut scope = UniqueIdents::new(&arena);
-        let ident = scope.ident("petStore");
+        let ident = scope.reserve("petStore");
         let usage = CodegenIdentUsage::Field(ident);
         let actual: syn::Ident = parse_quote!(#usage);
         let expected: syn::Ident = parse_quote!(pet_store);
@@ -295,7 +288,7 @@ mod tests {
     fn test_codegen_ident_module() {
         let arena = Arena::new();
         let mut scope = UniqueIdents::new(&arena);
-        let ident = scope.ident("MyModule");
+        let ident = scope.reserve("MyModule");
         let usage = CodegenIdentUsage::Module(ident);
         let actual: syn::Ident = parse_quote!(#usage);
         let expected: syn::Ident = parse_quote!(my_module);
@@ -306,7 +299,7 @@ mod tests {
     fn test_codegen_ident_variant() {
         let arena = Arena::new();
         let mut scope = UniqueIdents::new(&arena);
-        let ident = scope.ident("http_error");
+        let ident = scope.reserve("http_error");
         let usage = CodegenIdentUsage::Variant(ident);
         let actual: syn::Ident = parse_quote!(#usage);
         let expected: syn::Ident = parse_quote!(HttpError);
@@ -317,7 +310,7 @@ mod tests {
     fn test_codegen_ident_param() {
         let arena = Arena::new();
         let mut scope = UniqueIdents::new(&arena);
-        let ident = scope.ident("userId");
+        let ident = scope.reserve("userId");
         let usage = CodegenIdentUsage::Param(ident);
         let actual: syn::Ident = parse_quote!(#usage);
         let expected: syn::Ident = parse_quote!(user_id);
@@ -328,7 +321,7 @@ mod tests {
     fn test_codegen_ident_method() {
         let arena = Arena::new();
         let mut scope = UniqueIdents::new(&arena);
-        let ident = scope.ident("getUserById");
+        let ident = scope.reserve("getUserById");
         let usage = CodegenIdentUsage::Method(ident);
         let actual: syn::Ident = parse_quote!(#usage);
         let expected: syn::Ident = parse_quote!(get_user_by_id);
@@ -339,7 +332,7 @@ mod tests {
     fn test_codegen_ident_method_preserves_numeric_boundary() {
         let arena = Arena::new();
         let mut scope = UniqueIdents::new(&arena);
-        let ident = scope.ident("get_fees1");
+        let ident = scope.reserve("get_fees1");
 
         let usage = CodegenIdentUsage::Method(ident);
         let actual: syn::Ident = parse_quote!(#usage);
@@ -358,7 +351,7 @@ mod tests {
     fn test_codegen_ident_handles_rust_keywords() {
         let arena = Arena::new();
         let mut scope = UniqueIdents::new(&arena);
-        let ident = scope.ident("type");
+        let ident = scope.reserve("type");
         let usage = CodegenIdentUsage::Field(ident);
         let actual: syn::Ident = parse_quote!(#usage);
         let expected: syn::Ident = parse_quote!(r#type);
@@ -369,7 +362,7 @@ mod tests {
     fn test_codegen_ident_handles_invalid_start_chars() {
         let arena = Arena::new();
         let mut scope = UniqueIdents::new(&arena);
-        let ident = scope.ident("123foo");
+        let ident = scope.reserve("123foo");
         let usage = CodegenIdentUsage::Field(ident);
         let actual: syn::Ident = parse_quote!(#usage);
         let expected: syn::Ident = parse_quote!(_123_foo);
@@ -380,7 +373,7 @@ mod tests {
     fn test_codegen_ident_handles_special_chars() {
         let arena = Arena::new();
         let mut scope = UniqueIdents::new(&arena);
-        let ident = scope.ident("foo-bar-baz");
+        let ident = scope.reserve("foo-bar-baz");
         let usage = CodegenIdentUsage::Field(ident);
         let actual: syn::Ident = parse_quote!(#usage);
         let expected: syn::Ident = parse_quote!(foo_bar_baz);
@@ -391,7 +384,7 @@ mod tests {
     fn test_codegen_ident_handles_number_prefix() {
         let arena = Arena::new();
         let mut scope = UniqueIdents::new(&arena);
-        let ident = scope.ident("1099KStatus");
+        let ident = scope.reserve("1099KStatus");
 
         let usage = CodegenIdentUsage::Field(ident);
         let actual: syn::Ident = parse_quote!(#usage);
@@ -401,50 +394,6 @@ mod tests {
         let usage = CodegenIdentUsage::Type(ident);
         let actual: syn::Ident = parse_quote!(#usage);
         let expected: syn::Ident = parse_quote!(_1099KStatus);
-        assert_eq!(actual, expected);
-    }
-
-    // MARK: Untagged variant names
-
-    #[test]
-    fn test_untagged_variant_name_index() {
-        let arena = Arena::new();
-        let mut scope = UniqueIdents::new(&arena);
-
-        let ident = scope.variant_name_hint(UntaggedVariantNameHint::Index(0));
-        assert_eq!(&ident.0, "V");
-
-        let ident = scope.variant_name_hint(UntaggedVariantNameHint::Index(42));
-        assert_eq!(&ident.0, "V_42");
-    }
-
-    // MARK: Struct field names
-
-    #[test]
-    fn test_struct_field_name_index() {
-        let arena = Arena::new();
-        let mut scope = UniqueIdents::new(&arena);
-        let ident0 = scope.field_name_hint(StructFieldNameHint::Index(0));
-        let usage = CodegenIdentUsage::Field(ident0);
-        let actual: syn::Ident = parse_quote!(#usage);
-        let expected: syn::Ident = parse_quote!(variant);
-        assert_eq!(actual, expected);
-
-        let ident5 = scope.field_name_hint(StructFieldNameHint::Index(5));
-        let usage = CodegenIdentUsage::Field(ident5);
-        let actual: syn::Ident = parse_quote!(#usage);
-        let expected: syn::Ident = parse_quote!(variant_5);
-        assert_eq!(actual, expected);
-    }
-
-    #[test]
-    fn test_struct_field_name_additional_properties() {
-        let arena = Arena::new();
-        let mut scope = UniqueIdents::new(&arena);
-        let ident = scope.field_name_hint(StructFieldNameHint::AdditionalProperties);
-        let usage = CodegenIdentUsage::Field(ident);
-        let actual: syn::Ident = parse_quote!(#usage);
-        let expected: syn::Ident = parse_quote!(additional_properties);
         assert_eq!(actual, expected);
     }
 
@@ -487,7 +436,7 @@ mod tests {
     fn test_codegen_ident_scope_handles_empty() {
         let arena = Arena::new();
         let mut scope = UniqueIdents::new(&arena);
-        let ident = scope.ident("");
+        let ident = scope.reserve("");
 
         let usage = CodegenIdentUsage::Field(ident);
         let actual: syn::Ident = parse_quote!(#usage);
@@ -505,13 +454,13 @@ mod tests {
         let arena = Arena::new();
         let mut scope = UniqueIdents::new(&arena);
 
-        let ident = scope.ident("0");
+        let ident = scope.reserve("0");
         let usage = CodegenIdentUsage::Field(ident);
         let actual: syn::Ident = parse_quote!(#usage);
         let expected: syn::Ident = parse_quote!(_1);
         assert_eq!(actual, expected);
 
-        let ident = scope.ident("1");
+        let ident = scope.reserve("1");
         let usage = CodegenIdentUsage::Type(ident);
         let actual: syn::Ident = parse_quote!(#usage);
         let expected: syn::Ident = parse_quote!(_2);
@@ -523,13 +472,13 @@ mod tests {
         let arena = Arena::new();
         let mut scope = UniqueIdents::new(&arena);
 
-        let ident = scope.ident("crate");
+        let ident = scope.reserve("crate");
         let usage = CodegenIdentUsage::Method(ident);
         let actual: syn::Ident = parse_quote!(#usage);
         let expected: syn::Ident = parse_quote!(crate_2);
         assert_eq!(actual, expected);
 
-        let ident = scope.ident("crate2");
+        let ident = scope.reserve("crate2");
         let usage = CodegenIdentUsage::Method(ident);
         let actual: syn::Ident = parse_quote!(#usage);
         let expected: syn::Ident = parse_quote!(crate_3);

@@ -286,7 +286,7 @@ mod tests {
     fn test_single_feature() {
         let arena = Arena::new();
         let mut scope = UniqueIdents::new(&arena);
-        let cfg = CfgFeature::Single(scope.ident("pets"));
+        let cfg = CfgFeature::Single(scope.reserve("pets"));
 
         let actual: syn::Attribute = parse_quote!(#cfg);
         let expected: syn::Attribute = parse_quote!(#[cfg(feature = "pets")]);
@@ -298,9 +298,9 @@ mod tests {
         let arena = Arena::new();
         let mut scope = UniqueIdents::new(&arena);
         let cfg = CfgFeature::AnyOf(BTreeSet::from_iter([
-            scope.ident("cats"),
-            scope.ident("dogs"),
-            scope.ident("aardvarks"),
+            scope.reserve("cats"),
+            scope.reserve("dogs"),
+            scope.reserve("aardvarks"),
         ]));
 
         let actual: syn::Attribute = parse_quote!(#cfg);
@@ -314,9 +314,9 @@ mod tests {
         let arena = Arena::new();
         let mut scope = UniqueIdents::new(&arena);
         let cfg = CfgFeature::AllOf(BTreeSet::from_iter([
-            scope.ident("cats"),
-            scope.ident("dogs"),
-            scope.ident("aardvarks"),
+            scope.reserve("cats"),
+            scope.reserve("dogs"),
+            scope.reserve("aardvarks"),
         ]));
 
         let actual: syn::Attribute = parse_quote!(#cfg);
@@ -330,8 +330,8 @@ mod tests {
         let arena = Arena::new();
         let mut scope = UniqueIdents::new(&arena);
         let cfg = CfgFeature::OwnAndUsedBy {
-            own: scope.ident("own"),
-            used_by: BTreeSet::from_iter([scope.ident("a"), scope.ident("b")]),
+            own: scope.reserve("own"),
+            used_by: BTreeSet::from_iter([scope.reserve("a"), scope.reserve("b")]),
         };
 
         let actual: syn::Attribute = parse_quote!(#cfg);
@@ -344,7 +344,7 @@ mod tests {
     fn test_any_of_simplifies_single_feature() {
         let arena = Arena::new();
         let mut scope = UniqueIdents::new(&arena);
-        let cfg = CfgFeature::any_of(BTreeSet::from_iter([scope.ident("pets")]));
+        let cfg = CfgFeature::any_of(BTreeSet::from_iter([scope.reserve("pets")]));
 
         let actual: syn::Attribute = parse_quote!(#cfg);
         let expected: syn::Attribute = parse_quote!(#[cfg(feature = "pets")]);
@@ -355,7 +355,7 @@ mod tests {
     fn test_all_of_simplifies_single_feature() {
         let arena = Arena::new();
         let mut scope = UniqueIdents::new(&arena);
-        let cfg = CfgFeature::all_of(BTreeSet::from_iter([scope.ident("pets")]));
+        let cfg = CfgFeature::all_of(BTreeSet::from_iter([scope.reserve("pets")]));
 
         let actual: syn::Attribute = parse_quote!(#cfg);
         let expected: syn::Attribute = parse_quote!(#[cfg(feature = "pets")]);
@@ -378,8 +378,8 @@ mod tests {
     fn test_own_and_used_by_simplifies_single_used_by_to_all_of() {
         let arena = Arena::new();
         let mut scope = UniqueIdents::new(&arena);
-        let own = scope.ident("own");
-        let other = scope.ident("other");
+        let own = scope.reserve("own");
+        let other = scope.reserve("other");
         // `OwnedAndUsedBy` with one `used_by` feature should simplify to `AllOf`.
         let cfg = CfgFeature::own_and_used_by(own, BTreeSet::from_iter([other]));
         assert_eq!(cfg, CfgFeature::AllOf(BTreeSet::from_iter([other, own])),);
@@ -389,7 +389,7 @@ mod tests {
     fn test_own_and_used_by_simplifies_empty_to_single() {
         let arena = Arena::new();
         let mut scope = UniqueIdents::new(&arena);
-        let own = scope.ident("own");
+        let own = scope.reserve("own");
         // `OwnedAndUsedBy` with no `used_by` features should simplify to `Single`.
         let cfg = CfgFeature::own_and_used_by(own, BTreeSet::new());
         assert_eq!(cfg, CfgFeature::Single(own));
@@ -399,8 +399,8 @@ mod tests {
     fn test_own_and_used_by_simplifies_own_used_by_to_single() {
         let arena = Arena::new();
         let mut scope = UniqueIdents::new(&arena);
-        let own = scope.ident("own");
-        let other = scope.ident("other");
+        let own = scope.reserve("own");
+        let other = scope.reserve("other");
         let cfg = CfgFeature::own_and_used_by(own, BTreeSet::from_iter([own, other]));
         assert_eq!(cfg, CfgFeature::Single(own));
     }

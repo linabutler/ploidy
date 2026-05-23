@@ -1,11 +1,12 @@
-use std::{collections::BTreeSet, fmt::Write, ops::Deref};
+use std::{collections::BTreeSet, fmt::Write, num::NonZeroUsize, ops::Deref};
 
 use ploidy_core::{
+    arena::Arena,
     ir::{
         ContainerView, CookedGraph, EnumVariant, EnumView, HasResource, HasTypeId,
         InlineTypePathRoot, InlineTypePathSegment, InlineTypePathView, InlineTypeView, OperationId,
-        OperationUsage, SchemaTypeView, StructFieldName, StructView, TaggedView, TypeId, TypeView,
-        UntaggedView, View,
+        OperationUsage, PrimitiveType, SchemaTypeView, StructFieldName, StructView, TaggedView,
+        TypeId, TypeView, UntaggedView, View,
     },
     parse::ParameterLocation,
 };
@@ -13,7 +14,7 @@ use rustc_hash::FxHashMap;
 
 use super::{
     config::{CodegenConfig, DateTimeFormat},
-    naming::{CodegenIdentUsage, ResourceGroup, UniqueIdent, UniqueIdents},
+    naming::{CodegenIdentUsage, ResourceGroup, UniqueIdent, UniqueIdents, idents},
 };
 
 /// A [`CookedGraph`] decorated with Rust-specific information.
@@ -51,10 +52,7 @@ impl<'a> CodegenGraph<'a> {
             Operation(op) => self.idents[&Key::Operation(op)],
             Path(op, name) => self.idents[&Key::Parameter(op, ParameterLocation::Path, name)],
             Query(op, name) => self.idents[&Key::Parameter(op, ParameterLocation::Query, name)],
-            Type(id) => match self.cooked.view(id) {
-                TypeView::Schema(s) => self.idents[&Key::Schema(s.name())],
-                TypeView::Inline(i) => self.idents[&Key::Inline(i.id())],
-            },
+            Type(id) => self.idents[&Key::Type(id)],
             StructField(id, name) => self.idents[&Key::StructField(id, name)],
             EnumVariant(id, name) => self.idents[&Key::EnumVariant(id, name)],
             TaggedVariant(id, name) => self.idents[&Key::TaggedVariant(id, name)],
@@ -91,29 +89,21 @@ impl<'a> Deref for CodegenGraph<'a> {
 pub enum IdentMapping<'a> {
     /// A schema or inline type.
     Type(TypeId),
-
     /// An operation method.
     Operation(&'a OperationId),
-
     /// A path parameter for an operation.
     Path(&'a OperationId, &'a str),
-
     /// A query parameter for an operation.
     Query(&'a OperationId, &'a str),
-
     /// A struct field.
     StructField(TypeId, StructFieldName<'a>),
-
     /// A string enum variant.
     EnumVariant(TypeId, &'a str),
-
     /// A tagged union variant.
     TaggedVariant(TypeId, &'a str),
-
     /// An untagged union variant.
-    UntaggedVariant(TypeId, usize),
-
-    /// ...
+    UntaggedVariant(TypeId, NonZeroUsize),
+    /// A resource name for a type or an operation.
     Resource(&'a str),
 }
 
@@ -133,22 +123,22 @@ impl<'a> From<TypeId> for IdentMapping<'a> {
 
 /// Builds the identifier table for every name that Rust code generation emits.
 ///
-/// Names are assigned in dependency order. Schema, operation, parameter, field,
-/// and variant identifiers are uniquified first; inline type names are composed
-/// from those earlier identifiers.
+/// Names are assigned in dependency order. Schema types and operations are
+/// uniquified first, then inline types are named from their paths, and finally
+/// inline type members.
 fn ident_map<'a>(cooked: &CookedGraph<'a>) -> IdentMap<'a> {
     let mut idents = FxHashMap::default();
     idents.extend({
         let mut scope = UniqueIdents::new(cooked.arena());
         cooked
             .schemas()
-            .map(move |ty| (IdentMapKey::Schema(ty.name()), scope.ident(ty.name())))
+            .map(move |ty| (IdentMapKey::Type(ty.id()), scope.reserve(ty.name())))
     });
     idents.extend({
         let mut scope = UniqueIdents::new(cooked.arena());
         cooked
             .operations()
-            .map(move |op| (IdentMapKey::Operation(op.id()), scope.ident(op.id())))
+            .map(move |op| (IdentMapKey::Operation(op.id()), scope.reserve(op.id())))
     });
     idents.extend({
         let resources: BTreeSet<_> = cooked
@@ -160,7 +150,7 @@ fn ident_map<'a>(cooked: &CookedGraph<'a>) -> IdentMap<'a> {
         let mut scope = UniqueIdents::with_reserved(cooked.arena(), &["default"]);
         resources
             .into_iter()
-            .map(move |name| (IdentMapKey::Resource(name), scope.ident(name)))
+            .map(move |name| (IdentMapKey::Resource(name), scope.reserve(name)))
     });
     for op in cooked.operations() {
         {
@@ -172,7 +162,7 @@ fn ident_map<'a>(cooked: &CookedGraph<'a>) -> IdentMap<'a> {
                 &["query", "request", "form", "url", "response"],
             );
             for param in op.path().params() {
-                let ident = scope.ident(param.name());
+                let ident = scope.reserve(param.name());
                 idents.insert(
                     IdentMapKey::Parameter(op.id(), ParameterLocation::Path, param.name()),
                     ident,
@@ -183,7 +173,7 @@ fn ident_map<'a>(cooked: &CookedGraph<'a>) -> IdentMap<'a> {
             // Query parameters become regular struct fields.
             let mut scope = UniqueIdents::new(cooked.arena());
             for param in op.query() {
-                let ident = scope.ident(param.name());
+                let ident = scope.reserve(param.name());
                 idents.insert(
                     IdentMapKey::Parameter(op.id(), ParameterLocation::Query, param.name()),
                     ident,
@@ -192,85 +182,15 @@ fn ident_map<'a>(cooked: &CookedGraph<'a>) -> IdentMap<'a> {
         }
     }
 
-    {
-        let domains = cooked
-            .schemas()
-            .filter_map(MemberIdentDomain::from_schema_type)
-            .chain(
-                cooked
-                    .schemas()
-                    .flat_map(|s| s.inlines())
-                    .chain(cooked.operations().flat_map(|op| op.inlines()))
-                    .filter_map(MemberIdentDomain::from_inline_type),
-            );
-        for domain in domains {
-            match domain {
-                // Own, inherited, and synthesized struct fields.
-                MemberIdentDomain::Struct(id, view) => {
-                    let mut scope = UniqueIdents::new(cooked.arena());
-                    for field in view.fields() {
-                        let ident = match field.name() {
-                            StructFieldName::Name(n) => scope.ident(n),
-                            StructFieldName::Hint(hint) => scope.field_name_hint(hint),
-                        };
-                        idents.insert(IdentMapKey::StructField(id, field.name()), ident);
-                    }
-                }
-                // Common fields inherited by all untagged variants. The struct arm
-                // uniquifies them for fields; this arm uniquifies them for
-                // naming inline types.
-                MemberIdentDomain::Untagged(id, view) => {
-                    let mut scope = UniqueIdents::new(cooked.arena());
-                    for (index, variant) in view.variants().enumerate() {
-                        let ident = match variant.ty() {
-                            Some(variant) => scope.variant_name_hint(variant.hint),
-                            None => scope.ident("None"),
-                        };
-                        idents.insert(IdentMapKey::UntaggedVariant(id, index), ident);
-                    }
-                    let mut scope = UniqueIdents::new(cooked.arena());
-                    for field in view.fields() {
-                        let ident = match field.name() {
-                            StructFieldName::Name(n) => scope.ident(n),
-                            StructFieldName::Hint(hint) => scope.field_name_hint(hint),
-                        };
-                        idents.insert(IdentMapKey::StructField(id, field.name()), ident);
-                    }
-                }
-                // String enum variants.
-                MemberIdentDomain::Enum(id, view) => {
-                    let mut scope = UniqueIdents::new(cooked.arena());
-                    for variant in view.variants() {
-                        if let EnumVariant::String(name) = variant {
-                            let ident = scope.ident(name);
-                            idents.insert(IdentMapKey::EnumVariant(id, name), ident);
-                        }
-                    }
-                }
-                // Tagged variant names and common fields form different scopes:
-                // variant names must be unique within the generated enum;
-                // common fields are for naming inline types.
-                MemberIdentDomain::Tagged(id, view) => {
-                    let mut scope = UniqueIdents::new(cooked.arena());
-                    for variant in view.variants() {
-                        let ident = scope.ident(variant.name());
-                        idents.insert(IdentMapKey::TaggedVariant(id, variant.name()), ident);
-                    }
-                    let mut scope = UniqueIdents::new(cooked.arena());
-                    for field in view.fields() {
-                        let ident = match field.name() {
-                            StructFieldName::Name(n) => scope.ident(n),
-                            StructFieldName::Hint(hint) => scope.field_name_hint(hint),
-                        };
-                        idents.insert(IdentMapKey::StructField(id, field.name()), ident);
-                    }
-                }
-            }
+    for schema in cooked.schemas() {
+        if let Some(domain) = MemberIdentDomain::from_schema_type(schema) {
+            let map = domain.into_idents(cooked.arena(), &idents);
+            idents.extend(map);
         }
     }
 
-    // Inline type names depend on uniquified path segments, so build them after
-    // all schemas, operations, parameters, fields, and variants have names.
+    // Inline type names depend on uniquified path segments. Build each inline
+    // type after its parent, then name its members for child path segments.
     {
         let inlines = cooked
             .schemas()
@@ -296,7 +216,11 @@ fn ident_map<'a>(cooked: &CookedGraph<'a>) -> IdentMap<'a> {
             let scope = scopes
                 .entry(domain)
                 .or_insert_with(|| UniqueIdents::new(cooked.arena()));
-            idents.insert(IdentMapKey::Inline(inline.id()), scope.ident(&name));
+            idents.insert(IdentMapKey::Type(inline.id()), scope.reserve(&name));
+            if let Some(domain) = MemberIdentDomain::from_inline_type(inline) {
+                let map = domain.into_idents(cooked.arena(), &idents);
+                idents.extend(map);
+            }
         }
     }
     idents
@@ -306,15 +230,14 @@ type IdentMap<'a> = FxHashMap<IdentMapKey<'a>, &'a UniqueIdent>;
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 enum IdentMapKey<'a> {
-    Schema(&'a str),
-    Inline(TypeId),
+    Type(TypeId),
     Operation(&'a OperationId),
     Parameter(&'a OperationId, ParameterLocation, &'a str),
     Resource(&'a str),
     StructField(TypeId, StructFieldName<'a>),
     EnumVariant(TypeId, &'a str),
     TaggedVariant(TypeId, &'a str),
-    UntaggedVariant(TypeId, usize),
+    UntaggedVariant(TypeId, NonZeroUsize),
 }
 
 /// A uniqueness domain for inline type identifiers.
@@ -324,7 +247,6 @@ enum InlineTypeIdentDomain<'a> {
     Resource(ResourceGroup<'a>),
 }
 
-/// A uniqueness domain for field and variant identifiers.
 enum MemberIdentDomain<'graph, 'a> {
     Struct(TypeId, StructView<'graph, 'a>),
     Enum(TypeId, EnumView<'graph, 'a>),
@@ -336,10 +258,10 @@ impl<'graph, 'a> MemberIdentDomain<'graph, 'a> {
     fn from_schema_type(schema: SchemaTypeView<'graph, 'a>) -> Option<Self> {
         let id = schema.id();
         Some(match schema {
-            SchemaTypeView::Struct(_, v) => Self::Struct(id, v),
-            SchemaTypeView::Enum(_, v) => Self::Enum(id, v),
-            SchemaTypeView::Tagged(_, v) => Self::Tagged(id, v),
-            SchemaTypeView::Untagged(_, v) => Self::Untagged(id, v),
+            SchemaTypeView::Struct(_, view) => Self::Struct(id, view),
+            SchemaTypeView::Enum(_, view) => Self::Enum(id, view),
+            SchemaTypeView::Tagged(_, view) => Self::Tagged(id, view),
+            SchemaTypeView::Untagged(_, view) => Self::Untagged(id, view),
             _ => return None,
         })
     }
@@ -347,12 +269,145 @@ impl<'graph, 'a> MemberIdentDomain<'graph, 'a> {
     fn from_inline_type(inline: InlineTypeView<'graph, 'a>) -> Option<Self> {
         let id = inline.id();
         Some(match inline {
-            InlineTypeView::Struct(_, v) => Self::Struct(id, v),
-            InlineTypeView::Enum(_, v) => Self::Enum(id, v),
-            InlineTypeView::Tagged(_, v) => Self::Tagged(id, v),
-            InlineTypeView::Untagged(_, v) => Self::Untagged(id, v),
+            InlineTypeView::Struct(_, view) => Self::Struct(id, view),
+            InlineTypeView::Enum(_, view) => Self::Enum(id, view),
+            InlineTypeView::Tagged(_, view) => Self::Tagged(id, view),
+            InlineTypeView::Untagged(_, view) => Self::Untagged(id, view),
             _ => return None,
         })
+    }
+
+    fn into_idents(self, arena: &'a Arena, idents: &IdentMap<'a>) -> IdentMap<'a> {
+        let mut map = IdentMap::default();
+        match self {
+            Self::Struct(id, view) => {
+                // Own, inherited, and synthesized struct fields.
+                let mut scope = UniqueIdents::new(arena);
+                for field in view.fields() {
+                    let name = field.name();
+                    let ident = match name {
+                        StructFieldName::Name(name) => scope.reserve(name),
+                        StructFieldName::Ordinal(ordinal) => {
+                            let ident = idents[&IdentMapKey::Type(id)];
+                            scope.reserve(&format!(
+                                "{}_{ordinal}",
+                                CodegenIdentUsage::Type(ident).display()
+                            ))
+                        }
+                        StructFieldName::AdditionalProperties => {
+                            scope.reserve_ident(idents::ADDITIONAL_PROPERTIES)
+                        }
+                    };
+                    map.insert(IdentMapKey::StructField(id, name), ident);
+                }
+            }
+            Self::Enum(id, view) => {
+                let mut scope = UniqueIdents::new(arena);
+                for &variant in view.variants() {
+                    if let EnumVariant::String(name) = variant {
+                        let ident = scope.reserve(name);
+                        map.insert(IdentMapKey::EnumVariant(id, name), ident);
+                    }
+                }
+            }
+            Self::Tagged(id, view) => {
+                // Tagged variant names and common fields form different scopes:
+                // variant names must be unique within the generated enum;
+                // common fields are for naming inline types.
+                let mut scope = UniqueIdents::new(arena);
+                for variant in view.variants() {
+                    let name = variant.name();
+                    let ident = scope.reserve(name);
+                    map.insert(IdentMapKey::TaggedVariant(id, name), ident);
+                }
+                let mut scope = UniqueIdents::new(arena);
+                for field in view.fields() {
+                    let name = field.name();
+                    let ident = match name {
+                        StructFieldName::Name(name) => scope.reserve(name),
+                        StructFieldName::Ordinal(ordinal) => {
+                            let ident = idents[&IdentMapKey::Type(id)];
+                            scope.reserve(&format!(
+                                "{}_{ordinal}",
+                                CodegenIdentUsage::Type(ident).display()
+                            ))
+                        }
+                        StructFieldName::AdditionalProperties => {
+                            scope.reserve_ident(idents::ADDITIONAL_PROPERTIES)
+                        }
+                    };
+                    map.insert(IdentMapKey::StructField(id, name), ident);
+                }
+            }
+            Self::Untagged(id, view) => {
+                let mut scope = UniqueIdents::new(arena);
+                for variant in view.variants() {
+                    use {ContainerView::*, InlineTypeView::*, TypeView::*};
+                    let ordinal = variant.ordinal();
+                    let ident = match variant.ty() {
+                        Some(Schema(schema)) => {
+                            let ident = idents[&IdentMapKey::Type(schema.id())];
+                            scope.reserve_ident(ident)
+                        }
+                        Some(Inline(Primitive(_, primitive))) => {
+                            let ident = match primitive.ty() {
+                                PrimitiveType::String => idents::STRING,
+                                PrimitiveType::I8 => idents::I8,
+                                PrimitiveType::U8 => idents::U8,
+                                PrimitiveType::I16 => idents::I16,
+                                PrimitiveType::U16 => idents::U16,
+                                PrimitiveType::I32 => idents::I32,
+                                PrimitiveType::U32 => idents::U32,
+                                PrimitiveType::I64 => idents::I64,
+                                PrimitiveType::U64 => idents::U64,
+                                PrimitiveType::F32 => idents::F32,
+                                PrimitiveType::F64 => idents::F64,
+                                PrimitiveType::Bool => idents::BOOL,
+                                PrimitiveType::DateTime => idents::DATE_TIME,
+                                PrimitiveType::UnixTime => idents::UNIX_TIME,
+                                PrimitiveType::Date => idents::DATE,
+                                PrimitiveType::Url => idents::URL,
+                                PrimitiveType::Uuid => idents::UUID,
+                                PrimitiveType::Bytes => idents::BYTES,
+                                PrimitiveType::Binary => idents::BINARY,
+                            };
+                            scope.reserve_ident(ident)
+                        }
+                        Some(Inline(Container(_, Array(_)))) => scope.reserve_ident(idents::ARRAY),
+                        Some(Inline(Container(_, Map(_)))) => scope.reserve_ident(idents::MAP),
+                        Some(Inline(..)) => {
+                            let ident = idents[&IdentMapKey::Type(id)];
+                            scope.reserve(&format!(
+                                "{}_{ordinal}",
+                                CodegenIdentUsage::Type(ident).display()
+                            ))
+                        }
+                        None => scope.reserve_ident(idents::NONE),
+                    };
+                    map.insert(IdentMapKey::UntaggedVariant(id, ordinal), ident);
+                }
+                // Common fields inherited by all untagged variants.
+                let mut scope = UniqueIdents::new(arena);
+                for field in view.fields() {
+                    let name = field.name();
+                    let ident = match name {
+                        StructFieldName::Name(name) => scope.reserve(name),
+                        StructFieldName::Ordinal(ordinal) => {
+                            let ident = idents[&IdentMapKey::Type(id)];
+                            scope.reserve(&format!(
+                                "{}_{ordinal}",
+                                CodegenIdentUsage::Type(ident).display()
+                            ))
+                        }
+                        StructFieldName::AdditionalProperties => {
+                            scope.reserve_ident(idents::ADDITIONAL_PROPERTIES)
+                        }
+                    };
+                    map.insert(IdentMapKey::StructField(id, name), ident);
+                }
+            }
+        }
+        map
     }
 }
 
@@ -362,55 +417,64 @@ fn inline_type_candidate_name<'a>(
 ) -> String {
     let mut name = String::new();
 
-    match path.root() {
-        InlineTypePathRoot::Schema(_) => {}
-        InlineTypePathRoot::Operation { id, usage, .. } => {
-            let ident = idents[&IdentMapKey::Operation(id)];
-            write!(name, "{}", CodegenIdentUsage::Type(ident).display()).unwrap();
-
-            match usage {
-                OperationUsage::Path(param) => {
-                    let ident = idents[&IdentMapKey::Parameter(id, ParameterLocation::Path, param)];
-                    write!(name, "Path{}", CodegenIdentUsage::Type(ident).display()).unwrap();
-                }
-                OperationUsage::Query(param) => {
-                    let ident =
-                        idents[&IdentMapKey::Parameter(id, ParameterLocation::Query, param)];
-                    write!(name, "Query{}", CodegenIdentUsage::Type(ident).display()).unwrap();
-                }
-                OperationUsage::Request => name.push_str("Request"),
-                OperationUsage::Response => name.push_str("Response"),
-            }
-        }
-    }
-
     for segment in path.segments() {
         match segment {
-            InlineTypePathSegment::Field(parent, field_name) => {
-                let ident = idents[&IdentMapKey::StructField(parent, field_name)];
+            InlineTypePathSegment::Field(parent, field) => {
+                let ident = idents[&IdentMapKey::StructField(parent, field)];
                 write!(name, "{}", CodegenIdentUsage::Type(ident).display()).unwrap();
             }
-            InlineTypePathSegment::TaggedVariant(parent, variant_name) => {
-                let ident = idents[&IdentMapKey::TaggedVariant(parent, variant_name)];
+            InlineTypePathSegment::TaggedVariant(parent, variant) => {
+                let ident = idents[&IdentMapKey::TaggedVariant(parent, variant)];
                 write!(name, "{}", CodegenIdentUsage::Variant(ident).display()).unwrap();
             }
-            InlineTypePathSegment::UntaggedVariant(index) => {
-                write!(name, "V{index}").unwrap();
+            InlineTypePathSegment::UntaggedVariant(parent, ordinal) => {
+                let ident = idents[&IdentMapKey::UntaggedVariant(parent, ordinal)];
+                write!(name, "{}", CodegenIdentUsage::Variant(ident).display()).unwrap();
             }
             InlineTypePathSegment::ArrayItem => name.push_str("Item"),
             InlineTypePathSegment::MapValue => name.push_str("Value"),
             InlineTypePathSegment::Optional => {
                 // Optional types are invisible for naming.
             }
-            InlineTypePathSegment::Inherits(index) => {
-                write!(name, "P{index}").unwrap();
+            InlineTypePathSegment::Inherits(parent, ordinal) => {
+                let ident = idents[&IdentMapKey::Type(parent)];
+                write!(
+                    name,
+                    "{}_{ordinal}",
+                    CodegenIdentUsage::Type(ident).display()
+                )
+                .unwrap();
             }
         }
     }
 
-    if name.is_empty() {
-        name.push_str("Value");
-    }
+    match path.root() {
+        InlineTypePathRoot::Schema(id) if name.is_empty() => {
+            let ident = idents[&IdentMapKey::Type(id)];
+            CodegenIdentUsage::Type(ident).display().to_string()
+        }
+        InlineTypePathRoot::Schema(..) => name,
+        InlineTypePathRoot::Operation { id, usage, .. } => {
+            let mut full = String::new();
 
-    name
+            let ident = idents[&IdentMapKey::Operation(id)];
+            write!(full, "{}", CodegenIdentUsage::Type(ident).display()).unwrap();
+            match usage {
+                OperationUsage::Path(param) => {
+                    let ident = idents[&IdentMapKey::Parameter(id, ParameterLocation::Path, param)];
+                    write!(full, "Path{}", CodegenIdentUsage::Type(ident).display()).unwrap();
+                }
+                OperationUsage::Query(param) => {
+                    let ident =
+                        idents[&IdentMapKey::Parameter(id, ParameterLocation::Query, param)];
+                    write!(full, "Query{}", CodegenIdentUsage::Type(ident).display()).unwrap();
+                }
+                OperationUsage::Request => full.push_str("Request"),
+                OperationUsage::Response => full.push_str("Response"),
+            }
+            full.push_str(&name);
+
+            full
+        }
+    }
 }

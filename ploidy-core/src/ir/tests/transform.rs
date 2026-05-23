@@ -5,8 +5,7 @@ use crate::{
     ir::{
         Enum, EnumVariant, InlineTypeIds, PrimitiveType, SchemaTypeInfo, SpecContainer,
         SpecInlineType, SpecInner, SpecSchemaType, SpecStruct, SpecStructField, SpecTagged,
-        SpecTaggedVariant, SpecType, SpecUntagged, SpecUntaggedVariant, StructFieldName,
-        StructFieldNameHint, UntaggedVariantNameHint,
+        SpecTaggedVariant, SpecType, SpecUntagged, StructFieldName,
         transform::{TransformContext, TypeInfo, transform_with_context},
     },
     parse::{Document, Schema},
@@ -566,7 +565,7 @@ fn test_struct_with_additional_properties_ref() {
                 fields: [
                     _,
                     SpecStructField {
-                        name: StructFieldName::Hint(StructFieldNameHint::AdditionalProperties),
+                        name: StructFieldName::AdditionalProperties,
                         flattened: true,
                         required: true,
                         ty: SpecType::Inline(SpecInlineType::Container(
@@ -624,7 +623,7 @@ fn test_struct_with_additional_properties_inline() {
                         ..
                     },
                     SpecStructField {
-                        name: StructFieldName::Hint(StructFieldNameHint::AdditionalProperties),
+                        name: StructFieldName::AdditionalProperties,
                         flattened: true,
                         required: true,
                         ty: SpecType::Inline(SpecInlineType::Container(
@@ -673,7 +672,7 @@ fn test_struct_with_additional_properties_true() {
             },
             SpecStruct {
                 fields: [SpecStructField {
-                    name: StructFieldName::Hint(StructFieldNameHint::AdditionalProperties),
+                    name: StructFieldName::AdditionalProperties,
                     flattened: true,
                     required: true,
                     ty: SpecType::Inline(SpecInlineType::Container(
@@ -1228,13 +1227,7 @@ fn test_tagged_filters_non_refs() {
         SpecType::Schema(SpecSchemaType::Untagged(
             SchemaTypeInfo { name: "Animal", .. },
             SpecUntagged {
-                variants: [
-                    SpecUntaggedVariant::Some(UntaggedVariantNameHint::Index(1), SpecType::Ref(_)),
-                    SpecUntaggedVariant::Some(
-                        UntaggedVariantNameHint::Index(2),
-                        SpecType::Inline(_)
-                    ),
-                ],
+                variants: [Some(SpecType::Ref(_)), Some(SpecType::Inline(_)),],
                 ..
             },
         )),
@@ -1491,10 +1484,7 @@ fn test_untagged_basic() {
                 ..
             },
             SpecUntagged {
-                variants: [
-                    SpecUntaggedVariant::Some(UntaggedVariantNameHint::Index(1), SpecType::Ref(_)),
-                    SpecUntaggedVariant::Some(UntaggedVariantNameHint::Index(2), SpecType::Ref(_)),
-                ],
+                variants: [Some(SpecType::Ref(_)), Some(SpecType::Ref(_)),],
                 ..
             },
         )),
@@ -1642,7 +1632,7 @@ fn test_untagged_single_inline_primitive_variant_preserves_schema_identity() {
 }
 
 #[test]
-fn test_untagged_variant_numbering() {
+fn test_untagged_variants_preserve_declaration_count() {
     let doc = Document::from_yaml(indoc::indoc! {"
         openapi: 3.0.0
         info:
@@ -1669,17 +1659,12 @@ fn test_untagged_variant_numbering() {
     let arena = Arena::new();
     let result = transform(&arena, &doc, "ABC", &schema);
 
-    // Variants should have 1-based indices in their name hints.
     assert_matches!(
         result,
         SpecType::Schema(SpecSchemaType::Untagged(
             SchemaTypeInfo { name: "ABC", .. },
             SpecUntagged {
-                variants: [
-                    SpecUntaggedVariant::Some(UntaggedVariantNameHint::Index(1), _),
-                    SpecUntaggedVariant::Some(UntaggedVariantNameHint::Index(2), _),
-                    SpecUntaggedVariant::Some(UntaggedVariantNameHint::Index(3), _),
-                ],
+                variants: [Some(_), Some(_), Some(_),],
                 ..
             },
         )),
@@ -1906,7 +1891,7 @@ fn test_any_of_ref_uses_type_name() {
 }
 
 #[test]
-fn test_any_of_inline_uses_index_hint() {
+fn test_any_of_inline_uses_ordinal_name() {
     let doc = Document::from_yaml(indoc::indoc! {"
         openapi: 3.0.0
         info:
@@ -1930,7 +1915,7 @@ fn test_any_of_inline_uses_index_hint() {
     let arena = Arena::new();
     let result = transform(&arena, &doc, "Mixed", &schema);
 
-    // Both inline schemas should have index hints.
+    // Both inline schemas should have ordinal names.
     assert_matches!(
         result,
         SpecType::Schema(SpecSchemaType::Struct(
@@ -1938,19 +1923,19 @@ fn test_any_of_inline_uses_index_hint() {
             SpecStruct {
                 fields: [
                     SpecStructField {
-                        name: StructFieldName::Hint(StructFieldNameHint::Index(1)),
+                        name: StructFieldName::Ordinal(first),
                         flattened: true,
                         ..
                     },
                     SpecStructField {
-                        name: StructFieldName::Hint(StructFieldNameHint::Index(2)),
+                        name: StructFieldName::Ordinal(second),
                         flattened: true,
                         ..
                     },
                 ],
                 ..
             },
-        )),
+        )) if first.get() == 1 && second.get() == 2,
     );
 }
 
@@ -2437,14 +2422,14 @@ fn test_multiple_types_string_and_integer_untagged() {
             },
             SpecUntagged {
                 variants: [
-                    SpecUntaggedVariant::Some(
-                        UntaggedVariantNameHint::Primitive(PrimitiveType::String),
-                        SpecType::Inline(SpecInlineType::Primitive(_, PrimitiveType::String)),
-                    ),
-                    SpecUntaggedVariant::Some(
-                        UntaggedVariantNameHint::Primitive(PrimitiveType::I32),
-                        SpecType::Inline(SpecInlineType::Primitive(_, PrimitiveType::I32)),
-                    ),
+                    Some(SpecType::Inline(SpecInlineType::Primitive(
+                        _,
+                        PrimitiveType::String
+                    )),),
+                    Some(SpecType::Inline(SpecInlineType::Primitive(
+                        _,
+                        PrimitiveType::I32
+                    )),),
                 ],
                 ..
             },
@@ -2479,14 +2464,14 @@ fn test_type_array_with_format_produces_inline_variants() {
             },
             SpecUntagged {
                 variants: [
-                    SpecUntaggedVariant::Some(
-                        UntaggedVariantNameHint::Primitive(PrimitiveType::DateTime),
-                        SpecType::Inline(SpecInlineType::Primitive(_, PrimitiveType::DateTime)),
-                    ),
-                    SpecUntaggedVariant::Some(
-                        UntaggedVariantNameHint::Primitive(PrimitiveType::I32),
-                        SpecType::Inline(SpecInlineType::Primitive(_, PrimitiveType::I32)),
-                    ),
+                    Some(SpecType::Inline(SpecInlineType::Primitive(
+                        _,
+                        PrimitiveType::DateTime
+                    )),),
+                    Some(SpecType::Inline(SpecInlineType::Primitive(
+                        _,
+                        PrimitiveType::I32
+                    )),),
                 ],
                 ..
             },

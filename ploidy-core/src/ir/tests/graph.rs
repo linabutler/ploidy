@@ -2742,7 +2742,7 @@ fn test_collapsing_wrapper_preserves_variant_order() {
     };
     let variant_names = choice
         .variants()
-        .map(|variant| match variant.ty().unwrap().view {
+        .map(|variant| match variant.ty().unwrap() {
             TypeView::Schema(schema) => schema.name(),
             other => panic!("expected schema variant; got `{other:?}`"),
         })
