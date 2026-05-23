@@ -538,7 +538,7 @@ mod tests {
         let cfg = CfgFeature::for_schema_type(&graph, &default_type);
 
         let actual: syn::Attribute = parse_quote!(#cfg);
-        let expected: syn::Attribute = parse_quote!(#[cfg(feature = "default2")]);
+        let expected: syn::Attribute = parse_quote!(#[cfg(feature = "default-2")]);
         assert_eq!(actual, expected);
     }
 
@@ -727,7 +727,7 @@ mod tests {
         let cfg = CfgFeature::for_schema_type(&graph, &default_type);
 
         let actual: syn::Attribute = parse_quote!(#cfg);
-        let expected: syn::Attribute = parse_quote!(#[cfg(feature = "default2")]);
+        let expected: syn::Attribute = parse_quote!(#[cfg(feature = "default-2")]);
         assert_eq!(actual, expected);
     }
 
