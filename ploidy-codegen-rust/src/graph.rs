@@ -14,7 +14,7 @@ use rustc_hash::FxHashMap;
 
 use super::{
     config::{CodegenConfig, DateTimeFormat},
-    naming::{CodegenIdentUsage, ResourceGroup, UniqueIdent, UniqueIdents, idents},
+    naming::{CodegenIdentUsage, ResourceGroup, UniqueIdent, UniqueIdents},
 };
 
 /// A [`CookedGraph`] decorated with Rust-specific information.
@@ -46,7 +46,7 @@ impl<'a> CodegenGraph<'a> {
     /// Returns the unique Rust identifier for a schema, operation, parameter,
     /// field, or variant.
     #[inline]
-    pub fn ident(&self, key: impl Into<IdentMapping<'a>>) -> &'a UniqueIdent {
+    pub fn ident(&self, key: impl Into<IdentMapping<'a>>) -> UniqueIdent<'a> {
         use {IdentMapKey as Key, IdentMapping::*};
         match key.into() {
             Operation(op) => self.idents[&Key::Operation(op)],
@@ -132,13 +132,13 @@ fn ident_map<'a>(cooked: &CookedGraph<'a>) -> IdentMap<'a> {
         let mut scope = UniqueIdents::new(cooked.arena());
         cooked
             .schemas()
-            .map(move |ty| (IdentMapKey::Type(ty.id()), scope.reserve(ty.name())))
+            .map(move |ty| (IdentMapKey::Type(ty.id()), scope.claim(ty.name())))
     });
     idents.extend({
         let mut scope = UniqueIdents::new(cooked.arena());
         cooked
             .operations()
-            .map(move |op| (IdentMapKey::Operation(op.id()), scope.reserve(op.id())))
+            .map(move |op| (IdentMapKey::Operation(op.id()), scope.claim(op.id())))
     });
     idents.extend({
         let resources: BTreeSet<_> = cooked
@@ -150,7 +150,7 @@ fn ident_map<'a>(cooked: &CookedGraph<'a>) -> IdentMap<'a> {
         let mut scope = UniqueIdents::with_reserved(cooked.arena(), &["default"]);
         resources
             .into_iter()
-            .map(move |name| (IdentMapKey::Resource(name), scope.reserve(name)))
+            .map(move |name| (IdentMapKey::Resource(name), scope.claim(name)))
     });
     for op in cooked.operations() {
         {
@@ -162,7 +162,7 @@ fn ident_map<'a>(cooked: &CookedGraph<'a>) -> IdentMap<'a> {
                 &["query", "request", "form", "url", "response"],
             );
             for param in op.path().params() {
-                let ident = scope.reserve(param.name());
+                let ident = scope.claim(param.name());
                 idents.insert(
                     IdentMapKey::Parameter(op.id(), ParameterLocation::Path, param.name()),
                     ident,
@@ -173,7 +173,7 @@ fn ident_map<'a>(cooked: &CookedGraph<'a>) -> IdentMap<'a> {
             // Query parameters become regular struct fields.
             let mut scope = UniqueIdents::new(cooked.arena());
             for param in op.query() {
-                let ident = scope.reserve(param.name());
+                let ident = scope.claim(param.name());
                 idents.insert(
                     IdentMapKey::Parameter(op.id(), ParameterLocation::Query, param.name()),
                     ident,
@@ -216,7 +216,7 @@ fn ident_map<'a>(cooked: &CookedGraph<'a>) -> IdentMap<'a> {
             let scope = scopes
                 .entry(domain)
                 .or_insert_with(|| UniqueIdents::new(cooked.arena()));
-            idents.insert(IdentMapKey::Type(inline.id()), scope.reserve(&name));
+            idents.insert(IdentMapKey::Type(inline.id()), scope.claim(&name));
             if let Some(domain) = MemberIdentDomain::from_inline_type(inline) {
                 let map = domain.into_idents(cooked.arena(), &idents);
                 idents.extend(map);
@@ -226,7 +226,7 @@ fn ident_map<'a>(cooked: &CookedGraph<'a>) -> IdentMap<'a> {
     idents
 }
 
-type IdentMap<'a> = FxHashMap<IdentMapKey<'a>, &'a UniqueIdent>;
+type IdentMap<'a> = FxHashMap<IdentMapKey<'a>, UniqueIdent<'a>>;
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 enum IdentMapKey<'a> {
@@ -286,16 +286,16 @@ impl<'graph, 'a> MemberIdentDomain<'graph, 'a> {
                 for field in view.fields() {
                     let name = field.name();
                     let ident = match name {
-                        StructFieldName::Name(name) => scope.reserve(name),
+                        StructFieldName::Name(name) => scope.claim(name),
                         StructFieldName::Ordinal(ordinal) => {
                             let ident = idents[&IdentMapKey::Type(id)];
-                            scope.reserve(&format!(
+                            scope.claim(&format!(
                                 "{}_{ordinal}",
                                 CodegenIdentUsage::Type(ident).display()
                             ))
                         }
                         StructFieldName::AdditionalProperties => {
-                            scope.reserve_ident(idents::ADDITIONAL_PROPERTIES)
+                            scope.claim("additional_properties")
                         }
                     };
                     map.insert(IdentMapKey::StructField(id, name), ident);
@@ -305,7 +305,7 @@ impl<'graph, 'a> MemberIdentDomain<'graph, 'a> {
                 let mut scope = UniqueIdents::new(arena);
                 for &variant in view.variants() {
                     if let EnumVariant::String(name) = variant {
-                        let ident = scope.reserve(name);
+                        let ident = scope.claim(name);
                         map.insert(IdentMapKey::EnumVariant(id, name), ident);
                     }
                 }
@@ -317,23 +317,23 @@ impl<'graph, 'a> MemberIdentDomain<'graph, 'a> {
                 let mut scope = UniqueIdents::new(arena);
                 for variant in view.variants() {
                     let name = variant.name();
-                    let ident = scope.reserve(name);
+                    let ident = scope.claim(name);
                     map.insert(IdentMapKey::TaggedVariant(id, name), ident);
                 }
                 let mut scope = UniqueIdents::new(arena);
                 for field in view.fields() {
                     let name = field.name();
                     let ident = match name {
-                        StructFieldName::Name(name) => scope.reserve(name),
+                        StructFieldName::Name(name) => scope.claim(name),
                         StructFieldName::Ordinal(ordinal) => {
                             let ident = idents[&IdentMapKey::Type(id)];
-                            scope.reserve(&format!(
+                            scope.claim(&format!(
                                 "{}_{ordinal}",
                                 CodegenIdentUsage::Type(ident).display()
                             ))
                         }
                         StructFieldName::AdditionalProperties => {
-                            scope.reserve_ident(idents::ADDITIONAL_PROPERTIES)
+                            scope.claim("additional_properties")
                         }
                     };
                     map.insert(IdentMapKey::StructField(id, name), ident);
@@ -347,42 +347,41 @@ impl<'graph, 'a> MemberIdentDomain<'graph, 'a> {
                     let ident = match variant.ty() {
                         Some(Schema(schema)) => {
                             let ident = idents[&IdentMapKey::Type(schema.id())];
-                            scope.reserve_ident(ident)
+                            scope.adopt(ident)
                         }
                         Some(Inline(Primitive(_, primitive))) => {
-                            let ident = match primitive.ty() {
-                                PrimitiveType::String => idents::STRING,
-                                PrimitiveType::I8 => idents::I8,
-                                PrimitiveType::U8 => idents::U8,
-                                PrimitiveType::I16 => idents::I16,
-                                PrimitiveType::U16 => idents::U16,
-                                PrimitiveType::I32 => idents::I32,
-                                PrimitiveType::U32 => idents::U32,
-                                PrimitiveType::I64 => idents::I64,
-                                PrimitiveType::U64 => idents::U64,
-                                PrimitiveType::F32 => idents::F32,
-                                PrimitiveType::F64 => idents::F64,
-                                PrimitiveType::Bool => idents::BOOL,
-                                PrimitiveType::DateTime => idents::DATE_TIME,
-                                PrimitiveType::UnixTime => idents::UNIX_TIME,
-                                PrimitiveType::Date => idents::DATE,
-                                PrimitiveType::Url => idents::URL,
-                                PrimitiveType::Uuid => idents::UUID,
-                                PrimitiveType::Bytes => idents::BYTES,
-                                PrimitiveType::Binary => idents::BINARY,
-                            };
-                            scope.reserve_ident(ident)
+                            scope.claim(match primitive.ty() {
+                                PrimitiveType::String => "String",
+                                PrimitiveType::I8 => "I8",
+                                PrimitiveType::U8 => "U8",
+                                PrimitiveType::I16 => "I16",
+                                PrimitiveType::U16 => "U16",
+                                PrimitiveType::I32 => "I32",
+                                PrimitiveType::U32 => "U32",
+                                PrimitiveType::I64 => "I64",
+                                PrimitiveType::U64 => "U64",
+                                PrimitiveType::F32 => "F32",
+                                PrimitiveType::F64 => "F64",
+                                PrimitiveType::Bool => "Bool",
+                                PrimitiveType::DateTime => "DateTime",
+                                PrimitiveType::UnixTime => "UnixTime",
+                                PrimitiveType::Date => "Date",
+                                PrimitiveType::Url => "Url",
+                                PrimitiveType::Uuid => "Uuid",
+                                PrimitiveType::Bytes => "Bytes",
+                                PrimitiveType::Binary => "Binary",
+                            })
                         }
-                        Some(Inline(Container(_, Array(_)))) => scope.reserve_ident(idents::ARRAY),
-                        Some(Inline(Container(_, Map(_)))) => scope.reserve_ident(idents::MAP),
+                        Some(Inline(Container(_, Array(_)))) => scope.claim("Array"),
+                        Some(Inline(Container(_, Map(_)))) => scope.claim("Map"),
                         Some(Inline(..)) => {
                             let ident = idents[&IdentMapKey::Type(id)];
-                            scope.reserve(&format!(
+                            scope.claim(&format!(
                                 "{}_{ordinal}",
                                 CodegenIdentUsage::Type(ident).display()
                             ))
                         }
-                        None => scope.reserve_ident(idents::NONE),
+                        None => scope.claim("None"),
                     };
                     map.insert(IdentMapKey::UntaggedVariant(id, ordinal), ident);
                 }
@@ -391,16 +390,16 @@ impl<'graph, 'a> MemberIdentDomain<'graph, 'a> {
                 for field in view.fields() {
                     let name = field.name();
                     let ident = match name {
-                        StructFieldName::Name(name) => scope.reserve(name),
+                        StructFieldName::Name(name) => scope.claim(name),
                         StructFieldName::Ordinal(ordinal) => {
                             let ident = idents[&IdentMapKey::Type(id)];
-                            scope.reserve(&format!(
+                            scope.claim(&format!(
                                 "{}_{ordinal}",
                                 CodegenIdentUsage::Type(ident).display()
                             ))
                         }
                         StructFieldName::AdditionalProperties => {
-                            scope.reserve_ident(idents::ADDITIONAL_PROPERTIES)
+                            scope.claim("additional_properties")
                         }
                     };
                     map.insert(IdentMapKey::StructField(id, name), ident);

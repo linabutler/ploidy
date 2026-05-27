@@ -25,7 +25,7 @@ use miette::{Context, IntoDiagnostic};
 
 pub mod unique;
 
-pub use unique::{UniqueNames, WordSegments};
+pub use unique::{AsKebabCase, AsPascalCase, AsSnakeCase, NamePart, UniqueName, UniqueNames};
 
 pub fn write_to_disk(output: &Path, code: impl IntoCode) -> miette::Result<()> {
     let code = code.into_code();

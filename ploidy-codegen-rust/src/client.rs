@@ -182,7 +182,7 @@ struct ResourceModules<'a>(&'a [ResourceGroup<'a>]);
 impl ToTokens for ResourceModules<'_> {
     fn to_tokens(&self, tokens: &mut TokenStream) {
         tokens.append_all(self.0.iter().map(|ident| match ident {
-            ResourceGroup::Named(name) => {
+            &ResourceGroup::Named(name) => {
                 let cfg = CfgFeature::Single(name);
                 let mod_name = CodegenIdentUsage::Module(name);
                 quote! {
@@ -213,7 +213,7 @@ mod tests {
         let mut scope = UniqueIdents::new(&arena);
         let resources = [
             ResourceGroup::Default,
-            ResourceGroup::Named(scope.reserve("customer_profiles")),
+            ResourceGroup::Named(scope.claim("customer_profiles")),
         ];
         let modules = ResourceModules(&resources);
 
