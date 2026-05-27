@@ -1,85 +1,26 @@
-use std::{
-    fmt::{Display, Write},
-    ops::Deref,
-};
+use std::fmt::{Display, Formatter, Result as FmtResult, Write};
 
-use heck::{AsKebabCase, AsPascalCase, AsSnekCase};
-use itertools::Itertools;
 use ploidy_core::{
     arena::Arena,
-    codegen::{UniqueNames, unique::WordSegments},
+    codegen::{AsKebabCase, AsPascalCase, AsSnakeCase, NamePart, UniqueName, UniqueNames},
 };
 
 use proc_macro2::{Ident, Span, TokenStream};
 use quote::{IdentFragment, ToTokens, TokenStreamExt};
-use ref_cast::{RefCastCustom, ref_cast_custom};
-
-/// Static identifiers for type and field names.
-pub mod idents {
-    use super::CodegenIdent;
-
-    pub const ADDITIONAL_PROPERTIES: &CodegenIdent = CodegenIdent::new("additional_properties");
-    pub const ARRAY: &CodegenIdent = CodegenIdent::new("Array");
-    pub const BINARY: &CodegenIdent = CodegenIdent::new("Binary");
-    pub const BOOL: &CodegenIdent = CodegenIdent::new("Bool");
-    pub const BYTES: &CodegenIdent = CodegenIdent::new("Bytes");
-    pub const DATE: &CodegenIdent = CodegenIdent::new("Date");
-    pub const DATE_TIME: &CodegenIdent = CodegenIdent::new("DateTime");
-    pub const F32: &CodegenIdent = CodegenIdent::new("F32");
-    pub const F64: &CodegenIdent = CodegenIdent::new("F64");
-    pub const I8: &CodegenIdent = CodegenIdent::new("I8");
-    pub const I16: &CodegenIdent = CodegenIdent::new("I16");
-    pub const I32: &CodegenIdent = CodegenIdent::new("I32");
-    pub const I64: &CodegenIdent = CodegenIdent::new("I64");
-    pub const MAP: &CodegenIdent = CodegenIdent::new("Map");
-    pub const NONE: &CodegenIdent = CodegenIdent::new("None");
-    pub const STRING: &CodegenIdent = CodegenIdent::new("String");
-    pub const U8: &CodegenIdent = CodegenIdent::new("U8");
-    pub const U16: &CodegenIdent = CodegenIdent::new("U16");
-    pub const U32: &CodegenIdent = CodegenIdent::new("U32");
-    pub const U64: &CodegenIdent = CodegenIdent::new("U64");
-    pub const UNIX_TIME: &CodegenIdent = CodegenIdent::new("UnixTime");
-    pub const URL: &CodegenIdent = CodegenIdent::new("Url");
-    pub const UUID: &CodegenIdent = CodegenIdent::new("Uuid");
-}
+use unicode_ident::{is_xid_continue, is_xid_start};
 
 // Keywords that can't be used as identifiers, even with `r#`.
 const KEYWORDS: &[&str] = &["crate", "self", "super", "Self"];
-
-/// A cleaned string that's valid for use as a Rust identifier.
-#[derive(Debug, Eq, Hash, Ord, PartialEq, PartialOrd, RefCastCustom)]
-#[repr(transparent)]
-pub struct CodegenIdent(str);
-
-impl CodegenIdent {
-    #[ref_cast_custom]
-    const fn new(s: &str) -> &Self;
-}
 
 /// An identifier that's unique within its [`UniqueIdents`] scope.
 ///
 /// Only a scope can construct these, ensuring that identifiers won't collide
 /// within that scope. Pass a [`UniqueIdent`] to a [`CodegenIdentUsage`] variant
 /// to emit it as an [`Ident`] token.
-#[derive(Debug, Eq, Hash, Ord, PartialEq, PartialOrd, RefCastCustom)]
-#[repr(transparent)]
-pub struct UniqueIdent(str);
+#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub struct UniqueIdent<'a>(UniqueName<'a>);
 
-impl UniqueIdent {
-    #[ref_cast_custom]
-    fn new(s: &str) -> &Self;
-}
-
-impl Deref for UniqueIdent {
-    type Target = CodegenIdent;
-
-    #[inline]
-    fn deref(&self) -> &Self::Target {
-        CodegenIdent::new(&self.0)
-    }
-}
-
-/// Emits a [`CodegenIdent`] as an idiomatic Rust identifier.
+/// Emits a [`UniqueIdent`] as an idiomatic Rust identifier.
 ///
 /// Each [`CodegenIdentUsage`] variant determines the case transformation
 /// applied to the identifier: module, field, parameter, and method names
@@ -89,12 +30,12 @@ impl Deref for UniqueIdent {
 /// use [`display`](Self::display).
 #[derive(Clone, Copy, Debug)]
 pub enum CodegenIdentUsage<'a> {
-    Module(&'a CodegenIdent),
-    Type(&'a CodegenIdent),
-    Field(&'a UniqueIdent),
-    Variant(&'a UniqueIdent),
-    Param(&'a UniqueIdent),
-    Method(&'a UniqueIdent),
+    Module(UniqueIdent<'a>),
+    Type(UniqueIdent<'a>),
+    Field(UniqueIdent<'a>),
+    Variant(UniqueIdent<'a>),
+    Param(UniqueIdent<'a>),
+    Method(UniqueIdent<'a>),
 }
 
 impl<'a> CodegenIdentUsage<'a> {
@@ -106,21 +47,25 @@ impl<'a> CodegenIdentUsage<'a> {
     pub fn display(self) -> impl Display {
         struct DisplayUsage<'a>(CodegenIdentUsage<'a>);
         impl Display for DisplayUsage<'_> {
-            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-                let s = self.0.as_str();
-                if !s.starts_with(unicode_ident::is_xid_start) {
-                    // `s` is an identifier fragment; ensure it starts with
-                    // `XID_Start` to make it a valid identifier.
+            fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
+                let name = self.0.to_name();
+                if !name.first_char().is_some_and(is_xid_start) {
+                    // Rust identifiers must start with an `XID_Start` character
+                    // or `_`. `clean()` explicitly treats `_` as a separator,
+                    // so prepending `_` to the unique name here is guaranteed
+                    // not to collide with any other identifier.
                     f.write_char('_')?;
                 }
                 match self.0 {
                     CodegenIdentUsage::Type(_) | CodegenIdentUsage::Variant(_) => {
-                        write!(f, "{}", AsPascalCase(s))
+                        write!(f, "{}", AsPascalCase(name))
                     }
                     CodegenIdentUsage::Module(_)
                     | CodegenIdentUsage::Field(_)
                     | CodegenIdentUsage::Param(_)
-                    | CodegenIdentUsage::Method(_) => write!(f, "{}", AsSnekCase(s)),
+                    | CodegenIdentUsage::Method(_) => {
+                        write!(f, "{}", AsSnakeCase(name))
+                    }
                 }
             }
         }
@@ -128,21 +73,21 @@ impl<'a> CodegenIdentUsage<'a> {
     }
 
     #[inline]
-    fn as_str(&self) -> &str {
+    fn to_name(self) -> UniqueName<'a> {
         match self {
-            CodegenIdentUsage::Type(s) => &s.0,
-            CodegenIdentUsage::Variant(s) => &s.0,
-            CodegenIdentUsage::Module(s) => &s.0,
-            CodegenIdentUsage::Field(s) => &s.0,
-            CodegenIdentUsage::Param(s) => &s.0,
-            CodegenIdentUsage::Method(s) => &s.0,
+            CodegenIdentUsage::Type(s) => s.0,
+            CodegenIdentUsage::Variant(s) => s.0,
+            CodegenIdentUsage::Module(s) => s.0,
+            CodegenIdentUsage::Field(s) => s.0,
+            CodegenIdentUsage::Param(s) => s.0,
+            CodegenIdentUsage::Method(s) => s.0,
         }
     }
 }
 
 impl IdentFragment for CodegenIdentUsage<'_> {
     #[inline]
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+    fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
         write!(f, "{}", self.display())
     }
 }
@@ -169,7 +114,7 @@ impl ToTokens for CodegenIdentUsage<'_> {
 /// [`Default`]: Self::Default
 #[derive(Clone, Copy, Debug, Default, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub enum ResourceGroup<'a> {
-    Named(&'a UniqueIdent),
+    Named(UniqueIdent<'a>),
     #[default]
     Default,
 }
@@ -177,7 +122,7 @@ pub enum ResourceGroup<'a> {
 impl<'a> ResourceGroup<'a> {
     /// Returns the resource name for a [`Named`][Self::Named] group.
     #[inline]
-    pub fn name(self) -> Option<&'a UniqueIdent> {
+    pub fn name(self) -> Option<UniqueIdent<'a>> {
         match self {
             Self::Named(name) => Some(name),
             Self::Default => None,
@@ -194,12 +139,12 @@ impl<'a> ResourceGroup<'a> {
 
 /// Formats a uniquified resource name as a Cargo feature name.
 #[derive(Clone, Copy, Debug)]
-pub struct AsFeatureName<'a>(pub &'a UniqueIdent);
+pub struct AsFeatureName<'a>(pub UniqueIdent<'a>);
 
 impl Display for AsFeatureName<'_> {
     #[inline]
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", AsKebabCase(&self.0.0))
+    fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
+        write!(f, "{}", AsKebabCase(self.0.0))
     }
 }
 
@@ -218,45 +163,48 @@ impl<'a> UniqueIdents<'a> {
     /// with additional pre-reserved names.
     #[inline]
     pub fn with_reserved(arena: &'a Arena, reserved: &[&str]) -> Self {
-        Self(UniqueNames::with_reserved(
+        let names = UniqueNames::with_reserved(
             arena,
-            reserved.iter().chain(KEYWORDS).copied(),
-        ))
+            reserved.iter().chain(KEYWORDS).map(|name| clean(name)),
+        );
+        Self(names)
     }
 
-    /// Cleans and uniquifies an identifier.
+    /// Uniquifies an identifier fragment.
     #[inline]
-    pub fn reserve(&mut self, name: &str) -> &'a UniqueIdent {
-        UniqueIdent::new(self.0.uniquify(&clean(name)))
+    pub fn claim(&mut self, name: &str) -> UniqueIdent<'a> {
+        UniqueIdent(self.0.claim(clean(name)))
     }
 
-    /// Uniquifies an already-cleaned identifier.
+    /// Uniquifies an identifier from another scope.
     #[inline]
-    pub fn reserve_ident(&mut self, name: &CodegenIdent) -> &'a UniqueIdent {
-        UniqueIdent::new(self.0.uniquify(&name.0))
+    pub fn adopt(&mut self, ident: UniqueIdent<'a>) -> UniqueIdent<'a> {
+        UniqueIdent(self.0.adopt(ident.0))
     }
 }
 
-/// Makes a valid Rust identifier fragment from a string.
+/// Splits an identifier fragment into name parts for [`UniqueNames`].
 ///
-/// Cleaning segments the string on word boundaries and collapses all
-/// non-`XID_Continue` characters into new boundaries. This makes the fragment
-/// resilient to Heck's case transformations, which also collapse boundaries,
-/// and so can produce duplicates.
-///
-/// The result is a valid identifier fragment, but may not be a valid [`Ident`],
-/// because Rust identifiers must start with `XID_Start`.
+/// Returns non-empty text spans as text parts, with one boundary
+/// between adjacent spans. Text spans contain all `XID_Continue` characters
+/// except `_`; all others are separators. Leading, trailing, and repeated
+/// separators are discarded.
 #[inline]
-fn clean(s: &str) -> String {
-    WordSegments::new(s)
-        .flat_map(|(_, s)| s.split(|c| !unicode_ident::is_xid_continue(c)))
-        .join("_")
+fn clean(s: &str) -> impl Iterator<Item = NamePart<'_>> {
+    use itertools::intersperse;
+    intersperse(
+        s.split(|c| c == '_' || !is_xid_continue(c))
+            .filter(|s| !s.is_empty())
+            .map(NamePart::Text),
+        NamePart::Boundary,
+    )
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
+    use itertools::Itertools;
     use pretty_assertions::assert_eq;
     use syn::parse_quote;
 
@@ -266,7 +214,7 @@ mod tests {
     fn test_codegen_ident_type() {
         let arena = Arena::new();
         let mut scope = UniqueIdents::new(&arena);
-        let ident = scope.reserve("pet_store");
+        let ident = scope.claim("pet_store");
         let usage = CodegenIdentUsage::Type(ident);
         let actual: syn::Ident = parse_quote!(#usage);
         let expected: syn::Ident = parse_quote!(PetStore);
@@ -277,7 +225,7 @@ mod tests {
     fn test_codegen_ident_field() {
         let arena = Arena::new();
         let mut scope = UniqueIdents::new(&arena);
-        let ident = scope.reserve("petStore");
+        let ident = scope.claim("petStore");
         let usage = CodegenIdentUsage::Field(ident);
         let actual: syn::Ident = parse_quote!(#usage);
         let expected: syn::Ident = parse_quote!(pet_store);
@@ -288,7 +236,7 @@ mod tests {
     fn test_codegen_ident_module() {
         let arena = Arena::new();
         let mut scope = UniqueIdents::new(&arena);
-        let ident = scope.reserve("MyModule");
+        let ident = scope.claim("MyModule");
         let usage = CodegenIdentUsage::Module(ident);
         let actual: syn::Ident = parse_quote!(#usage);
         let expected: syn::Ident = parse_quote!(my_module);
@@ -299,7 +247,7 @@ mod tests {
     fn test_codegen_ident_variant() {
         let arena = Arena::new();
         let mut scope = UniqueIdents::new(&arena);
-        let ident = scope.reserve("http_error");
+        let ident = scope.claim("http_error");
         let usage = CodegenIdentUsage::Variant(ident);
         let actual: syn::Ident = parse_quote!(#usage);
         let expected: syn::Ident = parse_quote!(HttpError);
@@ -310,7 +258,7 @@ mod tests {
     fn test_codegen_ident_param() {
         let arena = Arena::new();
         let mut scope = UniqueIdents::new(&arena);
-        let ident = scope.reserve("userId");
+        let ident = scope.claim("userId");
         let usage = CodegenIdentUsage::Param(ident);
         let actual: syn::Ident = parse_quote!(#usage);
         let expected: syn::Ident = parse_quote!(user_id);
@@ -321,27 +269,10 @@ mod tests {
     fn test_codegen_ident_method() {
         let arena = Arena::new();
         let mut scope = UniqueIdents::new(&arena);
-        let ident = scope.reserve("getUserById");
+        let ident = scope.claim("getUserById");
         let usage = CodegenIdentUsage::Method(ident);
         let actual: syn::Ident = parse_quote!(#usage);
         let expected: syn::Ident = parse_quote!(get_user_by_id);
-        assert_eq!(actual, expected);
-    }
-
-    #[test]
-    fn test_codegen_ident_method_preserves_numeric_boundary() {
-        let arena = Arena::new();
-        let mut scope = UniqueIdents::new(&arena);
-        let ident = scope.reserve("get_fees1");
-
-        let usage = CodegenIdentUsage::Method(ident);
-        let actual: syn::Ident = parse_quote!(#usage);
-        let expected: syn::Ident = parse_quote!(get_fees_1);
-        assert_eq!(actual, expected);
-
-        let usage = CodegenIdentUsage::Type(ident);
-        let actual: syn::Ident = parse_quote!(#usage);
-        let expected: syn::Ident = parse_quote!(GetFees1);
         assert_eq!(actual, expected);
     }
 
@@ -351,7 +282,7 @@ mod tests {
     fn test_codegen_ident_handles_rust_keywords() {
         let arena = Arena::new();
         let mut scope = UniqueIdents::new(&arena);
-        let ident = scope.reserve("type");
+        let ident = scope.claim("type");
         let usage = CodegenIdentUsage::Field(ident);
         let actual: syn::Ident = parse_quote!(#usage);
         let expected: syn::Ident = parse_quote!(r#type);
@@ -362,10 +293,10 @@ mod tests {
     fn test_codegen_ident_handles_invalid_start_chars() {
         let arena = Arena::new();
         let mut scope = UniqueIdents::new(&arena);
-        let ident = scope.reserve("123foo");
+        let ident = scope.claim("123foo");
         let usage = CodegenIdentUsage::Field(ident);
         let actual: syn::Ident = parse_quote!(#usage);
-        let expected: syn::Ident = parse_quote!(_123_foo);
+        let expected: syn::Ident = parse_quote!(_123foo);
         assert_eq!(actual, expected);
     }
 
@@ -373,7 +304,7 @@ mod tests {
     fn test_codegen_ident_handles_special_chars() {
         let arena = Arena::new();
         let mut scope = UniqueIdents::new(&arena);
-        let ident = scope.reserve("foo-bar-baz");
+        let ident = scope.claim("foo-bar-baz");
         let usage = CodegenIdentUsage::Field(ident);
         let actual: syn::Ident = parse_quote!(#usage);
         let expected: syn::Ident = parse_quote!(foo_bar_baz);
@@ -384,11 +315,11 @@ mod tests {
     fn test_codegen_ident_handles_number_prefix() {
         let arena = Arena::new();
         let mut scope = UniqueIdents::new(&arena);
-        let ident = scope.reserve("1099KStatus");
+        let ident = scope.claim("1099KStatus");
 
         let usage = CodegenIdentUsage::Field(ident);
         let actual: syn::Ident = parse_quote!(#usage);
-        let expected: syn::Ident = parse_quote!(_1099_k_status);
+        let expected: syn::Ident = parse_quote!(_1099k_status);
         assert_eq!(actual, expected);
 
         let usage = CodegenIdentUsage::Type(ident);
@@ -400,43 +331,61 @@ mod tests {
     // MARK: `clean()`
 
     #[test]
-    fn test_clean() {
-        assert_eq!(clean("foo-bar"), "foo_bar");
-        assert_eq!(clean("foo.bar"), "foo_bar");
-        assert_eq!(clean("foo bar"), "foo_bar");
-        assert_eq!(clean("foo@bar"), "foo_bar");
-        assert_eq!(clean("foo#bar"), "foo_bar");
-        assert_eq!(clean("foo!bar"), "foo_bar");
+    fn test_clean_classifies_identifier_parts() {
+        use NamePart::{Boundary, Text};
 
-        assert_eq!(clean("foo_bar"), "foo_bar");
-        assert_eq!(clean("FooBar"), "Foo_Bar");
-        assert_eq!(clean("foo123"), "foo_123");
-        assert_eq!(clean("_foo"), "foo");
+        assert_eq!(
+            clean("foo-bar").collect_vec(),
+            [Text("foo"), Boundary, Text("bar")]
+        );
+        assert_eq!(
+            clean("foo.bar").collect_vec(),
+            [Text("foo"), Boundary, Text("bar")]
+        );
+        assert_eq!(
+            clean("foo bar").collect_vec(),
+            [Text("foo"), Boundary, Text("bar")]
+        );
+        assert_eq!(
+            clean("foo@bar").collect_vec(),
+            [Text("foo"), Boundary, Text("bar")]
+        );
 
-        assert_eq!(clean("_foo"), "foo");
-        assert_eq!(clean("__foo"), "foo");
+        assert_eq!(
+            clean("foo_bar").collect_vec(),
+            [Text("foo"), Boundary, Text("bar")]
+        );
+        assert_eq!(clean("FooBar").collect_vec(), [Text("FooBar")]);
+        assert_eq!(clean("foo123").collect_vec(), [Text("foo123")]);
+        assert_eq!(clean("_foo").collect_vec(), [Text("foo")]);
+        assert_eq!(clean("__foo").collect_vec(), [Text("foo")]);
 
-        // Digits are in `XID_Continue`, so they should be preserved.
-        assert_eq!(clean("123foo"), "123_foo");
-        assert_eq!(clean("9bar"), "9_bar");
+        assert_eq!(clean("123foo").collect_vec(), [Text("123foo")]);
+        assert_eq!(clean("9bar").collect_vec(), [Text("9bar")]);
 
-        // Non-ASCII characters that are valid in identifiers should be preserved;
-        // characters that aren't should be replaced.
-        assert_eq!(clean("café"), "café");
-        assert_eq!(clean("foo™bar"), "foo_bar");
+        assert_eq!(clean("caf\u{e9}").collect_vec(), [Text("caf\u{e9}")]);
+        assert_eq!(
+            clean("foo\u{2122}bar").collect_vec(),
+            [Text("foo"), Boundary, Text("bar")]
+        );
 
-        // Invalid characters should be collapsed.
-        assert_eq!(clean("foo---bar"), "foo_bar");
-        assert_eq!(clean("foo...bar"), "foo_bar");
+        assert_eq!(
+            clean("foo---bar").collect_vec(),
+            [Text("foo"), Boundary, Text("bar")]
+        );
+        assert_eq!(
+            clean("foo...bar").collect_vec(),
+            [Text("foo"), Boundary, Text("bar")]
+        );
     }
 
-    // MARK: Scopes
+    // MARK: Edge cases
 
     #[test]
-    fn test_codegen_ident_scope_handles_empty() {
+    fn test_codegen_ident_empty() {
         let arena = Arena::new();
         let mut scope = UniqueIdents::new(&arena);
-        let ident = scope.reserve("");
+        let ident = scope.claim("");
 
         let usage = CodegenIdentUsage::Field(ident);
         let actual: syn::Ident = parse_quote!(#usage);
@@ -450,17 +399,17 @@ mod tests {
     }
 
     #[test]
-    fn test_codegen_ident_scope_handles_numeric_names() {
+    fn test_codegen_ident_numeric_names() {
         let arena = Arena::new();
         let mut scope = UniqueIdents::new(&arena);
 
-        let ident = scope.reserve("0");
+        let ident = scope.claim("0");
         let usage = CodegenIdentUsage::Field(ident);
         let actual: syn::Ident = parse_quote!(#usage);
         let expected: syn::Ident = parse_quote!(_1);
         assert_eq!(actual, expected);
 
-        let ident = scope.reserve("1");
+        let ident = scope.claim("1");
         let usage = CodegenIdentUsage::Type(ident);
         let actual: syn::Ident = parse_quote!(#usage);
         let expected: syn::Ident = parse_quote!(_2);
@@ -468,20 +417,174 @@ mod tests {
     }
 
     #[test]
-    fn test_codegen_ident_scope_handles_reserved_suffixes() {
+    fn test_codegen_ident_reserved_suffixes() {
         let arena = Arena::new();
         let mut scope = UniqueIdents::new(&arena);
 
-        let ident = scope.reserve("crate");
+        let ident = scope.claim("crate");
         let usage = CodegenIdentUsage::Method(ident);
         let actual: syn::Ident = parse_quote!(#usage);
         let expected: syn::Ident = parse_quote!(crate_2);
         assert_eq!(actual, expected);
 
-        let ident = scope.reserve("crate2");
+        let ident = scope.claim("crate2");
         let usage = CodegenIdentUsage::Method(ident);
         let actual: syn::Ident = parse_quote!(#usage);
-        let expected: syn::Ident = parse_quote!(crate_3);
+        let expected: syn::Ident = parse_quote!(crate3);
         assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn test_codegen_ident_respects_existing_numeric_suffix_boundary() {
+        let arena = Arena::new();
+        let mut scope = UniqueIdents::new(&arena);
+        let ident = scope.claim("get_fees1");
+
+        let usage = CodegenIdentUsage::Method(ident);
+        let actual: syn::Ident = parse_quote!(#usage);
+        let expected: syn::Ident = parse_quote!(get_fees1);
+        assert_eq!(actual, expected);
+
+        let usage = CodegenIdentUsage::Type(ident);
+        let actual: syn::Ident = parse_quote!(#usage);
+        let expected: syn::Ident = parse_quote!(GetFees1);
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn test_codegen_ident_collapses_letter_digit_boundaries() {
+        let arena = Arena::new();
+        let mut scope = UniqueIdents::new(&arena);
+
+        let ident = scope.claim("s3Upload");
+        let usage = CodegenIdentUsage::Method(ident);
+        let actual: syn::Ident = parse_quote!(#usage);
+        let expected: syn::Ident = parse_quote!(s3_upload);
+        assert_eq!(actual, expected);
+
+        let ident = scope.claim("x509Cert");
+        let usage = CodegenIdentUsage::Method(ident);
+        let actual: syn::Ident = parse_quote!(#usage);
+        let expected: syn::Ident = parse_quote!(x509_cert);
+        assert_eq!(actual, expected);
+
+        let ident = scope.claim("sha256Digest");
+        let usage = CodegenIdentUsage::Method(ident);
+        let actual: syn::Ident = parse_quote!(#usage);
+        let expected: syn::Ident = parse_quote!(sha256_digest);
+        assert_eq!(actual, expected);
+
+        let ident = scope.claim("http2Protocol");
+        let usage = CodegenIdentUsage::Type(ident);
+        let actual: syn::Ident = parse_quote!(#usage);
+        let expected: syn::Ident = parse_quote!(Http2Protocol);
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn test_codegen_ident_reserves_numeric_suffix_slots() {
+        let arena = Arena::new();
+        let mut scope = UniqueIdents::new(&arena);
+
+        let first = scope.claim("Response2");
+        let usage = CodegenIdentUsage::Type(first);
+        let actual: syn::Ident = parse_quote!(#usage);
+        let expected: syn::Ident = parse_quote!(Response2);
+        assert_eq!(actual, expected);
+
+        let second = scope.claim("Response_2");
+        let usage = CodegenIdentUsage::Type(second);
+        let actual: syn::Ident = parse_quote!(#usage);
+        let expected: syn::Ident = parse_quote!(Response3);
+        assert_eq!(actual, expected);
+
+        let usage = CodegenIdentUsage::Method(first);
+        let actual: syn::Ident = parse_quote!(#usage);
+        let expected: syn::Ident = parse_quote!(response2);
+        assert_eq!(actual, expected);
+
+        let usage = CodegenIdentUsage::Method(second);
+        let actual: syn::Ident = parse_quote!(#usage);
+        let expected: syn::Ident = parse_quote!(response_3);
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn test_codegen_ident_deduplicates_internal_numeric_boundaries() {
+        let arena = Arena::new();
+        let mut scope = UniqueIdents::new(&arena);
+
+        let compact = scope.claim("Http2Protocol");
+        let usage = CodegenIdentUsage::Type(compact);
+        let actual: syn::Ident = parse_quote!(#usage);
+        let expected: syn::Ident = parse_quote!(Http2Protocol);
+        assert_eq!(actual, expected);
+
+        let explicit = scope.claim("Http_2Protocol");
+        let usage = CodegenIdentUsage::Type(explicit);
+        let actual: syn::Ident = parse_quote!(#usage);
+        let expected: syn::Ident = parse_quote!(Http2Protocol2);
+        assert_eq!(actual, expected);
+
+        let compact = scope.claim("Http2ProtocolVariant");
+        let usage = CodegenIdentUsage::Variant(compact);
+        let actual: syn::Ident = parse_quote!(#usage);
+        let expected: syn::Ident = parse_quote!(Http2ProtocolVariant);
+        assert_eq!(actual, expected);
+
+        let explicit = scope.claim("Http_2ProtocolVariant");
+        let usage = CodegenIdentUsage::Variant(explicit);
+        let actual: syn::Ident = parse_quote!(#usage);
+        let expected: syn::Ident = parse_quote!(Http2ProtocolVariant2);
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn test_codegen_ident_adopt_preserves_numeric_suffix_boundary() {
+        let arena = Arena::new();
+        let mut schema_scope = UniqueIdents::new(&arena);
+        let schema_ident = schema_scope.claim("Response_2");
+
+        let mut variant_scope = UniqueIdents::new(&arena);
+        let response = variant_scope.claim("Response");
+        let variant_ident = variant_scope.adopt(schema_ident);
+
+        let usage = CodegenIdentUsage::Variant(response);
+        let actual: syn::Ident = parse_quote!(#usage);
+        let expected: syn::Ident = parse_quote!(Response);
+        assert_eq!(actual, expected);
+
+        let usage = CodegenIdentUsage::Variant(variant_ident);
+        let actual: syn::Ident = parse_quote!(#usage);
+        let expected: syn::Ident = parse_quote!(Response2);
+        assert_eq!(actual, expected);
+
+        let usage = CodegenIdentUsage::Method(variant_ident);
+        let actual: syn::Ident = parse_quote!(#usage);
+        let expected: syn::Ident = parse_quote!(response_2);
+        assert_eq!(actual, expected);
+    }
+
+    // MARK: Cargo features
+
+    #[test]
+    fn test_feature_name_respects_existing_numeric_suffix_boundary() {
+        let arena = Arena::new();
+        let mut scope = UniqueIdents::new(&arena);
+        let ident = scope.claim("get_fees1");
+
+        assert_eq!(AsFeatureName(ident).to_string(), "get-fees1");
+    }
+
+    #[test]
+    fn test_feature_name_collapses_letter_digit_boundaries() {
+        let arena = Arena::new();
+        let mut scope = UniqueIdents::new(&arena);
+
+        let compact = scope.claim("oauth2Token");
+        assert_eq!(AsFeatureName(compact).to_string(), "oauth2-token");
+
+        let explicit = scope.claim("oauth_2_token");
+        assert_eq!(AsFeatureName(explicit).to_string(), "oauth-2-token-2");
     }
 }

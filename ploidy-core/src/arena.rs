@@ -66,6 +66,12 @@ impl Arena {
     pub(crate) fn alloc_str(&self, s: &str) -> &mut str {
         self.0.alloc_str(s)
     }
+
+    /// Allocates and returns a reference to a formatted string.
+    #[inline]
+    pub(crate) fn alloc_fmt(&self, f: std::fmt::Arguments<'_>) -> &str {
+        bumpalo::format!(in &self.0, "{}", f).into_bump_str()
+    }
 }
 
 // Atomics aren't `Copy`, but are trivially droppable, and so OK to allocate

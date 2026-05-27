@@ -73,10 +73,10 @@ impl<'a> CodegenCargoManifest<'a> {
                 .iter()
                 .map(|(resource, deps)| {
                     (
-                        AsFeatureName(resource).to_string(),
+                        AsFeatureName(*resource).to_string(),
                         FeatureDependencies(
                             deps.iter()
-                                .map(|resource| AsFeatureName(resource).to_string())
+                                .map(|resource| AsFeatureName(*resource).to_string())
                                 .collect_vec(),
                         ),
                     )
@@ -91,7 +91,7 @@ impl<'a> CodegenCargoManifest<'a> {
                     FeatureDependencies(
                         deps_by_resource
                             .keys()
-                            .map(|resource| AsFeatureName(resource).to_string())
+                            .map(|resource| AsFeatureName(*resource).to_string())
                             .collect_vec(),
                     ),
                 );
@@ -742,6 +742,43 @@ mod tests {
         let features = manifest.features();
         let keys = features.keys().copied().collect_vec();
         assert_matches!(&*keys, ["default", "pets"]);
+    }
+
+    #[test]
+    fn test_resource_feature_names_deduplicate_numeric_case_collisions() {
+        let doc = Document::from_yaml(indoc::indoc! {"
+            openapi: 3.0.0
+            info:
+              title: Test
+              version: 1.0.0
+            paths:
+              /tokens:
+                get:
+                  operationId: listTokens
+                  x-resource-name: oauth_2_token
+                  responses:
+                    '200':
+                      description: OK
+            components:
+              schemas:
+                OAuth2Token:
+                  type: object
+                  x-resourceId: oauth2Token
+                  properties:
+                    id:
+                      type: string
+        "})
+        .unwrap();
+
+        let arena = Arena::new();
+        let spec = Spec::from_doc(&arena, &doc).unwrap();
+        let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
+        let manifest = CodegenCargoManifest::new(&graph, &default_manifest()).to_manifest();
+
+        let features = manifest.features();
+        let keys = features.keys().copied().collect_vec();
+        assert_matches!(&*keys, ["default", "oauth-2-token-2", "oauth2-token"]);
+        assert_eq!(features["default"], ["oauth-2-token-2", "oauth2-token"]);
     }
 
     #[test]

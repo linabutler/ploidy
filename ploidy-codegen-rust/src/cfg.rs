@@ -36,17 +36,17 @@ use super::{
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum CfgFeature<'a> {
     /// A single `feature = "name"` predicate.
-    Single(&'a UniqueIdent),
+    Single(UniqueIdent<'a>),
     /// A compound `any(feature = "a", feature = "b", ...)` predicate.
-    AnyOf(BTreeSet<&'a UniqueIdent>),
+    AnyOf(BTreeSet<UniqueIdent<'a>>),
     /// A compound `all(feature = "a", feature = "b", ...)` predicate.
-    AllOf(BTreeSet<&'a UniqueIdent>),
+    AllOf(BTreeSet<UniqueIdent<'a>>),
     /// A compound `all(feature = "own", any(feature = "a", ...))` predicate,
     /// used for schema types that both specify an `x-resourceId`, and are
     /// used by operations that specify an `x-resource-name`.
     OwnAndUsedBy {
-        own: &'a UniqueIdent,
-        used_by: BTreeSet<&'a UniqueIdent>,
+        own: UniqueIdent<'a>,
+        used_by: BTreeSet<UniqueIdent<'a>>,
     },
 }
 
@@ -178,7 +178,7 @@ impl<'a> CfgFeature<'a> {
     }
 
     /// Builds a `#[cfg(any(...))]` predicate, simplifying if possible.
-    fn any_of(mut features: BTreeSet<&'a UniqueIdent>) -> Option<Self> {
+    fn any_of(mut features: BTreeSet<UniqueIdent<'a>>) -> Option<Self> {
         let first = features.pop_first()?;
         Some(if features.is_empty() {
             // Simplify `any(first)` to `first`.
@@ -190,7 +190,7 @@ impl<'a> CfgFeature<'a> {
     }
 
     /// Builds a `#[cfg(all(...))]` predicate, simplifying if possible.
-    fn all_of(mut features: BTreeSet<&'a UniqueIdent>) -> Option<Self> {
+    fn all_of(mut features: BTreeSet<UniqueIdent<'a>>) -> Option<Self> {
         let first = features.pop_first()?;
         Some(if features.is_empty() {
             // Simplify `all(first)` to `first`.
@@ -202,8 +202,8 @@ impl<'a> CfgFeature<'a> {
     }
 
     /// Builds a `#[cfg(all(own, any(...)))]` predicate, simplifying if possible.
-    fn own_and_used_by(own: &'a UniqueIdent, mut used_by: BTreeSet<&'a UniqueIdent>) -> Self {
-        if used_by.contains(own) {
+    fn own_and_used_by(own: UniqueIdent<'a>, mut used_by: BTreeSet<UniqueIdent<'a>>) -> Self {
+        if used_by.contains(&own) {
             // Simplify `all(own, any(own, ...))` to `own`.
             return Self::Single(own);
         }
@@ -225,27 +225,27 @@ impl<'a> CfgFeature<'a> {
 impl ToTokens for CfgFeature<'_> {
     fn to_tokens(&self, tokens: &mut TokenStream) {
         let predicate = match self {
-            Self::Single(resource) => {
+            &Self::Single(resource) => {
                 let name = AsFeatureName(resource).to_string();
                 quote! { feature = #name }
             }
             Self::AnyOf(resources) => {
-                let predicates = resources.iter().map(|f| {
+                let predicates = resources.iter().map(|&f| {
                     let name = AsFeatureName(f).to_string();
                     quote! { feature = #name }
                 });
                 quote! { any(#(#predicates),*) }
             }
             Self::AllOf(resources) => {
-                let predicates = resources.iter().map(|f| {
+                let predicates = resources.iter().map(|&f| {
                     let name = AsFeatureName(f).to_string();
                     quote! { feature = #name }
                 });
                 quote! { all(#(#predicates),*) }
             }
             Self::OwnAndUsedBy { own, used_by } => {
-                let own_name = AsFeatureName(own).to_string();
-                let used_by_predicates = used_by.iter().map(|f| {
+                let own_name = AsFeatureName(*own).to_string();
+                let used_by_predicates = used_by.iter().map(|&f| {
                     let name = AsFeatureName(f).to_string();
                     quote! { feature = #name }
                 });
@@ -286,7 +286,7 @@ mod tests {
     fn test_single_feature() {
         let arena = Arena::new();
         let mut scope = UniqueIdents::new(&arena);
-        let cfg = CfgFeature::Single(scope.reserve("pets"));
+        let cfg = CfgFeature::Single(scope.claim("pets"));
 
         let actual: syn::Attribute = parse_quote!(#cfg);
         let expected: syn::Attribute = parse_quote!(#[cfg(feature = "pets")]);
@@ -298,9 +298,9 @@ mod tests {
         let arena = Arena::new();
         let mut scope = UniqueIdents::new(&arena);
         let cfg = CfgFeature::AnyOf(BTreeSet::from_iter([
-            scope.reserve("cats"),
-            scope.reserve("dogs"),
-            scope.reserve("aardvarks"),
+            scope.claim("cats"),
+            scope.claim("dogs"),
+            scope.claim("aardvarks"),
         ]));
 
         let actual: syn::Attribute = parse_quote!(#cfg);
@@ -314,9 +314,9 @@ mod tests {
         let arena = Arena::new();
         let mut scope = UniqueIdents::new(&arena);
         let cfg = CfgFeature::AllOf(BTreeSet::from_iter([
-            scope.reserve("cats"),
-            scope.reserve("dogs"),
-            scope.reserve("aardvarks"),
+            scope.claim("cats"),
+            scope.claim("dogs"),
+            scope.claim("aardvarks"),
         ]));
 
         let actual: syn::Attribute = parse_quote!(#cfg);
@@ -330,8 +330,8 @@ mod tests {
         let arena = Arena::new();
         let mut scope = UniqueIdents::new(&arena);
         let cfg = CfgFeature::OwnAndUsedBy {
-            own: scope.reserve("own"),
-            used_by: BTreeSet::from_iter([scope.reserve("a"), scope.reserve("b")]),
+            own: scope.claim("own"),
+            used_by: BTreeSet::from_iter([scope.claim("a"), scope.claim("b")]),
         };
 
         let actual: syn::Attribute = parse_quote!(#cfg);
@@ -344,7 +344,7 @@ mod tests {
     fn test_any_of_simplifies_single_feature() {
         let arena = Arena::new();
         let mut scope = UniqueIdents::new(&arena);
-        let cfg = CfgFeature::any_of(BTreeSet::from_iter([scope.reserve("pets")]));
+        let cfg = CfgFeature::any_of(BTreeSet::from_iter([scope.claim("pets")]));
 
         let actual: syn::Attribute = parse_quote!(#cfg);
         let expected: syn::Attribute = parse_quote!(#[cfg(feature = "pets")]);
@@ -355,7 +355,7 @@ mod tests {
     fn test_all_of_simplifies_single_feature() {
         let arena = Arena::new();
         let mut scope = UniqueIdents::new(&arena);
-        let cfg = CfgFeature::all_of(BTreeSet::from_iter([scope.reserve("pets")]));
+        let cfg = CfgFeature::all_of(BTreeSet::from_iter([scope.claim("pets")]));
 
         let actual: syn::Attribute = parse_quote!(#cfg);
         let expected: syn::Attribute = parse_quote!(#[cfg(feature = "pets")]);
@@ -378,8 +378,8 @@ mod tests {
     fn test_own_and_used_by_simplifies_single_used_by_to_all_of() {
         let arena = Arena::new();
         let mut scope = UniqueIdents::new(&arena);
-        let own = scope.reserve("own");
-        let other = scope.reserve("other");
+        let own = scope.claim("own");
+        let other = scope.claim("other");
         // `OwnedAndUsedBy` with one `used_by` feature should simplify to `AllOf`.
         let cfg = CfgFeature::own_and_used_by(own, BTreeSet::from_iter([other]));
         assert_eq!(cfg, CfgFeature::AllOf(BTreeSet::from_iter([other, own])),);
@@ -389,7 +389,7 @@ mod tests {
     fn test_own_and_used_by_simplifies_empty_to_single() {
         let arena = Arena::new();
         let mut scope = UniqueIdents::new(&arena);
-        let own = scope.reserve("own");
+        let own = scope.claim("own");
         // `OwnedAndUsedBy` with no `used_by` features should simplify to `Single`.
         let cfg = CfgFeature::own_and_used_by(own, BTreeSet::new());
         assert_eq!(cfg, CfgFeature::Single(own));
@@ -399,8 +399,8 @@ mod tests {
     fn test_own_and_used_by_simplifies_own_used_by_to_single() {
         let arena = Arena::new();
         let mut scope = UniqueIdents::new(&arena);
-        let own = scope.reserve("own");
-        let other = scope.reserve("other");
+        let own = scope.claim("own");
+        let other = scope.claim("other");
         let cfg = CfgFeature::own_and_used_by(own, BTreeSet::from_iter([own, other]));
         assert_eq!(cfg, CfgFeature::Single(own));
     }
