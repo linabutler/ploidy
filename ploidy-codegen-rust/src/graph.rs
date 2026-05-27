@@ -302,11 +302,16 @@ impl<'graph, 'a> MemberIdentDomain<'graph, 'a> {
                 }
             }
             Self::Enum(id, view) => {
-                let mut scope = UniqueIdents::new(arena);
+                let mut scope = UniqueIdents::with_reserved(
+                    arena,
+                    &[&format!(
+                        "Other{}",
+                        CodegenIdentUsage::Type(idents[&IdentMapKey::Type(id)]).display()
+                    )],
+                );
                 for &variant in view.variants() {
                     if let EnumVariant::String(name) = variant {
-                        let ident = scope.claim(name);
-                        map.insert(IdentMapKey::EnumVariant(id, name), ident);
+                        map.insert(IdentMapKey::EnumVariant(id, name), scope.claim(name));
                     }
                 }
             }

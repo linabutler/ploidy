@@ -137,13 +137,13 @@ mod tests {
 
     use ploidy_core::{
         arena::Arena,
-        ir::{RawGraph, SchemaTypeView, Spec},
+        ir::{InlineTypeView, RawGraph, SchemaTypeView, Spec, View},
         parse::Document,
     };
     use pretty_assertions::assert_eq;
     use syn::parse_quote;
 
-    use crate::CodegenGraph;
+    use crate::{CodegenGraph, tests::assert_matches};
 
     // MARK: String variants
 
@@ -251,6 +251,110 @@ mod tests {
             }
         };
         assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn test_schema_enum_variant_avoids_colliding_with_catch_all_other_variant() {
+        let doc = Document::from_yaml(indoc::indoc! {"
+            openapi: 3.0.0
+            info:
+              title: Test API
+              version: 1.0.0
+            paths: {}
+            components:
+              schemas:
+                Status:
+                  type: string
+                  enum:
+                    - other_status
+                    - active
+        "})
+        .unwrap();
+
+        let arena = Arena::new();
+        let spec = Spec::from_doc(&arena, &doc).unwrap();
+        let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
+
+        let schema = graph.schema("Status").unwrap();
+        let SchemaTypeView::Enum(_, enum_view) = schema else {
+            panic!("expected enum `Status`; got `{schema:?}`");
+        };
+
+        let codegen = CodegenEnum::new(&graph, &enum_view);
+
+        let actual: syn::File = parse_quote!(#codegen);
+        let expected: syn::ItemEnum = parse_quote! {
+            #[derive(Clone, Debug, Eq, Hash, PartialEq, ::ploidy_util::pointer::JsonPointee, ::ploidy_util::pointer::JsonPointerTarget)]
+            #[ploidy(pointer(crate = "::ploidy_util::pointer"))]
+            pub enum Status {
+                OtherStatus2,
+                Active,
+                OtherStatus(String)
+            }
+        };
+        assert_matches!(
+            actual.items.as_slice(),
+            [syn::Item::Enum(actual), ..] if actual == &expected
+        );
+    }
+
+    #[test]
+    fn test_inline_enum_variant_avoids_colliding_with_catch_all_other_variant() {
+        let doc = Document::from_yaml(indoc::indoc! {"
+            openapi: 3.0.0
+            info:
+              title: Test API
+              version: 1.0.0
+            paths: {}
+            components:
+              schemas:
+                Pet:
+                  type: object
+                  required:
+                    - status
+                  properties:
+                    status:
+                      type: string
+                      enum:
+                        - other_status
+                        - active
+        "})
+        .unwrap();
+
+        let arena = Arena::new();
+        let spec = Spec::from_doc(&arena, &doc).unwrap();
+        let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
+
+        let schema = graph.schema("Pet").unwrap();
+        let SchemaTypeView::Struct(_, _) = &schema else {
+            panic!("expected struct `Pet`; got `{schema:?}`");
+        };
+        let Some(inline) = schema
+            .inlines()
+            .find(|inline| matches!(inline, InlineTypeView::Enum(..)))
+        else {
+            panic!("expected inline enum in `Pet`; got `{schema:?}`");
+        };
+        let InlineTypeView::Enum(_, enum_view) = inline else {
+            panic!("expected inline enum; got `{inline:?}`");
+        };
+
+        let codegen = CodegenEnum::new(&graph, &enum_view);
+
+        let actual: syn::File = parse_quote!(#codegen);
+        let expected: syn::ItemEnum = parse_quote! {
+            #[derive(Clone, Debug, Eq, Hash, PartialEq, ::ploidy_util::pointer::JsonPointee, ::ploidy_util::pointer::JsonPointerTarget)]
+            #[ploidy(pointer(crate = "::ploidy_util::pointer"))]
+            pub enum Status {
+                OtherStatus2,
+                Active,
+                OtherStatus(String)
+            }
+        };
+        assert_matches!(
+            actual.items.as_slice(),
+            [syn::Item::Enum(actual), ..] if actual == &expected
+        );
     }
 
     // MARK: Unrepresentable variants
