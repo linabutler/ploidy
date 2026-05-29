@@ -185,6 +185,7 @@ mod tests {
         let actual: syn::File = parse_quote!(#resource);
         let expected: syn::File = parse_quote! {
             impl crate::client::Client {
+                #[doc = " GET /customers"]
                 pub async fn list_customers(
                     &self,
                 ) -> Result<::std::vec::Vec<crate::types::Customer>, crate::error::Error> {
@@ -270,6 +271,7 @@ mod tests {
         let expected: syn::File = parse_quote! {
             impl crate::client::Client {
                 #[cfg(feature = "customer")]
+                #[doc = " GET /orders"]
                 pub async fn list_orders(
                     &self,
                 ) -> Result<::std::vec::Vec<crate::types::Order>, crate::error::Error> {
@@ -341,6 +343,7 @@ mod tests {
         let actual: syn::File = parse_quote!(#resource);
         let expected: syn::File = parse_quote! {
             impl crate::client::Client {
+                #[doc = " GET /customers"]
                 pub async fn list_customers(
                     &self,
                     query: &parameters::ListCustomersQuery
@@ -443,6 +446,7 @@ mod tests {
         let actual: syn::File = parse_quote!(#resource);
         let expected: syn::File = parse_quote! {
             impl crate::client::Client {
+                #[doc = " GET /customers"]
                 pub async fn list_customers(
                     &self,
                     query: &parameters::ListCustomersQuery
@@ -474,6 +478,7 @@ mod tests {
                     let _ = response;
                     Ok(())
                 }
+                #[doc = " GET /customers/search"]
                 pub async fn search_customers(
                     &self,
                     query: &parameters::SearchCustomersQuery
@@ -568,6 +573,7 @@ mod tests {
         let actual: syn::File = parse_quote!(#resource);
         let expected: syn::File = parse_quote! {
             impl crate::client::Client {
+                #[doc = " GET /customers"]
                 pub async fn list_customers(
                     &self,
                 ) -> Result<(), crate::error::Error> {

@@ -362,7 +362,7 @@ mod tests {
 
         let actual: syn::File = parse_quote!(#codegen);
         let expected: syn::File = parse_quote! {
-            #[doc = "Represents different types of pets"]
+            #[doc = " Represents different types of pets"]
             #[derive(Debug, Clone, PartialEq, Eq, Hash, ::ploidy_util::serde::Serialize, ::ploidy_util::serde::Deserialize, ::ploidy_util::pointer::JsonPointee, ::ploidy_util::pointer::JsonPointerTarget)]
             #[serde(crate = "::ploidy_util::serde", tag = "type")]
             #[ploidy(pointer(crate = "::ploidy_util::pointer", tag = "type"))]

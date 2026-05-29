@@ -317,7 +317,7 @@ mod tests {
 
         let actual: syn::ItemEnum = parse_quote!(#untagged);
         let expected: syn::ItemEnum = parse_quote! {
-            #[doc = "A union that can be either a string or an integer."]
+            #[doc = " A union that can be either a string or an integer."]
             #[derive(Debug, Clone, PartialEq, Eq, Hash, ::ploidy_util::serde::Serialize, ::ploidy_util::serde::Deserialize, ::ploidy_util::pointer::JsonPointee, ::ploidy_util::pointer::JsonPointerTarget)]
             #[serde(crate = "::ploidy_util::serde", untagged)]
             #[ploidy(pointer(crate = "::ploidy_util::pointer", untagged))]

@@ -639,7 +639,7 @@ mod tests {
 
         let actual: syn::File = parse_quote!(#codegen);
         let expected: syn::File = parse_quote! {
-            #[doc = "A list of tags."]
+            #[doc = " A list of tags."]
             pub type Tags = ::std::vec::Vec<::std::string::String>;
         };
         assert_eq!(actual, expected);

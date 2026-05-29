@@ -54,7 +54,11 @@
 //! [response]: OperationView::response
 //! [resource name]: OperationView::resource
 
-use std::{collections::VecDeque, marker::PhantomData};
+use std::{
+    collections::VecDeque,
+    fmt::{Display, Formatter, Result as FmtResult},
+    marker::PhantomData,
+};
 
 use petgraph::{
     graph::NodeIndex,
@@ -248,6 +252,12 @@ impl<'view, 'graph, 'a> OperationViewPath<'view, 'graph, 'a> {
             GraphParameter::Path(info) => Some(ParameterView::new(self.0, info)),
             _ => None,
         })
+    }
+}
+
+impl Display for OperationViewPath<'_, '_, '_> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
+        write!(f, "{}", self.0.op.path)
     }
 }
 
