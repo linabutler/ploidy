@@ -16,12 +16,14 @@ use std::{
     mem,
 };
 
+use icu_normalizer::{ComposingNormalizer, ComposingNormalizerBorrowed};
 use itertools::Itertools;
 use rustc_hash::{FxHashMap, FxHashSet};
 use unicase::UniCase;
-use unicode_normalization::UnicodeNormalization;
 
 use crate::arena::Arena;
+
+static NFC: ComposingNormalizerBorrowed<'_> = ComposingNormalizer::new_nfc();
 
 /// A scope that claims target language names before final case rendering.
 ///
@@ -382,7 +384,7 @@ fn segments<'a>(
             .into_iter()
             .flat_map(|part| {
                 either!(match part {
-                    NamePart::Text(text) => text.nfc().map(NameChar::from),
+                    NamePart::Text(text) => NFC.normalize_iter(text.chars()).map(NameChar::from),
                     NamePart::Boundary => iter::once(NameChar::Separator),
                 })
             })

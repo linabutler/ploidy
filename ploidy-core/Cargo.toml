@@ -32,7 +32,9 @@ rustc-hash = { workspace = true }
 syn = { version = "2", default-features = false, optional = true }
 thiserror = "2"
 unicase = "2"
-unicode-normalization = "0.1"
+icu_normalizer = { version = "2", default-features = false, features = [
+    "compiled_data",
+] }
 winnow = "1.0"
 
 [dev-dependencies]
