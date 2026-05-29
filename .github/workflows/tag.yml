@@ -1,0 +1,75 @@
+---
+name: Tag release
+on:
+  workflow_dispatch:
+    inputs:
+      bump:
+        description: "The version to increment"
+        required: true
+        type: choice
+        options:
+          - major
+          - minor
+          - patch
+        default: minor
+
+concurrency:
+  group: tag
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+
+# Downgrade `GITHUB_TOKEN` permissions; we use `GH_REPO_PAT` instead,
+# so that pushing the tag can trigger our other workflows.
+permissions: {}
+
+jobs:
+  tag:
+    name: Tag release
+    runs-on: ubuntu-latest
+    if: ${{ github.ref == 'refs/heads/main' }}
+    steps:
+      - name: Check out repo
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ github.ref }}
+          token: ${{ secrets.GH_REPO_PAT }}
+
+      - name: Install `cargo-binstall`
+        env:
+          BINSTALL_VERSION: "1.19.1"
+        shell: bash
+        # `cargo binstall` uses immutable tags.
+        run: |
+          curl -L --proto '=https' --tlsv1.2 -sSf "https://raw.githubusercontent.com/cargo-bins/cargo-binstall/v$BINSTALL_VERSION/install-from-binstall-release.sh" | bash
+
+      - name: Install `cargo-edit`
+        run: cargo binstall -y cargo-edit@0.13.11
+
+      - name: Bump version
+        env:
+          VERSION_BUMP: ${{ inputs.bump }}
+        shell: bash
+        run: |
+          cargo set-version --bump "$VERSION_BUMP"
+          new_version=$(cargo metadata --format-version=1 --no-deps | jq -er '[.packages[].version] | unique | select(length == 1) | .[]') || exit 1
+          echo "NEW_PLOIDY_VERSION=$new_version" >> "$GITHUB_ENV"
+
+      - name: Regenerate Cargo lockfile
+        run: cargo generate-lockfile
+
+      - name: Commit and tag
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add Cargo.toml Cargo.lock
+          git commit -m "chore(release): v${NEW_PLOIDY_VERSION}"
+          git tag "v${NEW_PLOIDY_VERSION}"
+
+      - name: Verify release
+        run: cargo package --workspace --locked
+
+      - name: Push commit and tag
+        run: |
+          git push --atomic origin "$GITHUB_REF_NAME" "v${NEW_PLOIDY_VERSION}"
