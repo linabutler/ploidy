@@ -1,4 +1,7 @@
+use std::fmt::{Display, Formatter, Result as FmtResult, Write};
+
 use miette::SourceSpan;
+use percent_encoding::{AsciiSet, CONTROLS, utf8_percent_encode};
 use winnow::{
     Parser, Stateful,
     combinator::eof,
@@ -6,6 +9,21 @@ use winnow::{
 };
 
 use crate::arena::Arena;
+
+// The WHATWG URL path percent-encode set, plus `/` and `%`.
+const PATH_SEGMENT_PERCENT_ENCODE_SET: &AsciiSet = &CONTROLS
+    .add(b' ')
+    .add(b'"')
+    .add(b'#')
+    .add(b'<')
+    .add(b'>')
+    .add(b'?')
+    .add(b'^')
+    .add(b'`')
+    .add(b'{')
+    .add(b'}')
+    .add(b'/')
+    .add(b'%');
 
 /// Parser input threaded with an allocation [`Arena`].
 type Input<'a> = Stateful<&'a str, &'a Arena>;
@@ -38,6 +56,38 @@ pub struct ParsedPath<'a> {
     pub segments: &'a [PathSegment<'a>],
     /// Literal query parameters that follow the path.
     pub query: &'a [PathQueryParameter<'a>],
+}
+
+impl Display for ParsedPath<'_> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
+        for segment in self.segments {
+            f.write_char('/')?;
+            segment
+                .fragments()
+                .iter()
+                .try_for_each(|fragment| match fragment {
+                    PathFragment::Literal(text) => {
+                        write!(
+                            f,
+                            "{}",
+                            utf8_percent_encode(text, PATH_SEGMENT_PERCENT_ENCODE_SET)
+                        )
+                    }
+                    PathFragment::Param(name) => write!(f, "{{{name}}}"),
+                })?;
+        }
+
+        if !self.query.is_empty() {
+            let mut serializer = form_urlencoded::Serializer::new(String::new());
+            for param in self.query {
+                serializer.append_pair(param.name, param.value);
+            }
+            f.write_char('?')?;
+            f.write_str(&serializer.finish())?;
+        }
+
+        Ok(())
+    }
 }
 
 /// A literal query parameter parsed from the path template.
@@ -402,6 +452,36 @@ mod test {
                     value: "true",
                 }],
             },
+        );
+    }
+
+    #[test]
+    fn test_display_preserves_path_params() {
+        let arena = Arena::new();
+        let result = parse(
+            &arena,
+            "/v1/storage/{workspace}/documents/report-{documentId}.pdf?beta=true&expand",
+        )
+        .unwrap();
+
+        assert_eq!(
+            result.to_string(),
+            "/v1/storage/{workspace}/documents/report-{documentId}.pdf?beta=true&expand="
+        );
+    }
+
+    #[test]
+    fn test_display_encodes_literals() {
+        let arena = Arena::new();
+        let result = parse(
+            &arena,
+            "/foo%20bar/a%2Fb?name=John%20Doe&filter=%7Bactive%7D",
+        )
+        .unwrap();
+
+        assert_eq!(
+            result.to_string(),
+            "/foo%20bar/a%2Fb?name=John+Doe&filter=%7Bactive%7D"
         );
     }
 

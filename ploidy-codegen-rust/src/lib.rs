@@ -80,8 +80,15 @@ pub fn write_client_to_disk(output: &Path, graph: &CodegenGraph<'_>) -> miette::
 /// Generates one or more `#[doc]` attributes for a schema description,
 /// wrapping at 80 characters for readability.
 pub fn doc_attrs(description: &str) -> TokenStream {
-    let lines = textwrap::wrap(description, 80)
-        .into_iter()
-        .map(|line| quote!(#[doc = #line]));
+    use textwrap::{Options, wrap};
+    let lines = wrap(
+        description,
+        &Options::new(80)
+            .initial_indent(" ")
+            .subsequent_indent(" ")
+            .break_words(false),
+    )
+    .into_iter()
+    .map(|line| quote!(#[doc = #line]));
     quote! { #(#lines)* }
 }

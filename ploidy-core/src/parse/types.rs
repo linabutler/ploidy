@@ -93,6 +93,18 @@ pub enum Method {
     Patch,
 }
 
+impl Method {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Get => "GET",
+            Self::Post => "POST",
+            Self::Put => "PUT",
+            Self::Patch => "PATCH",
+            Self::Delete => "DELETE",
+        }
+    }
+}
+
 impl PathItem {
     /// Returns an iterator over the operations for each HTTP method.
     pub fn operations(&self) -> impl Iterator<Item = (Method, &Operation)> {

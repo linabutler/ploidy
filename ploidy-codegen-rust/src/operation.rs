@@ -215,7 +215,23 @@ impl ToTokens for CodegenOperation<'_> {
         };
 
         let method_name = CodegenIdentUsage::Method(self.graph.ident(self.op.id()));
-        let doc = self.op.description().map(doc_attrs);
+
+        let doc = {
+            let url = format!(" {} {}", self.op.method().as_str(), self.op.path());
+            match self.op.description() {
+                Some(description) => {
+                    let attrs = doc_attrs(description);
+                    quote! {
+                        #attrs
+                        #[doc = ""]
+                        #[doc = #url]
+                    }
+                }
+                None => {
+                    quote!(#[doc = #url])
+                }
+            }
+        };
 
         tokens.append_all(quote! {
             #doc
@@ -274,6 +290,7 @@ mod tests {
               /items/{item_id}:
                 get:
                   operationId: getItem
+                  description: Gets an item.
                   parameters:
                     - name: item_id
                       in: path
@@ -299,6 +316,9 @@ mod tests {
 
         let actual: syn::ImplItemFn = parse_quote!(#codegen);
         let expected: syn::ImplItemFn = parse_quote! {
+            #[doc = " Gets an item."]
+            #[doc = ""]
+            #[doc = " GET /items/{item_id}"]
             pub async fn get_item(
                 &self,
                 item_id: &str,
@@ -368,6 +388,7 @@ mod tests {
 
         let actual: syn::ImplItemFn = parse_quote!(#codegen);
         let expected: syn::ImplItemFn = parse_quote! {
+            #[doc = " GET /items"]
             pub async fn get_items(
                 &self,
                 query: &parameters::GetItemsQuery
@@ -440,6 +461,7 @@ mod tests {
 
         let actual: syn::ImplItemFn = parse_quote!(#codegen);
         let expected: syn::ImplItemFn = parse_quote! {
+            #[doc = " GET /search/{query}"]
             pub async fn search(
                 &self,
                 query_2: &str,
@@ -531,6 +553,7 @@ mod tests {
 
         let actual: syn::ImplItemFn = parse_quote!(#codegen);
         let expected: syn::ImplItemFn = parse_quote! {
+            #[doc = " PUT /items/{item_id}"]
             pub async fn update_item(
                 &self,
                 item_id: &str,
@@ -607,6 +630,7 @@ mod tests {
 
         let actual: syn::ImplItemFn = parse_quote!(#codegen);
         let expected: syn::ImplItemFn = parse_quote! {
+            #[doc = " GET /items/{item_id}"]
             pub async fn get_item(
                 &self,
                 item_id: &str
@@ -664,6 +688,7 @@ mod tests {
 
         let actual: syn::ImplItemFn = parse_quote!(#codegen);
         let expected: syn::ImplItemFn = parse_quote! {
+            #[doc = " GET /items/{item_id}"]
             pub async fn get_item(
                 &self,
                 item_id: &str
@@ -737,6 +762,7 @@ mod tests {
 
         let actual: syn::ImplItemFn = parse_quote!(#codegen);
         let expected: syn::ImplItemFn = parse_quote! {
+            #[doc = " POST /v1/messages?beta=true&expand="]
             pub async fn beta_create_message(
                 &self,
                 request: impl Into<crate::types::Message>
@@ -821,6 +847,7 @@ mod tests {
 
         let actual: syn::ImplItemFn = parse_quote!(#codegen);
         let expected: syn::ImplItemFn = parse_quote! {
+            #[doc = " POST /v1/messages?beta=true"]
             pub async fn beta_create_message(
                 &self,
                 query: &parameters::BetaCreateMessageQuery,
@@ -911,6 +938,7 @@ mod tests {
 
         let actual: syn::ImplItemFn = parse_quote!(#codegen);
         let expected: syn::ImplItemFn = parse_quote! {
+            #[doc = " GET /v1/models/{model_id}?beta=true"]
             pub async fn beta_get_model(
                 &self,
                 model_id: &str,
