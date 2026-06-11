@@ -17,7 +17,7 @@ pub enum ExtraDerive {
 
     /// Derive [`Default`].
     ///
-    /// Included if all fields are optional.
+    /// Excluded if the type is undefaultable.
     Default,
 }
 

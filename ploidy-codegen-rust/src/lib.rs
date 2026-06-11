@@ -84,7 +84,7 @@ pub fn doc_attrs(description: &str) -> TokenStream {
     let dedented = dedent(description);
     let lines = wrap(
         &dedented,
-        &Options::new(80)
+        Options::new(80)
             .initial_indent(" ")
             .subsequent_indent(" ")
             .break_words(false),

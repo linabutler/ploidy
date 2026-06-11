@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 
 #[derive(Debug, clap::Parser)]
-#[command(version, about, long_about = None)]
+#[command(version, about = "OpenAPI compiler", long_about = None)]
 pub enum RawMain {
     /// Generate code from an OpenAPI spec.
     #[command(subcommand)]
