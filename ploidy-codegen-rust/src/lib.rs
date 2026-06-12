@@ -4,7 +4,7 @@ use itertools::Itertools;
 use proc_macro2::TokenStream;
 use quote::quote;
 
-use ploidy_core::codegen::{IntoCode, write_to_disk};
+use ploidy_core::codegen::{IntoCode, WrittenFile, write_to_disk};
 
 mod cargo;
 mod cfg;
@@ -45,18 +45,26 @@ pub use schema::*;
 pub use statics::*;
 pub use types::*;
 
-pub fn write_types_to_disk(output: &Path, graph: &CodegenGraph<'_>) -> miette::Result<()> {
+pub fn write_types_to_disk(
+    output: &Path,
+    graph: &CodegenGraph<'_>,
+) -> miette::Result<Vec<WrittenFile>> {
+    let mut written = Vec::new();
+
     for schema in graph.schemas() {
         let code = CodegenSchemaType::new(graph, &schema).into_code();
-        write_to_disk(output, code)?;
+        written.push(write_to_disk(output, code)?);
     }
 
-    write_to_disk(output, CodegenTypesModule::new(graph))?;
+    written.push(write_to_disk(output, CodegenTypesModule::new(graph))?);
 
-    Ok(())
+    Ok(written)
 }
 
-pub fn write_client_to_disk(output: &Path, graph: &CodegenGraph<'_>) -> miette::Result<()> {
+pub fn write_client_to_disk(
+    output: &Path,
+    graph: &CodegenGraph<'_>,
+) -> miette::Result<Vec<WrittenFile>> {
     // Group operations by resource name.
     let ops_by_resource: BTreeMap<_, Vec<_>> =
         graph.operations().fold(BTreeMap::default(), |mut map, op| {
@@ -65,16 +73,24 @@ pub fn write_client_to_disk(output: &Path, graph: &CodegenGraph<'_>) -> miette::
             map
         });
 
+    let mut written = Vec::new();
+
     // Write a module per resource.
     for (ident, ops) in &ops_by_resource {
-        write_to_disk(output, CodegenResource::new(graph, *ident, ops))?;
+        written.push(write_to_disk(
+            output,
+            CodegenResource::new(graph, *ident, ops),
+        )?);
     }
 
     // Write the top-level client module.
     let idents = ops_by_resource.keys().copied().collect_vec();
-    write_to_disk(output, CodegenClientModule::new(graph, &idents))?;
+    written.push(write_to_disk(
+        output,
+        CodegenClientModule::new(graph, &idents),
+    )?);
 
-    Ok(())
+    Ok(written)
 }
 
 /// Generates one or more `#[doc]` attributes for a schema description,

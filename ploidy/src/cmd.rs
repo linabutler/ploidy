@@ -66,6 +66,7 @@ impl Generate {
                 Ok(Self::Rust(GenerateArgs {
                     input,
                     output,
+                    stats: args.stats,
                     language,
                 }))
             }
@@ -77,6 +78,7 @@ impl Generate {
 pub struct GenerateArgs<T> {
     pub input: PathBuf,
     pub output: PathBuf,
+    pub stats: bool,
     pub language: T,
 }
 
@@ -186,6 +188,7 @@ mod tests {
         let args = RawGenerate::Rust(RawGenerateArgs {
             input: PathBuf::from("specs/petstore.yaml"),
             output: None,
+            stats: false,
             language: RawGenerateRustArgs::default(),
         });
         let Generate::Rust(result) = Generate::try_new(args).unwrap();
@@ -197,6 +200,7 @@ mod tests {
         let args = RawGenerate::Rust(RawGenerateArgs {
             input: PathBuf::from("specs/petstore.yaml"),
             output: Some(PathBuf::from("my-output")),
+            stats: false,
             language: RawGenerateRustArgs::default(),
         });
         let Generate::Rust(result) = Generate::try_new(args).unwrap();
@@ -208,6 +212,7 @@ mod tests {
         let args = RawGenerate::Rust(RawGenerateArgs {
             input: PathBuf::from("/"),
             output: None,
+            stats: false,
             language: RawGenerateRustArgs::default(),
         });
         let err = Generate::try_new(args).unwrap_err();

@@ -24,6 +24,10 @@ pub struct RawGenerateArgs<T: clap::Args> {
     #[arg(short, long)]
     pub output: Option<PathBuf>,
 
+    /// Print statistics to standard output.
+    #[arg(long)]
+    pub stats: bool,
+
     #[command(flatten)]
     pub language: T,
 }

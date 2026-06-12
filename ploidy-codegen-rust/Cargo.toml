@@ -11,7 +11,7 @@ rust-version.workspace = true
 
 [dependencies]
 itertools = "0.14"
-serde = { version = "1", features = ["derive"] }
+serde = { workspace = true, features = ["derive"] }
 miette = "7"
 ploidy-core = { workspace = true, features = ["proc-macro2"] }
 prettyplease = "0.2"

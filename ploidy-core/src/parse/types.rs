@@ -4,7 +4,7 @@ use indexmap::IndexMap;
 use itertools::Itertools;
 use ploidy_pointer::{JsonPointee, JsonPointer, JsonPointerBuf, JsonPointerTarget};
 use serde::{
-    Deserialize, Deserializer,
+    Deserialize, Deserializer, Serialize,
     de::{DeserializeOwned, Error as DeserializeError},
 };
 use serde_json::Value as JsonValue;
@@ -61,7 +61,7 @@ impl Info {
 }
 
 /// The title and optional version from an [`Info`] section.
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, Serialize)]
 pub struct Label<'a> {
     pub title: &'a str,
     pub version: Option<&'a str>,

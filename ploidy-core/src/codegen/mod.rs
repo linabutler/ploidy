@@ -27,19 +27,33 @@ pub mod unique;
 
 pub use unique::{AsKebabCase, AsPascalCase, AsSnakeCase, NamePart, UniqueName, UniqueNames};
 
-pub fn write_to_disk(output: &Path, code: impl IntoCode) -> miette::Result<()> {
+/// A record of a file that [`write_to_disk`] wrote.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct WrittenFile {
+    /// The path to the file, relative to the output directory.
+    pub path: String,
+    /// The size of the written contents in bytes.
+    pub size: usize,
+}
+
+pub fn write_to_disk(output: &Path, code: impl IntoCode) -> miette::Result<WrittenFile> {
     let code = code.into_code();
-    let path = output.join(code.path());
+    let relative = code.path().to_owned();
+    let absolute = output.join(&relative);
     let string = code.into_string()?;
-    if let Some(parent) = path.parent() {
+    if let Some(parent) = absolute.parent() {
         std::fs::create_dir_all(parent)
             .into_diagnostic()
             .with_context(|| format!("Failed to create directory `{}`", parent.display()))?;
     }
-    std::fs::write(&path, string)
+    let size = string.len();
+    std::fs::write(&absolute, string)
         .into_diagnostic()
-        .with_context(|| format!("Failed to write `{}`", path.display()))?;
-    Ok(())
+        .with_context(|| format!("Failed to write `{}`", absolute.display()))?;
+    Ok(WrittenFile {
+        path: relative,
+        size,
+    })
 }
 
 pub trait Code {
