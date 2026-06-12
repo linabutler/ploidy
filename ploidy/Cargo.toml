@@ -17,6 +17,8 @@ mimalloc = { version = "0.1", optional = true }
 ploidy-codegen-rust = { workspace = true }
 ploidy-core = { workspace = true }
 semver = "1"
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
 
 [features]
 mimalloc = ["dep:mimalloc"]

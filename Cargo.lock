@@ -1128,6 +1128,8 @@ dependencies = [
  "ploidy-codegen-rust",
  "ploidy-core",
  "semver",
+ "serde",
+ "serde_json",
  "tempfile",
 ]
 

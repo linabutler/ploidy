@@ -13,9 +13,9 @@ repository.workspace = true
 indexmap = { version = "2", optional = true }
 ploidy-pointer-derive = { workspace = true, optional = true }
 ref-cast = { workspace = true }
-serde = { version = "1", optional = true }
+serde = { workspace = true, optional = true }
 serde_bytes = { version = "0.11", optional = true }
-serde_json = { version = "1", optional = true }
+serde_json = { workspace = true, optional = true }
 strsim = { version = "0.11", optional = true }
 thiserror = "2"
 
