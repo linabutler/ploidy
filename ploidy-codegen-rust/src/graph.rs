@@ -146,8 +146,10 @@ fn ident_map<'a>(cooked: &CookedGraph<'a>) -> IdentMap<'a> {
             .filter_map(|op| op.resource())
             .chain(cooked.schemas().filter_map(|ty| ty.resource()))
             .collect();
-        // Resources become feature names; `default` is a special feature name.
-        let mut scope = UniqueIdents::with_reserved(cooked.arena(), &["default"]);
+        // Resources become feature names; `default`, `tracing`, and
+        // `trace-context` are special feature names.
+        let mut scope =
+            UniqueIdents::with_reserved(cooked.arena(), &["default", "tracing", "trace-context"]);
         resources
             .into_iter()
             .map(move |name| (IdentMapKey::Resource(name), scope.claim(name)))

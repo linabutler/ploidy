@@ -20,6 +20,10 @@ rust-version = "1.89"
 [workspace.dependencies]
 either = "1"
 indoc = "2"
+opentelemetry = { version = "0.32", default-features = false, features = [
+    "trace",
+] }
+opentelemetry-http = { version = "0.32", default-features = false }
 ploidy-codegen-rust = { path = "ploidy-codegen-rust", version = "0.14.2" }
 ploidy-core = { path = "ploidy-core", version = "0.14.2" }
 ploidy-pointer = { path = "ploidy-pointer", version = "0.14.2" }
@@ -30,6 +34,8 @@ rustc-hash = "2"
 serde = "1"
 serde_json = "1"
 toml_edit = { version = "0.25", features = ["serde"] }
+tracing = "0.1"
+tracing-opentelemetry = { version = "0.33", default-features = false }
 
 [workspace.lints.rust]
 unsafe_code = "forbid"

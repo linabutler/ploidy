@@ -166,47 +166,67 @@ impl ToTokens for CodegenOperation<'_> {
             None => quote! { () },
         };
 
-        let build_url = self.url();
+        let url = self.url();
 
-        let build_query = self.query();
+        let query = self.query();
 
-        let http_method = CodegenMethod(self.op.method());
-
-        let build_request = match self.op.request() {
-            Some(RequestView::Json(_)) => quote! {
-                let response = self.client
-                    .#http_method(url)
-                    .headers(self.headers.clone())
-                    .json(&request.into())
-                    .send()
-                    .await?
-                    .error_for_status()?;
-            },
-            Some(RequestView::Multipart) => quote! {
-                let response = self.client
-                    .#http_method(url)
-                    .headers(self.headers.clone())
-                    .multipart(form)
-                    .send()
-                    .await?
-                    .error_for_status()?;
-            },
-            None => quote! {
-                let response = self.client
-                    .#http_method(url)
-                    .headers(self.headers.clone())
-                    .send()
-                    .await?
-                    .error_for_status()?;
-            },
+        let request = {
+            let method = CodegenMethod(self.op.method());
+            let builder = match self.op.request() {
+                Some(RequestView::Json(_)) => quote! {
+                    let request = self.client
+                        .#method(url)
+                        .headers(self.headers.clone())
+                        .json(&request.into());
+                },
+                Some(RequestView::Multipart) => quote! {
+                    let request = self.client
+                        .#method(url)
+                        .headers(self.headers.clone())
+                        .multipart(form);
+                },
+                None => quote! {
+                    let request = self.client
+                        .#method(url)
+                        .headers(self.headers.clone());
+                },
+            };
+            quote! {
+                #[cfg(feature = "tracing")]
+                {
+                    ::tracing::record_all!(::tracing::Span::current(),
+                        server.address = url.host_str(),
+                        server.port = url.port_or_known_default(),
+                        // We intentionally include the full URL,
+                        // without redaction.
+                        url.full = url.as_str(),
+                    );
+                }
+                let request = {
+                    #builder
+                    #[cfg(feature = "trace-context")]
+                    let request = ::ploidy_util::trace::propagate(
+                        ::tracing::Span::current(),
+                        request,
+                    );
+                    request
+                };
+                let response = request.send().await?;
+                #[cfg(feature = "tracing")]
+                {
+                    ::tracing::record_all!(::tracing::Span::current(),
+                        http.response.status_code = response.status().as_u16()
+                    );
+                }
+                let response = response.error_for_status()?;
+            }
         };
 
-        let parse_response = if self.op.response().is_some() {
+        let response = if self.op.response().is_some() {
             quote! {
                 let body = response.bytes().await?;
                 let deserializer = &mut ::ploidy_util::serde_json::Deserializer::from_slice(&body);
-                let result = ::ploidy_util::serde_path_to_error::deserialize(deserializer)
-                    .map_err(crate::error::JsonError::from)?;
+                let result = ::ploidy_util::serde_path_to_error::deserialize(deserializer)?;
                 Ok(result)
             }
         } else {
@@ -217,6 +237,32 @@ impl ToTokens for CodegenOperation<'_> {
         };
 
         let method_name = CodegenIdentUsage::Method(self.graph.ident(self.op.id()));
+
+        let instrument = {
+            let name = format!("{} {}", self.op.method().as_str(), self.op.path());
+            let template = self.op.path().to_string();
+            let method = self.op.method().as_str();
+            let mut fields = vec![
+                quote!(otel.name = #name),
+                quote!(otel.kind = "client"),
+                quote!(url.template = #template),
+                quote!(http.request.method = #method),
+                quote!(server.address, server.port, url.full, http.response.status_code, error.type),
+            ];
+            fields.extend(paths.iter().map(|param| {
+                let param = CodegenIdentUsage::Param(
+                    self.graph
+                        .ident(IdentMapping::Path(self.op.id(), param.name())),
+                );
+                quote!(#param = %#param)
+            }));
+            quote! {
+                #[cfg_attr(feature = "tracing", ::tracing::instrument(
+                    skip_all,
+                    fields(#(#fields),*)
+                ))]
+            }
+        };
 
         let doc = {
             let url = format!(" {} {}", self.op.method().as_str(), self.op.path());
@@ -237,14 +283,24 @@ impl ToTokens for CodegenOperation<'_> {
 
         tokens.append_all(quote! {
             #doc
+            #instrument
             pub async fn #method_name(
                 &self,
                 #(#params),*
             ) -> Result<#return_type, crate::error::Error> {
-                #build_url
-                #build_query
-                #build_request
-                #parse_response
+                let result: Result<_, crate::error::Error> = async move {
+                    #url
+                    #query
+                    #request
+                    #response
+                }.await;
+                #[cfg(feature = "tracing")]
+                if let Err(err) = &result {
+                    ::tracing::record_all!(::tracing::Span::current(),
+                        error.type = %err.category(),
+                    );
+                }
+                result
             }
         });
     }
@@ -321,38 +377,88 @@ mod tests {
             #[doc = " Gets an item."]
             #[doc = ""]
             #[doc = " GET /items/{item_id}"]
+            #[cfg_attr(
+                feature = "tracing",
+                ::tracing::instrument(
+                    skip_all,
+                    fields(
+                        otel.name = "GET /items/{item_id}",
+                        otel.kind = "client",
+                        url.template = "/items/{item_id}",
+                        http.request.method = "GET",
+                        server.address,
+                        server.port,
+                        url.full,
+                        http.response.status_code,
+                        error.type,
+                        item_id = %item_id
+                    )
+                )
+            )]
             pub async fn get_item(
                 &self,
                 item_id: &str,
                 query: &parameters::GetItemQuery
             ) -> Result<(), crate::error::Error> {
-                let url = {
-                    let mut url = self.base_url.clone();
-                    let _ = url
-                        .path_segments_mut()
-                        .map(|mut segments| {
-                            segments.pop_if_empty()
-                                .push("items")
-                                .push(item_id);
-                        });
-                    url
-                };
-                let url = ::ploidy_util::serde::Serialize::serialize(
-                    query,
-                    ::ploidy_util::QuerySerializer::new(
-                        url,
-                        parameters::GetItemQuery::STYLES,
-                    ),
-                )?;
-                let response = self
-                    .client
-                    .get(url)
-                    .headers(self.headers.clone())
-                    .send()
-                    .await?
-                    .error_for_status()?;
-                let _ = response;
-                Ok(())
+                let result: Result<_, crate::error::Error> = async move {
+                    let url = {
+                        let mut url = self.base_url.clone();
+                        let _ = url
+                            .path_segments_mut()
+                            .map(|mut segments| {
+                                segments.pop_if_empty()
+                                    .push("items")
+                                    .push(item_id);
+                            });
+                        url
+                    };
+                    let url = ::ploidy_util::serde::Serialize::serialize(
+                        query,
+                        ::ploidy_util::QuerySerializer::new(
+                            url,
+                            parameters::GetItemQuery::STYLES,
+                        ),
+                    )?;
+                    #[cfg(feature = "tracing")]
+                    {
+                        ::tracing::record_all!(::tracing::Span::current(),
+                            server.address = url.host_str(),
+                            server.port = url.port_or_known_default(),
+                            url.full = url.as_str(),
+                        );
+                    }
+                    let request = {
+                        let request = self
+                            .client
+                            .get(url)
+                            .headers(self.headers.clone());
+                        #[cfg(feature = "trace-context")]
+                        let request = ::ploidy_util::trace::propagate(
+                            ::tracing::Span::current(),
+                            request,
+                        );
+                        request
+                    };
+                    let response = request
+                        .send()
+                        .await?;
+                    #[cfg(feature = "tracing")]
+                    {
+                        ::tracing::record_all!(::tracing::Span::current(),
+                            http.response.status_code = response.status().as_u16()
+                        );
+                    }
+                    let response = response.error_for_status()?;
+                    let _ = response;
+                    Ok(())
+                }.await;
+                #[cfg(feature = "tracing")]
+                if let Err(err) = &result {
+                    ::tracing::record_all!(::tracing::Span::current(),
+                        error.type = %err.category(),
+                    );
+                }
+                result
             }
         };
         assert_eq!(actual, expected);
@@ -391,36 +497,85 @@ mod tests {
         let actual: syn::ImplItemFn = parse_quote!(#codegen);
         let expected: syn::ImplItemFn = parse_quote! {
             #[doc = " GET /items"]
+            #[cfg_attr(
+                feature = "tracing",
+                ::tracing::instrument(
+                    skip_all,
+                    fields(
+                        otel.name = "GET /items",
+                        otel.kind = "client",
+                        url.template = "/items",
+                        http.request.method = "GET",
+                        server.address,
+                        server.port,
+                        url.full,
+                        http.response.status_code,
+                        error.type
+                    )
+                )
+            )]
             pub async fn get_items(
                 &self,
                 query: &parameters::GetItemsQuery
             ) -> Result<(), crate::error::Error> {
-                let url = {
-                    let mut url = self.base_url.clone();
-                    let _ = url
-                        .path_segments_mut()
-                        .map(|mut segments| {
-                            segments.pop_if_empty()
-                                .push("items");
-                        });
-                    url
-                };
-                let url = ::ploidy_util::serde::Serialize::serialize(
-                    query,
-                    ::ploidy_util::QuerySerializer::new(
-                        url,
-                        parameters::GetItemsQuery::STYLES,
-                    ),
-                )?;
-                let response = self
-                    .client
-                    .get(url)
-                    .headers(self.headers.clone())
-                    .send()
-                    .await?
-                    .error_for_status()?;
-                let _ = response;
-                Ok(())
+                let result: Result<_, crate::error::Error> = async move {
+                    let url = {
+                        let mut url = self.base_url.clone();
+                        let _ = url
+                            .path_segments_mut()
+                            .map(|mut segments| {
+                                segments.pop_if_empty()
+                                    .push("items");
+                            });
+                        url
+                    };
+                    let url = ::ploidy_util::serde::Serialize::serialize(
+                        query,
+                        ::ploidy_util::QuerySerializer::new(
+                            url,
+                            parameters::GetItemsQuery::STYLES,
+                        ),
+                    )?;
+                    #[cfg(feature = "tracing")]
+                    {
+                        ::tracing::record_all!(::tracing::Span::current(),
+                            server.address = url.host_str(),
+                            server.port = url.port_or_known_default(),
+                            url.full = url.as_str(),
+                        );
+                    }
+                    let request = {
+                        let request = self
+                            .client
+                            .get(url)
+                            .headers(self.headers.clone());
+                        #[cfg(feature = "trace-context")]
+                        let request = ::ploidy_util::trace::propagate(
+                            ::tracing::Span::current(),
+                            request,
+                        );
+                        request
+                    };
+                    let response = request
+                        .send()
+                        .await?;
+                    #[cfg(feature = "tracing")]
+                    {
+                        ::tracing::record_all!(::tracing::Span::current(),
+                            http.response.status_code = response.status().as_u16()
+                        );
+                    }
+                    let response = response.error_for_status()?;
+                    let _ = response;
+                    Ok(())
+                }.await;
+                #[cfg(feature = "tracing")]
+                if let Err(err) = &result {
+                    ::tracing::record_all!(::tracing::Span::current(),
+                        error.type = %err.category(),
+                    );
+                }
+                result
             }
         };
         assert_eq!(actual, expected);
@@ -464,38 +619,88 @@ mod tests {
         let actual: syn::ImplItemFn = parse_quote!(#codegen);
         let expected: syn::ImplItemFn = parse_quote! {
             #[doc = " GET /search/{query}"]
+            #[cfg_attr(
+                feature = "tracing",
+                ::tracing::instrument(
+                    skip_all,
+                    fields(
+                        otel.name = "GET /search/{query}",
+                        otel.kind = "client",
+                        url.template = "/search/{query}",
+                        http.request.method = "GET",
+                        server.address,
+                        server.port,
+                        url.full,
+                        http.response.status_code,
+                        error.type,
+                        query_2 = %query_2
+                    )
+                )
+            )]
             pub async fn search(
                 &self,
                 query_2: &str,
                 query: &parameters::SearchQuery
             ) -> Result<(), crate::error::Error> {
-                let url = {
-                    let mut url = self.base_url.clone();
-                    let _ = url
-                        .path_segments_mut()
-                        .map(|mut segments| {
-                            segments.pop_if_empty()
-                                .push("search")
-                                .push(query_2);
-                        });
-                    url
-                };
-                let url = ::ploidy_util::serde::Serialize::serialize(
-                    query,
-                    ::ploidy_util::QuerySerializer::new(
-                        url,
-                        parameters::SearchQuery::STYLES,
-                    ),
-                )?;
-                let response = self
-                    .client
-                    .get(url)
-                    .headers(self.headers.clone())
-                    .send()
-                    .await?
-                    .error_for_status()?;
-                let _ = response;
-                Ok(())
+                let result: Result<_, crate::error::Error> = async move {
+                    let url = {
+                        let mut url = self.base_url.clone();
+                        let _ = url
+                            .path_segments_mut()
+                            .map(|mut segments| {
+                                segments.pop_if_empty()
+                                    .push("search")
+                                    .push(query_2);
+                            });
+                        url
+                    };
+                    let url = ::ploidy_util::serde::Serialize::serialize(
+                        query,
+                        ::ploidy_util::QuerySerializer::new(
+                            url,
+                            parameters::SearchQuery::STYLES,
+                        ),
+                    )?;
+                    #[cfg(feature = "tracing")]
+                    {
+                        ::tracing::record_all!(::tracing::Span::current(),
+                            server.address = url.host_str(),
+                            server.port = url.port_or_known_default(),
+                            url.full = url.as_str(),
+                        );
+                    }
+                    let request = {
+                        let request = self
+                            .client
+                            .get(url)
+                            .headers(self.headers.clone());
+                        #[cfg(feature = "trace-context")]
+                        let request = ::ploidy_util::trace::propagate(
+                            ::tracing::Span::current(),
+                            request,
+                        );
+                        request
+                    };
+                    let response = request
+                        .send()
+                        .await?;
+                    #[cfg(feature = "tracing")]
+                    {
+                        ::tracing::record_all!(::tracing::Span::current(),
+                            http.response.status_code = response.status().as_u16()
+                        );
+                    }
+                    let response = response.error_for_status()?;
+                    let _ = response;
+                    Ok(())
+                }.await;
+                #[cfg(feature = "tracing")]
+                if let Err(err) = &result {
+                    ::tracing::record_all!(::tracing::Span::current(),
+                        error.type = %err.category(),
+                    );
+                }
+                result
             }
         };
         assert_eq!(actual, expected);
@@ -556,43 +761,92 @@ mod tests {
         let actual: syn::ImplItemFn = parse_quote!(#codegen);
         let expected: syn::ImplItemFn = parse_quote! {
             #[doc = " PUT /items/{item_id}"]
+            #[cfg_attr(
+                feature = "tracing",
+                ::tracing::instrument(
+                    skip_all,
+                    fields(
+                        otel.name = "PUT /items/{item_id}",
+                        otel.kind = "client",
+                        url.template = "/items/{item_id}",
+                        http.request.method = "PUT",
+                        server.address,
+                        server.port,
+                        url.full,
+                        http.response.status_code,
+                        error.type,
+                        item_id = %item_id
+                    )
+                )
+            )]
             pub async fn update_item(
                 &self,
                 item_id: &str,
                 query: &parameters::UpdateItemQuery,
                 request: impl Into<crate::types::Item>
             ) -> Result<crate::types::Item, crate::error::Error> {
-                let url = {
-                    let mut url = self.base_url.clone();
-                    let _ = url
-                        .path_segments_mut()
-                        .map(|mut segments| {
-                            segments.pop_if_empty()
-                                .push("items")
-                                .push(item_id);
-                        });
-                    url
-                };
-                let url = ::ploidy_util::serde::Serialize::serialize(
-                    query,
-                    ::ploidy_util::QuerySerializer::new(
-                        url,
-                        parameters::UpdateItemQuery::STYLES,
-                    ),
-                )?;
-                let response = self
-                    .client
-                    .put(url)
-                    .headers(self.headers.clone())
-                    .json(&request.into())
-                    .send()
-                    .await?
-                    .error_for_status()?;
-                let body = response.bytes().await?;
-                let deserializer = &mut ::ploidy_util::serde_json::Deserializer::from_slice(&body);
-                let result = ::ploidy_util::serde_path_to_error::deserialize(deserializer)
-                    .map_err(crate::error::JsonError::from)?;
-                Ok(result)
+                let result: Result<_, crate::error::Error> = async move {
+                    let url = {
+                        let mut url = self.base_url.clone();
+                        let _ = url
+                            .path_segments_mut()
+                            .map(|mut segments| {
+                                segments.pop_if_empty()
+                                    .push("items")
+                                    .push(item_id);
+                            });
+                        url
+                    };
+                    let url = ::ploidy_util::serde::Serialize::serialize(
+                        query,
+                        ::ploidy_util::QuerySerializer::new(
+                            url,
+                            parameters::UpdateItemQuery::STYLES,
+                        ),
+                    )?;
+                    #[cfg(feature = "tracing")]
+                    {
+                        ::tracing::record_all!(::tracing::Span::current(),
+                            server.address = url.host_str(),
+                            server.port = url.port_or_known_default(),
+                            url.full = url.as_str(),
+                        );
+                    }
+                    let request = {
+                        let request = self
+                            .client
+                            .put(url)
+                            .headers(self.headers.clone())
+                            .json(&request.into());
+                        #[cfg(feature = "trace-context")]
+                        let request = ::ploidy_util::trace::propagate(
+                            ::tracing::Span::current(),
+                            request,
+                        );
+                        request
+                    };
+                    let response = request
+                        .send()
+                        .await?;
+                    #[cfg(feature = "tracing")]
+                    {
+                        ::tracing::record_all!(::tracing::Span::current(),
+                            http.response.status_code = response.status().as_u16()
+                        );
+                    }
+                    let response = response.error_for_status()?;
+                    let body = response.bytes().await?;
+                    let deserializer = &mut ::ploidy_util::serde_json::Deserializer::from_slice(&body);
+                    let result = ::ploidy_util::serde_path_to_error::deserialize(deserializer)?;
+                    Ok(result)
+                }.await;
+                #[cfg(feature = "tracing")]
+                if let Err(err) = &result {
+                    ::tracing::record_all!(::tracing::Span::current(),
+                        error.type = %err.category(),
+                    );
+                }
+                result
             }
         };
         assert_eq!(actual, expected);
@@ -633,30 +887,80 @@ mod tests {
         let actual: syn::ImplItemFn = parse_quote!(#codegen);
         let expected: syn::ImplItemFn = parse_quote! {
             #[doc = " GET /items/{item_id}"]
+            #[cfg_attr(
+                feature = "tracing",
+                ::tracing::instrument(
+                    skip_all,
+                    fields(
+                        otel.name = "GET /items/{item_id}",
+                        otel.kind = "client",
+                        url.template = "/items/{item_id}",
+                        http.request.method = "GET",
+                        server.address,
+                        server.port,
+                        url.full,
+                        http.response.status_code,
+                        error.type,
+                        item_id = %item_id
+                    )
+                )
+            )]
             pub async fn get_item(
                 &self,
                 item_id: &str
             ) -> Result<(), crate::error::Error> {
-                let url = {
-                    let mut url = self.base_url.clone();
-                    let _ = url
-                        .path_segments_mut()
-                        .map(|mut segments| {
-                            segments.pop_if_empty()
-                                .push("items")
-                                .push(item_id);
-                        });
-                    url
-                };
-                let response = self
-                    .client
-                    .get(url)
-                    .headers(self.headers.clone())
-                    .send()
-                    .await?
-                    .error_for_status()?;
-                let _ = response;
-                Ok(())
+                let result: Result<_, crate::error::Error> = async move {
+                    let url = {
+                        let mut url = self.base_url.clone();
+                        let _ = url
+                            .path_segments_mut()
+                            .map(|mut segments| {
+                                segments.pop_if_empty()
+                                    .push("items")
+                                    .push(item_id);
+                            });
+                        url
+                    };
+                    #[cfg(feature = "tracing")]
+                    {
+                        ::tracing::record_all!(::tracing::Span::current(),
+                            server.address = url.host_str(),
+                            server.port = url.port_or_known_default(),
+                            url.full = url.as_str(),
+                        );
+                    }
+                    let request = {
+                        let request = self
+                            .client
+                            .get(url)
+                            .headers(self.headers.clone());
+                        #[cfg(feature = "trace-context")]
+                        let request = ::ploidy_util::trace::propagate(
+                            ::tracing::Span::current(),
+                            request,
+                        );
+                        request
+                    };
+                    let response = request
+                        .send()
+                        .await?;
+                    #[cfg(feature = "tracing")]
+                    {
+                        ::tracing::record_all!(::tracing::Span::current(),
+                            http.response.status_code = response.status().as_u16()
+                        );
+                    }
+                    let response = response.error_for_status()?;
+                    let _ = response;
+                    Ok(())
+                }.await;
+                #[cfg(feature = "tracing")]
+                if let Err(err) = &result {
+                    ::tracing::record_all!(::tracing::Span::current(),
+                        error.type = %err.category(),
+                    );
+                }
+                result
             }
         };
         assert_eq!(actual, expected);
@@ -691,30 +995,80 @@ mod tests {
         let actual: syn::ImplItemFn = parse_quote!(#codegen);
         let expected: syn::ImplItemFn = parse_quote! {
             #[doc = " GET /items/{item_id}"]
+            #[cfg_attr(
+                feature = "tracing",
+                ::tracing::instrument(
+                    skip_all,
+                    fields(
+                        otel.name = "GET /items/{item_id}",
+                        otel.kind = "client",
+                        url.template = "/items/{item_id}",
+                        http.request.method = "GET",
+                        server.address,
+                        server.port,
+                        url.full,
+                        http.response.status_code,
+                        error.type,
+                        item_id = %item_id
+                    )
+                )
+            )]
             pub async fn get_item(
                 &self,
                 item_id: &str
             ) -> Result<(), crate::error::Error> {
-                let url = {
-                    let mut url = self.base_url.clone();
-                    let _ = url
-                        .path_segments_mut()
-                        .map(|mut segments| {
-                            segments.pop_if_empty()
-                                .push("items")
-                                .push(item_id);
-                        });
-                    url
-                };
-                let response = self
-                    .client
-                    .get(url)
-                    .headers(self.headers.clone())
-                    .send()
-                    .await?
-                    .error_for_status()?;
-                let _ = response;
-                Ok(())
+                let result: Result<_, crate::error::Error> = async move {
+                    let url = {
+                        let mut url = self.base_url.clone();
+                        let _ = url
+                            .path_segments_mut()
+                            .map(|mut segments| {
+                                segments.pop_if_empty()
+                                    .push("items")
+                                    .push(item_id);
+                            });
+                        url
+                    };
+                    #[cfg(feature = "tracing")]
+                    {
+                        ::tracing::record_all!(::tracing::Span::current(),
+                            server.address = url.host_str(),
+                            server.port = url.port_or_known_default(),
+                            url.full = url.as_str(),
+                        );
+                    }
+                    let request = {
+                        let request = self
+                            .client
+                            .get(url)
+                            .headers(self.headers.clone());
+                        #[cfg(feature = "trace-context")]
+                        let request = ::ploidy_util::trace::propagate(
+                            ::tracing::Span::current(),
+                            request,
+                        );
+                        request
+                    };
+                    let response = request
+                        .send()
+                        .await?;
+                    #[cfg(feature = "tracing")]
+                    {
+                        ::tracing::record_all!(::tracing::Span::current(),
+                            http.response.status_code = response.status().as_u16()
+                        );
+                    }
+                    let response = response.error_for_status()?;
+                    let _ = response;
+                    Ok(())
+                }.await;
+                #[cfg(feature = "tracing")]
+                if let Err(err) = &result {
+                    ::tracing::record_all!(::tracing::Span::current(),
+                        error.type = %err.category(),
+                    );
+                }
+                result
             }
         };
         assert_eq!(actual, expected);
@@ -765,36 +1119,84 @@ mod tests {
         let actual: syn::ImplItemFn = parse_quote!(#codegen);
         let expected: syn::ImplItemFn = parse_quote! {
             #[doc = " POST /v1/messages?beta=true&expand="]
+            #[cfg_attr(
+                feature = "tracing",
+                ::tracing::instrument(
+                    skip_all,
+                    fields(
+                        otel.name = "POST /v1/messages?beta=true&expand=",
+                        otel.kind = "client",
+                        url.template = "/v1/messages?beta=true&expand=",
+                        http.request.method = "POST",
+                        server.address,
+                        server.port,
+                        url.full,
+                        http.response.status_code,
+                        error.type
+                    )
+                )
+            )]
             pub async fn beta_create_message(
                 &self,
                 request: impl Into<crate::types::Message>
             ) -> Result<crate::types::Message, crate::error::Error> {
-                let url = {
-                    let mut url = self.base_url.clone();
-                    let _ = url
-                        .path_segments_mut()
-                        .map(|mut segments| {
-                            segments.pop_if_empty()
-                                .extend(&["v1", "messages"]);
-                        });
-                    url.query_pairs_mut()
-                        .append_pair("beta", "true")
-                        .append_pair("expand", "");
-                    url
-                };
-                let response = self
-                    .client
-                    .post(url)
-                    .headers(self.headers.clone())
-                    .json(&request.into())
-                    .send()
-                    .await?
-                    .error_for_status()?;
-                let body = response.bytes().await?;
-                let deserializer = &mut ::ploidy_util::serde_json::Deserializer::from_slice(&body);
-                let result = ::ploidy_util::serde_path_to_error::deserialize(deserializer)
-                    .map_err(crate::error::JsonError::from)?;
-                Ok(result)
+                let result: Result<_, crate::error::Error> = async move {
+                    let url = {
+                        let mut url = self.base_url.clone();
+                        let _ = url
+                            .path_segments_mut()
+                            .map(|mut segments| {
+                                segments.pop_if_empty()
+                                    .extend(&["v1", "messages"]);
+                            });
+                        url.query_pairs_mut()
+                            .append_pair("beta", "true")
+                            .append_pair("expand", "");
+                        url
+                    };
+                    #[cfg(feature = "tracing")]
+                    {
+                        ::tracing::record_all!(::tracing::Span::current(),
+                            server.address = url.host_str(),
+                            server.port = url.port_or_known_default(),
+                            url.full = url.as_str(),
+                        );
+                    }
+                    let request = {
+                        let request = self
+                            .client
+                            .post(url)
+                            .headers(self.headers.clone())
+                            .json(&request.into());
+                        #[cfg(feature = "trace-context")]
+                        let request = ::ploidy_util::trace::propagate(
+                            ::tracing::Span::current(),
+                            request,
+                        );
+                        request
+                    };
+                    let response = request
+                        .send()
+                        .await?;
+                    #[cfg(feature = "tracing")]
+                    {
+                        ::tracing::record_all!(::tracing::Span::current(),
+                            http.response.status_code = response.status().as_u16()
+                        );
+                    }
+                    let response = response.error_for_status()?;
+                    let body = response.bytes().await?;
+                    let deserializer = &mut ::ploidy_util::serde_json::Deserializer::from_slice(&body);
+                    let result = ::ploidy_util::serde_path_to_error::deserialize(deserializer)?;
+                    Ok(result)
+                }.await;
+                #[cfg(feature = "tracing")]
+                if let Err(err) = &result {
+                    ::tracing::record_all!(::tracing::Span::current(),
+                        error.type = %err.category(),
+                    );
+                }
+                result
             }
         };
         assert_eq!(actual, expected);
@@ -849,43 +1251,91 @@ mod tests {
         let actual: syn::ImplItemFn = parse_quote!(#codegen);
         let expected: syn::ImplItemFn = parse_quote! {
             #[doc = " POST /v1/messages?beta=true"]
+            #[cfg_attr(
+                feature = "tracing",
+                ::tracing::instrument(
+                    skip_all,
+                    fields(
+                        otel.name = "POST /v1/messages?beta=true",
+                        otel.kind = "client",
+                        url.template = "/v1/messages?beta=true",
+                        http.request.method = "POST",
+                        server.address,
+                        server.port,
+                        url.full,
+                        http.response.status_code,
+                        error.type
+                    )
+                )
+            )]
             pub async fn beta_create_message(
                 &self,
                 query: &parameters::BetaCreateMessageQuery,
                 request: impl Into<crate::types::Message>
             ) -> Result<crate::types::Message, crate::error::Error> {
-                let url = {
-                    let mut url = self.base_url.clone();
-                    let _ = url
-                        .path_segments_mut()
-                        .map(|mut segments| {
-                            segments.pop_if_empty()
-                                .extend(&["v1", "messages"]);
-                        });
-                    url.query_pairs_mut()
-                        .append_pair("beta", "true");
-                    url
-                };
-                let url = ::ploidy_util::serde::Serialize::serialize(
-                    query,
-                    ::ploidy_util::QuerySerializer::new(
-                        url,
-                        parameters::BetaCreateMessageQuery::STYLES,
-                    ),
-                )?;
-                let response = self
-                    .client
-                    .post(url)
-                    .headers(self.headers.clone())
-                    .json(&request.into())
-                    .send()
-                    .await?
-                    .error_for_status()?;
-                let body = response.bytes().await?;
-                let deserializer = &mut ::ploidy_util::serde_json::Deserializer::from_slice(&body);
-                let result = ::ploidy_util::serde_path_to_error::deserialize(deserializer)
-                    .map_err(crate::error::JsonError::from)?;
-                Ok(result)
+                let result: Result<_, crate::error::Error> = async move {
+                    let url = {
+                        let mut url = self.base_url.clone();
+                        let _ = url
+                            .path_segments_mut()
+                            .map(|mut segments| {
+                                segments.pop_if_empty()
+                                    .extend(&["v1", "messages"]);
+                            });
+                        url.query_pairs_mut()
+                            .append_pair("beta", "true");
+                        url
+                    };
+                    let url = ::ploidy_util::serde::Serialize::serialize(
+                        query,
+                        ::ploidy_util::QuerySerializer::new(
+                            url,
+                            parameters::BetaCreateMessageQuery::STYLES,
+                        ),
+                    )?;
+                    #[cfg(feature = "tracing")]
+                    {
+                        ::tracing::record_all!(::tracing::Span::current(),
+                            server.address = url.host_str(),
+                            server.port = url.port_or_known_default(),
+                            url.full = url.as_str(),
+                        );
+                    }
+                    let request = {
+                        let request = self
+                            .client
+                            .post(url)
+                            .headers(self.headers.clone())
+                            .json(&request.into());
+                        #[cfg(feature = "trace-context")]
+                        let request = ::ploidy_util::trace::propagate(
+                            ::tracing::Span::current(),
+                            request,
+                        );
+                        request
+                    };
+                    let response = request
+                        .send()
+                        .await?;
+                    #[cfg(feature = "tracing")]
+                    {
+                        ::tracing::record_all!(::tracing::Span::current(),
+                            http.response.status_code = response.status().as_u16()
+                        );
+                    }
+                    let response = response.error_for_status()?;
+                    let body = response.bytes().await?;
+                    let deserializer = &mut ::ploidy_util::serde_json::Deserializer::from_slice(&body);
+                    let result = ::ploidy_util::serde_path_to_error::deserialize(deserializer)?;
+                    Ok(result)
+                }.await;
+                #[cfg(feature = "tracing")]
+                if let Err(err) = &result {
+                    ::tracing::record_all!(::tracing::Span::current(),
+                        error.type = %err.category(),
+                    );
+                }
+                result
             }
         };
         assert_eq!(actual, expected);
@@ -939,43 +1389,92 @@ mod tests {
         let actual: syn::ImplItemFn = parse_quote!(#codegen);
         let expected: syn::ImplItemFn = parse_quote! {
             #[doc = " GET /v1/models/{model_id}?beta=true"]
+            #[cfg_attr(
+                feature = "tracing",
+                ::tracing::instrument(
+                    skip_all,
+                    fields(
+                        otel.name = "GET /v1/models/{model_id}?beta=true",
+                        otel.kind = "client",
+                        url.template = "/v1/models/{model_id}?beta=true",
+                        http.request.method = "GET",
+                        server.address,
+                        server.port,
+                        url.full,
+                        http.response.status_code,
+                        error.type,
+                        model_id = %model_id
+                    )
+                )
+            )]
             pub async fn beta_get_model(
                 &self,
                 model_id: &str,
                 query: &parameters::BetaGetModelQuery
             ) -> Result<crate::types::Model, crate::error::Error> {
-                let url = {
-                    let mut url = self.base_url.clone();
-                    let _ = url
-                        .path_segments_mut()
-                        .map(|mut segments| {
-                            segments.pop_if_empty()
-                                .extend(&["v1", "models"])
-                                .push(model_id);
-                        });
-                    url.query_pairs_mut()
-                        .append_pair("beta", "true");
-                    url
-                };
-                let url = ::ploidy_util::serde::Serialize::serialize(
-                    query,
-                    ::ploidy_util::QuerySerializer::new(
-                        url,
-                        parameters::BetaGetModelQuery::STYLES,
-                    ),
-                )?;
-                let response = self
-                    .client
-                    .get(url)
-                    .headers(self.headers.clone())
-                    .send()
-                    .await?
-                    .error_for_status()?;
-                let body = response.bytes().await?;
-                let deserializer = &mut ::ploidy_util::serde_json::Deserializer::from_slice(&body);
-                let result = ::ploidy_util::serde_path_to_error::deserialize(deserializer)
-                    .map_err(crate::error::JsonError::from)?;
-                Ok(result)
+                let result: Result<_, crate::error::Error> = async move {
+                    let url = {
+                        let mut url = self.base_url.clone();
+                        let _ = url
+                            .path_segments_mut()
+                            .map(|mut segments| {
+                                segments.pop_if_empty()
+                                    .extend(&["v1", "models"])
+                                    .push(model_id);
+                            });
+                        url.query_pairs_mut()
+                            .append_pair("beta", "true");
+                        url
+                    };
+                    let url = ::ploidy_util::serde::Serialize::serialize(
+                        query,
+                        ::ploidy_util::QuerySerializer::new(
+                            url,
+                            parameters::BetaGetModelQuery::STYLES,
+                        ),
+                    )?;
+                    #[cfg(feature = "tracing")]
+                    {
+                        ::tracing::record_all!(::tracing::Span::current(),
+                            server.address = url.host_str(),
+                            server.port = url.port_or_known_default(),
+                            url.full = url.as_str(),
+                        );
+                    }
+                    let request = {
+                        let request = self
+                            .client
+                            .get(url)
+                            .headers(self.headers.clone());
+                        #[cfg(feature = "trace-context")]
+                        let request = ::ploidy_util::trace::propagate(
+                            ::tracing::Span::current(),
+                            request,
+                        );
+                        request
+                    };
+                    let response = request
+                        .send()
+                        .await?;
+                    #[cfg(feature = "tracing")]
+                    {
+                        ::tracing::record_all!(::tracing::Span::current(),
+                            http.response.status_code = response.status().as_u16()
+                        );
+                    }
+                    let response = response.error_for_status()?;
+                    let body = response.bytes().await?;
+                    let deserializer = &mut ::ploidy_util::serde_json::Deserializer::from_slice(&body);
+                    let result = ::ploidy_util::serde_path_to_error::deserialize(deserializer)?;
+                    Ok(result)
+                }.await;
+                #[cfg(feature = "tracing")]
+                if let Err(err) = &result {
+                    ::tracing::record_all!(::tracing::Span::current(),
+                        error.type = %err.category(),
+                    );
+                }
+                result
             }
         };
         assert_eq!(actual, expected);

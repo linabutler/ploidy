@@ -354,7 +354,7 @@ Given a spec with an operation like:
               $ref: "#/components/schemas/User"
 ```
 
-...you can use the generated client to call that operation like:
+...you can use the client to call that operation like:
 
 ```rust
 use my_api_client::{Client, Error};
@@ -373,12 +373,16 @@ async fn main() -> Result<(), Error> {
 }
 ```
 
-> [!NOTE]
-> `with_user_agent`, `with_header`, and `with_sensitive_header` all set default headers for each request. Sensitive headers are excluded from debug output.
+The client uses [Reqwest](https://docs.rs/reqwest) under the hood, and has several convenience methods:
 
-The generated client uses [Reqwest](https://docs.rs/reqwest) under the hood. If you need to configure connection options, like proxies, timeouts, or TLS, build your own `reqwest::Client` and pass it to `Client::with_reqwest_client`.
+* `with_user_agent()`, `with_header()`, and `with_sensitive_header()` set default headers for all requests. Sensitive headers are excluded from debug output.
+* `request()` returns a raw [`RequestBuilder`](https://docs.rs/reqwest/latest/reqwest/struct.RequestBuilder.html) with the client's base URL and default headers already applied. Use this for requests that the operation methods don't cover.
+* `Client::with_reqwest_client()` creates a client with a custom `reqwest::Client`. Use this to configure connection options like proxies, timeouts, and TLS.
 
-For requests that the typed methods don't cover, `Client::request` returns a raw `RequestBuilder` with the client's base URL and default headers already applied.
+Generated clients also have two opt-in observability features:
+
+* `tracing` instruments each operation method with a [`tracing` span](https://docs.rs/tracing/latest/tracing/span/index.html).
+* `trace-context` enables `tracing` and propagates trace context using your application's [OpenTelemetry propagator](https://docs.rs/opentelemetry/latest/opentelemetry/global/fn.get_text_map_propagator.html).
 
 ### Smart boxing
 
@@ -493,12 +497,14 @@ pub struct Customer {
 }
 ```
 
-All features are enabled by default, so the generated crate works out of the box. To enable just a subset of the generated features:
+All resource features are enabled by default, so the generated crate works out of the box. To enable just a subset of the generated resources:
 
 ```toml
 [dependencies]
 my-api-client = { version = "1", default-features = false, features = ["orders"] }
 ```
+
+The observability features are not enabled by default.
 
 ### Choosing the right tool
 
@@ -540,7 +546,7 @@ Ploidy is opinionated by design. We'd rather get the defaults right than expose 
 | Query parameters | Supported | `{OperationId}Query` struct argument |
 | Query `style` | Supported | `form`, `spaceDelimited`, `pipeDelimited`, `deepObject` |
 | Header and cookie parameters | Unsupported | - |
-| Request bodies | Partial | `application/json` and `*/*` schemas become typed arguments; `multipart/form-data` becomes `reqwest::multipart::Form` |
+| Request bodies | Partial | `application/json` and `*/*` schemas become typed model arguments; `multipart/form-data` becomes `reqwest::multipart::Form` |
 | Responses | Partial | The first `application/json` or `*/*` schema from either the lowest 2xx response or `default` becomes the return value; other response schemas are ignored |
 
 ## Contributing

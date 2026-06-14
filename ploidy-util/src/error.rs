@@ -1,41 +1,143 @@
-/// Transport-level error types.
+use std::fmt::{Display, Formatter, Result as FmtResult};
+
+use http::{HeaderName, StatusCode, uri::InvalidUri};
+use url::ParseError as UrlParseError;
+
+use crate::query::QueryParamError;
+
+/// A client error.
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
-    /// Network or connection error.
-    #[error("Network error")]
-    Network(#[from] reqwest::Error),
+    #[error("error building request")]
+    Build(#[from] BuildError),
 
-    /// Invalid JSON in request or response.
-    #[error("Malformed JSON")]
-    Json(#[from] JsonError),
+    #[error("HTTP transport error")]
+    Transport(#[source] reqwest::Error),
 
-    /// Invalid URL.
-    #[error("Malformed URL")]
-    Url(#[from] url::ParseError),
+    #[error("HTTP status error ({0})")]
+    Status(StatusCode),
 
-    /// Invalid query parameter.
-    #[error("Invalid query parameter")]
-    QueryParam(#[from] crate::QueryParamError),
-
-    /// Invalid request path.
-    #[error("Invalid request path")]
-    InvalidPath(#[from] crate::http::uri::InvalidUri),
-
-    /// Invalid HTTP header name.
-    #[error("Invalid header name")]
-    BadHeaderName(#[source] http::Error),
-
-    /// Invalid HTTP header value.
-    #[error("Invalid value for header `{0}`")]
-    BadHeaderValue(http::HeaderName, #[source] http::Error),
+    #[error("invalid or unexpected response body")]
+    Body(#[from] BodyError),
 }
 
-/// Invalid or unexpected JSON, with or without a path
+impl Error {
+    /// Creates an error for an invalid HTTP header name.
+    #[cold]
+    pub fn bad_header_name(err: impl Into<http::Error>) -> Self {
+        Self::Build(BuildError::HeaderName(err.into()))
+    }
+
+    /// Creates an error for an invalid HTTP header value.
+    #[cold]
+    pub fn bad_header_value(name: HeaderName, err: impl Into<http::Error>) -> Self {
+        Self::Build(BuildError::HeaderValue(name, err.into()))
+    }
+
+    /// Returns the telemetry category for this error.
+    pub fn category(&self) -> ErrorCategory {
+        match self {
+            Self::Build(_) => ErrorCategory::Build,
+            Self::Transport(err) if err.is_timeout() => ErrorCategory::Timeout,
+            Self::Transport(err) if err.is_connect() => ErrorCategory::Connect,
+            Self::Transport(_) => ErrorCategory::Transport,
+            &Self::Status(status) => ErrorCategory::Status(status),
+            Self::Body(_) => ErrorCategory::Body,
+        }
+    }
+}
+
+impl From<InvalidUri> for Error {
+    fn from(err: InvalidUri) -> Self {
+        Self::Build(BuildError::Path(err))
+    }
+}
+
+impl From<QueryParamError> for Error {
+    fn from(err: QueryParamError) -> Self {
+        Self::Build(BuildError::QueryParam(err))
+    }
+}
+
+impl From<UrlParseError> for Error {
+    fn from(err: UrlParseError) -> Self {
+        Self::Build(BuildError::Url(err))
+    }
+}
+
+impl From<reqwest::Error> for Error {
+    #[cold]
+    fn from(err: reqwest::Error) -> Self {
+        if err.is_builder() {
+            Self::Build(BuildError::Request(err))
+        } else if let Some(status) = err.status() {
+            Self::Status(status)
+        } else {
+            Self::Transport(err)
+        }
+    }
+}
+
+impl From<serde_json::Error> for Error {
+    #[cold]
+    fn from(err: serde_json::Error) -> Self {
+        Self::Body(BodyError::Json(err))
+    }
+}
+
+impl From<serde_path_to_error::Error<serde_json::Error>> for Error {
+    #[cold]
+    fn from(err: serde_path_to_error::Error<serde_json::Error>) -> Self {
+        Self::Body(BodyError::JsonWithPath(err))
+    }
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum BuildError {
+    #[error("invalid URL")]
+    Url(#[source] UrlParseError),
+    #[error("invalid query parameter")]
+    QueryParam(#[source] QueryParamError),
+    #[error("invalid request path")]
+    Path(#[source] InvalidUri),
+    #[error("invalid header name")]
+    HeaderName(#[source] http::Error),
+    #[error("invalid value for header `{0}`")]
+    HeaderValue(HeaderName, #[source] http::Error),
+    #[error(transparent)]
+    Request(reqwest::Error),
+}
+
+/// Invalid or unexpected response body, with or without a path
 /// to the unexpected section.
 #[derive(Debug, thiserror::Error)]
-pub enum JsonError {
+pub enum BodyError {
     #[error(transparent)]
-    Json(#[from] serde_json::Error),
+    Json(serde_json::Error),
     #[error(transparent)]
-    JsonWithPath(#[from] serde_path_to_error::Error<serde_json::Error>),
+    JsonWithPath(serde_path_to_error::Error<serde_json::Error>),
+}
+
+/// The telemetry category for an [`Error`].
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ErrorCategory {
+    Build,
+    Connect,
+    Timeout,
+    Transport,
+    Status(StatusCode),
+    Body,
+}
+
+impl Display for ErrorCategory {
+    fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
+        f.write_str(match self {
+            Self::Build => "build",
+            Self::Connect => "connect",
+            Self::Timeout => "timeout",
+            Self::Transport => "transport",
+            Self::Status(status) => status.as_str(),
+            Self::Body => "body",
+        })
+    }
 }

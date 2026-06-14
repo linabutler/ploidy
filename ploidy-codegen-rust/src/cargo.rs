@@ -69,9 +69,9 @@ impl<'a> CodegenCargoManifest<'a> {
             }
 
             // Build the `features` section of the manifest.
-            let mut features: BTreeMap<_, _> = deps_by_resource
-                .iter()
-                .map(|(resource, deps)| {
+            let mut features = BTreeMap::new();
+            if !deps_by_resource.is_empty() {
+                features.extend(deps_by_resource.iter().map(|(resource, deps)| {
                     (
                         AsFeatureName(*resource).to_string(),
                         FeatureDependencies(
@@ -80,12 +80,8 @@ impl<'a> CodegenCargoManifest<'a> {
                                 .collect_vec(),
                         ),
                     )
-                })
-                .collect();
-            if features.is_empty() {
-                BTreeMap::new()
-            } else {
-                // `default` enables all other features.
+                }));
+                // `default` enables all resource features.
                 features.insert(
                     "default".to_owned(),
                     FeatureDependencies(
@@ -95,8 +91,21 @@ impl<'a> CodegenCargoManifest<'a> {
                             .collect_vec(),
                     ),
                 );
-                features
             }
+            // `tracing` enables per-method spans; `trace-context` adds
+            // trace context propagation. Both are opt-in.
+            features.insert(
+                "tracing".to_owned(),
+                FeatureDependencies(vec!["ploidy-util/tracing".to_owned()]),
+            );
+            features.insert(
+                "trace-context".to_owned(),
+                FeatureDependencies(vec![
+                    "tracing".to_owned(),
+                    "ploidy-util/trace-context".to_owned(),
+                ]),
+            );
+            features
         };
 
         self.manifest.clone().apply(CargoManifestDiff {
@@ -611,6 +620,10 @@ mod tests {
                 [dependencies]
                 serde = "1.0.0"
                 ploidy-util = "{PLOIDY_VERSION}"
+
+                [features]
+                trace-context = ["tracing", "ploidy-util/trace-context"]
+                tracing = ["ploidy-util/tracing"]
             "#},
         );
     }
@@ -713,7 +726,7 @@ mod tests {
 
         let features = manifest.features();
         let keys = features.keys().copied().collect_vec();
-        assert_matches!(&*keys, ["customer", "default"]);
+        assert_matches!(&*keys, ["customer", "default", "trace-context", "tracing"]);
     }
 
     #[test]
@@ -741,7 +754,7 @@ mod tests {
 
         let features = manifest.features();
         let keys = features.keys().copied().collect_vec();
-        assert_matches!(&*keys, ["default", "pets"]);
+        assert_matches!(&*keys, ["default", "pets", "trace-context", "tracing"]);
     }
 
     #[test]
@@ -777,12 +790,53 @@ mod tests {
 
         let features = manifest.features();
         let keys = features.keys().copied().collect_vec();
-        assert_matches!(&*keys, ["default", "oauth-2-token-2", "oauth2-token"]);
+        assert_matches!(
+            &*keys,
+            [
+                "default",
+                "oauth-2-token-2",
+                "oauth2-token",
+                "trace-context",
+                "tracing"
+            ]
+        );
         assert_eq!(features["default"], ["oauth-2-token-2", "oauth2-token"]);
     }
 
     #[test]
-    fn test_unnamed_schema_creates_no_features() {
+    fn test_resource_named_tracing_does_not_collide_with_tracing_feature() {
+        let doc = Document::from_yaml(indoc::indoc! {"
+            openapi: 3.0.0
+            info:
+              title: Test
+              version: 1.0.0
+            components:
+              schemas:
+                Trace:
+                  type: object
+                  x-resourceId: tracing
+                  properties:
+                    id:
+                      type: string
+        "})
+        .unwrap();
+
+        let arena = Arena::new();
+        let spec = Spec::from_doc(&arena, &doc).unwrap();
+        let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
+        let manifest = CodegenCargoManifest::new(&graph, &default_manifest()).to_manifest();
+
+        // `tracing` is reserved for the tracing feature, so the
+        // resource's feature is uniquified to `tracing-2`.
+        let features = manifest.features();
+        let keys = features.keys().copied().collect_vec();
+        assert_matches!(&*keys, ["default", "trace-context", "tracing", "tracing-2"]);
+        assert_eq!(features["default"], ["tracing-2"]);
+        assert_eq!(features["tracing"], ["ploidy-util/tracing"]);
+    }
+
+    #[test]
+    fn test_unnamed_schema_creates_no_resource_features() {
         let doc = Document::from_yaml(indoc::indoc! {"
             openapi: 3.0.0
             info:
@@ -805,7 +859,7 @@ mod tests {
 
         let features = manifest.features();
         let keys = features.keys().copied().collect_vec();
-        assert_matches!(&*keys, []);
+        assert_matches!(&*keys, ["trace-context", "tracing"]);
     }
 
     // MARK: Schema feature dependencies

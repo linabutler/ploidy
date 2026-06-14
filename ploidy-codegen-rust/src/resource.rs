@@ -186,9 +186,27 @@ mod tests {
         let expected: syn::File = parse_quote! {
             impl crate::client::Client {
                 #[doc = " GET /customers"]
+                #[cfg_attr(
+                    feature = "tracing",
+                    ::tracing::instrument(
+                        skip_all,
+                        fields(
+                            otel.name = "GET /customers",
+                            otel.kind = "client",
+                            url.template = "/customers",
+                            http.request.method = "GET",
+                            server.address,
+                            server.port,
+                            url.full,
+                            http.response.status_code,
+                            error.type
+                        )
+                    )
+                )]
                 pub async fn list_customers(
                     &self,
                 ) -> Result<::std::vec::Vec<crate::types::Customer>, crate::error::Error> {
+                let result: Result<_, crate::error::Error> = async move {
                     let url = {
                         let mut url = self.base_url.clone();
                         let _ = url
@@ -199,19 +217,49 @@ mod tests {
                             });
                         url
                     };
-                    let response = self
-                        .client
-                        .get(url)
-                        .headers(self.headers.clone())
+                    #[cfg(feature = "tracing")]
+                    {
+                        ::tracing::record_all!(::tracing::Span::current(),
+                            server.address = url.host_str(),
+                            server.port = url.port_or_known_default(),
+                            url.full = url.as_str(),
+                        );
+                    }
+                    let request = {
+                        let request = self
+                            .client
+                            .get(url)
+                            .headers(self.headers.clone());
+                        #[cfg(feature = "trace-context")]
+                        let request = ::ploidy_util::trace::propagate(
+                            ::tracing::Span::current(),
+                            request,
+                        );
+                        request
+                    };
+                    let response = request
                         .send()
-                        .await?
-                        .error_for_status()?;
+                        .await?;
+                    #[cfg(feature = "tracing")]
+                    {
+                        ::tracing::record_all!(::tracing::Span::current(),
+                            http.response.status_code = response.status().as_u16()
+                        );
+                    }
+                    let response = response.error_for_status()?;
                     let body = response.bytes().await?;
                     let deserializer = &mut ::ploidy_util::serde_json::Deserializer::from_slice(&body);
-                    let result = ::ploidy_util::serde_path_to_error::deserialize(deserializer)
-                        .map_err(crate::error::JsonError::from)?;
+                    let result = ::ploidy_util::serde_path_to_error::deserialize(deserializer)?;
                     Ok(result)
+                }.await;
+                #[cfg(feature = "tracing")]
+                if let Err(err) = &result {
+                    ::tracing::record_all!(::tracing::Span::current(),
+                        error.type = %err.category(),
+                    );
                 }
+                result
+            }
             }
         };
         assert_eq!(actual, expected);
@@ -272,9 +320,27 @@ mod tests {
             impl crate::client::Client {
                 #[cfg(feature = "customer")]
                 #[doc = " GET /orders"]
+                #[cfg_attr(
+                    feature = "tracing",
+                    ::tracing::instrument(
+                        skip_all,
+                        fields(
+                            otel.name = "GET /orders",
+                            otel.kind = "client",
+                            url.template = "/orders",
+                            http.request.method = "GET",
+                            server.address,
+                            server.port,
+                            url.full,
+                            http.response.status_code,
+                            error.type
+                        )
+                    )
+                )]
                 pub async fn list_orders(
                     &self,
                 ) -> Result<::std::vec::Vec<crate::types::Order>, crate::error::Error> {
+                let result: Result<_, crate::error::Error> = async move {
                     let url = {
                         let mut url = self.base_url.clone();
                         let _ = url
@@ -285,19 +351,49 @@ mod tests {
                             });
                         url
                     };
-                    let response = self
-                        .client
-                        .get(url)
-                        .headers(self.headers.clone())
+                    #[cfg(feature = "tracing")]
+                    {
+                        ::tracing::record_all!(::tracing::Span::current(),
+                            server.address = url.host_str(),
+                            server.port = url.port_or_known_default(),
+                            url.full = url.as_str(),
+                        );
+                    }
+                    let request = {
+                        let request = self
+                            .client
+                            .get(url)
+                            .headers(self.headers.clone());
+                        #[cfg(feature = "trace-context")]
+                        let request = ::ploidy_util::trace::propagate(
+                            ::tracing::Span::current(),
+                            request,
+                        );
+                        request
+                    };
+                    let response = request
                         .send()
-                        .await?
-                        .error_for_status()?;
+                        .await?;
+                    #[cfg(feature = "tracing")]
+                    {
+                        ::tracing::record_all!(::tracing::Span::current(),
+                            http.response.status_code = response.status().as_u16()
+                        );
+                    }
+                    let response = response.error_for_status()?;
                     let body = response.bytes().await?;
                     let deserializer = &mut ::ploidy_util::serde_json::Deserializer::from_slice(&body);
-                    let result = ::ploidy_util::serde_path_to_error::deserialize(deserializer)
-                        .map_err(crate::error::JsonError::from)?;
+                    let result = ::ploidy_util::serde_path_to_error::deserialize(deserializer)?;
                     Ok(result)
+                }.await;
+                #[cfg(feature = "tracing")]
+                if let Err(err) = &result {
+                    ::tracing::record_all!(::tracing::Span::current(),
+                        error.type = %err.category(),
+                    );
                 }
+                result
+            }
             }
         };
         assert_eq!(actual, expected);
@@ -344,10 +440,28 @@ mod tests {
         let expected: syn::File = parse_quote! {
             impl crate::client::Client {
                 #[doc = " GET /customers"]
+                #[cfg_attr(
+                    feature = "tracing",
+                    ::tracing::instrument(
+                        skip_all,
+                        fields(
+                            otel.name = "GET /customers",
+                            otel.kind = "client",
+                            url.template = "/customers",
+                            http.request.method = "GET",
+                            server.address,
+                            server.port,
+                            url.full,
+                            http.response.status_code,
+                            error.type
+                        )
+                    )
+                )]
                 pub async fn list_customers(
                     &self,
                     query: &parameters::ListCustomersQuery
                 ) -> Result<(), crate::error::Error> {
+                let result: Result<_, crate::error::Error> = async move {
                     let url = {
                         let mut url = self.base_url.clone();
                         let _ = url
@@ -365,16 +479,47 @@ mod tests {
                             parameters::ListCustomersQuery::STYLES,
                         ),
                     )?;
-                    let response = self
-                        .client
-                        .get(url)
-                        .headers(self.headers.clone())
+                    #[cfg(feature = "tracing")]
+                    {
+                        ::tracing::record_all!(::tracing::Span::current(),
+                            server.address = url.host_str(),
+                            server.port = url.port_or_known_default(),
+                            url.full = url.as_str(),
+                        );
+                    }
+                    let request = {
+                        let request = self
+                            .client
+                            .get(url)
+                            .headers(self.headers.clone());
+                        #[cfg(feature = "trace-context")]
+                        let request = ::ploidy_util::trace::propagate(
+                            ::tracing::Span::current(),
+                            request,
+                        );
+                        request
+                    };
+                    let response = request
                         .send()
-                        .await?
-                        .error_for_status()?;
+                        .await?;
+                    #[cfg(feature = "tracing")]
+                    {
+                        ::tracing::record_all!(::tracing::Span::current(),
+                            http.response.status_code = response.status().as_u16()
+                        );
+                    }
+                    let response = response.error_for_status()?;
                     let _ = response;
                     Ok(())
+                }.await;
+                #[cfg(feature = "tracing")]
+                if let Err(err) = &result {
+                    ::tracing::record_all!(::tracing::Span::current(),
+                        error.type = %err.category(),
+                    );
                 }
+                result
+            }
             }
             pub mod parameters {
                 mod list_customers_query {
@@ -447,10 +592,28 @@ mod tests {
         let expected: syn::File = parse_quote! {
             impl crate::client::Client {
                 #[doc = " GET /customers"]
+                #[cfg_attr(
+                    feature = "tracing",
+                    ::tracing::instrument(
+                        skip_all,
+                        fields(
+                            otel.name = "GET /customers",
+                            otel.kind = "client",
+                            url.template = "/customers",
+                            http.request.method = "GET",
+                            server.address,
+                            server.port,
+                            url.full,
+                            http.response.status_code,
+                            error.type
+                        )
+                    )
+                )]
                 pub async fn list_customers(
                     &self,
                     query: &parameters::ListCustomersQuery
                 ) -> Result<(), crate::error::Error> {
+                let result: Result<_, crate::error::Error> = async move {
                     let url = {
                         let mut url = self.base_url.clone();
                         let _ = url
@@ -468,21 +631,70 @@ mod tests {
                             parameters::ListCustomersQuery::STYLES,
                         ),
                     )?;
-                    let response = self
-                        .client
-                        .get(url)
-                        .headers(self.headers.clone())
+                    #[cfg(feature = "tracing")]
+                    {
+                        ::tracing::record_all!(::tracing::Span::current(),
+                            server.address = url.host_str(),
+                            server.port = url.port_or_known_default(),
+                            url.full = url.as_str(),
+                        );
+                    }
+                    let request = {
+                        let request = self
+                            .client
+                            .get(url)
+                            .headers(self.headers.clone());
+                        #[cfg(feature = "trace-context")]
+                        let request = ::ploidy_util::trace::propagate(
+                            ::tracing::Span::current(),
+                            request,
+                        );
+                        request
+                    };
+                    let response = request
                         .send()
-                        .await?
-                        .error_for_status()?;
+                        .await?;
+                    #[cfg(feature = "tracing")]
+                    {
+                        ::tracing::record_all!(::tracing::Span::current(),
+                            http.response.status_code = response.status().as_u16()
+                        );
+                    }
+                    let response = response.error_for_status()?;
                     let _ = response;
                     Ok(())
+                }.await;
+                #[cfg(feature = "tracing")]
+                if let Err(err) = &result {
+                    ::tracing::record_all!(::tracing::Span::current(),
+                        error.type = %err.category(),
+                    );
                 }
+                result
+            }
                 #[doc = " GET /customers/search"]
+                #[cfg_attr(
+                    feature = "tracing",
+                    ::tracing::instrument(
+                        skip_all,
+                        fields(
+                            otel.name = "GET /customers/search",
+                            otel.kind = "client",
+                            url.template = "/customers/search",
+                            http.request.method = "GET",
+                            server.address,
+                            server.port,
+                            url.full,
+                            http.response.status_code,
+                            error.type
+                        )
+                    )
+                )]
                 pub async fn search_customers(
                     &self,
                     query: &parameters::SearchCustomersQuery
                 ) -> Result<(), crate::error::Error> {
+                let result: Result<_, crate::error::Error> = async move {
                     let url = {
                         let mut url = self.base_url.clone();
                         let _ = url
@@ -500,16 +712,47 @@ mod tests {
                             parameters::SearchCustomersQuery::STYLES,
                         ),
                     )?;
-                    let response = self
-                        .client
-                        .get(url)
-                        .headers(self.headers.clone())
+                    #[cfg(feature = "tracing")]
+                    {
+                        ::tracing::record_all!(::tracing::Span::current(),
+                            server.address = url.host_str(),
+                            server.port = url.port_or_known_default(),
+                            url.full = url.as_str(),
+                        );
+                    }
+                    let request = {
+                        let request = self
+                            .client
+                            .get(url)
+                            .headers(self.headers.clone());
+                        #[cfg(feature = "trace-context")]
+                        let request = ::ploidy_util::trace::propagate(
+                            ::tracing::Span::current(),
+                            request,
+                        );
+                        request
+                    };
+                    let response = request
                         .send()
-                        .await?
-                        .error_for_status()?;
+                        .await?;
+                    #[cfg(feature = "tracing")]
+                    {
+                        ::tracing::record_all!(::tracing::Span::current(),
+                            http.response.status_code = response.status().as_u16()
+                        );
+                    }
+                    let response = response.error_for_status()?;
                     let _ = response;
                     Ok(())
+                }.await;
+                #[cfg(feature = "tracing")]
+                if let Err(err) = &result {
+                    ::tracing::record_all!(::tracing::Span::current(),
+                        error.type = %err.category(),
+                    );
                 }
+                result
+            }
             }
             pub mod parameters {
                 mod list_customers_query {
@@ -573,9 +816,27 @@ mod tests {
         let expected: syn::File = parse_quote! {
             impl crate::client::Client {
                 #[doc = " GET /customers"]
+                #[cfg_attr(
+                    feature = "tracing",
+                    ::tracing::instrument(
+                        skip_all,
+                        fields(
+                            otel.name = "GET /customers",
+                            otel.kind = "client",
+                            url.template = "/customers",
+                            http.request.method = "GET",
+                            server.address,
+                            server.port,
+                            url.full,
+                            http.response.status_code,
+                            error.type
+                        )
+                    )
+                )]
                 pub async fn list_customers(
                     &self,
                 ) -> Result<(), crate::error::Error> {
+                let result: Result<_, crate::error::Error> = async move {
                     let url = {
                         let mut url = self.base_url.clone();
                         let _ = url
@@ -586,16 +847,47 @@ mod tests {
                             });
                         url
                     };
-                    let response = self
-                        .client
-                        .get(url)
-                        .headers(self.headers.clone())
+                    #[cfg(feature = "tracing")]
+                    {
+                        ::tracing::record_all!(::tracing::Span::current(),
+                            server.address = url.host_str(),
+                            server.port = url.port_or_known_default(),
+                            url.full = url.as_str(),
+                        );
+                    }
+                    let request = {
+                        let request = self
+                            .client
+                            .get(url)
+                            .headers(self.headers.clone());
+                        #[cfg(feature = "trace-context")]
+                        let request = ::ploidy_util::trace::propagate(
+                            ::tracing::Span::current(),
+                            request,
+                        );
+                        request
+                    };
+                    let response = request
                         .send()
-                        .await?
-                        .error_for_status()?;
+                        .await?;
+                    #[cfg(feature = "tracing")]
+                    {
+                        ::tracing::record_all!(::tracing::Span::current(),
+                            http.response.status_code = response.status().as_u16()
+                        );
+                    }
+                    let response = response.error_for_status()?;
                     let _ = response;
                     Ok(())
+                }.await;
+                #[cfg(feature = "tracing")]
+                if let Err(err) = &result {
+                    ::tracing::record_all!(::tracing::Span::current(),
+                        error.type = %err.category(),
+                    );
                 }
+                result
+            }
             }
         };
         assert_eq!(actual, expected);
