@@ -72,10 +72,10 @@ impl ToTokens for CodegenClientModule<'_> {
                 {
                     let name = name
                         .try_into()
-                        .map_err(|err| crate::error::Error::BadHeaderName(err.into()))?;
+                        .map_err(crate::error::Error::bad_header_name)?;
                     let value = value
                         .try_into()
-                        .map_err(|err| crate::error::Error::BadHeaderValue(name.clone(), err.into()))?;
+                        .map_err(|err| crate::error::Error::bad_header_value(name.clone(), err))?;
                     self.headers.insert(name, value);
                     Ok(Self {
                         client: self.client,
@@ -105,10 +105,10 @@ impl ToTokens for CodegenClientModule<'_> {
                 {
                     let name = name
                         .try_into()
-                        .map_err(|err| crate::error::Error::BadHeaderName(err.into()))?;
+                        .map_err(crate::error::Error::bad_header_name)?;
                     let mut value: ::ploidy_util::http::HeaderValue = value
                         .try_into()
-                        .map_err(|err| crate::error::Error::BadHeaderValue(name.clone(), err.into()))?;
+                        .map_err(|err| crate::error::Error::bad_header_value(name.clone(), err))?;
                     value.set_sensitive(true);
                     self.with_header(name, value)
                 }

@@ -14,6 +14,8 @@ base64 = "0.22"
 chrono = { version = "0.4", features = ["serde"] }
 http = "1"
 itertools = "0.14"
+opentelemetry = { workspace = true, optional = true }
+opentelemetry-http = { workspace = true, optional = true }
 percent-encoding = "2.3"
 ploidy-pointer = { workspace = true, features = [
     "chrono",
@@ -37,8 +39,17 @@ serde_bytes = "0.11"
 serde_json = { workspace = true }
 serde_path_to_error = "0.1"
 thiserror = "2"
+tracing = { workspace = true, optional = true }
+tracing-opentelemetry = { workspace = true, optional = true }
 url = { version = "2", features = ["serde"] }
 uuid = { version = "1", features = ["serde", "v4"] }
 
 [features]
 did-you-mean = ["ploidy-pointer/did-you-mean"]
+tracing = ["dep:tracing"]
+trace-context = [
+    "tracing",
+    "dep:opentelemetry",
+    "dep:opentelemetry-http",
+    "dep:tracing-opentelemetry",
+]
