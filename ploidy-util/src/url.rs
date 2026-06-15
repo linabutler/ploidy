@@ -16,22 +16,24 @@ impl UrlExt for Url {
             .split_once('?')
             .unwrap_or((path_and_query, ""));
         if !path.is_empty() {
-            let mut segments = self.path_segments_mut().map_err(|()| PathAndQueryError)?;
+            let mut segments = self
+                .path_segments_mut()
+                .map_err(|()| PathAndQueryError::UrlCannotBeABase)?;
             segments.pop_if_empty();
             for segment in path.split('/') {
                 if segment.is_empty() || !segment.chars().all(is_path_char) {
-                    Err(PathAndQueryError)?;
+                    Err(PathAndQueryError::BadPathChar)?;
                 }
                 segments.push(
                     &percent_decode_str(segment)
                         .decode_utf8()
-                        .map_err(|_| PathAndQueryError)?,
+                        .map_err(|_| PathAndQueryError::BadPathChar)?,
                 );
             }
         }
         if !query.is_empty() {
             if !query.chars().all(is_query_char) {
-                Err(PathAndQueryError)?;
+                Err(PathAndQueryError::BadQueryChar)?;
             }
             self.query_pairs_mut()
                 .extend_pairs(::url::form_urlencoded::parse(query.as_bytes()));
@@ -42,8 +44,14 @@ impl UrlExt for Url {
 
 /// An error returned when a path and query can't be parsed.
 #[derive(Clone, Copy, Debug, thiserror::Error)]
-#[error("invalid path and query")]
-pub struct PathAndQueryError;
+pub enum PathAndQueryError {
+    #[error("URL can't be used as a base URL")]
+    UrlCannotBeABase,
+    #[error("URL path contains invalid character")]
+    BadPathChar,
+    #[error("URL query contains invalid character")]
+    BadQueryChar,
+}
 
 /// Returns whether `c` is allowed in a URL path segment per
 /// the WHATWG URL Standard's [path percent-encode set][set].

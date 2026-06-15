@@ -98,8 +98,8 @@ pub enum BuildError {
     Url(#[source] UrlParseError),
     #[error("invalid query parameter")]
     QueryParam(#[source] QueryParamError),
-    #[error("invalid request path")]
-    Path(#[source] PathAndQueryError),
+    #[error(transparent)]
+    Path(PathAndQueryError),
     #[error("invalid header name")]
     HeaderName(#[source] http::Error),
     #[error("invalid value for header `{0}`")]

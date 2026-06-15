@@ -209,22 +209,20 @@ mod tests {
                 let result: Result<_, crate::error::Error> = async move {
                     let url = {
                         let mut url = self.base_url.clone();
-                        let _ = url
-                            .path_segments_mut()
-                            .map(|mut segments| {
-                                segments.pop_if_empty()
-                                    .push("customers");
-                            });
+                        url.path_segments_mut()
+                            .map_err(|()| ::ploidy_util::url::PathAndQueryError::UrlCannotBeABase)?
+                            .pop_if_empty()
+                            .push("customers");
+                        #[cfg(feature = "tracing")]
+                        {
+                            ::tracing::record_all!(::tracing::Span::current(),
+                                server.address = url.host_str(),
+                                server.port = url.port_or_known_default(),
+                                url.full = url.as_str(),
+                            );
+                        }
                         url
                     };
-                    #[cfg(feature = "tracing")]
-                    {
-                        ::tracing::record_all!(::tracing::Span::current(),
-                            server.address = url.host_str(),
-                            server.port = url.port_or_known_default(),
-                            url.full = url.as_str(),
-                        );
-                    }
                     let request = {
                         let request = self
                             .client
@@ -343,22 +341,20 @@ mod tests {
                 let result: Result<_, crate::error::Error> = async move {
                     let url = {
                         let mut url = self.base_url.clone();
-                        let _ = url
-                            .path_segments_mut()
-                            .map(|mut segments| {
-                                segments.pop_if_empty()
-                                    .push("orders");
-                            });
+                        url.path_segments_mut()
+                            .map_err(|()| ::ploidy_util::url::PathAndQueryError::UrlCannotBeABase)?
+                            .pop_if_empty()
+                            .push("orders");
+                        #[cfg(feature = "tracing")]
+                        {
+                            ::tracing::record_all!(::tracing::Span::current(),
+                                server.address = url.host_str(),
+                                server.port = url.port_or_known_default(),
+                                url.full = url.as_str(),
+                            );
+                        }
                         url
                     };
-                    #[cfg(feature = "tracing")]
-                    {
-                        ::tracing::record_all!(::tracing::Span::current(),
-                            server.address = url.host_str(),
-                            server.port = url.port_or_known_default(),
-                            url.full = url.as_str(),
-                        );
-                    }
                     let request = {
                         let request = self
                             .client
@@ -464,29 +460,27 @@ mod tests {
                 let result: Result<_, crate::error::Error> = async move {
                     let url = {
                         let mut url = self.base_url.clone();
-                        let _ = url
-                            .path_segments_mut()
-                            .map(|mut segments| {
-                                segments.pop_if_empty()
-                                    .push("customers");
-                            });
+                        url.path_segments_mut()
+                            .map_err(|()| ::ploidy_util::url::PathAndQueryError::UrlCannotBeABase)?
+                            .pop_if_empty()
+                            .push("customers");
+                        let url = ::ploidy_util::serde::Serialize::serialize(
+                            query,
+                            ::ploidy_util::QuerySerializer::new(
+                                url,
+                                parameters::ListCustomersQuery::STYLES,
+                            ),
+                        )?;
+                        #[cfg(feature = "tracing")]
+                        {
+                            ::tracing::record_all!(::tracing::Span::current(),
+                                server.address = url.host_str(),
+                                server.port = url.port_or_known_default(),
+                                url.full = url.as_str(),
+                            );
+                        }
                         url
                     };
-                    let url = ::ploidy_util::serde::Serialize::serialize(
-                        query,
-                        ::ploidy_util::QuerySerializer::new(
-                            url,
-                            parameters::ListCustomersQuery::STYLES,
-                        ),
-                    )?;
-                    #[cfg(feature = "tracing")]
-                    {
-                        ::tracing::record_all!(::tracing::Span::current(),
-                            server.address = url.host_str(),
-                            server.port = url.port_or_known_default(),
-                            url.full = url.as_str(),
-                        );
-                    }
                     let request = {
                         let request = self
                             .client
@@ -616,29 +610,27 @@ mod tests {
                 let result: Result<_, crate::error::Error> = async move {
                     let url = {
                         let mut url = self.base_url.clone();
-                        let _ = url
-                            .path_segments_mut()
-                            .map(|mut segments| {
-                                segments.pop_if_empty()
-                                    .push("customers");
-                            });
+                        url.path_segments_mut()
+                            .map_err(|()| ::ploidy_util::url::PathAndQueryError::UrlCannotBeABase)?
+                            .pop_if_empty()
+                            .push("customers");
+                        let url = ::ploidy_util::serde::Serialize::serialize(
+                            query,
+                            ::ploidy_util::QuerySerializer::new(
+                                url,
+                                parameters::ListCustomersQuery::STYLES,
+                            ),
+                        )?;
+                        #[cfg(feature = "tracing")]
+                        {
+                            ::tracing::record_all!(::tracing::Span::current(),
+                                server.address = url.host_str(),
+                                server.port = url.port_or_known_default(),
+                                url.full = url.as_str(),
+                            );
+                        }
                         url
                     };
-                    let url = ::ploidy_util::serde::Serialize::serialize(
-                        query,
-                        ::ploidy_util::QuerySerializer::new(
-                            url,
-                            parameters::ListCustomersQuery::STYLES,
-                        ),
-                    )?;
-                    #[cfg(feature = "tracing")]
-                    {
-                        ::tracing::record_all!(::tracing::Span::current(),
-                            server.address = url.host_str(),
-                            server.port = url.port_or_known_default(),
-                            url.full = url.as_str(),
-                        );
-                    }
                     let request = {
                         let request = self
                             .client
@@ -697,29 +689,27 @@ mod tests {
                 let result: Result<_, crate::error::Error> = async move {
                     let url = {
                         let mut url = self.base_url.clone();
-                        let _ = url
-                            .path_segments_mut()
-                            .map(|mut segments| {
-                                segments.pop_if_empty()
-                                    .extend(&["customers", "search"]);
-                            });
+                        url.path_segments_mut()
+                            .map_err(|()| ::ploidy_util::url::PathAndQueryError::UrlCannotBeABase)?
+                            .pop_if_empty()
+                            .extend(&["customers", "search"]);
+                        let url = ::ploidy_util::serde::Serialize::serialize(
+                            query,
+                            ::ploidy_util::QuerySerializer::new(
+                                url,
+                                parameters::SearchCustomersQuery::STYLES,
+                            ),
+                        )?;
+                        #[cfg(feature = "tracing")]
+                        {
+                            ::tracing::record_all!(::tracing::Span::current(),
+                                server.address = url.host_str(),
+                                server.port = url.port_or_known_default(),
+                                url.full = url.as_str(),
+                            );
+                        }
                         url
                     };
-                    let url = ::ploidy_util::serde::Serialize::serialize(
-                        query,
-                        ::ploidy_util::QuerySerializer::new(
-                            url,
-                            parameters::SearchCustomersQuery::STYLES,
-                        ),
-                    )?;
-                    #[cfg(feature = "tracing")]
-                    {
-                        ::tracing::record_all!(::tracing::Span::current(),
-                            server.address = url.host_str(),
-                            server.port = url.port_or_known_default(),
-                            url.full = url.as_str(),
-                        );
-                    }
                     let request = {
                         let request = self
                             .client
@@ -839,22 +829,20 @@ mod tests {
                 let result: Result<_, crate::error::Error> = async move {
                     let url = {
                         let mut url = self.base_url.clone();
-                        let _ = url
-                            .path_segments_mut()
-                            .map(|mut segments| {
-                                segments.pop_if_empty()
-                                    .push("customers");
-                            });
+                        url.path_segments_mut()
+                            .map_err(|()| ::ploidy_util::url::PathAndQueryError::UrlCannotBeABase)?
+                            .pop_if_empty()
+                            .push("customers");
+                        #[cfg(feature = "tracing")]
+                        {
+                            ::tracing::record_all!(::tracing::Span::current(),
+                                server.address = url.host_str(),
+                                server.port = url.port_or_known_default(),
+                                url.full = url.as_str(),
+                            );
+                        }
                         url
                     };
-                    #[cfg(feature = "tracing")]
-                    {
-                        ::tracing::record_all!(::tracing::Span::current(),
-                            server.address = url.host_str(),
-                            server.port = url.port_or_known_default(),
-                            url.full = url.as_str(),
-                        );
-                    }
                     let request = {
                         let request = self
                             .client
