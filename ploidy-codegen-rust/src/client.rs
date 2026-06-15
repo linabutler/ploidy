@@ -124,39 +124,34 @@ impl ToTokens for CodegenClientModule<'_> {
                 /// Returns a raw [`RequestBuilder`].
                 ///
                 /// Constructs the request URL by appending `path_and_query`
-                /// to the base URL's path and query, respectively. For example,
-                /// given a base URL of `https://api.example.com/v1` and a
-                /// `path_and_query` of `/pets/list?limit=10`, the request URL is
+                /// to the base URL's path and query. The path can be relative or
+                /// absolute; its segments are appended to the base path.
+                /// Appended query parameters are not deduplicated.
+                ///
+                /// For example, if this client's base URL is
+                /// `https://api.example.com/v1` and `path_and_query` is
+                /// `/pets/list?limit=10`, the request URL is
                 /// `https://api.example.com/v1/pets/list?limit=10`.
+                /// Prefer using the builder's [`query`] method to append
+                /// dynamic query parameters; use `path_and_query` for static
+                /// parameters.
                 ///
                 /// The request includes the client's default headers.
                 ///
-                /// Use this for requests that the typed client methods
-                /// don't support.
+                /// Use this for requests that the client's operation methods
+                /// don't cover.
                 ///
                 /// [`RequestBuilder`]: crate::util::reqwest::RequestBuilder
+                /// [`query`]: crate::util::reqwest::RequestBuilder::query
                 pub fn request(
                     &self,
                     method: crate::util::reqwest::Method,
                     path_and_query: &str,
                 ) -> Result<crate::util::reqwest::RequestBuilder, crate::error::Error> {
-                    let parts: ::ploidy_util::http::uri::PathAndQuery = path_and_query.parse()?;
-                    let mut url = self.base_url.clone();
-                    let _ = url.path_segments_mut().map(|mut segments| {
-                        let path = parts.path();
-                        if path != "/" {
-                            let path = path
-                                .strip_prefix('/') // Drop leading `/` from new path.
-                                .unwrap_or(path);
-                            segments
-                                .pop_if_empty() // Drop trailing `/` from the base path.
-                                .extend(path.split('/'));
-                        }
-                    });
-                    if let Some(query) = parts.query() {
-                        url.query_pairs_mut()
-                            .extend_pairs(::ploidy_util::url::form_urlencoded::parse(query.as_bytes()));
-                    }
+                    let url = ::ploidy_util::url::UrlExt::with_path_and_query(
+                        self.base_url.clone(),
+                        path_and_query,
+                    )?;
                     Ok(self.client
                         .request(method, url)
                         .headers(self.headers.clone()))

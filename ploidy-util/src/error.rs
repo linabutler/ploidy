@@ -1,9 +1,9 @@
 use std::fmt::{Display, Formatter, Result as FmtResult};
 
-use http::{HeaderName, StatusCode, uri::InvalidUri};
+use http::{HeaderName, StatusCode};
 use url::ParseError as UrlParseError;
 
-use crate::query::QueryParamError;
+use crate::{query::QueryParamError, url::PathAndQueryError};
 
 /// A client error.
 #[derive(Debug, thiserror::Error)]
@@ -47,15 +47,15 @@ impl Error {
     }
 }
 
-impl From<InvalidUri> for Error {
-    fn from(err: InvalidUri) -> Self {
-        Self::Build(BuildError::Path(err))
-    }
-}
-
 impl From<QueryParamError> for Error {
     fn from(err: QueryParamError) -> Self {
         Self::Build(BuildError::QueryParam(err))
+    }
+}
+
+impl From<PathAndQueryError> for Error {
+    fn from(err: PathAndQueryError) -> Self {
+        Self::Build(BuildError::Path(err))
     }
 }
 
@@ -99,7 +99,7 @@ pub enum BuildError {
     #[error("invalid query parameter")]
     QueryParam(#[source] QueryParamError),
     #[error("invalid request path")]
-    Path(#[source] InvalidUri),
+    Path(#[source] PathAndQueryError),
     #[error("invalid header name")]
     HeaderName(#[source] http::Error),
     #[error("invalid value for header `{0}`")]

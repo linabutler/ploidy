@@ -5,6 +5,7 @@ pub mod error;
 pub mod query;
 #[cfg(feature = "trace-context")]
 pub mod trace;
+pub mod url;
 
 pub use absent::{AbsentError, AbsentOr, AbsentOrExt, FieldAbsentError};
 pub use binary::{Base64, Base64Error};
@@ -24,5 +25,4 @@ pub use serde_json;
 pub use serde_path_to_error;
 #[cfg(feature = "tracing")]
 pub use tracing;
-pub use url;
 pub use uuid;
