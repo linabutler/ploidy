@@ -27,7 +27,7 @@ Ploidy thinks of generated code as source code that you can read, review, and de
   - [The client](#the-client)
   - [Smart boxing](#smart-boxing)
   - [Per-resource feature gates](#per-resource-feature-gates)
-  - [Choosing the right tool](#choosing-the-right-tool)
+* [Why not Ploidy?](#why-not-ploidy)
 * [Supported OpenAPI features](#supported-openapi-features)
   - [For schemas](#for-schemas)
   - [For operations](#for-operations)
@@ -506,7 +506,7 @@ my-api-client = { version = "1", default-features = false, features = ["orders"]
 
 The observability features are not enabled by default.
 
-### Choosing the right tool
+## Why not Ploidy?
 
 Ploidy focuses on generating Rust clients from modern OpenAPI specs. The broader ecosystem has strong options for other needs:
 
