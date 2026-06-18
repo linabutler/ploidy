@@ -3321,3 +3321,235 @@ fn test_optional_field_container_description_is_not_parent_schema() {
         )),
     );
 }
+
+#[test]
+fn test_array_with_prefix_items_widens_element_type() {
+    let doc = Document::from_yaml(indoc::indoc! {"
+        openapi: 3.0.0
+        info:
+         title: Test API
+         version: 1.0.0
+    "})
+    .unwrap();
+    let schema: Schema = serde_saphyr::from_str(indoc::indoc! {"
+        type: array
+        items:
+         type: string
+        prefixItems:
+         - type: boolean
+         - type: number
+    "})
+    .unwrap();
+
+    let arena = Arena::new();
+    let result = transform(&arena, &doc, "MixedArray", &schema);
+
+    assert_matches!(
+        result,
+        SpecType::Schema(SpecSchemaType::Container(
+            SchemaTypeInfo {
+                name: "MixedArray",
+                ..
+            },
+            SpecContainer::Array(SpecInner {
+                ty: SpecType::Schema(SpecSchemaType::Untagged(
+                    _,
+                    SpecUntagged { variants: _, .. }
+                )),
+                ..
+            }),
+        )),
+    );
+}
+
+#[test]
+fn test_array_with_contains_widens_element_type() {
+    let doc = Document::from_yaml(indoc::indoc! {"
+        openapi: 3.0.0
+        info:
+         title: Test API
+         version: 1.0.0
+    "})
+    .unwrap();
+    let schema: Schema = serde_saphyr::from_str(indoc::indoc! {"
+        type: array
+        items:
+         type: string
+        contains:
+         type: object
+    "})
+    .unwrap();
+
+    let arena = Arena::new();
+    let result = transform(&arena, &doc, "ArrayWithContains", &schema);
+
+    assert_matches!(
+        result,
+        SpecType::Schema(SpecSchemaType::Container(
+            SchemaTypeInfo {
+                name: "ArrayWithContains",
+                ..
+            },
+            SpecContainer::Array(SpecInner {
+                ty: SpecType::Schema(SpecSchemaType::Untagged(
+                    _,
+                    SpecUntagged { variants: _, .. }
+                )),
+                ..
+            }),
+        )),
+    );
+}
+
+#[test]
+fn test_array_with_unevaluated_items_true_widens_element_type() {
+    let doc = Document::from_yaml(indoc::indoc! {"
+        openapi: 3.0.0
+        info:
+         title: Test API
+         version: 1.0.0
+    "})
+    .unwrap();
+    let schema: Schema = serde_saphyr::from_str(indoc::indoc! {"
+        type: array
+        items:
+         type: string
+        unevaluatedItems: true
+    "})
+    .unwrap();
+
+    let arena = Arena::new();
+    let result = transform(&arena, &doc, "ArrayWithUnevaluated", &schema);
+
+    assert_matches!(
+        result,
+        SpecType::Schema(SpecSchemaType::Container(
+            SchemaTypeInfo {
+                name: "ArrayWithUnevaluated",
+                ..
+            },
+            SpecContainer::Array(SpecInner {
+                ty: SpecType::Schema(SpecSchemaType::Untagged(
+                    _,
+                    SpecUntagged { variants: _, .. }
+                )),
+                ..
+            }),
+        )),
+    );
+}
+
+#[test]
+fn test_array_with_unevaluated_items_false_no_widening() {
+    let doc = Document::from_yaml(indoc::indoc! {"
+        openapi: 3.0.0
+        info:
+         title: Test API
+         version: 1.0.0
+    "})
+    .unwrap();
+    let schema: Schema = serde_saphyr::from_str(indoc::indoc! {"
+        type: array
+        items:
+         type: string
+        unevaluatedItems: false
+    "})
+    .unwrap();
+
+    let arena = Arena::new();
+    let result = transform(&arena, &doc, "ArrayNoExtra", &schema);
+
+    assert_matches!(
+        result,
+        SpecType::Schema(SpecSchemaType::Container(
+            SchemaTypeInfo {
+                name: "ArrayNoExtra",
+                ..
+            },
+            SpecContainer::Array(SpecInner {
+                ty: SpecType::Inline(SpecInlineType::Primitive(_, PrimitiveType::String)),
+                ..
+            }),
+        )),
+    );
+}
+
+#[test]
+fn test_array_with_all_keywords_creates_union() {
+    let doc = Document::from_yaml(indoc::indoc! {"
+        openapi: 3.0.0
+        info:
+         title: Test API
+         version: 1.0.0
+    "})
+    .unwrap();
+    let schema: Schema = serde_saphyr::from_str(indoc::indoc! {"
+        type: array
+        items:
+         type: string
+        prefixItems:
+         - type: boolean
+        contains:
+         type: number
+        unevaluatedItems: true
+    "})
+    .unwrap();
+
+    let arena = Arena::new();
+    let result = transform(&arena, &doc, "FullArray", &schema);
+
+    assert_matches!(
+        result,
+        SpecType::Schema(SpecSchemaType::Container(
+            SchemaTypeInfo {
+                name: "FullArray",
+                ..
+            },
+            SpecContainer::Array(SpecInner {
+                ty: SpecType::Schema(SpecSchemaType::Untagged(
+                    _,
+                    SpecUntagged { variants: _, .. }
+                )),
+                ..
+            }),
+        )),
+    );
+}
+
+#[test]
+fn test_array_with_prefix_items_only_creates_union() {
+    let doc = Document::from_yaml(indoc::indoc! {"
+        openapi: 3.0.0
+        info:
+         title: Test API
+         version: 1.0.0
+    "})
+    .unwrap();
+    let schema: Schema = serde_saphyr::from_str(indoc::indoc! {"
+        type: array
+        prefixItems:
+         - type: string
+         - type: number
+    "})
+    .unwrap();
+
+    let arena = Arena::new();
+    let result = transform(&arena, &doc, "TupleArray", &schema);
+
+    assert_matches!(
+        result,
+        SpecType::Schema(SpecSchemaType::Container(
+            SchemaTypeInfo {
+                name: "TupleArray",
+                ..
+            },
+            SpecContainer::Array(SpecInner {
+                ty: SpecType::Schema(SpecSchemaType::Untagged(
+                    _,
+                    SpecUntagged { variants: _, .. }
+                )),
+                ..
+            }),
+        )),
+    );
+}

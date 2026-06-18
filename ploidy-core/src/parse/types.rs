@@ -400,6 +400,14 @@ pub enum AdditionalProperties {
     RefOrSchema(RefOrSchema),
 }
 
+#[derive(Clone, Debug, Deserialize, JsonPointee, JsonPointerTarget)]
+#[serde(untagged)]
+#[ploidy(pointer(untagged))]
+pub enum UnevaluatedItems {
+    Bool(bool),
+    RefOrSchema(RefOrSchema),
+}
+
 /// An OpenAPI schema definition.
 #[derive(Debug, Clone, Default, Deserialize, JsonPointee, JsonPointerTarget)]
 #[serde(rename_all = "camelCase")]
@@ -426,6 +434,12 @@ pub struct Schema {
     // Array items.
     #[serde(default)]
     pub items: Option<RefOrSchema>,
+    #[serde(default)]
+    pub prefix_items: Option<Vec<RefOrSchema>>,
+    #[serde(default)]
+    pub unevaluated_items: Option<UnevaluatedItems>,
+    #[serde(default)]
+    pub contains: Option<RefOrSchema>,
 
     // Enum variants.
     #[serde(rename = "enum", default)]
