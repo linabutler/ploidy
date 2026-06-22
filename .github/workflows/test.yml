@@ -32,7 +32,7 @@ jobs:
         ${{ matrix.features == 'all' && '--all-features' || '' }}
         ${{ matrix.features == 'none' && '--no-default-features' || '' }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           ref: ${{ github.ref }}
 
@@ -140,7 +140,7 @@ jobs:
         ${{ matrix.features == 'all' && '--all-features' || '' }}
         ${{ matrix.features == 'none' && '--no-default-features' || '' }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           ref: ${{ github.ref }}
 
