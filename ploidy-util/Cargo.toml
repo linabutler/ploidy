@@ -13,7 +13,7 @@ keywords.workspace = true
 base64 = "0.22"
 chrono = { version = "0.4", features = ["serde"] }
 http = "1"
-itertools = "0.14"
+itertools = "0.15"
 opentelemetry = { workspace = true, optional = true }
 opentelemetry-http = { workspace = true, optional = true }
 percent-encoding = "2.3"

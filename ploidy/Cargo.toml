@@ -11,7 +11,7 @@ rust-version.workspace = true
 
 [dependencies]
 clap = { version = "4", features = ["cargo", "derive"] }
-itertools = "0.14"
+itertools = "0.15"
 miette = { version = "7", features = ["fancy"] }
 mimalloc = { version = "0.1", optional = true }
 ploidy-codegen-rust = { workspace = true }

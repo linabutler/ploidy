@@ -14,7 +14,7 @@ proc-macro = true
 
 [dependencies]
 heck = "0.5"
-itertools = "0.14"
+itertools = "0.15"
 proc-macro2 = "1"
 quote = "1"
 syn = "2"

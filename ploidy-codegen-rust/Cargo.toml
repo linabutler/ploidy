@@ -10,7 +10,7 @@ repository.workspace = true
 rust-version.workspace = true
 
 [dependencies]
-itertools = "0.14"
+itertools = "0.15"
 serde = { workspace = true, features = ["derive"] }
 miette = "7"
 ploidy-core = { workspace = true, features = ["proc-macro2"] }
