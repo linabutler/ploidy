@@ -51,7 +51,7 @@ jobs:
           echo "SCCACHE_DIR=${SCCACHE_DIR:-$HOME/.cache/sccache}" >> $GITHUB_ENV
 
       - name: Restore Cargo packages and metadata
-        uses: actions/cache/restore@v5
+        uses: actions/cache/restore@v6
         id: restore-cargo-home
         # [1] lists the cacheable Cargo home subdirectories. We don't use any
         # Cargo-installed binaries in our builds, so we ignore those paths.
@@ -69,7 +69,7 @@ jobs:
       - uses: mozilla-actions/sccache-action@9e7fa8a12102821edf02ca5dbea1acd0f89a2696 # v0.0.10
 
       - name: Restore build cache
-        uses: actions/cache/restore@v5
+        uses: actions/cache/restore@v6
         id: restore-sccache
         with:
           path: ${{ env.SCCACHE_DIR }}
@@ -86,7 +86,7 @@ jobs:
           cargo test $CARGO_FLAGS --no-run
 
       - name: Cache Cargo packages and metadata
-        uses: actions/cache/save@v5
+        uses: actions/cache/save@v6
         if: ${{ steps.restore-cargo-home.outputs.cache-hit != 'true' }}
         with:
           path: |
@@ -96,7 +96,7 @@ jobs:
           key: ${{ steps.restore-cargo-home.outputs.cache-primary-key }}
 
       - name: Cache build products
-        uses: actions/cache/save@v5
+        uses: actions/cache/save@v6
         if: ${{ steps.restore-sccache.outputs.cache-hit != 'true' }}
         with:
           path: ${{ env.SCCACHE_DIR }}
@@ -150,7 +150,7 @@ jobs:
           echo "SCCACHE_DIR=${SCCACHE_DIR:-$HOME/.cache/sccache}" >> $GITHUB_ENV
 
       - name: Restore Cargo packages and metadata
-        uses: actions/cache/restore@v5
+        uses: actions/cache/restore@v6
         id: restore-cargo-home
         with:
           # The Cargo cache format is backward-compatible, so we can
@@ -173,7 +173,7 @@ jobs:
           echo "$MATRIX_PACKAGES" > "$GITHUB_WORKSPACE/build-cache-key"
 
       - name: Restore build cache
-        uses: actions/cache/restore@v5
+        uses: actions/cache/restore@v6
         id: restore-sccache
         with:
           path: ${{ env.SCCACHE_DIR }}
@@ -193,7 +193,7 @@ jobs:
           cargo test $CARGO_FLAGS --no-run
 
       - name: Cache build products
-        uses: actions/cache/save@v5
+        uses: actions/cache/save@v6
         if: ${{ steps.restore-sccache.outputs.cache-hit != 'true' }}
         with:
           path: ${{ env.SCCACHE_DIR }}
