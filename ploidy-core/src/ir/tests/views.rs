@@ -2738,7 +2738,7 @@ fn test_operation_view_inlines_finds_inline_types() {
                     && matches!(
                         inline.path().root(),
                         InlineTypePathRoot::Operation {
-                            usage: OperationUsage::Response,
+                            usage: OperationUsage::Response { status: None },
                             ..
                         },
                     )
@@ -2815,10 +2815,268 @@ fn test_operation_request_and_response() {
         InlineTypePathRoot::Operation {
             id,
             resource: None,
-            usage: OperationUsage::Response,
+            usage: OperationUsage::Response { status: None },
         } if id == "createUser",
     );
     assert!(resp_path.segments().next().is_none());
+}
+
+#[test]
+fn test_operation_response_cases_preserve_statuses() {
+    let doc = Document::from_yaml(indoc::indoc! {"
+        openapi: 3.0.0
+        info:
+          title: Test
+          version: 1.0
+        paths:
+          /jobs:
+            post:
+              operationId: startJob
+              responses:
+                '200':
+                  description: Complete
+                  content:
+                    application/json:
+                      schema:
+                        $ref: '#/components/schemas/Job'
+                '202':
+                  description: Accepted
+                  content:
+                    application/json:
+                      schema:
+                        $ref: '#/components/schemas/PendingJob'
+        components:
+          schemas:
+            Job:
+              type: object
+            PendingJob:
+              type: object
+    "})
+    .unwrap();
+
+    let arena = Arena::new();
+    let spec = Spec::from_doc(&arena, &doc).unwrap();
+    let graph = RawGraph::new(&arena, &spec).cook();
+
+    let operation = graph.operations().next().unwrap();
+    let cases = operation.response_cases().collect_vec();
+    let [complete, pending] = &*cases else {
+        panic!("expected two response cases; got `{cases:?}`");
+    };
+    assert_eq!(complete.status(), 200);
+    let Some(ResponseView::Json(TypeView::Schema(complete))) = complete.body() else {
+        panic!("expected `Job` response body; got `{:?}`", complete.body());
+    };
+    assert_eq!(complete.name(), "Job");
+    assert_eq!(pending.status(), 202);
+    let Some(ResponseView::Json(TypeView::Schema(pending))) = pending.body() else {
+        panic!(
+            "expected `PendingJob` response body; got `{:?}`",
+            pending.body(),
+        );
+    };
+    assert_eq!(pending.name(), "PendingJob");
+}
+
+#[test]
+fn test_operation_response_inline_paths_include_status_when_needed() {
+    let doc = Document::from_yaml(indoc::indoc! {"
+        openapi: 3.0.0
+        info:
+          title: Test
+          version: 1.0
+        paths:
+          /jobs:
+            post:
+              operationId: startJob
+              responses:
+                '200':
+                  description: Complete
+                  content:
+                    application/json:
+                      schema:
+                        type: object
+                        properties:
+                          id:
+                            type: string
+                '202':
+                  description: Accepted
+                  content:
+                    application/json:
+                      schema:
+                        type: object
+                        properties:
+                          token:
+                            type: string
+    "})
+    .unwrap();
+
+    let arena = Arena::new();
+    let spec = Spec::from_doc(&arena, &doc).unwrap();
+    let graph = RawGraph::new(&arena, &spec).cook();
+
+    let operation = graph.operations().next().unwrap();
+    let mut statuses = operation
+        .inlines()
+        .filter_map(|inline| match inline {
+            InlineTypeView::Struct(_, _) if inline.path().segments().next().is_none() => {
+                match inline.path().root() {
+                    InlineTypePathRoot::Operation {
+                        usage: OperationUsage::Response { status },
+                        ..
+                    } => status,
+                    _ => None,
+                }
+            }
+            _ => None,
+        })
+        .collect_vec();
+    statuses.sort();
+    assert_matches!(&*statuses, [200, 202]);
+}
+
+#[test]
+fn test_operation_response_case_with_headers_body() {
+    let doc = Document::from_yaml(indoc::indoc! {"
+        openapi: 3.0.0
+        info:
+          title: Test
+          version: 1.0
+        paths:
+          /jobs/{id}:
+            get:
+              operationId: getJob
+              responses:
+                '200':
+                  description: Complete
+                  content:
+                    application/json:
+                      schema:
+                        $ref: '#/components/schemas/Job'
+                '304':
+                  description: Not modified.
+                  headers:
+                    etag:
+                      required: true
+                      schema:
+                        type: string
+                    cache-control:
+                      schema:
+                        type: string
+        components:
+          schemas:
+            Job:
+              type: object
+    "})
+    .unwrap();
+
+    let arena = Arena::new();
+    let spec = Spec::from_doc(&arena, &doc).unwrap();
+    let graph = RawGraph::new(&arena, &spec).cook();
+
+    let operation = graph.operations().next().unwrap();
+    let cases = operation.response_cases().collect_vec();
+    let [complete, not_modified] = &*cases else {
+        panic!("expected two response cases; got `{cases:?}`");
+    };
+    assert_eq!(complete.status(), 200);
+    assert_eq!(not_modified.status(), 304);
+    let Some(ResponseView::Headers(TypeView::Inline(InlineTypeView::Struct(_, headers)))) =
+        not_modified.body()
+    else {
+        panic!(
+            "expected inline headers struct; got `{:?}`",
+            not_modified.body(),
+        );
+    };
+    let fields = headers.fields().collect_vec();
+    let [etag, cache_control] = &*fields else {
+        panic!("expected two header fields; got `{fields:?}`");
+    };
+    assert_matches!(etag.name(), StructFieldName::Name("etag"));
+    assert_matches!(etag.required(), Required::Required { nullable: false });
+    assert_matches!(
+        etag.ty(),
+        TypeView::Inline(InlineTypeView::Primitive(_, p)) if p.ty() == PrimitiveType::String,
+    );
+    assert_matches!(cache_control.name(), StructFieldName::Name("cache-control"));
+    assert_matches!(
+        cache_control.required(),
+        Required::Required { nullable: true }
+    );
+}
+
+#[test]
+fn test_operation_header_struct_path_includes_status_when_needed() {
+    let doc = Document::from_yaml(indoc::indoc! {"
+        openapi: 3.0.0
+        info:
+          title: Test
+          version: 1.0
+        paths:
+          /jobs:
+            get:
+              operationId: getJob
+              responses:
+                '200':
+                  description: Complete
+                  content:
+                    application/json:
+                      schema:
+                        $ref: '#/components/schemas/Job'
+                '304':
+                  description: Not modified.
+                  headers:
+                    etag:
+                      required: true
+                      schema:
+                        type: string
+          /archives:
+            get:
+              operationId: getArchive
+              responses:
+                '307':
+                  description: Redirect to the archive URL.
+                  headers:
+                    location:
+                      required: true
+                      schema:
+                        type: string
+        components:
+          schemas:
+            Job:
+              type: object
+    "})
+    .unwrap();
+
+    let arena = Arena::new();
+    let spec = Spec::from_doc(&arena, &doc).unwrap();
+    let graph = RawGraph::new(&arena, &spec).cook();
+
+    // `getJob` has two payloads, so its header struct's path carries the
+    // status; `getArchive` has one, so its path omits the status.
+    for (id, expected) in [("getJob", Some(304)), ("getArchive", None)] {
+        let operation = graph
+            .operations()
+            .find(|op| op.id() == id)
+            .unwrap_or_else(|| panic!("expected operation `{id}`"));
+        let Some(ResponseView::Headers(TypeView::Inline(headers))) = operation
+            .response_cases()
+            .find_map(|case| match case.body() {
+                Some(ResponseView::Headers(_)) => case.body(),
+                _ => None,
+            })
+        else {
+            panic!("expected a headers response case for `{id}`");
+        };
+        assert_matches!(
+            headers.path().root(),
+            InlineTypePathRoot::Operation {
+                usage: OperationUsage::Response { status },
+                ..
+            } if status == expected,
+        );
+    }
 }
 
 // MARK: Parameter views

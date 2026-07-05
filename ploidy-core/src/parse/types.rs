@@ -204,6 +204,8 @@ pub struct Response {
     pub description: Option<String>,
     #[serde(default)]
     pub content: Option<IndexMap<String, MediaType>>,
+    #[serde(default)]
+    pub headers: Option<IndexMap<String, RefOrHeader>>,
 }
 
 /// Example definition (placeholder).
@@ -213,11 +215,15 @@ pub struct Example {
     pub extensions: IndexMap<String, JsonValue>,
 }
 
-/// Header definition (placeholder).
-#[derive(Debug, Deserialize, JsonPointee, JsonPointerTarget)]
+/// Response header definition.
+#[derive(Clone, Debug, Deserialize, JsonPointee, JsonPointerTarget)]
 pub struct Header {
-    #[serde(flatten)]
-    pub extensions: IndexMap<String, JsonValue>,
+    #[serde(default)]
+    pub required: bool,
+    #[serde(default)]
+    pub description: Option<String>,
+    #[serde(default)]
+    pub schema: Option<RefOrSchema>,
 }
 
 /// Security scheme definition (placeholder).
@@ -342,6 +348,9 @@ pub type RefOrRequestBody = RefOr<ComponentRef, RequestBody>;
 
 /// Either a reference or a response definition.
 pub type RefOrResponse = RefOr<ComponentRef, Response>;
+
+/// Either a reference or a header definition.
+pub type RefOrHeader = RefOr<ComponentRef, Header>;
 
 /// A reference to another definition.
 #[derive(Clone, Debug, Deserialize)]

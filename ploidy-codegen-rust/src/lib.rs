@@ -4,7 +4,10 @@ use itertools::Itertools;
 use proc_macro2::TokenStream;
 use quote::quote;
 
-use ploidy_core::codegen::{IntoCode, WrittenFile, write_to_disk};
+use ploidy_core::{
+    codegen::{IntoCode, WrittenFile, write_to_disk},
+    ir::{HasTypeId, ResponseView, TypeId, TypeView},
+};
 
 mod cargo;
 mod cfg;
@@ -54,6 +57,25 @@ pub fn write_types_to_disk(
     for schema in graph.schemas() {
         let code = CodegenSchemaType::new(graph, &schema).into_code();
         written.push(write_to_disk(output, code)?);
+    }
+
+    for op in graph.operations() {
+        let mut shapes: Vec<Option<TypeId>> = vec![];
+        for case in op.response_cases() {
+            let shape = case.body().map(|body| match body {
+                ResponseView::Json(view) | ResponseView::Headers(view) => match view {
+                    TypeView::Schema(view) => view.id(),
+                    TypeView::Inline(view) => view.id(),
+                },
+            });
+            if !shapes.contains(&shape) {
+                shapes.push(shape);
+            }
+        }
+        if shapes.len() > 1 {
+            let code = CodegenOperationResult::new(graph, &op).into_code();
+            written.push(write_to_disk(output, code)?);
+        }
     }
 
     written.push(write_to_disk(output, CodegenTypesModule::new(graph))?);

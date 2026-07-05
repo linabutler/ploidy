@@ -7,8 +7,9 @@ use crate::{
     ir::{
         spec::Spec,
         types::{
-            ParameterStyle, PrimitiveType, SpecInlineType, SpecOperation, SpecParameter,
-            SpecParameterInfo, SpecRequest, SpecResponse, SpecType,
+            ParameterStyle, PrimitiveType, SpecContainer, SpecInlineType, SpecInner, SpecOperation,
+            SpecParameter, SpecParameterInfo, SpecRequest, SpecResponse, SpecStructField, SpecType,
+            StructFieldName, shape::ResponseCase,
         },
     },
     parse::{Document, Method, path::ParsedPath},
@@ -850,7 +851,10 @@ fn test_parses_response_json_reference() {
     assert_matches!(
         &*ir.operations,
         [SpecOperation {
-            response: Some(SpecResponse::Json(_)),
+            responses: [ResponseCase {
+                status: 200,
+                body: Some(SpecResponse::Json(_)),
+            }],
             ..
         }],
     );
@@ -886,7 +890,10 @@ fn test_parses_response_json_inline_schema() {
     assert_matches!(
         &*ir.operations,
         [SpecOperation {
-            response: Some(SpecResponse::Json(_)),
+            responses: [ResponseCase {
+                status: 200,
+                body: Some(SpecResponse::Json(_)),
+            }],
             ..
         }],
     );
@@ -938,14 +945,17 @@ fn test_prioritizes_2xx_status_over_default_response() {
     assert_matches!(
         &*ir.operations,
         [SpecOperation {
-            response: Some(SpecResponse::Json(SpecType::Ref(component_ref))),
+            responses: [ResponseCase {
+                status: 200,
+                body: Some(SpecResponse::Json(SpecType::Ref(component_ref))),
+            }],
             ..
         }] if component_ref.name() == "User",
     );
 }
 
 #[test]
-fn test_falls_back_to_default_response_when_no_2xx_status() {
+fn test_falls_back_to_default_response_when_no_success_status() {
     let doc = Document::from_yaml(indoc::indoc! {"
         openapi: 3.0.0
         info:
@@ -956,6 +966,15 @@ fn test_falls_back_to_default_response_when_no_2xx_status() {
             get:
               operationId: listUsers
               responses:
+                '404':
+                  description: Not found
+                  content:
+                    application/json:
+                      schema:
+                        type: object
+                        properties:
+                          code:
+                            type: string
                 'default':
                   description: Default response
                   content:
@@ -974,7 +993,10 @@ fn test_falls_back_to_default_response_when_no_2xx_status() {
     assert_matches!(
         &*ir.operations,
         [SpecOperation {
-            response: Some(_),
+            responses: [ResponseCase {
+                status: 200,
+                body: Some(_),
+            }],
             ..
         }],
     );
@@ -1007,14 +1029,17 @@ fn test_parses_response_with_wildcard_content_type() {
     assert_matches!(
         &*ir.operations,
         [SpecOperation {
-            response: Some(SpecResponse::Json(_)),
+            responses: [ResponseCase {
+                status: 200,
+                body: Some(SpecResponse::Json(_)),
+            }],
             ..
         }],
     );
 }
 
 #[test]
-fn test_selects_first_2xx_status_when_multiple_exist() {
+fn test_preserves_multiple_2xx_responses() {
     let doc = Document::from_yaml(indoc::indoc! {"
         openapi: 3.0.0
         info:
@@ -1057,13 +1082,368 @@ fn test_selects_first_2xx_status_when_multiple_exist() {
     let arena = Arena::new();
     let ir = Spec::from_doc(&arena, &doc).unwrap();
 
-    // The response should be from the first 2xx status (200), not 202.
     assert_matches!(
         &*ir.operations,
         [SpecOperation {
-            response: Some(SpecResponse::Json(SpecType::Ref(component_ref))),
+            responses: [
+                ResponseCase {
+                    status: 200,
+                    body: Some(SpecResponse::Json(SpecType::Ref(first))),
+                },
+                ResponseCase {
+                    status: 202,
+                    body: Some(SpecResponse::Json(SpecType::Ref(second))),
+                },
+            ],
             ..
-        }] if component_ref.name() == "UserList",
+        }] if first.name() == "UserList" && second.name() == "AcceptedResponse",
+    );
+}
+
+#[test]
+fn test_parses_header_only_response_as_headers_struct() {
+    let doc = Document::from_yaml(indoc::indoc! {"
+        openapi: 3.0.0
+        info:
+          title: Test API
+          version: 1.0
+        paths:
+          /archives:
+            get:
+              operationId: getArchive
+              responses:
+                '307':
+                  description: Redirect to the archive URL.
+                  headers:
+                    location:
+                      required: true
+                      schema:
+                        type: string
+    "})
+    .unwrap();
+
+    let arena = Arena::new();
+    let ir = Spec::from_doc(&arena, &doc).unwrap();
+
+    assert_matches!(
+        &*ir.operations,
+        [SpecOperation {
+            responses: [ResponseCase {
+                status: 307,
+                body: Some(SpecResponse::Headers(SpecType::Inline(
+                    SpecInlineType::Struct(_, response),
+                ))),
+            }],
+            ..
+        }] if matches!(
+            response.fields,
+            [SpecStructField {
+                name: StructFieldName::Name("location"),
+                ty: SpecType::Inline(SpecInlineType::Primitive(_, PrimitiveType::String)),
+                required: true,
+                ..
+            }]
+        ),
+    );
+}
+
+#[test]
+fn test_parses_optional_header_as_nullable_field() {
+    let doc = Document::from_yaml(indoc::indoc! {"
+        openapi: 3.0.0
+        info:
+          title: Test API
+          version: 1.0
+        paths:
+          /users:
+            get:
+              operationId: getUser
+              responses:
+                '304':
+                  description: Not modified.
+                  headers:
+                    etag:
+                      schema:
+                        type: string
+    "})
+    .unwrap();
+
+    let arena = Arena::new();
+    let ir = Spec::from_doc(&arena, &doc).unwrap();
+
+    assert_matches!(
+        &*ir.operations,
+        [SpecOperation {
+            responses: [ResponseCase {
+                status: 304,
+                body: Some(SpecResponse::Headers(SpecType::Inline(
+                    SpecInlineType::Struct(_, response),
+                ))),
+            }],
+            ..
+        }] if matches!(
+            response.fields,
+            [SpecStructField {
+                name: StructFieldName::Name("etag"),
+                ty: SpecType::Inline(SpecInlineType::Container(
+                    _,
+                    SpecContainer::Optional(SpecInner {
+                        ty: SpecType::Inline(SpecInlineType::Primitive(_, PrimitiveType::String)),
+                        ..
+                    }),
+                )),
+                required: true,
+                ..
+            }]
+        ),
+    );
+}
+
+#[test]
+fn test_ignores_headers_on_response_with_body() {
+    let doc = Document::from_yaml(indoc::indoc! {"
+        openapi: 3.0.0
+        info:
+          title: Test API
+          version: 1.0
+        paths:
+          /users:
+            get:
+              operationId: getUser
+              responses:
+                '200':
+                  description: Success
+                  headers:
+                    etag:
+                      required: true
+                      schema:
+                        type: string
+                  content:
+                    application/json:
+                      schema:
+                        type: object
+                        properties:
+                          name:
+                            type: string
+    "})
+    .unwrap();
+
+    let arena = Arena::new();
+    let ir = Spec::from_doc(&arena, &doc).unwrap();
+
+    assert_matches!(
+        &*ir.operations,
+        [SpecOperation {
+            responses: [ResponseCase {
+                status: 200,
+                body: Some(SpecResponse::Json(_)),
+            }],
+            ..
+        }],
+    );
+}
+
+#[test]
+fn test_preserves_3xx_and_2xx_success_responses() {
+    let doc = Document::from_yaml(indoc::indoc! {"
+        openapi: 3.0.0
+        info:
+          title: Test API
+          version: 1.0
+        paths:
+          /users:
+            get:
+              operationId: getUser
+              responses:
+                '200':
+                  description: Success
+                  content:
+                    application/json:
+                      schema:
+                        $ref: '#/components/schemas/User'
+                '304':
+                  description: Not modified.
+                  headers:
+                    ETag:
+                      required: true
+                      schema:
+                        type: string
+                '404':
+                  description: Not found
+                  content:
+                    application/json:
+                      schema:
+                        $ref: '#/components/schemas/User'
+        components:
+          schemas:
+            User:
+              type: object
+    "})
+    .unwrap();
+
+    let arena = Arena::new();
+    let ir = Spec::from_doc(&arena, &doc).unwrap();
+
+    // The 404 is excluded, and the capitalized `ETag` header
+    // becomes a lowercased field name.
+    assert_matches!(
+        &*ir.operations,
+        [SpecOperation {
+            responses: [
+                ResponseCase {
+                    status: 200,
+                    body: Some(SpecResponse::Json(_)),
+                },
+                ResponseCase {
+                    status: 304,
+                    body: Some(SpecResponse::Headers(SpecType::Inline(
+                        SpecInlineType::Struct(_, response),
+                    ))),
+                },
+            ],
+            ..
+        }] if matches!(
+            response.fields,
+            [SpecStructField {
+                name: StructFieldName::Name("etag"),
+                ..
+            }]
+        ),
+    );
+}
+
+#[test]
+fn test_resolves_header_component_ref() {
+    let doc = Document::from_yaml(indoc::indoc! {"
+        openapi: 3.0.0
+        info:
+          title: Test API
+          version: 1.0
+        paths:
+          /users:
+            delete:
+              operationId: deleteUser
+              responses:
+                '204':
+                  description: Deleted
+                  headers:
+                    x-rate-limit:
+                      $ref: '#/components/headers/RateLimit'
+        components:
+          headers:
+            RateLimit:
+              required: true
+              schema:
+                type: integer
+    "})
+    .unwrap();
+
+    let arena = Arena::new();
+    let ir = Spec::from_doc(&arena, &doc).unwrap();
+
+    // The referenced header resolves, and its `integer` schema is
+    // still represented as a string field.
+    assert_matches!(
+        &*ir.operations,
+        [SpecOperation {
+            responses: [ResponseCase {
+                status: 204,
+                body: Some(SpecResponse::Headers(SpecType::Inline(
+                    SpecInlineType::Struct(_, response),
+                ))),
+            }],
+            ..
+        }] if matches!(
+            response.fields,
+            [SpecStructField {
+                name: StructFieldName::Name("x-rate-limit"),
+                ty: SpecType::Inline(SpecInlineType::Primitive(_, PrimitiveType::String)),
+                required: true,
+                ..
+            }]
+        ),
+    );
+}
+
+#[test]
+fn test_ignores_content_type_header() {
+    let doc = Document::from_yaml(indoc::indoc! {"
+        openapi: 3.0.0
+        info:
+          title: Test API
+          version: 1.0
+        paths:
+          /archives:
+            get:
+              operationId: getArchive
+              responses:
+                '307':
+                  description: Redirect to the archive URL.
+                  headers:
+                    Content-Type:
+                      required: true
+                      schema:
+                        type: string
+                    location:
+                      required: true
+                      schema:
+                        type: string
+    "})
+    .unwrap();
+
+    let arena = Arena::new();
+    let ir = Spec::from_doc(&arena, &doc).unwrap();
+
+    assert_matches!(
+        &*ir.operations,
+        [SpecOperation {
+            responses: [ResponseCase {
+                status: 307,
+                body: Some(SpecResponse::Headers(SpecType::Inline(
+                    SpecInlineType::Struct(_, response),
+                ))),
+            }],
+            ..
+        }] if matches!(
+            response.fields,
+            [SpecStructField {
+                name: StructFieldName::Name("location"),
+                ..
+            }]
+        ),
+    );
+}
+
+#[test]
+fn test_header_only_response_without_headers_stays_bodyless() {
+    let doc = Document::from_yaml(indoc::indoc! {"
+        openapi: 3.0.0
+        info:
+          title: Test API
+          version: 1.0
+        paths:
+          /users:
+            delete:
+              operationId: deleteUser
+              responses:
+                '204':
+                  description: Deleted
+                  headers: {}
+    "})
+    .unwrap();
+
+    let arena = Arena::new();
+    let ir = Spec::from_doc(&arena, &doc).unwrap();
+
+    assert_matches!(
+        &*ir.operations,
+        [SpecOperation {
+            responses: [ResponseCase {
+                status: 204,
+                body: None,
+            }],
+            ..
+        }],
     );
 }
 
@@ -1085,7 +1465,7 @@ fn test_operation_without_response() {
     let arena = Arena::new();
     let ir = Spec::from_doc(&arena, &doc).unwrap();
 
-    assert_matches!(&*ir.operations, [SpecOperation { response: None, .. }]);
+    assert_matches!(&*ir.operations, [SpecOperation { responses: [], .. }]);
 }
 
 // MARK: `x-resource-name` extension
@@ -1368,7 +1748,7 @@ fn test_operation_with_all_components() {
             resource: Some("users"),
             description: Some("Update an existing user"),
             request: Some(_),
-            response: Some(_),
+            responses: [_],
             params: [_, _],
             ..
         }],

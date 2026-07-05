@@ -5,8 +5,8 @@ use itertools::Itertools;
 use crate::{
     arena::Arena,
     ir::{
-        ContainerView, HasResource, InlineTypeView, RawGraph, RequestView, ResponseView,
-        SchemaTypeView, Spec, StructFieldName, TypeView, View,
+        ContainerView, HasResource, InlineTypeView, PrimitiveType, RawGraph, RequestView,
+        ResponseView, SchemaTypeView, Spec, StructFieldName, TypeView, View,
     },
     parse::Document,
     tests::assert_matches,
@@ -1077,6 +1077,120 @@ fn test_dependencies_propagation() {
         .collect_vec();
     other_used_by.dedup();
     assert_eq!(other_used_by, ["getData"]);
+}
+
+#[test]
+fn test_operation_dependencies_include_all_successful_responses() {
+    let doc = Document::from_yaml(indoc::indoc! {"
+        openapi: 3.0.0
+        info:
+          title: Test API
+          version: 1.0
+        paths:
+          /jobs:
+            post:
+              operationId: startJob
+              responses:
+                '200':
+                  description: Complete
+                  content:
+                    application/json:
+                      schema:
+                        $ref: '#/components/schemas/Job'
+                '202':
+                  description: Accepted
+                  content:
+                    application/json:
+                      schema:
+                        $ref: '#/components/schemas/PendingJob'
+        components:
+          schemas:
+            Job:
+              type: object
+            PendingJob:
+              type: object
+    "})
+    .unwrap();
+
+    let arena = Arena::new();
+    let spec = Spec::from_doc(&arena, &doc).unwrap();
+    let graph = RawGraph::new(&arena, &spec).cook();
+
+    let operation = graph.operations().next().unwrap();
+    let mut deps = operation
+        .dependencies()
+        .filter_map(|v| v.into_schema().right())
+        .map(|schema| schema.name())
+        .collect_vec();
+    deps.sort();
+    assert_matches!(&*deps, ["Job", "PendingJob"]);
+}
+
+#[test]
+fn test_operation_dependencies_include_header_struct() {
+    let doc = Document::from_yaml(indoc::indoc! {"
+        openapi: 3.0.0
+        info:
+          title: Test
+          version: 1.0
+        paths:
+          /jobs:
+            get:
+              operationId: getJob
+              responses:
+                '200':
+                  description: Complete
+                  content:
+                    application/json:
+                      schema:
+                        $ref: '#/components/schemas/Job'
+                '304':
+                  description: Not modified.
+                  headers:
+                    etag:
+                      required: true
+                      schema:
+                        type: string
+        components:
+          schemas:
+            Job:
+              type: object
+    "})
+    .unwrap();
+
+    let arena = Arena::new();
+    let spec = Spec::from_doc(&arena, &doc).unwrap();
+    let graph = RawGraph::new(&arena, &spec).cook();
+
+    let operation = graph.operations().next().unwrap();
+    let deps = operation
+        .dependencies()
+        .filter_map(|v| v.into_schema().right())
+        .map(|schema| schema.name())
+        .collect_vec();
+    assert_matches!(&*deps, ["Job"]);
+
+    // The synthesized header struct is an operation inline with a
+    // field edge to a string primitive.
+    let structs = operation
+        .inlines()
+        .filter_map(|inline| match inline {
+            InlineTypeView::Struct(_, view) => Some(view),
+            _ => None,
+        })
+        .collect_vec();
+    let [headers] = &*structs else {
+        panic!("expected one inline struct; got `{structs:?}`");
+    };
+    let fields = headers.fields().collect_vec();
+    let [etag] = &*fields else {
+        panic!("expected one header field; got `{fields:?}`");
+    };
+    assert_matches!(etag.name(), StructFieldName::Name("etag"));
+    assert_matches!(
+        etag.ty(),
+        TypeView::Inline(InlineTypeView::Primitive(_, p)) if p.ty() == PrimitiveType::String,
+    );
 }
 
 // MARK: Backward propagation

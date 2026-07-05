@@ -103,7 +103,10 @@ pub enum OperationUsage<'a> {
     /// The request body.
     Request,
     /// The response body.
-    Response,
+    Response {
+        /// The response status code, when needed to distinguish response bodies.
+        status: Option<u16>,
+    },
 }
 
 /// A segment in an inline type path.

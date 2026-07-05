@@ -14,7 +14,7 @@ pub struct Operation<'a, Ty> {
     pub description: Option<&'a str>,
     pub params: &'a [Parameter<'a, Ty>],
     pub request: Option<Request<Ty>>,
-    pub response: Option<Response<Ty>>,
+    pub responses: &'a [ResponseCase<Ty>],
 }
 
 impl<'a, Ty> Operation<'a, Ty> {
@@ -30,16 +30,30 @@ impl<'a, Ty> Operation<'a, Ty> {
                 Request::Json(ty) => Some(ty),
                 Request::Multipart => None,
             }),
-            self.response.as_ref().map(|response| match response {
-                Response::Json(ty) => ty,
+            self.responses.iter().filter_map(|response| {
+                response.body.as_ref().map(|body| match body {
+                    Response::Json(ty) | Response::Headers(ty) => ty,
+                })
             })
         )
     }
 }
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub struct ResponseCase<Ty> {
+    /// The numeric HTTP status code for this successful response.
+    pub status: u16,
+    /// The response payload, if this status documents a body or headers.
+    pub body: Option<Response<Ty>>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub enum Response<Ty> {
+    /// A JSON body.
     Json(Ty),
+    /// A struct decoded from response headers, for cases that document
+    /// headers but no body.
+    Headers(Ty),
 }
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]

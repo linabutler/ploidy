@@ -32,7 +32,7 @@ use super::{
         GraphTagged, GraphType, GraphUntagged, InlineTypeId, InlineTypeIds, InlineTypePathRoot,
         OperationUsage, PrimitiveType, SpecInlineType, SpecSchemaType, SpecType, StructFieldName,
         TaggedVariantMeta, UntaggedVariantMeta, VariantMeta,
-        shape::{Operation, Parameter, ParameterInfo, Request, Response},
+        shape::{Operation, Parameter, ParameterInfo, Request, Response, ResponseCase},
     },
     views::{TypeId, operation::OperationView, primitive::PrimitiveView, schema::SchemaTypeView},
 };
@@ -153,13 +153,21 @@ impl<'a> RawGraph<'a> {
                 Request::Multipart => Request::Multipart,
             });
 
-            let response = op.response.as_ref().map(|r| match r {
-                Response::Json(ty) => Response::Json(match ty {
-                    SpecType::Schema(s) => indices[&ResolvedSpecType::Schema(s)],
-                    SpecType::Inline(i) => indices[&ResolvedSpecType::Inline(i)],
-                    SpecType::Ref(r) => schemas[&*r.name()],
+            let responses = arena.alloc_slice_exact(op.responses.iter().map(|case| ResponseCase {
+                status: case.status,
+                body: case.body.as_ref().map(|r| match r {
+                    Response::Json(ty) => Response::Json(match ty {
+                        SpecType::Schema(s) => indices[&ResolvedSpecType::Schema(s)],
+                        SpecType::Inline(i) => indices[&ResolvedSpecType::Inline(i)],
+                        SpecType::Ref(r) => schemas[&*r.name()],
+                    }),
+                    Response::Headers(ty) => Response::Headers(match ty {
+                        SpecType::Schema(s) => indices[&ResolvedSpecType::Schema(s)],
+                        SpecType::Inline(i) => indices[&ResolvedSpecType::Inline(i)],
+                        SpecType::Ref(r) => schemas[&*r.name()],
+                    }),
                 }),
-            });
+            }));
 
             &*arena.alloc(Operation {
                 id: op.id,
@@ -169,7 +177,7 @@ impl<'a> RawGraph<'a> {
                 description: op.description,
                 params,
                 request,
-                response,
+                responses,
             })
         }));
 
@@ -513,23 +521,34 @@ impl<'a> RawGraph<'a> {
                     })
                     .or(op.request);
 
-                let response = op
-                    .response
-                    .and_then(|response| match response {
-                        Response::Json(ty) => {
-                            let &ty = collapsed_to.get(&ty)?;
-                            Some(Response::Json(ty))
-                        }
+                let responses = op
+                    .responses
+                    .iter()
+                    .map(|response| ResponseCase {
+                        status: response.status,
+                        body: response
+                            .body
+                            .and_then(|body| match body {
+                                Response::Json(ty) => {
+                                    let &ty = collapsed_to.get(&ty)?;
+                                    Some(Response::Json(ty))
+                                }
+                                Response::Headers(ty) => {
+                                    let &ty = collapsed_to.get(&ty)?;
+                                    Some(Response::Headers(ty))
+                                }
+                            })
+                            .or(response.body),
                     })
-                    .or(op.response);
+                    .collect_vec();
 
-                if params == op.params && request == op.request && response == op.response {
+                if params == op.params && request == op.request && responses == op.responses {
                     op
                 } else {
                     self.arena.alloc(Operation {
                         params: self.arena.alloc_slice_copy(&params),
                         request,
-                        response,
+                        responses: self.arena.alloc_slice_copy(&responses),
                         ..*op
                     })
                 }
@@ -828,9 +847,15 @@ impl<'a> CookedGraph<'a> {
                     Request::Json(ty) => Request::Json(indices[ty]),
                     Request::Multipart => Request::Multipart,
                 }),
-                response: op.response.as_ref().map(|r| match r {
-                    Response::Json(ty) => Response::Json(indices[ty]),
-                }),
+                responses: raw
+                    .arena
+                    .alloc_slice_exact(op.responses.iter().map(|response| ResponseCase {
+                        status: response.status,
+                        body: response.body.as_ref().map(|r| match r {
+                            Response::Json(ty) => Response::Json(indices[ty]),
+                            Response::Headers(ty) => Response::Headers(indices[ty]),
+                        }),
+                    })),
             })
         }));
 
@@ -1249,21 +1274,30 @@ impl<'graph, 'a> MetadataBuilder<'graph, 'a> {
                     },
                 );
             }
-            if let Some(Response::Json(index)) = op.response
-                && matches!(self.graph[index], GraphType::Inline(_))
-                && bfs.discover(index)
-            {
-                by_node.insert(
-                    index,
-                    PartialPath {
-                        root: InlineTypePathRoot::Operation {
-                            id: op.id,
-                            resource: op.resource,
-                            usage: OperationUsage::Response,
+            let response_body_count = op
+                .responses
+                .iter()
+                .filter(|response| response.body.is_some())
+                .count();
+            for response in op.responses {
+                if let Some(Response::Json(index) | Response::Headers(index)) = response.body
+                    && matches!(self.graph[index], GraphType::Inline(_))
+                    && bfs.discover(index)
+                {
+                    by_node.insert(
+                        index,
+                        PartialPath {
+                            root: InlineTypePathRoot::Operation {
+                                id: op.id,
+                                resource: op.resource,
+                                usage: OperationUsage::Response {
+                                    status: (response_body_count > 1).then_some(response.status),
+                                },
+                            },
+                            edges: vec![],
                         },
-                        edges: vec![],
-                    },
-                );
+                    );
+                }
             }
             while let Some(edge) = bfs.next() {
                 let parent = &by_node[&edge.source()];

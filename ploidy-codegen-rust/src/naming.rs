@@ -200,6 +200,40 @@ fn clean(s: &str) -> impl Iterator<Item = NamePart<'_>> {
     )
 }
 
+/// Returns the UpperCamelCase name for an HTTP status code, used for
+/// result-enum variants and status-suffixed inline type names.
+///
+/// Statuses with well-known reason phrases map to those phrases
+/// (`200` → `Ok`, `304` → `NotModified`); anything else falls back
+/// to `Status{code}`.
+pub(crate) fn status_variant_name(status: u16) -> String {
+    match status {
+        100 => "Continue".to_owned(),
+        101 => "SwitchingProtocols".to_owned(),
+        102 => "Processing".to_owned(),
+        103 => "EarlyHints".to_owned(),
+        200 => "Ok".to_owned(),
+        201 => "Created".to_owned(),
+        202 => "Accepted".to_owned(),
+        203 => "NonAuthoritativeInformation".to_owned(),
+        204 => "NoContent".to_owned(),
+        205 => "ResetContent".to_owned(),
+        206 => "PartialContent".to_owned(),
+        207 => "MultiStatus".to_owned(),
+        208 => "AlreadyReported".to_owned(),
+        226 => "ImUsed".to_owned(),
+        300 => "MultipleChoices".to_owned(),
+        301 => "MovedPermanently".to_owned(),
+        302 => "Found".to_owned(),
+        303 => "SeeOther".to_owned(),
+        304 => "NotModified".to_owned(),
+        305 => "UseProxy".to_owned(),
+        307 => "TemporaryRedirect".to_owned(),
+        308 => "PermanentRedirect".to_owned(),
+        _ => format!("Status{status}"),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

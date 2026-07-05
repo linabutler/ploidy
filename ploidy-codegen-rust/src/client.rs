@@ -44,9 +44,16 @@ impl ToTokens for CodegenClientModule<'_> {
 
             impl Client {
                 /// Creates a new client.
+                ///
+                /// The client never follows redirects, so operations can
+                /// surface documented 3xx responses. Use
+                /// [`Self::with_reqwest_client`] to supply a client with a
+                /// different redirect policy.
                 pub fn new(base_url: impl AsRef<str>) -> Result<Self, crate::error::Error> {
                     Ok(Self::with_reqwest_client(
-                        ::ploidy_util::reqwest::Client::new(),
+                        ::ploidy_util::reqwest::Client::builder()
+                            .redirect(::ploidy_util::reqwest::redirect::Policy::none())
+                            .build()?,
                         base_url.as_ref().parse()?,
                     ))
                 }
@@ -196,7 +203,11 @@ impl ToTokens for ResourceModules<'_> {
 mod tests {
     use super::*;
 
-    use ploidy_core::arena::Arena;
+    use ploidy_core::{
+        arena::Arena,
+        ir::{RawGraph, Spec},
+        parse::Document,
+    };
     use pretty_assertions::assert_eq;
     use syn::parse_quote;
 
@@ -220,5 +231,53 @@ mod tests {
             pub mod customer_profiles;
         };
         assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn test_client_new_disables_redirects() {
+        let doc = Document::from_yaml(indoc::indoc! {"
+            openapi: 3.0.0
+            info:
+              title: Test API
+              version: 1.0.0
+            paths: {}
+        "})
+        .unwrap();
+
+        let arena = Arena::new();
+        let spec = Spec::from_doc(&arena, &doc).unwrap();
+        let graph = CodegenGraph::new(RawGraph::new(&arena, &spec).cook());
+
+        let module = CodegenClientModule::new(&graph, &[]);
+        let file: syn::File = parse_quote!(#module);
+        let new_fn = file
+            .items
+            .iter()
+            .find_map(|item| match item {
+                syn::Item::Impl(impl_) => impl_.items.iter().find_map(|item| match item {
+                    syn::ImplItem::Fn(f) if f.sig.ident == "new" => Some(f),
+                    _ => None,
+                }),
+                _ => None,
+            })
+            .unwrap_or_else(|| panic!("expected `fn new` in `impl Client`; got `{file:?}`"));
+
+        let expected: syn::ImplItemFn = parse_quote! {
+            /// Creates a new client.
+            ///
+            /// The client never follows redirects, so operations can
+            /// surface documented 3xx responses. Use
+            /// [`Self::with_reqwest_client`] to supply a client with a
+            /// different redirect policy.
+            pub fn new(base_url: impl AsRef<str>) -> Result<Self, crate::error::Error> {
+                Ok(Self::with_reqwest_client(
+                    ::ploidy_util::reqwest::Client::builder()
+                        .redirect(::ploidy_util::reqwest::redirect::Policy::none())
+                        .build()?,
+                    base_url.as_ref().parse()?,
+                ))
+            }
+        };
+        assert_eq!(*new_fn, expected);
     }
 }

@@ -10,7 +10,7 @@ members = [
 resolver = "3"
 
 [workspace.package]
-version = "0.15.0"
+version = "0.16.0"
 license = "Apache-2.0"
 edition = "2024"
 repository = "https://github.com/linabutler/ploidy"
@@ -24,10 +24,10 @@ opentelemetry = { version = "0.32", default-features = false, features = [
     "trace",
 ] }
 opentelemetry-http = { version = "0.32", default-features = false }
-ploidy-codegen-rust = { path = "ploidy-codegen-rust", version = "0.15.0" }
-ploidy-core = { path = "ploidy-core", version = "0.15.0" }
-ploidy-pointer = { path = "ploidy-pointer", version = "0.15.0" }
-ploidy-pointer-derive = { path = "ploidy-pointer-derive", version = "0.15.0" }
+ploidy-codegen-rust = { path = "ploidy-codegen-rust", version = "0.16.0" }
+ploidy-core = { path = "ploidy-core", version = "0.16.0" }
+ploidy-pointer = { path = "ploidy-pointer", version = "0.16.0" }
+ploidy-pointer-derive = { path = "ploidy-pointer-derive", version = "0.16.0" }
 pretty_assertions = "1"
 ref-cast = "1"
 rustc-hash = "2"

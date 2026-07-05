@@ -1,7 +1,4 @@
-use ploidy_core::{
-    codegen::IntoCode,
-    ir::{OperationView, View},
-};
+use ploidy_core::{codegen::IntoCode, ir::OperationView};
 use proc_macro2::TokenStream;
 use quote::{ToTokens, TokenStreamExt, format_ident, quote};
 
@@ -52,10 +49,7 @@ impl ToTokens for CodegenResource<'_> {
             }
         });
 
-        let inlines = CodegenInlines::for_resource_inlines(
-            self.graph,
-            self.ops.iter().flat_map(|op| op.inlines()).collect(),
-        );
+        let inlines = CodegenInlines::for_resource_types(self.graph, self.ops);
 
         let params = self
             .ops

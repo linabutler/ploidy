@@ -19,6 +19,9 @@ pub enum Error {
 
     #[error("invalid or unexpected response body")]
     Body(#[from] BodyError),
+
+    #[error("invalid or missing response header")]
+    Header(#[from] HeaderError),
 }
 
 impl Error {
@@ -34,6 +37,18 @@ impl Error {
         Self::Build(BuildError::HeaderValue(name, err.into()))
     }
 
+    /// Creates an error for a required response header that's missing.
+    #[cold]
+    pub fn missing_header(name: &'static str) -> Self {
+        Self::Header(HeaderError::Missing(name))
+    }
+
+    /// Creates an error for a response header whose value isn't valid UTF-8.
+    #[cold]
+    pub fn invalid_header(name: &'static str) -> Self {
+        Self::Header(HeaderError::NotUtf8(name))
+    }
+
     /// Returns the telemetry category for this error.
     pub fn category(&self) -> ErrorCategory {
         match self {
@@ -43,6 +58,7 @@ impl Error {
             Self::Transport(_) => ErrorCategory::Transport,
             &Self::Status(status) => ErrorCategory::Status(status),
             Self::Body(_) => ErrorCategory::Body,
+            Self::Header(_) => ErrorCategory::Header,
         }
     }
 }
@@ -118,6 +134,20 @@ pub enum BodyError {
     JsonWithPath(serde_path_to_error::Error<serde_json::Error>),
 }
 
+/// A missing or invalid header on a documented response.
+///
+/// Unlike [`BuildError::HeaderName`] and [`BuildError::HeaderValue`],
+/// which describe *request* headers rejected while building a request,
+/// [`HeaderError`] describes *response* headers that don't match the
+/// API's documented shape.
+#[derive(Debug, thiserror::Error)]
+pub enum HeaderError {
+    #[error("missing required header `{0}`")]
+    Missing(&'static str),
+    #[error("header `{0}` isn't valid UTF-8")]
+    NotUtf8(&'static str),
+}
+
 /// The telemetry category for an [`Error`].
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ErrorCategory {
@@ -127,6 +157,7 @@ pub enum ErrorCategory {
     Transport,
     Status(StatusCode),
     Body,
+    Header,
 }
 
 impl Display for ErrorCategory {
@@ -138,6 +169,32 @@ impl Display for ErrorCategory {
             Self::Transport => "transport",
             Self::Status(status) => status.as_str(),
             Self::Body => "body",
+            Self::Header => "header",
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_missing_header_error_category_is_header() {
+        let err = Error::missing_header("location");
+        assert!(matches!(
+            err,
+            Error::Header(HeaderError::Missing("location")),
+        ));
+        assert_eq!(err.category(), ErrorCategory::Header);
+        assert_eq!(err.category().to_string(), "header");
+    }
+
+    #[test]
+    fn test_invalid_header_error_display_names_header() {
+        let err = Error::invalid_header("etag");
+        let Error::Header(inner) = err else {
+            panic!("expected header error; got `{err:?}`");
+        };
+        assert_eq!(inner.to_string(), "header `etag` isn't valid UTF-8");
     }
 }
