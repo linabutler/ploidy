@@ -388,21 +388,174 @@ impl<'context, 'a> IrTransformer<'context, 'a> {
                 (Ty::Boolean, _) => OtherVariant::Primitive(PrimitiveType::Bool),
 
                 (Ty::Array, _) => {
-                    let items = match &self.schema.items {
-                        Some(RefOrSchema::Ref(r)) => SpecType::Ref(r),
-                        Some(RefOrSchema::Inline(schema)) => {
-                            let id = self.context.ids.next();
-                            transform_with_context(self.context, id, schema)
+                    // Check if we need to widen the array element type due to
+                    // prefixItems, unevaluatedItems, or contains.
+                    let has_prefix_items = self.schema.prefix_items.is_some()
+                        && !self.schema.prefix_items.as_ref().unwrap().is_empty();
+                    let has_unevaluated_items = self.schema.unevaluated_items.is_some();
+                    let has_contains = self.schema.contains.is_some();
+
+                    if has_prefix_items || has_unevaluated_items || has_contains {
+                        // Collect all possible element types.
+                        let mut element_types: Vec<SpecType<'a>> = Vec::new();
+
+                        // Add items schema.
+                        if let Some(items) = &self.schema.items {
+                            let ty = match items {
+                                RefOrSchema::Ref(r) => SpecType::Ref(r),
+                                RefOrSchema::Inline(schema) => {
+                                    let id = self.context.ids.next();
+                                    transform_with_context(self.context, id, schema)
+                                }
+                            };
+                            element_types.push(ty);
                         }
-                        None => {
-                            let id = self.context.ids.next();
-                            SpecInlineType::Any(id).into()
+
+                        // Add prefix items schemas.
+                        if let Some(prefix_items) = &self.schema.prefix_items {
+                            for item_schema in prefix_items {
+                                let ty = match item_schema {
+                                    RefOrSchema::Ref(r) => SpecType::Ref(r),
+                                    RefOrSchema::Inline(schema) => {
+                                        let id = self.context.ids.next();
+                                        transform_with_context(self.context, id, schema)
+                                    }
+                                };
+                                element_types.push(ty);
+                            }
                         }
-                    };
-                    OtherVariant::Array(SpecInner {
-                        description: self.schema.description.as_deref(),
-                        ty: self.arena().alloc(items),
-                    })
+
+                        // Add contains schema.
+                        if let Some(contains) = &self.schema.contains {
+                            let ty = match contains {
+                                RefOrSchema::Ref(r) => SpecType::Ref(r),
+                                RefOrSchema::Inline(schema) => {
+                                    let id = self.context.ids.next();
+                                    transform_with_context(self.context, id, schema)
+                                }
+                            };
+                            element_types.push(ty);
+                        }
+
+                        // Add unevaluated items.
+                        if let Some(unevaluated_items) = &self.schema.unevaluated_items {
+                            match unevaluated_items {
+                                crate::parse::UnevaluatedItems::Bool(true) => {
+                                    let id = self.context.ids.next();
+                                    element_types.push(SpecInlineType::Any(id).into());
+                                }
+                                crate::parse::UnevaluatedItems::RefOrSchema(RefOrSchema::Ref(
+                                    r,
+                                )) => {
+                                    element_types.push(SpecType::Ref(r));
+                                }
+                                crate::parse::UnevaluatedItems::RefOrSchema(
+                                    RefOrSchema::Inline(schema),
+                                ) => {
+                                    let id = self.context.ids.next();
+                                    element_types.push(transform_with_context(
+                                        self.context,
+                                        id,
+                                        schema,
+                                    ));
+                                }
+                                crate::parse::UnevaluatedItems::Bool(false) => {
+                                    // false means no additional items allowed, skip.
+                                }
+                            }
+                        }
+
+                        // Deduplicate element types by converting to string representation.
+                        // This is a simple approach; we keep types in order of appearance.
+                        let mut seen = std::collections::HashSet::new();
+                        let mut unique_types = Vec::new();
+                        for ty in element_types {
+                            let key = format!("{:?}", ty);
+                            if seen.insert(key) {
+                                unique_types.push(ty);
+                            }
+                        }
+
+                        // If no unique types were collected, default to Any.
+                        if unique_types.is_empty() {
+                            let id = self.context.ids.next();
+                            unique_types.push(SpecInlineType::Any(id).into());
+                        }
+
+                        // Create an untagged union of element types if we have multiple types.
+                        let items = if unique_types.len() == 1 {
+                            unique_types.into_iter().next().unwrap()
+                        } else {
+                            let variants = unique_types
+                                .into_iter()
+                                .enumerate()
+                                .map(|(index, ty)| {
+                                    let hint = match ty {
+                                        SpecType::Schema(SpecSchemaType::Primitive(_, p))
+                                        | SpecType::Inline(SpecInlineType::Primitive(_, p)) => {
+                                            UntaggedVariantNameHint::Primitive(p)
+                                        }
+                                        SpecType::Schema(SpecSchemaType::Container(
+                                            _,
+                                            SpecContainer::Array(_),
+                                        ))
+                                        | SpecType::Inline(SpecInlineType::Container(
+                                            _,
+                                            SpecContainer::Array(_),
+                                        )) => UntaggedVariantNameHint::Array,
+                                        SpecType::Schema(SpecSchemaType::Container(
+                                            _,
+                                            SpecContainer::Map(_),
+                                        ))
+                                        | SpecType::Inline(SpecInlineType::Container(
+                                            _,
+                                            SpecContainer::Map(_),
+                                        )) => UntaggedVariantNameHint::Map,
+                                        _ => UntaggedVariantNameHint::Index(index + 1),
+                                    };
+                                    SpecUntaggedVariant::Some(hint, self.arena().alloc(ty))
+                                })
+                                .collect_vec();
+
+                            let untagged = SpecUntagged {
+                                description: self.schema.description.as_deref(),
+                                variants: self.arena().alloc_slice_copy(&variants),
+                                fields: self
+                                    .arena()
+                                    .alloc_slice(std::iter::empty::<SpecStructField<'a>>()),
+                            };
+                            match self.name {
+                                TypeInfo::Schema(info) => {
+                                    SpecSchemaType::Untagged(info, untagged).into()
+                                }
+                                TypeInfo::Inline(id) => {
+                                    SpecInlineType::Untagged(id, untagged).into()
+                                }
+                            }
+                        };
+
+                        OtherVariant::Array(SpecInner {
+                            description: self.schema.description.as_deref(),
+                            ty: self.arena().alloc(items),
+                        })
+                    } else {
+                        // Original logic when no widening keywords are present.
+                        let items = match &self.schema.items {
+                            Some(RefOrSchema::Ref(r)) => SpecType::Ref(r),
+                            Some(RefOrSchema::Inline(schema)) => {
+                                let id = self.context.ids.next();
+                                transform_with_context(self.context, id, schema)
+                            }
+                            None => {
+                                let id = self.context.ids.next();
+                                SpecInlineType::Any(id).into()
+                            }
+                        };
+                        OtherVariant::Array(SpecInner {
+                            description: self.schema.description.as_deref(),
+                            ty: self.arena().alloc(items),
+                        })
+                    }
                 }
 
                 (Ty::Object, _) => {
