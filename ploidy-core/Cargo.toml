@@ -29,7 +29,7 @@ proc-macro2 = { version = "1", default-features = false, optional = true }
 quote = { version = "1", default-features = false, optional = true }
 ref-cast = { workspace = true }
 rustc-hash = { workspace = true }
-syn = { version = "2", default-features = false, optional = true }
+syn = { version = "3", default-features = false, optional = true }
 thiserror = "2"
 unicase = "2"
 icu_normalizer = { version = "2", default-features = false, features = [
