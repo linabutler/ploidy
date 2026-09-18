@@ -20,10 +20,10 @@ rust-version = "1.89"
 [workspace.dependencies]
 either = "1"
 indoc = "2"
-opentelemetry = { version = "0.32", default-features = false, features = [
+opentelemetry = { version = "0.33", default-features = false, features = [
     "trace",
 ] }
-opentelemetry-http = { version = "0.32", default-features = false }
+opentelemetry-http = { version = "0.33", default-features = false }
 ploidy-codegen-rust = { path = "ploidy-codegen-rust", version = "0.15.0" }
 ploidy-core = { path = "ploidy-core", version = "0.15.0" }
 ploidy-pointer = { path = "ploidy-pointer", version = "0.15.0" }
