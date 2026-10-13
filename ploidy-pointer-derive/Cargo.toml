@@ -17,7 +17,7 @@ heck = "0.5"
 itertools = "0.15"
 proc-macro2 = "1"
 quote = "1"
-syn = "2"
+syn = "3"
 thiserror = "2"
 
 [features]
