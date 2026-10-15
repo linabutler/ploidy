@@ -14,7 +14,7 @@ itertools = "0.15"
 serde = { workspace = true, features = ["derive"] }
 miette = "7"
 ploidy-core = { workspace = true, features = ["proc-macro2"] }
-prettyplease = "0.2"
+prettyplease = "0.3"
 proc-macro2 = { version = "1", default-features = false }
 quote = { version = "1", default-features = false }
 rustc-hash = { workspace = true }
