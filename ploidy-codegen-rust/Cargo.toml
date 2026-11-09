@@ -19,7 +19,7 @@ proc-macro2 = { version = "1", default-features = false }
 quote = { version = "1", default-features = false }
 rustc-hash = { workspace = true }
 semver = "1"
-syn = { version = "2", default-features = false, features = [
+syn = { version = "3", default-features = false, features = [
     "parsing",
     "printing",
 ] }
@@ -30,7 +30,7 @@ unicode-ident = "1"
 
 [dev-dependencies]
 indoc = { workspace = true }
-syn = { version = "2", default-features = false, features = [
+syn = { version = "3", default-features = false, features = [
     "extra-traits",
     "parsing",
     "printing",
